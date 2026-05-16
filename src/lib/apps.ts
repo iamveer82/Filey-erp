@@ -6,6 +6,7 @@ import {
   Users,
   ShoppingCart,
   BarChart3,
+  Wrench,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
@@ -86,10 +87,19 @@ export const APPS: AppDef[] = [
     dot: "bg-brand-700",
   },
   {
+    to: "/tools",
+    label: "Tools",
+    short: "Tools",
+    desc: "Local PDF toolkit — merge, split, convert & more",
+    icon: Wrench,
+    tile: "bg-secondary-400",
+    dot: "bg-secondary-400",
+  },
+  {
     to: "/settings",
     label: "Settings",
     short: "Settings",
-    desc: "Users, company settings & audit log",
+    desc: "Company details, users & audit log",
     icon: Settings2,
     tile: "bg-brand-500",
     dot: "bg-brand-500",

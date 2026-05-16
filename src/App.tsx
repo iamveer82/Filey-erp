@@ -8,6 +8,7 @@ import Quoting from "./pages/Invoicing";
 import Suppliers from "./pages/Suppliers";
 import Purchase from "./pages/Purchase";
 import Reports from "./pages/Reports";
+import ToolsPage from "./pages/PdfTools";
 import Settings from "./pages/Tools";
 import Login from "./pages/Login";
 import ProfileSetup from "./pages/ProfileSetup";
@@ -40,6 +41,7 @@ function Gate() {
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/purchase" element={<Purchase />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/tools" element={<ToolsPage />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>

@@ -16,13 +16,11 @@ import {
   Modal,
   Field,
 } from "../components/ui";
-import PdfToolbox from "../components/PdfToolbox";
 
-type Tab = "company" | "pdf" | "users" | "system" | "audit";
+type Tab = "company" | "users" | "system" | "audit";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "company", label: "Company Details" },
-  { id: "pdf", label: "PDF Tools" },
   { id: "users", label: "Users" },
   { id: "system", label: "System" },
   { id: "audit", label: "Audit Log" },
@@ -91,8 +89,6 @@ export default function Settings() {
       </div>
 
       {tab === "company" && <CompanyDetails />}
-
-      {tab === "pdf" && <PdfToolbox />}
 
       {tab === "users" && (
         <DataTable<User>
