@@ -34,6 +34,13 @@ const TEMPLATES = [
   { id: "minimal", name: "Minimal" },
   { id: "classic", name: "Classic" },
   { id: "modern", name: "Modern" },
+  { id: "corporate", name: "Corporate" },
+  { id: "elegant", name: "Elegant" },
+  { id: "bold", name: "Bold" },
+  { id: "tech", name: "Tech" },
+  { id: "creative", name: "Creative" },
+  { id: "receipt", name: "Receipt" },
+  { id: "monogram", name: "Monogram" },
 ];
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -207,7 +214,7 @@ export default function Invoicing() {
   return (
     <div>
       <PageHeader
-        title="Invoicing"
+        title="Quoting"
         subtitle="Build, theme & download professional invoices as PDF"
         action={
           <div className="flex gap-2">
@@ -856,6 +863,353 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
 
         <Items headerBg={a} bordered />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  const SellerContact = ({ cls = "text-neutral-500" }: { cls?: string }) => (
+    <>
+      {form.seller_email && <p className={`text-xs ${cls}`}>{form.seller_email}</p>}
+      {form.seller_phone && <p className={`text-xs ${cls}`}>{form.seller_phone}</p>}
+    </>
+  );
+
+  const Parties = () => (
+    <div className="grid grid-cols-2 gap-8 text-sm mt-8">
+      <div>
+        <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
+        <p className="font-semibold mt-1">{form.seller_name}</p>
+        <p className="text-xs text-neutral-500 whitespace-pre-line">
+          {form.seller_address}
+        </p>
+        {form.seller_trn && (
+          <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
+        )}
+        <SellerContact />
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-wider text-neutral-400">
+          Bill To
+        </p>
+        <p className="font-semibold mt-1">{form.customer_name}</p>
+        <p className="text-xs text-neutral-500 whitespace-pre-line">
+          {form.customer_address}
+        </p>
+        {form.customer_trn && (
+          <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
+        )}
+      </div>
+    </div>
+  );
+
+  const Meta = () => (
+    <div className="flex justify-between text-xs text-neutral-500 mt-4">
+      <p className="font-mono">{form.number}</p>
+      <p>
+        Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
+      </p>
+    </div>
+  );
+
+  const Initial = ({ size = 48 }: { size?: number }) =>
+    form.logo ? (
+      <Logo size={size} />
+    ) : (
+      <div
+        className="grid place-items-center rounded-full font-bold text-white"
+        style={{ width: size, height: size, background: a }}
+      >
+        {(form.seller_name || "C").trim().charAt(0).toUpperCase()}
+      </div>
+    );
+
+  // ---- CORPORATE ----
+  if (form.template === "corporate") {
+    return (
+      <div className="text-neutral-900">
+        <div className="flex justify-between items-start border-b-4 pb-5" style={{ borderColor: a }}>
+          <div className="flex items-center gap-3">
+            <Logo size={48} />
+            <div>
+              <p className="font-bold text-xl">{form.seller_name}</p>
+              <p className="text-xs text-neutral-500 whitespace-pre-line">
+                {form.seller_address}
+              </p>
+              <SellerContact />
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
+              TAX INVOICE
+            </p>
+            <p className="text-sm font-mono mt-1">{form.number}</p>
+            {form.seller_trn && (
+              <p className="text-xs text-neutral-500 mt-1">
+                TRN {form.seller_trn}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-sm mt-6">
+          <div className="bg-neutral-50 p-4 rounded">
+            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">
+              Bill To
+            </p>
+            <p className="font-semibold">{form.customer_name}</p>
+            <p className="text-xs text-neutral-500 whitespace-pre-line">
+              {form.customer_address}
+            </p>
+            {form.customer_trn && (
+              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
+            )}
+          </div>
+          <div className="bg-neutral-50 p-4 rounded text-right">
+            <p className="text-xs text-neutral-500">
+              Issued {fmtDate(form.issue_date)}
+            </p>
+            <p className="text-xs text-neutral-500">
+              Due {fmtDate(form.due_date)}
+            </p>
+          </div>
+        </div>
+        <Items headerBg={a} />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- ELEGANT ----
+  if (form.template === "elegant") {
+    return (
+      <div className="text-neutral-800 font-serif">
+        <div className="text-center">
+          <Logo size={52} />
+          <p className="text-3xl tracking-[0.3em] mt-4" style={{ color: a }}>
+            INVOICE
+          </p>
+          <div className="mx-auto w-16 h-px my-3" style={{ background: a }} />
+          <p className="text-xs tracking-widest text-neutral-500">
+            {form.number} · {fmtDate(form.issue_date)}
+          </p>
+        </div>
+        <div className="flex justify-between mt-10 text-sm">
+          <div>
+            <p className="text-[11px] uppercase tracking-widest text-neutral-400">
+              From
+            </p>
+            <p className="font-semibold mt-1">{form.seller_name}</p>
+            <p className="text-xs text-neutral-500 whitespace-pre-line">
+              {form.seller_address}
+            </p>
+            <SellerContact />
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] uppercase tracking-widest text-neutral-400">
+              Billed To
+            </p>
+            <p className="font-semibold mt-1">{form.customer_name}</p>
+            <p className="text-xs text-neutral-500 whitespace-pre-line">
+              {form.customer_address}
+            </p>
+          </div>
+        </div>
+        <Items />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- BOLD ----
+  if (form.template === "bold") {
+    return (
+      <div className="text-neutral-900">
+        <div
+          className="-mx-12 -mt-12 px-12 pt-12 pb-10 mb-8"
+          style={{ background: a, color: "#fff" }}
+        >
+          <div className="flex justify-between items-start">
+            <Logo size={50} />
+            <p className="text-5xl font-extrabold tracking-tight">INVOICE</p>
+          </div>
+          <div className="flex justify-between items-end mt-8">
+            <div>
+              <p className="text-lg font-bold">{form.seller_name}</p>
+              <p className="text-xs opacity-80 whitespace-pre-line">
+                {form.seller_address}
+              </p>
+            </div>
+            <div className="text-right text-sm">
+              <p className="font-mono">{form.number}</p>
+              <p className="opacity-80">Due {fmtDate(form.due_date)}</p>
+            </div>
+          </div>
+        </div>
+        <div className="text-sm">
+          <p className="text-xs uppercase tracking-wider text-neutral-400">
+            Bill To
+          </p>
+          <p className="font-semibold mt-1">{form.customer_name}</p>
+          <p className="text-xs text-neutral-500 whitespace-pre-line">
+            {form.customer_address}
+          </p>
+        </div>
+        <Items headerBg={a} />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- TECH ----
+  if (form.template === "tech") {
+    return (
+      <div className="text-neutral-900 font-mono">
+        <div className="flex justify-between items-start">
+          <div>
+            <Logo size={40} />
+            <p className="text-sm font-bold mt-2">{form.seller_name}</p>
+            <p className="text-[11px] text-neutral-500 whitespace-pre-line">
+              {form.seller_address}
+            </p>
+            <SellerContact cls="text-neutral-500" />
+          </div>
+          <div
+            className="px-4 py-3 rounded-lg text-right"
+            style={{ background: `${a}15`, border: `1px solid ${a}` }}
+          >
+            <p className="text-lg font-bold" style={{ color: a }}>
+              ./invoice
+            </p>
+            <p className="text-xs">{form.number}</p>
+            <p className="text-[11px] text-neutral-500">
+              {fmtDate(form.issue_date)} → {fmtDate(form.due_date)}
+            </p>
+          </div>
+        </div>
+        <div className="mt-8 text-xs">
+          <span className="text-neutral-400">{"// bill_to"}</span>
+          <p className="font-bold text-sm mt-1">{form.customer_name}</p>
+          <p className="text-neutral-500 whitespace-pre-line">
+            {form.customer_address}
+          </p>
+        </div>
+        <Items headerBg={a} />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- CREATIVE ----
+  if (form.template === "creative") {
+    return (
+      <div className="text-neutral-900 relative overflow-hidden">
+        <div
+          className="absolute -top-16 -right-16 w-48 h-48 rounded-full opacity-20"
+          style={{ background: a }}
+        />
+        <div className="relative flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <Initial size={52} />
+            <div>
+              <p className="font-bold text-lg">{form.seller_name}</p>
+              <SellerContact />
+            </div>
+          </div>
+          <p
+            className="text-4xl font-extrabold italic"
+            style={{ color: a }}
+          >
+            Invoice
+          </p>
+        </div>
+        <div
+          className="relative mt-8 rounded-2xl p-5 text-sm"
+          style={{ background: `${a}12` }}
+        >
+          <div className="flex justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">
+                Billed To
+              </p>
+              <p className="font-semibold mt-1">{form.customer_name}</p>
+              <p className="text-xs text-neutral-500 whitespace-pre-line">
+                {form.customer_address}
+              </p>
+            </div>
+            <div className="text-right text-xs text-neutral-500">
+              <p className="font-mono">{form.number}</p>
+              <p>Issued {fmtDate(form.issue_date)}</p>
+              <p>Due {fmtDate(form.due_date)}</p>
+            </div>
+          </div>
+        </div>
+        <Items />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- RECEIPT ----
+  if (form.template === "receipt") {
+    return (
+      <div className="text-neutral-900 max-w-sm mx-auto text-center">
+        <Initial size={44} />
+        <p className="font-bold text-lg mt-2">{form.seller_name}</p>
+        <p className="text-[11px] text-neutral-500 whitespace-pre-line">
+          {form.seller_address}
+        </p>
+        <SellerContact />
+        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
+        <div className="flex justify-between text-xs">
+          <span className="text-neutral-500">Invoice</span>
+          <span className="font-mono">{form.number}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-neutral-500">Date</span>
+          <span>{fmtDate(form.issue_date)}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-neutral-500">Customer</span>
+          <span className="font-semibold">{form.customer_name}</span>
+        </div>
+        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
+        <div className="text-left">
+          <Items />
+        </div>
+        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- MONOGRAM ----
+  if (form.template === "monogram") {
+    return (
+      <div className="text-neutral-900">
+        <div className="flex flex-col items-center">
+          <Initial size={64} />
+          <p className="font-bold text-xl mt-3">{form.seller_name}</p>
+          <p className="text-xs text-neutral-500 whitespace-pre-line text-center">
+            {form.seller_address}
+          </p>
+          <SellerContact />
+        </div>
+        <div
+          className="mt-6 py-2 text-center text-sm font-semibold tracking-[0.25em]"
+          style={{ borderTop: `1px solid ${a}`, borderBottom: `1px solid ${a}`, color: a }}
+        >
+          INVOICE {form.number}
+        </div>
+        <Parties />
+        <Meta />
+        <Items />
         <Totals />
         <Footer />
       </div>
