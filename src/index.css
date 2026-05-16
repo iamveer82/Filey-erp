@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    margin: 0;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cfcfcf transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #cfcfcf;
+    border-radius: 8px;
+  }
+}
+
+@layer components {
+  /* Cards — white surface, 16px radius, soft shadow. `.card` is the
+     canonical name; `.bento-card` is kept as an alias so existing
+     pages reskin automatically. */
+  .card,
+  .bento-card {
+    @apply rounded-2xl bg-white border border-brand-200 shadow-bento p-5
+           transition-all duration-200;
+  }
+  .card-hover,
+  .bento-card-hover {
+    @apply hover:shadow-bento-hover hover:border-primary-300 cursor-pointer;
+  }
+  .card-dark {
+    @apply rounded-2xl bg-ink text-white border border-ink shadow-bento p-5;
+  }
+  .card-accent {
+    @apply rounded-2xl border-0 shadow-bento p-5 text-ink
+           bg-gradient-to-br from-primary-300 via-primary-400 to-secondary-400;
+  }
+  .stat-label {
+    @apply text-xs font-semibold uppercase tracking-wide text-brand-400;
+  }
+  .stat-value {
+    @apply text-2xl font-bold text-ink mt-1;
+  }
+  .btn-primary,
+  .btn-cta {
+    @apply inline-flex items-center gap-2 rounded-xl bg-primary-400 px-4 py-2
+           text-sm font-semibold text-ink transition-all duration-200
+           hover:bg-primary-500 hover:shadow-glow focus:outline-none
+           focus:ring-2 focus:ring-primary-300 disabled:opacity-50
+           disabled:cursor-not-allowed cursor-pointer;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 rounded-xl bg-primary-100 px-4 py-2
+           text-sm font-semibold text-primary-700 transition-colors duration-200
+           hover:bg-primary-200 cursor-pointer;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm
+           font-semibold text-brand-600 border border-brand-200 bg-white/60
+           transition-colors duration-200 hover:bg-brand-50 hover:text-ink
+           cursor-pointer;
+  }
+  .input {
+    @apply w-full rounded-xl border border-brand-200 bg-white px-3 py-2 text-sm
+           text-ink placeholder:text-brand-400 focus:outline-none
+           focus:ring-2 focus:ring-primary-300 focus:border-primary-400;
+  }
+  .label {
+    @apply block text-xs font-semibold text-brand-600 mb-1;
+  }
+  .pill {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-brand-200
+           bg-white px-3 py-1.5 text-xs font-semibold text-brand-600
+           transition-colors duration-200 hover:bg-brand-50 cursor-pointer;
+  }
+  .chip-active {
+    @apply border-primary-300 bg-primary-100 text-primary-700;
+  }
+  .th {
+    @apply text-left text-xs font-semibold uppercase tracking-wide
+           text-brand-400 px-4 py-3;
+  }
+  .td {
+    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ===== Invoice print → PDF ===== */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .invoice-print,
+  .invoice-print * {
+    visibility: visible !important;
+  }
+  .invoice-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
