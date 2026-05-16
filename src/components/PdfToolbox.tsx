@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Combine,
   Scissors,
@@ -157,6 +157,13 @@ export default function PdfToolbox() {
   const [results, setResults] = useState<OutFile[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!active) return;
+    const h = (e: KeyboardEvent) => e.key === "Escape" && setActive(null);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [active]);
+
   const open = (t: Tool) => {
     setActive(t);
     setFiles([]);
@@ -267,9 +274,13 @@ export default function PdfToolbox() {
                 accept={active.accept}
                 multiple={active.multi}
                 className="hidden"
-                onChange={(e) =>
-                  setFiles(Array.from(e.target.files ?? []))
-                }
+                onChange={(e) => {
+                  setFiles(Array.from(e.target.files ?? []));
+                  setResults([]);
+                  setErr("");
+                  // Clear so re-selecting the same file still fires.
+                  e.target.value = "";
+                }}
               />
             </label>
 
@@ -391,7 +402,7 @@ export default function PdfToolbox() {
               </button>
               <button
                 className="btn-primary"
-                disabled={busy}
+                disabled={busy || files.length === 0}
                 onClick={run}
               >
                 {busy ? (

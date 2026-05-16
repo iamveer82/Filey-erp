@@ -14,6 +14,12 @@ export interface OutFile {
 const readBuf = (f: File) => f.arrayBuffer();
 const base = (n: string) => n.replace(/\.pdf$/i, "");
 
+// Many real-world PDFs carry an empty-owner-password encryption dict.
+// Loading with ignoreEncryption lets the toolkit handle them instead of
+// hard-failing on otherwise-readable files.
+const loadDoc = async (f: File) =>
+  PDFDocument.load(await readBuf(f), { ignoreEncryption: true });
+
 /** Parse "1-3,5,8-" (1-based) into a sorted unique 0-based index list. */
 export function parseRanges(input: string, pageCount: number): number[] {
   const out = new Set<number>();
@@ -33,14 +39,14 @@ export function parseRanges(input: string, pageCount: number): number[] {
 }
 
 export async function pageCount(file: File): Promise<number> {
-  const doc = await PDFDocument.load(await readBuf(file));
+  const doc = await loadDoc(file);
   return doc.getPageCount();
 }
 
 export async function mergePdfs(files: File[]): Promise<OutFile> {
   const merged = await PDFDocument.create();
   for (const f of files) {
-    const src = await PDFDocument.load(await readBuf(f));
+    const src = await loadDoc(f);
     const pages = await merged.copyPages(src, src.getPageIndices());
     pages.forEach((p) => merged.addPage(p));
   }
@@ -51,7 +57,7 @@ export async function extractPages(
   file: File,
   ranges: string
 ): Promise<OutFile> {
-  const src = await PDFDocument.load(await readBuf(file));
+  const src = await loadDoc(file);
   const idx = parseRanges(ranges, src.getPageCount());
   if (!idx.length) throw new Error("No valid pages in that range.");
   const out = await PDFDocument.create();
@@ -64,7 +70,7 @@ export async function deletePages(
   file: File,
   ranges: string
 ): Promise<OutFile> {
-  const src = await PDFDocument.load(await readBuf(file));
+  const src = await loadDoc(file);
   const remove = new Set(parseRanges(ranges, src.getPageCount()));
   const keep = src
     .getPageIndices()
@@ -80,9 +86,12 @@ export async function splitEvery(
   file: File,
   size: number
 ): Promise<OutFile[]> {
-  const src = await PDFDocument.load(await readBuf(file));
+  const src = await loadDoc(file);
   const total = src.getPageCount();
-  const chunk = Math.max(1, size);
+  // Guard against NaN / 0 / negative / fractional input — an invalid
+  // chunk size here would otherwise spin the page loop forever.
+  const n = Math.floor(Number(size));
+  const chunk = Number.isFinite(n) && n > 0 ? n : 1;
   const results: OutFile[] = [];
   for (let start = 0, part = 1; start < total; start += chunk, part++) {
     const idx = [];
@@ -103,7 +112,7 @@ export async function rotatePdf(
   deg: number,
   ranges?: string
 ): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file));
+  const doc = await loadDoc(file);
   const target = ranges
     ? new Set(parseRanges(ranges, doc.getPageCount()))
     : null;
@@ -157,7 +166,7 @@ export async function pdfToImages(
 }
 
 export async function addPageNumbers(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file));
+  const doc = await loadDoc(file);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   doc.getPages().forEach((p, i) => {
     const { width } = p.getSize();
@@ -178,14 +187,22 @@ export async function addWatermark(
   file: File,
   text: string
 ): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file));
+  const doc = await loadDoc(file);
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
+  const label = (text || "DRAFT").slice(0, 40);
   doc.getPages().forEach((p) => {
     const { width, height } = p.getSize();
-    p.drawText(text || "DRAFT", {
-      x: width / 2 - text.length * 12,
-      y: height / 2,
-      size: 56,
+    // Auto-size so the rotated text always fits the page diagonal.
+    const diag = Math.hypot(width, height);
+    let size = 56;
+    while (size > 12 && font.widthOfTextAtSize(label, size) > diag * 0.7)
+      size -= 4;
+    const tw = font.widthOfTextAtSize(label, size);
+    const rad = (45 * Math.PI) / 180;
+    p.drawText(label, {
+      x: width / 2 - (tw / 2) * Math.cos(rad),
+      y: height / 2 - (tw / 2) * Math.sin(rad),
+      size,
       font,
       color: rgb(0.6, 0.6, 0.6),
       rotate: degrees(45),
@@ -197,7 +214,7 @@ export async function addWatermark(
 
 /** Lightweight re-save: strips redundant objects and re-streams. */
 export async function compressPdf(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file));
+  const doc = await loadDoc(file);
   const bytes = await doc.save({ useObjectStreams: true });
   return { name: `${base(file.name)}-compressed.pdf`, bytes };
 }
