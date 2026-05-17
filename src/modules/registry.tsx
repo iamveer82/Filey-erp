@@ -11,6 +11,8 @@ import {
   Users,
   ShoppingCart,
   BarChart3,
+  Contact,
+  Landmark,
   Wrench,
   Settings2,
   type LucideIcon,
@@ -26,6 +28,8 @@ import Crm from "../pages/Crm";
 import Suppliers from "../pages/Suppliers";
 import Purchase from "../pages/Purchase";
 import Reports from "../pages/Reports";
+import People from "../pages/People";
+import Accounting from "../pages/Accounting";
 import ToolsPage from "../pages/PdfTools";
 import Settings from "../pages/Tools";
 
@@ -123,6 +127,24 @@ export const MODULES: AppModule[] = [
     icon: BarChart3,
     to: "/reports",
     element: <Reports />,
+  },
+  {
+    id: "people",
+    label: "People",
+    short: "People",
+    desc: "Employees, attendance & payroll",
+    icon: Contact,
+    to: "/people",
+    element: <People />,
+  },
+  {
+    id: "accounting",
+    label: "Accounting",
+    short: "Accounting",
+    desc: "Chart of accounts & journal entries",
+    icon: Landmark,
+    to: "/accounting",
+    element: <Accounting />,
   },
   {
     id: "tools",
