@@ -30,7 +30,7 @@ export default function ProfileSetup() {
           <div className="rounded-2xl bg-ink p-3 text-white">
             <UserRound size={26} />
           </div>
-          <h1 className="text-2xl font-extrabold text-ink mt-4">
+          <h1 className="text-2xl font-bold text-ink mt-4">
             Set up your profile
           </h1>
           <p className="text-sm text-brand-400">{user?.email}</p>

@@ -78,7 +78,7 @@ function blankForm(c: CompanyProfile): Form {
     number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
     status: "draft",
     template: c.default_template || "minimal",
-    accent: c.default_accent || "#0A0A0A",
+    accent: c.default_accent || "#222222",
     currency: "AED",
     seller_name: c.name,
     seller_address: c.address,
@@ -227,8 +227,8 @@ export default function Invoicing() {
   return (
     <div>
       <PageHeader
-        title="Quoting"
-        subtitle="Build, theme & download professional invoices as PDF"
+        title="Invoicing"
+        subtitle="Create FTA tax invoices — pick a template, fill details, send"
         action={
           <div className="flex gap-2">
             <button
@@ -1126,7 +1126,7 @@ function InvoiceView({ form }: { form: Form }) {
   const t = totals(form);
   const ccy = form.currency || "AED";
   const m = (v: number) => money(v, ccy);
-  const a = form.accent || "#0A0A0A";
+  const a = form.accent || "#222222";
 
   const Items = ({
     headerBg,

@@ -87,8 +87,8 @@ A clean, **icon-first light sidebar** for seamless navigation.
 - Storage card pinned bottom: usage donut, `XX% Used`, GB caption,
   "Upgrade Storage" ghost button.
 - Quick-access icon row beneath the storage card.
-- Sections: **Overview, Inventory, Orders, Quoting, Suppliers,
-  Purchase, Reports, Settings.**
+- Sections: **Overview, Inventory, Orders, Invoicing, CRM,
+  Suppliers, Purchase, Reports, Tools, Settings.**
 
 ### Topbar
 

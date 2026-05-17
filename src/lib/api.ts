@@ -1211,13 +1211,13 @@ export const billing = {
           trn: "",
           email: "",
           phone: "",
-          default_accent: "#2563EB",
+          default_accent: "#222222",
           default_template: "minimal",
         };
       },
       {
         name: "My Company",
-        default_accent: "#2563EB",
+        default_accent: "#222222",
         default_template: "minimal",
       }
     ),

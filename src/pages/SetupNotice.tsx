@@ -9,7 +9,7 @@ export default function SetupNotice() {
             <CloudOff size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-ink">
+            <h1 className="text-xl font-bold text-ink">
               Connect Supabase
             </h1>
             <p className="text-sm text-brand-400">
