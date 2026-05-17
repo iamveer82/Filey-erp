@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured } from "./supabase";
+import { quotationTotals } from "./money";
 
 // ===== Types =====
 export interface Product {
@@ -1290,19 +1291,8 @@ export interface ToolRun {
   created_at: string;
 }
 
-function quoteTotal(items: QuotationItem[]) {
-  let subtotal = 0;
-  let discount = 0;
-  let tax = 0;
-  for (const i of items) {
-    const gross = i.qty * i.rate;
-    const disc = gross * ((i.discount || 0) / 100);
-    subtotal += gross;
-    discount += disc;
-    tax += (gross - disc) * ((i.tax || 0) / 100);
-  }
-  return subtotal - discount + tax;
-}
+const quoteTotal = (items: QuotationItem[]) =>
+  quotationTotals(items).total;
 
 export const quotes = {
   listDocs: () =>

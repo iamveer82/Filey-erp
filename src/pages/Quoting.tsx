@@ -24,6 +24,7 @@ import {
   QuotationInput,
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
+import { quotationTotals } from "../lib/money";
 import { Modal, Field } from "../components/ui";
 
 interface Line {
@@ -105,18 +106,7 @@ export default function Quoting() {
     loadTemplates();
   }, []);
 
-  const totals = useMemo(() => {
-    const subtotal = lines.reduce((s, l) => s + l.qty * l.rate, 0);
-    const discount = lines.reduce(
-      (s, l) => s + l.qty * l.rate * ((l.discount || 0) / 100),
-      0
-    );
-    const tax = lines.reduce(
-      (s, l) => s + lineAmount(l) * ((l.tax || 0) / 100),
-      0
-    );
-    return { subtotal, discount, tax, total: subtotal - discount + tax };
-  }, [lines]);
+  const totals = useMemo(() => quotationTotals(lines), [lines]);
 
   const m = (v: number) => money(v, currency);
 

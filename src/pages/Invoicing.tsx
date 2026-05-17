@@ -31,6 +31,7 @@ import {
   CrmCustomer,
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
+import { invoiceTotals } from "../lib/money";
 import {
   PageHeader,
   DataTable,
@@ -100,15 +101,8 @@ function blankForm(c: CompanyProfile): Form {
   };
 }
 
-function totals(f: Form) {
-  const subtotal = f.items.reduce(
-    (s, i) => s + (i.qty || 0) * (i.unit_price || 0),
-    0
-  );
-  const afterDiscount = Math.max(0, subtotal - (f.discount || 0));
-  const tax = afterDiscount * ((f.tax_rate || 0) / 100);
-  return { subtotal, tax, total: afterDiscount + tax };
-}
+const totals = (f: Form) =>
+  invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
 
 export default function Invoicing() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
