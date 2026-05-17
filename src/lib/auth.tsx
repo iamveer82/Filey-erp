@@ -21,6 +21,14 @@ export interface Profile {
   email: string;
   name: string;
   company: string;
+  phone?: string;
+  role?: string;
+  username?: string;
+  avatar?: string;
+  language?: string;
+  timezone?: string;
+  date_format?: string;
+  time_format?: string;
   created_at?: string;
   updated_at?: string;
 }

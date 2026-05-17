@@ -15,6 +15,16 @@ create table if not exists profiles (
   updated_at  timestamptz not null default now()
 );
 
+-- Extra profile fields (additive, safe on existing projects)
+alter table profiles add column if not exists phone text;
+alter table profiles add column if not exists role text default 'Administrator';
+alter table profiles add column if not exists username text;
+alter table profiles add column if not exists avatar text;
+alter table profiles add column if not exists language text default 'English (US)';
+alter table profiles add column if not exists timezone text;
+alter table profiles add column if not exists date_format text;
+alter table profiles add column if not exists time_format text;
+
 alter table profiles enable row level security;
 drop policy if exists profiles_owner on profiles;
 create policy profiles_owner on profiles
