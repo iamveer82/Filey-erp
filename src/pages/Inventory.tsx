@@ -228,7 +228,8 @@ function ProductModal({
           <input
             type="number"
             className="input"
-            value={f.unit_price}
+            placeholder="0"
+            value={f.unit_price || ""}
             onChange={(e) => setF({ ...f, unit_price: +e.target.value })}
           />
         </Field>
@@ -236,7 +237,8 @@ function ProductModal({
           <input
             type="number"
             className="input"
-            value={f.cost_price}
+            placeholder="0"
+            value={f.cost_price || ""}
             onChange={(e) => setF({ ...f, cost_price: +e.target.value })}
           />
         </Field>
@@ -244,7 +246,8 @@ function ProductModal({
           <input
             type="number"
             className="input"
-            value={f.quantity}
+            placeholder="0"
+            value={f.quantity || ""}
             onChange={(e) => setF({ ...f, quantity: +e.target.value })}
           />
         </Field>
@@ -252,7 +255,8 @@ function ProductModal({
           <input
             type="number"
             className="input"
-            value={f.reorder_level}
+            placeholder="0"
+            value={f.reorder_level || ""}
             onChange={(e) => setF({ ...f, reorder_level: +e.target.value })}
           />
         </Field>

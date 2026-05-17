@@ -197,7 +197,8 @@ function PurchaseModal({
           <input
             type="number"
             className="input"
-            value={f.amount}
+            placeholder="0"
+            value={f.amount || ""}
             onChange={(e) => setF({ ...f, amount: +e.target.value })}
           />
         </Field>

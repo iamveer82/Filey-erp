@@ -80,7 +80,7 @@ function blankForm(c: CompanyProfile): Form {
     status: "draft",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
-    currency: "AED",
+    currency: c.currency || "AED",
     seller_name: c.name,
     seller_address: c.address,
     seller_trn: c.trn,
@@ -92,10 +92,10 @@ function blankForm(c: CompanyProfile): Form {
     customer_trn: "",
     customer_email: "",
     issue_date: today(),
-    due_date: addDays(30),
+    due_date: undefined,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days.",
-    tax_rate: 5,
+    tax_rate: c.default_tax_rate ?? 5,
     discount: 0,
     items: [{ description: "", qty: 1, unit_price: 0 }],
   };
@@ -193,7 +193,13 @@ export default function Invoicing() {
     if (!form) return;
     setSaving(true);
     try {
-      const id = await billing.saveDoc(form as InvoiceDocInput);
+      // Empty date inputs must become undefined, not "" (invalid SQL date).
+      const payload = {
+        ...form,
+        issue_date: form.issue_date || undefined,
+        due_date: form.due_date || undefined,
+      };
+      const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id });
       await loadDocs();
     } catch (e) {
@@ -625,7 +631,7 @@ function Editor({
                     onChange={(e) => set("issue_date", e.target.value)}
                   />
                 </Field>
-                <Field label="Due Date">
+                <Field label="Due Date (optional)">
                   <input
                     type="date"
                     className="input"
@@ -691,7 +697,8 @@ function Editor({
                         <input
                           type="number"
                           className="input text-right"
-                          value={it.unit_price}
+                          placeholder="0"
+                          value={it.unit_price || ""}
                           onChange={(e) =>
                             setItem(i, { unit_price: +e.target.value })
                           }
@@ -736,7 +743,8 @@ function Editor({
                   <input
                     type="number"
                     className="input"
-                    value={form.discount}
+                    placeholder="0"
+                    value={form.discount || ""}
                     onChange={(e) => set("discount", +e.target.value)}
                   />
                 </Field>

@@ -230,10 +230,18 @@ export type InvoiceDocInput = Omit<
 > & { id?: number };
 export interface CompanyProfile {
   name: string;
+  business_type?: string;
   address?: string;
+  city?: string;
+  zip?: string;
   trn?: string;
+  vat_number?: string;
+  tax_type?: string;
   email?: string;
   phone?: string;
+  website?: string;
+  currency?: string;
+  default_tax_rate?: number;
   logo?: string;
   default_accent: string;
   default_template: string;
@@ -1197,10 +1205,19 @@ export const billing = {
           const c = data as any;
           return {
             name: c.name,
+            business_type: c.business_type ?? undefined,
             address: c.address ?? undefined,
+            city: c.city ?? undefined,
+            zip: c.zip ?? undefined,
             trn: c.trn ?? undefined,
+            vat_number: c.vat_number ?? undefined,
+            tax_type: c.tax_type ?? "VAT",
             email: c.email ?? undefined,
             phone: c.phone ?? undefined,
+            website: c.website ?? undefined,
+            currency: c.currency ?? "AED",
+            default_tax_rate:
+              c.default_tax_rate == null ? 5 : Number(c.default_tax_rate),
             logo: c.logo ?? undefined,
             default_accent: c.default_accent,
             default_template: c.default_template,
@@ -1212,12 +1229,18 @@ export const billing = {
           trn: "",
           email: "",
           phone: "",
+          tax_type: "VAT",
+          currency: "AED",
+          default_tax_rate: 5,
           default_accent: "#222222",
           default_template: "minimal",
         };
       },
       {
         name: "My Company",
+        tax_type: "VAT",
+        currency: "AED",
+        default_tax_rate: 5,
         default_accent: "#222222",
         default_template: "minimal",
       }

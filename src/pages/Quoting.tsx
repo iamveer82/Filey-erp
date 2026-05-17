@@ -102,7 +102,13 @@ export default function Quoting() {
     quoteTemplates.list().then(setSaved).catch(() => {});
 
   useEffect(() => {
-    billing.getCompany().then(setCompany).catch(() => {});
+    billing
+      .getCompany()
+      .then((c) => {
+        setCompany(c);
+        if (c?.currency) setCurrency(c.currency);
+      })
+      .catch(() => {});
     crm.customers().then(setCustomers).catch(() => {});
     loadTemplates();
   }, []);
@@ -484,7 +490,8 @@ export default function Quoting() {
                         <input
                           type="number"
                           className="input text-right"
-                          value={l.rate}
+                          placeholder="0"
+                          value={l.rate || ""}
                           onChange={(e) =>
                             setLine(i, { rate: +e.target.value })
                           }
@@ -494,7 +501,8 @@ export default function Quoting() {
                         <input
                           type="number"
                           className="input text-right"
-                          value={l.discount}
+                          placeholder="0"
+                          value={l.discount || ""}
                           onChange={(e) =>
                             setLine(i, { discount: +e.target.value })
                           }
@@ -505,7 +513,8 @@ export default function Quoting() {
                           <input
                             type="number"
                             className="input text-right"
-                            value={l.tax}
+                            placeholder="0"
+                            value={l.tax || ""}
                             onChange={(e) =>
                               setLine(i, { tax: +e.target.value })
                             }

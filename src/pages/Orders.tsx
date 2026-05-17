@@ -174,7 +174,8 @@ function OrderModal({
           <input
             type="number"
             className="input"
-            value={f.total}
+            placeholder="0"
+            value={f.total || ""}
             onChange={(e) => setF({ ...f, total: +e.target.value })}
           />
         </Field>
