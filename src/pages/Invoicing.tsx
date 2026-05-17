@@ -656,7 +656,9 @@ function Editor({
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-16 text-right">Qty</th>
                     <th className="py-2 px-2 w-28 text-right">Unit</th>
-                    <th className="py-2 px-2 w-16 text-right">Tax</th>
+                    {(form.tax_rate || 0) > 0 && (
+                      <th className="py-2 px-2 w-16 text-right">Tax</th>
+                    )}
                     <th className="py-2 px-2 w-28 text-right">Amount</th>
                     <th className="w-8" />
                   </tr>
@@ -695,9 +697,11 @@ function Editor({
                           }
                         />
                       </td>
-                      <td className="py-2 px-2 text-right text-brand-500">
-                        {form.tax_rate}%
-                      </td>
+                      {(form.tax_rate || 0) > 0 && (
+                        <td className="py-2 px-2 text-right text-brand-500">
+                          {form.tax_rate}%
+                        </td>
+                      )}
                       <td className="py-2 px-2 text-right font-semibold text-ink">
                         {m((it.qty || 0) * (it.unit_price || 0))}
                       </td>
@@ -748,13 +752,50 @@ function Editor({
                   <Settings size={15} /> Invoice Settings
                 </div>
                 <div className="mt-3 space-y-2">
-                  <input
-                    type="number"
-                    className="input"
-                    placeholder="Tax rate %"
-                    value={form.tax_rate}
-                    onChange={(e) => set("tax_rate", +e.target.value)}
-                  />
+                  <div>
+                    <p className="text-xs font-semibold text-brand-600 mb-1.5">
+                      Apply VAT
+                    </p>
+                    <div className="flex rounded-lg bg-brand-100 p-0.5">
+                      {([["Yes", true], ["No", false]] as const).map(
+                        ([lbl, on]) => {
+                          const active = (form.tax_rate || 0) > 0 === on;
+                          return (
+                            <button
+                              key={lbl}
+                              type="button"
+                              onClick={() =>
+                                set(
+                                  "tax_rate",
+                                  on
+                                    ? form.tax_rate > 0
+                                      ? form.tax_rate
+                                      : 5
+                                    : 0
+                                )
+                              }
+                              className={`flex-1 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                                active
+                                  ? "bg-white text-ink shadow-bento"
+                                  : "text-brand-500 hover:text-ink"
+                              }`}
+                            >
+                              {lbl}
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+                  {(form.tax_rate || 0) > 0 && (
+                    <input
+                      type="number"
+                      className="input"
+                      placeholder="VAT rate %"
+                      value={form.tax_rate}
+                      onChange={(e) => set("tax_rate", +e.target.value)}
+                    />
+                  )}
                   <select
                     className="input"
                     value={form.status}
@@ -1168,7 +1209,9 @@ function InvoiceView({ form }: { form: Form }) {
     <div className="ml-auto w-72 mt-6 text-sm">
       <Row k="Subtotal" v={m(t.subtotal)} />
       {form.discount > 0 && <Row k="Discount" v={`- ${m(form.discount)}`} />}
-      <Row k={`Tax (${form.tax_rate}%)`} v={m(t.tax)} />
+      {(form.tax_rate || 0) > 0 && (
+        <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />
+      )}
       <div
         className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
         style={{ borderColor: a, color: a }}
@@ -1392,7 +1435,7 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
-              TAX INVOICE
+              {(form.tax_rate || 0) > 0 ? "TAX INVOICE" : "INVOICE"}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
             {form.seller_trn && (

@@ -93,6 +93,7 @@ export default function Quoting() {
   );
   const [custModal, setCustModal] = useState(false);
   const [invModal, setInvModal] = useState(false);
+  const [vat, setVat] = useState(true);
   const [docId, setDocId] = useState<number | undefined>(undefined);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [savedNote, setSavedNote] = useState(false);
@@ -106,7 +107,11 @@ export default function Quoting() {
     loadTemplates();
   }, []);
 
-  const totals = useMemo(() => quotationTotals(lines), [lines]);
+  const totals = useMemo(
+    () =>
+      quotationTotals(vat ? lines : lines.map((l) => ({ ...l, tax: 0 }))),
+    [lines, vat]
+  );
 
   const m = (v: number) => money(v, currency);
 
@@ -152,7 +157,7 @@ export default function Quoting() {
         qty: l.qty,
         rate: l.rate,
         discount: l.discount,
-        tax: l.tax,
+        tax: vat ? l.tax : 0,
       })),
     };
     try {
@@ -393,14 +398,34 @@ export default function Quoting() {
           </div>
 
           <div className="card">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
               <p className="font-bold text-ink">Products</p>
-              <button
-                className="btn-ghost text-xs"
-                onClick={addLine}
-              >
-                <Plus size={13} /> Add Product
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-brand-500">
+                  VAT
+                </span>
+                <div className="flex rounded-lg bg-brand-100 p-0.5">
+                  {([["Yes", true], ["No", false]] as const).map(
+                    ([lbl, on]) => (
+                      <button
+                        key={lbl}
+                        type="button"
+                        onClick={() => setVat(on)}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                          vat === on
+                            ? "bg-white text-ink shadow-bento"
+                            : "text-brand-500 hover:text-ink"
+                        }`}
+                      >
+                        {lbl}
+                      </button>
+                    )
+                  )}
+                </div>
+                <button className="btn-ghost text-xs" onClick={addLine}>
+                  <Plus size={13} /> Add Product
+                </button>
+              </div>
             </div>
             <p className="text-xs text-brand-400 mb-3">
               Add products and their rates
@@ -415,7 +440,9 @@ export default function Quoting() {
                     <th className="py-2 px-2 w-16 text-right">Qty</th>
                     <th className="py-2 px-2 w-24 text-right">Rate</th>
                     <th className="py-2 px-2 w-16 text-right">Disc%</th>
-                    <th className="py-2 px-2 w-16 text-right">Tax%</th>
+                    {vat && (
+                      <th className="py-2 px-2 w-16 text-right">Tax%</th>
+                    )}
                     <th className="py-2 px-2 w-24 text-right">Total</th>
                     <th className="w-8" />
                   </tr>
@@ -473,16 +500,18 @@ export default function Quoting() {
                           }
                         />
                       </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="number"
-                          className="input text-right"
-                          value={l.tax}
-                          onChange={(e) =>
-                            setLine(i, { tax: +e.target.value })
-                          }
-                        />
-                      </td>
+                      {vat && (
+                        <td className="py-2 px-2">
+                          <input
+                            type="number"
+                            className="input text-right"
+                            value={l.tax}
+                            onChange={(e) =>
+                              setLine(i, { tax: +e.target.value })
+                            }
+                          />
+                        </td>
+                      )}
                       <td className="py-2 px-2 text-right font-semibold text-ink">
                         {m(lineAmount(l))}
                       </td>
@@ -517,7 +546,7 @@ export default function Quoting() {
                   v={`-${m(totals.discount)}`}
                   tone="text-success"
                 />
-                <Row k="Tax" v={m(totals.tax)} />
+                {vat && <Row k="Tax" v={m(totals.tax)} />}
                 <div className="flex justify-between py-2 mt-1 border-t border-brand-200 font-bold text-ink">
                   <span>Total ({currency})</span>
                   <span>{m(totals.total)}</span>
@@ -609,7 +638,7 @@ export default function Quoting() {
                     <th className="py-2 text-right">Qty</th>
                     <th className="py-2 text-right">Rate</th>
                     <th className="py-2 text-right">Disc</th>
-                    <th className="py-2 text-right">Tax</th>
+                    {vat && <th className="py-2 text-right">Tax</th>}
                     <th className="py-2 text-right">Amount</th>
                   </tr>
                 </thead>
@@ -626,7 +655,9 @@ export default function Quoting() {
                       <td className="py-2 text-right">{l.qty}</td>
                       <td className="py-2 text-right">{m(l.rate)}</td>
                       <td className="py-2 text-right">{l.discount}%</td>
-                      <td className="py-2 text-right">{l.tax}%</td>
+                      {vat && (
+                        <td className="py-2 text-right">{l.tax}%</td>
+                      )}
                       <td className="py-2 text-right font-semibold">
                         {m(lineAmount(l))}
                       </td>
@@ -642,7 +673,7 @@ export default function Quoting() {
                   v={`-${m(totals.discount)}`}
                   tone="text-green-600"
                 />
-                <Row k="Tax" v={m(totals.tax)} />
+                {vat && <Row k="Tax" v={m(totals.tax)} />}
                 <div
                   className="flex justify-between py-2 mt-1 font-bold text-sm"
                   style={{ borderTop: `2px solid ${accent}`, color: accent }}
