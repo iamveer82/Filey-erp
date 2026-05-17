@@ -1,52 +1,9 @@
 import { ReactNode } from "react";
 import { NavLink, Link, useLocation } from "react-router-dom";
-import {
-  Boxes,
-  Bell,
-  Search,
-  ChevronDown,
-  LogOut,
-  HardDriveUpload,
-  LayoutGrid,
-  Home,
-  ClipboardList,
-  Calendar,
-} from "lucide-react";
+import { Boxes, Bell, Search, ChevronDown, LogOut } from "lucide-react";
 import { cn } from "../lib/format";
 import { APPS } from "../lib/apps";
 import { useAuth } from "../lib/auth";
-
-const STORAGE_USED_PCT = 68;
-const STORAGE_USED_GB = 68.3;
-const STORAGE_TOTAL_GB = 100;
-
-function StorageRing({ pct }: { pct: number }) {
-  const r = 22;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg width="60" height="60" viewBox="0 0 60 60" className="-rotate-90">
-      <circle
-        cx="30"
-        cy="30"
-        r={r}
-        fill="none"
-        stroke="#F0E9D9"
-        strokeWidth="7"
-      />
-      <circle
-        cx="30"
-        cy="30"
-        r={r}
-        fill="none"
-        stroke="#FFD600"
-        strokeWidth="7"
-        strokeLinecap="round"
-        strokeDasharray={c}
-        strokeDashoffset={c - (pct / 100) * c}
-      />
-    </svg>
-  );
-}
 
 export default function Layout({ children }: { children: ReactNode }) {
   const loc = useLocation();
@@ -103,46 +60,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-
-        <div className="p-3">
-          <div className="rounded-2xl bg-brand-50 border border-brand-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="relative grid place-items-center">
-                <StorageRing pct={STORAGE_USED_PCT} />
-                <span className="absolute text-[13px] font-bold text-ink">
-                  {STORAGE_USED_PCT}%
-                </span>
-              </div>
-              <div>
-                <p className="text-sm font-bold text-ink">Used</p>
-                <p className="text-[11px] text-brand-400 mt-0.5">
-                  {STORAGE_USED_GB} GB of {STORAGE_TOTAL_GB} GB
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 h-1.5 rounded-full bg-brand-200 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-primary-400"
-                style={{ width: `${STORAGE_USED_PCT}%` }}
-              />
-            </div>
-            <button className="btn-ghost w-full justify-center mt-3 text-xs">
-              <HardDriveUpload size={14} /> Upgrade Storage
-            </button>
-          </div>
-
-          <div className="flex items-center justify-around mt-3 px-2 text-brand-400">
-            {[LayoutGrid, Home, ClipboardList, Boxes, Calendar].map((I, i) => (
-              <button
-                key={i}
-                aria-label="Quick access"
-                className="rounded-lg p-2 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer"
-              >
-                <I size={17} />
-              </button>
-            ))}
-          </div>
-        </div>
       </aside>
 
       {/* ───────────── Main ───────────── */}
