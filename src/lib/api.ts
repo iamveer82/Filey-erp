@@ -260,6 +260,13 @@ const hasTauri =
 const onLine = () =>
   typeof navigator === "undefined" ? true : navigator.onLine;
 
+let activeCacheOrg = "default";
+/** Scope the local read-cache to an organization. Call whenever the
+ *  signed-in user's org changes (login, org switch, sign-out). */
+export function setCacheOrg(orgId?: string | null): void {
+  activeCacheOrg = orgId && orgId.trim() ? orgId : "default";
+}
+
 async function cacheGet<T>(key: string): Promise<T | null> {
   try {
     if (hasTauri) {
@@ -379,18 +386,21 @@ async function readCached<T>(
   run: () => Promise<T>,
   empty: T
 ): Promise<T> {
-  if (!isConfigured) return (await cacheGet<T>(key)) ?? empty;
+  // Namespace the local cache by the active organization so data from
+  // one org never bleeds into another on a shared device.
+  const k = `${activeCacheOrg}:${key}`;
+  if (!isConfigured) return (await cacheGet<T>(k)) ?? empty;
   if (onLine()) {
     try {
       await flushOutbox();
       const data = await run();
-      await cacheSet(key, data);
+      await cacheSet(k, data);
       return data;
     } catch {
-      return (await cacheGet<T>(key)) ?? empty;
+      return (await cacheGet<T>(k)) ?? empty;
     }
   }
-  return (await cacheGet<T>(key)) ?? empty;
+  return (await cacheGet<T>(k)) ?? empty;
 }
 
 function offlineError(): never {

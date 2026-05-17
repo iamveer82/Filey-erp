@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured } from "./supabase";
+import { setCacheOrg } from "./api";
 
 export type Channel = "email" | "phone";
 
@@ -84,7 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select("*")
       .eq("id", u.id)
       .maybeSingle();
-    setProfile((data as Profile) ?? null);
+    const prof = (data as Profile) ?? null;
+    setCacheOrg(prof?.org_id);
+    setProfile(prof);
   };
 
   useEffect(() => {
@@ -103,7 +106,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) await loadProfile(s.user);
-      else setProfile(null);
+      else {
+        setCacheOrg(null);
+        setProfile(null);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -176,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
+    setCacheOrg(null);
     setProfile(null);
   };
 
@@ -200,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
     if (error) throw error;
+    setCacheOrg((data as Profile).org_id);
     setProfile(data as Profile);
   };
 
@@ -212,6 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
     if (error) throw error;
+    setCacheOrg((data as Profile).org_id);
     setProfile(data as Profile);
   };
 
