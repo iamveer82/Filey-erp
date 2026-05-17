@@ -25,10 +25,16 @@ import {
   LayoutGrid,
   Copy,
   Building,
+  Download,
+  Wifi,
 } from "lucide-react";
 import {
   tools,
   billing,
+  erp,
+  crm,
+  fin,
+  quotes,
   AuditEntry,
   CompanyProfile,
   org,
@@ -118,13 +124,11 @@ export default function Settings() {
           {section === "security" && (
             <SecurityPanel onChangePassword={() => setPwOpen(true)} />
           )}
-          {["preferences", "billing", "notifications", "integrations", "backup"].includes(
-            section
-          ) && (
-            <Placeholder
-              title={NAV.find((n) => n.id === section)?.label ?? ""}
-            />
-          )}
+          {section === "preferences" && <PreferencesPanel />}
+          {section === "billing" && <BillingPanel />}
+          {section === "notifications" && <NotificationsPanel />}
+          {section === "integrations" && <IntegrationsPanel />}
+          {section === "backup" && <BackupPanel />}
         </div>
 
         {/* right: account management */}
@@ -1374,16 +1378,354 @@ function AppsManager() {
   );
 }
 
-/* ---------------- Placeholder sections ---------------- */
+/* ---------------- Preferences / Notifications (persisted) ------- */
 
-function Placeholder({ title }: { title: string }) {
+function useSettings() {
+  const [map, setMap] = useState<Record<string, string>>({});
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    tools
+      .settings()
+      .then((rows) => {
+        const m: Record<string, string> = {};
+        rows.forEach((r) => (m[r.key] = r.value));
+        setMap(m);
+      })
+      .catch(() => {})
+      .finally(() => setReady(true));
+  }, []);
+  const get = (k: string, d = "") => map[k] ?? d;
+  const set = async (k: string, v: string) => {
+    setMap((m) => ({ ...m, [k]: v }));
+    try {
+      await tools.setSetting(k, v);
+    } catch {
+      /* offline — queued by api layer */
+    }
+  };
+  return { get, set, ready };
+}
+
+function Toggle({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={`relative w-10 h-6 rounded-full shrink-0 cursor-pointer transition-colors ${
+        on ? "bg-primary-400" : "bg-brand-200"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+          on ? "left-[18px]" : "left-0.5"
+        }`}
+      />
+    </button>
+  );
+}
+
+function PreferencesPanel() {
+  const { get, set, ready } = useSettings();
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  useEffect(() => {
+    billing.getCompany().then(setCompany).catch(() => {});
+  }, []);
+  if (!ready)
+    return <div className="card text-sm text-brand-400">Loading…</div>;
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <p className="font-bold text-ink">Document defaults</p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Used to pre-fill new invoices & quotations. Edit these in{" "}
+          <b>Company Details</b>.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+          {[
+            ["Currency", company?.currency ?? "AED"],
+            ["Invoice template", company?.default_template ?? "minimal"],
+            [
+              "Default tax rate",
+              `${company?.default_tax_rate ?? 5}%`,
+            ],
+          ].map(([k, v]) => (
+            <div
+              key={k as string}
+              className="rounded-xl border border-brand-200 p-3"
+            >
+              <p className="text-xs text-brand-400">{k}</p>
+              <p className="font-semibold text-ink capitalize mt-0.5">
+                {v}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="card">
+        <p className="font-bold text-ink mb-4">App preferences</p>
+        <div className="space-y-3 max-w-sm">
+          <Field label="Rows per page">
+            <input
+              type="number"
+              className="input"
+              placeholder="25"
+              defaultValue={get("pref.page_size", "25")}
+              onBlur={(e) => set("pref.page_size", e.target.value || "25")}
+            />
+          </Field>
+          <label className="flex items-center justify-between">
+            <span className="text-sm text-brand-700">
+              Show KPI change indicators
+            </span>
+            <Toggle
+              on={get("pref.kpi_delta", "on") === "on"}
+              onChange={(v) => set("pref.kpi_delta", v ? "on" : "off")}
+            />
+          </label>
+          <p className="text-[11px] text-brand-400">
+            Preferences are saved to your workspace.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPanel() {
+  const { get, set, ready } = useSettings();
+  const ITEMS = [
+    ["notif.lowstock", "Low-stock alerts", "When a product hits its reorder level"],
+    ["notif.neworder", "New order received", "When a sales order is created"],
+    ["notif.quote", "Quotation accepted", "When a customer accepts a quote"],
+    ["notif.weekly", "Weekly summary", "A digest of activity every Monday"],
+  ];
+  if (!ready)
+    return <div className="card text-sm text-brand-400">Loading…</div>;
   return (
     <div className="card">
-      <p className="font-bold text-ink">{title}</p>
-      <p className="text-sm text-brand-500 mt-2">
-        {title} settings will appear here. Core configuration (company,
-        users, security, activity) is available in the other sections.
+      <p className="font-bold text-ink">Notifications</p>
+      <p className="text-sm text-brand-500 mt-0.5 mb-4">
+        Choose what you want to be notified about.
       </p>
+      <div className="space-y-1">
+        {ITEMS.map(([key, title, desc]) => (
+          <div
+            key={key}
+            className="flex items-center justify-between rounded-xl border border-brand-200 px-4 py-3"
+          >
+            <div>
+              <p className="text-sm font-semibold text-ink">{title}</p>
+              <p className="text-[11px] text-brand-400">{desc}</p>
+            </div>
+            <Toggle
+              on={get(key, "on") === "on"}
+              onChange={(v) => set(key, v ? "on" : "off")}
+            />
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-brand-400 mt-3">
+        Preferences are saved now. Delivery (email/push) activates once a
+        notification integration is configured.
+      </p>
+    </div>
+  );
+}
+
+function BillingPanel() {
+  const [stats, setStats] = useState<Record<string, number>>({});
+  useEffect(() => {
+    Promise.all([
+      erp.products().catch(() => []),
+      erp.orders().catch(() => []),
+      quotes.listDocs().catch(() => []),
+      billing.listDocs().catch(() => []),
+      crm.customers().catch(() => []),
+    ]).then(([p, o, q, i, c]) =>
+      setStats({
+        Products: p.length,
+        Orders: o.length,
+        Quotations: q.length,
+        Invoices: i.length,
+        Customers: c.length,
+      })
+    );
+  }, []);
+  return (
+    <div className="space-y-4">
+      <div className="card-accent">
+        <p className="text-xs font-semibold text-ink/70">Current plan</p>
+        <p className="text-2xl font-bold text-ink mt-1">
+          Self-hosted · Free
+        </p>
+        <p className="text-sm text-ink/70 mt-1">
+          Filey ERP is open source (MIT). Run it for your business at no
+          cost — you only pay for your own Supabase project (free tier
+          available).
+        </p>
+      </div>
+      <div className="card">
+        <p className="font-bold text-ink mb-3">Usage</p>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {Object.entries(stats).map(([k, v]) => (
+            <div
+              key={k}
+              className="rounded-xl border border-brand-200 p-3 text-center"
+            >
+              <p className="text-2xl font-bold text-ink">{v}</p>
+              <p className="text-[11px] text-brand-400 mt-0.5">{k}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-brand-400 mt-3">
+          No usage limits — your data lives in your own Supabase project.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationsPanel() {
+  const url = (import.meta.env.VITE_SUPABASE_URL as string) || "";
+  const host = url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const rows = [
+    {
+      n: "Supabase",
+      d: host || "not configured",
+      ok: !!host,
+      icon: <Wifi size={16} />,
+    },
+    {
+      n: "Local PDF Tools",
+      d: "On-device, no network",
+      ok: true,
+      icon: <Plug size={16} />,
+    },
+    {
+      n: "Email / SMTP",
+      d: "Not configured",
+      ok: false,
+      icon: <Bell size={16} />,
+    },
+    {
+      n: "Webhooks / API",
+      d: "Not configured",
+      ok: false,
+      icon: <Plug size={16} />,
+    },
+  ];
+  return (
+    <div className="card">
+      <p className="font-bold text-ink">Integrations</p>
+      <p className="text-sm text-brand-500 mt-0.5 mb-4">
+        Connected services and their status.
+      </p>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div
+            key={r.n}
+            className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
+          >
+            <span className="rounded-lg bg-primary-100 text-primary-700 p-2">
+              {r.icon}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-ink">{r.n}</p>
+              <p className="text-[11px] text-brand-400 truncate">{r.d}</p>
+            </div>
+            <Badge tone={r.ok ? "success" : "neutral"}>
+              {r.ok ? "Connected" : "Off"}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BackupPanel() {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const exportData = async () => {
+    setBusy(true);
+    try {
+      const [company, products, orders, invoices, quotations, customers, expenses] =
+        await Promise.all([
+          billing.getCompany().catch(() => null),
+          erp.products().catch(() => []),
+          erp.orders().catch(() => []),
+          billing.listDocs().catch(() => []),
+          quotes.listDocs().catch(() => []),
+          crm.customers().catch(() => []),
+          fin.expenses().catch(() => []),
+        ]);
+      const blob = new Blob(
+        [
+          JSON.stringify(
+            {
+              exported_at: new Date().toISOString(),
+              app: "filey-erp",
+              company,
+              products,
+              orders,
+              invoices,
+              quotations,
+              customers,
+              expenses,
+            },
+            null,
+            2
+          ),
+        ],
+        { type: "application/json" }
+      );
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `filey-backup-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      setDone(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <p className="font-bold text-ink">Export data</p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Download a JSON snapshot of your company, products, orders,
+          invoices, quotations, customers and expenses.
+        </p>
+        <button className="btn-primary" disabled={busy} onClick={exportData}>
+          <Download size={16} /> {busy ? "Preparing…" : "Export backup"}
+        </button>
+        {done && (
+          <span className="ml-3 text-sm font-semibold text-success">
+            Backup downloaded
+          </span>
+        )}
+      </div>
+      <div className="card">
+        <p className="font-bold text-ink">Restore</p>
+        <p className="text-sm text-brand-500 mt-2">
+          Your source of truth is your Supabase project — restore from a
+          Supabase backup (Dashboard → Database → Backups), or contact the
+          owner to re-import an exported file. In-app restore/import is on
+          the roadmap.
+        </p>
+      </div>
     </div>
   );
 }
