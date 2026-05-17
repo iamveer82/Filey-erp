@@ -210,7 +210,7 @@ export function DataTable<T>({
   return (
     <div className="card overflow-hidden p-0">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px]">
+        <table className="w-full">
           <thead>
             <tr>
               {columns.map((c) => (

@@ -240,7 +240,7 @@ export default function Quoting() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(420px,560px)] gap-5 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
         {/* builder */}
         <div className="no-print space-y-4">
           <div className="card">
@@ -406,7 +406,7 @@ export default function Quoting() {
               Add products and their rates
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-semibold text-brand-400">
                     <th className="py-2 w-6">#</th>
