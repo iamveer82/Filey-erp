@@ -18,7 +18,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const current = APPS.find((a) => a.to === loc.pathname)?.label ?? "Overview";
 
   return (
-    <div className="flex h-full bg-background p-3 gap-3">
+    <div className="flex h-full w-full overflow-hidden bg-background p-3 gap-3">
       {/* ───────────── Sidebar ───────────── */}
       <aside className="w-64 shrink-0 bg-white rounded-2xl border border-brand-200 shadow-bento flex flex-col overflow-hidden">
         <div className="px-5 py-5 flex items-center justify-between border-b border-brand-100">
@@ -63,7 +63,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* ───────────── Main ───────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <header className="h-14 shrink-0 flex items-center justify-between gap-4 mb-3">
           <div className="relative flex-1 max-w-md">
             <Search
@@ -111,8 +111,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto rounded-2xl">
-          <div className="pb-4">
+        <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
+          <div className="pb-4 pr-1">
             <p className="text-[11px] font-semibold text-brand-400 uppercase tracking-wide mb-1">
               Filey / {current}
             </p>
