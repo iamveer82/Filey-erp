@@ -1232,3 +1232,217 @@ export const billing = {
       else await sInsert("company_profile", row);
     }),
 };
+
+// ===== Quoting =====
+export interface QuotationItem {
+  id?: number;
+  product: string;
+  sku?: string;
+  qty: number;
+  rate: number;
+  discount: number; // percent
+  tax: number; // percent
+}
+export interface QuotationSummary {
+  id: number;
+  number: string;
+  customer_name: string;
+  status: string;
+  template: string;
+  total: number;
+  valid_until?: string;
+  updated_at: string;
+}
+export interface QuotationDoc {
+  id: number;
+  number: string;
+  status: string;
+  template: string;
+  accent: string;
+  currency: string;
+  quote_date?: string;
+  valid_until?: string;
+  sales_person?: string;
+  customer_name: string;
+  customer_address?: string;
+  customer_trn?: string;
+  customer_email?: string;
+  terms?: string;
+  created_at: string;
+  updated_at: string;
+  items: QuotationItem[];
+}
+export type QuotationInput = Omit<
+  QuotationDoc,
+  "id" | "created_at" | "updated_at"
+> & { id?: number };
+export interface QuoteTemplate {
+  id: number;
+  name: string;
+  base_template: string;
+  created_at: string;
+}
+export interface ToolRun {
+  id: number;
+  tool: string;
+  tool_name: string;
+  file_name: string;
+  created_at: string;
+}
+
+function quoteTotal(items: QuotationItem[]) {
+  let subtotal = 0;
+  let discount = 0;
+  let tax = 0;
+  for (const i of items) {
+    const gross = i.qty * i.rate;
+    const disc = gross * ((i.discount || 0) / 100);
+    subtotal += gross;
+    discount += disc;
+    tax += (gross - disc) * ((i.tax || 0) / 100);
+  }
+  return subtotal - discount + tax;
+}
+
+export const quotes = {
+  listDocs: () =>
+    readCached<QuotationSummary[]>(
+      "quotation_docs",
+      async () => {
+        const [docs, items] = await Promise.all([
+          sList<any>("quotations", [{ col: "updated_at", asc: false }]),
+          sList<any>("quotation_items"),
+        ]);
+        const byDoc = new Map<number, any[]>();
+        for (const it of items) {
+          const a = byDoc.get(it.quotation_id) ?? [];
+          a.push(it);
+          byDoc.set(it.quotation_id, a);
+        }
+        return docs.map((d) => ({
+          id: d.id,
+          number: d.number,
+          customer_name: d.customer_name,
+          status: d.status,
+          template: d.template,
+          total: quoteTotal(byDoc.get(d.id) ?? []),
+          valid_until: d.valid_until ?? undefined,
+          updated_at: d.updated_at,
+        })) as QuotationSummary[];
+      },
+      []
+    ),
+  getDoc: (docId: number) =>
+    readCached<QuotationDoc>(
+      `quotation_doc:${docId}`,
+      async () => {
+        const { data: d, error } = await sb()
+          .from("quotations")
+          .select("*")
+          .eq("id", docId)
+          .single();
+        if (error) throw error;
+        const items = await sList<any>("quotation_items", [
+          { col: "position", asc: true },
+          { col: "id", asc: true },
+        ]);
+        return {
+          ...(d as any),
+          items: items
+            .filter((i) => i.quotation_id === docId)
+            .map((i) => ({
+              id: i.id,
+              product: i.product,
+              sku: i.sku ?? undefined,
+              qty: i.qty,
+              rate: i.rate,
+              discount: i.discount,
+              tax: i.tax,
+            })),
+        } as QuotationDoc;
+      },
+      null as unknown as QuotationDoc
+    ),
+  saveDoc: (input: QuotationInput) =>
+    online(async () => {
+      const { items, id, ...docFields } = input;
+      const row = clean(docFields as Record<string, unknown>);
+      let docId: number;
+      if (id && id > 0) {
+        await sUpdate("quotations", id, row);
+        const { error } = await sb()
+          .from("quotation_items")
+          .delete()
+          .eq("quotation_id", id);
+        if (error) throw error;
+        docId = id;
+      } else {
+        docId = await sInsert("quotations", row);
+      }
+      if (items.length) {
+        const { error } = await sb()
+          .from("quotation_items")
+          .insert(
+            items.map((it, i) => ({
+              quotation_id: docId,
+              product: it.product,
+              sku: it.sku ?? null,
+              qty: it.qty,
+              rate: it.rate,
+              discount: it.discount,
+              tax: it.tax,
+              position: i,
+            }))
+          );
+        if (error) throw error;
+      }
+      return docId;
+    }),
+  deleteDoc: (docId: number) =>
+    write({ k: "delete", t: "quotations", id: docId }, () =>
+      sDelete("quotations", docId), undefined
+    ),
+  setStatus: (docId: number, status: string) =>
+    write(
+      { k: "update", t: "quotations", id: docId, row: { status } },
+      () => sUpdate("quotations", docId, { status }),
+      undefined
+    ),
+};
+
+export const quoteTemplates = {
+  list: () =>
+    readCached<QuoteTemplate[]>(
+      "quotation_templates",
+      () =>
+        sList<QuoteTemplate>("quotation_templates", [
+          { col: "id", asc: false },
+        ]),
+      []
+    ),
+  create: (name: string, baseTemplate: string) => {
+    const row = { name, base_template: baseTemplate };
+    return write({ k: "insert", t: "quotation_templates", row }, () =>
+      sInsert("quotation_templates", row), -1
+    );
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "quotation_templates", id }, () =>
+      sDelete("quotation_templates", id), undefined
+    ),
+};
+
+export const toolRuns = {
+  list: () =>
+    readCached<ToolRun[]>(
+      "tool_runs",
+      () => sList<ToolRun>("tool_runs", [{ col: "id", asc: false }]),
+      []
+    ),
+  log: (tool: string, toolName: string, fileName: string) => {
+    const row = { tool, tool_name: toolName, file_name: fileName };
+    return write({ k: "insert", t: "tool_runs", row }, () =>
+      sInsert("tool_runs", row), -1
+    );
+  },
+};

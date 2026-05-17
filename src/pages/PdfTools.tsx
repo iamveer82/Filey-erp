@@ -10,6 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { PageHeader, InfoCard, Card } from "../components/ui";
+import { toolRuns } from "../lib/api";
 import PdfToolbox, {
   PDF_TOOLS,
   PDF_CATS,
@@ -19,22 +20,13 @@ import PdfToolbox, {
 } from "../components/PdfToolbox";
 
 interface RunLog {
-  tool: string;
   toolName: string;
   file: string;
   ts: number;
 }
 
-const RUNS_KEY = "filey_tool_runs";
 const FAVS_KEY = "filey_tool_favs";
 
-const loadRuns = (): RunLog[] => {
-  try {
-    return JSON.parse(localStorage.getItem(RUNS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-};
 const loadFavs = (): string[] => {
   try {
     const v = JSON.parse(localStorage.getItem(FAVS_KEY) || "null");
@@ -94,22 +86,33 @@ export default function ToolsPage() {
   const [favs, setFavs] = useState<string[]>([]);
   const [filter, setFilter] = useState<string | null>(null);
 
+  const refreshRuns = () =>
+    toolRuns
+      .list()
+      .then((rows) =>
+        setRuns(
+          rows.slice(0, 20).map((r) => ({
+            toolName: r.tool_name,
+            file: r.file_name,
+            ts: new Date(r.created_at).getTime(),
+          }))
+        )
+      )
+      .catch(() => {});
+
   useEffect(() => {
-    setRuns(loadRuns());
+    refreshRuns();
     setFavs(loadFavs());
   }, []);
 
-  const logRun = (toolId: string, files: string[]) => {
+  const logRun = async (toolId: string, files: string[]) => {
     const t = toolById(toolId);
-    const entry: RunLog = {
-      tool: toolId,
-      toolName: t?.name ?? toolId,
-      file: files[0] ?? "file",
-      ts: Date.now(),
-    };
-    const next = [entry, ...loadRuns()].slice(0, 20);
-    localStorage.setItem(RUNS_KEY, JSON.stringify(next));
-    setRuns(next);
+    try {
+      await toolRuns.log(toolId, t?.name ?? toolId, files[0] ?? "file");
+    } catch {
+      /* offline — queued by the api layer */
+    }
+    refreshRuns();
   };
 
   const toggleFav = (id: string) => {

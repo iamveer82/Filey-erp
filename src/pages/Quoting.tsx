@@ -11,7 +11,18 @@ import {
   X,
   CalendarDays,
 } from "lucide-react";
-import { billing, crm, erp, CompanyProfile, CrmCustomer, Product } from "../lib/api";
+import {
+  billing,
+  crm,
+  erp,
+  quotes,
+  quoteTemplates,
+  CompanyProfile,
+  CrmCustomer,
+  Product,
+  QuoteTemplate,
+  QuotationInput,
+} from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { Modal, Field } from "../components/ui";
 
@@ -38,9 +49,6 @@ const STEPS = [
   "Add Products",
   "Review & Send",
 ];
-
-const DRAFT_KEY = "filey_quotation_draft";
-const TPL_KEY = "filey_quotation_templates";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
@@ -84,27 +92,17 @@ export default function Quoting() {
   );
   const [custModal, setCustModal] = useState(false);
   const [invModal, setInvModal] = useState(false);
-  const [saved, setSaved] = useState<{ name: string; ts: number }[]>([]);
+  const [docId, setDocId] = useState<number | undefined>(undefined);
+  const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [savedNote, setSavedNote] = useState(false);
+
+  const loadTemplates = () =>
+    quoteTemplates.list().then(setSaved).catch(() => {});
 
   useEffect(() => {
     billing.getCompany().then(setCompany).catch(() => {});
     crm.customers().then(setCustomers).catch(() => {});
-    try {
-      setSaved(JSON.parse(localStorage.getItem(TPL_KEY) || "[]"));
-      const d = localStorage.getItem(DRAFT_KEY);
-      if (d) {
-        const p = JSON.parse(d);
-        setNumber(p.number ?? qtNo());
-        setLines(p.lines ?? lines);
-        setTpl(p.tpl ?? "clean");
-        setCurrency(p.currency ?? "USD");
-        setSalesPerson(p.salesPerson ?? "");
-      }
-    } catch {
-      /* ignore */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadTemplates();
   }, []);
 
   const totals = useMemo(() => {
@@ -132,29 +130,61 @@ export default function Quoting() {
   const delLine = (i: number) =>
     setLines((ls) => ls.filter((_, x) => x !== i));
 
-  const saveDraft = () => {
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({ number, lines, tpl, currency, salesPerson })
-    );
-    setSavedNote(true);
-    setTimeout(() => setSavedNote(false), 2500);
-  };
-
-  const saveTemplate = () => {
-    const name = prompt("Template name?");
-    if (!name) return;
-    const next = [{ name, ts: Date.now() }, ...saved].slice(0, 12);
-    setSaved(next);
-    localStorage.setItem(TPL_KEY, JSON.stringify(next));
-  };
-
   const accent =
     tpl === "corporate"
       ? "#222222"
       : tpl === "classic"
       ? "#4A453B"
       : "#E0AE00";
+
+  const saveDraft = async () => {
+    const trn = customer?.segment?.startsWith("TRN:")
+      ? customer.segment.slice(4).trim()
+      : undefined;
+    const input: QuotationInput = {
+      id: docId,
+      number,
+      status: "draft",
+      template: tpl,
+      accent,
+      currency,
+      quote_date: date,
+      valid_until: valid,
+      sales_person: salesPerson || undefined,
+      customer_name: customer?.company || customer?.name || "",
+      customer_address: customer?.address,
+      customer_trn: trn,
+      customer_email: customer?.email,
+      terms,
+      items: lines.map((l) => ({
+        product: l.product,
+        sku: l.sku || undefined,
+        qty: l.qty,
+        rate: l.rate,
+        discount: l.discount,
+        tax: l.tax,
+      })),
+    };
+    try {
+      const newId = await quotes.saveDoc(input);
+      if (newId && newId > 0) setDocId(newId);
+      setSavedNote(true);
+      setTimeout(() => setSavedNote(false), 2500);
+    } catch (e) {
+      alert(`Could not save: ${e}`);
+    }
+  };
+
+  const saveTemplate = async () => {
+    const name = prompt("Template name?");
+    if (!name) return;
+    try {
+      await quoteTemplates.create(name, tpl);
+      loadTemplates();
+    } catch (e) {
+      alert(`Could not save template: ${e}`);
+    }
+  };
 
   return (
     <div className="animate-fade-up">
@@ -658,9 +688,9 @@ export default function Quoting() {
               Manage your custom templates
             </p>
             <div className="flex flex-wrap gap-2">
-              {saved.map((s, i) => (
+              {saved.map((s) => (
                 <div
-                  key={i}
+                  key={s.id}
                   className="rounded-xl border border-brand-200 px-3 py-2"
                 >
                   <p className="text-xs font-semibold text-ink">
@@ -668,7 +698,7 @@ export default function Quoting() {
                   </p>
                   <p className="text-[10px] text-brand-400 flex items-center gap-1">
                     <CalendarDays size={10} />
-                    {fmtDate(new Date(s.ts).toISOString())}
+                    {fmtDate(s.created_at)}
                   </p>
                 </div>
               ))}
