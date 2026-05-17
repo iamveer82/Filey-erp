@@ -1459,3 +1459,77 @@ export const toolRuns = {
     );
   },
 };
+
+// ===== Organizations / RBAC =====
+export interface Organization {
+  id: string;
+  name: string;
+  owner_id: string;
+  created_at: string;
+}
+export interface OrgMember {
+  id: number;
+  org_id: string;
+  user_id: string;
+  role: string;
+  name: string;
+  email: string;
+}
+
+export const org = {
+  get: () =>
+    readCached<Organization | null>(
+      "organization",
+      async () => {
+        const rows = await sList<Organization>("organizations");
+        return rows[0] ?? null;
+      },
+      null
+    ),
+  members: () =>
+    readCached<OrgMember[]>(
+      "org_members",
+      async () => {
+        const [mems, profs] = await Promise.all([
+          sList<any>("org_members", [{ col: "id", asc: true }]),
+          sList<any>("profiles"),
+        ]);
+        const byId = new Map(profs.map((p) => [p.id, p]));
+        return mems.map((m) => ({
+          id: m.id,
+          org_id: m.org_id,
+          user_id: m.user_id,
+          role: m.role,
+          name: byId.get(m.user_id)?.name ?? "—",
+          email: byId.get(m.user_id)?.email ?? "",
+        })) as OrgMember[];
+      },
+      []
+    ),
+  /** Create a new organization; returns its id (the join code). */
+  create: (name: string) =>
+    online(async () => {
+      const id = await sInsert("organizations", { name });
+      await sInsert("org_members", {
+        org_id: String(id),
+        role: "owner",
+      });
+      return String(id);
+    }),
+  /** Join an existing organization by its id (join code). */
+  join: (code: string) =>
+    online(async () => {
+      await sInsert("org_members", { org_id: code, role: "staff" });
+      return code;
+    }),
+  setRole: (memberId: number, role: string) =>
+    write(
+      { k: "update", t: "org_members", id: memberId, row: { role } },
+      () => sUpdate("org_members", memberId, { role }),
+      undefined
+    ),
+  remove: (memberId: number) =>
+    write({ k: "delete", t: "org_members", id: memberId }, () =>
+      sDelete("org_members", memberId), undefined
+    ),
+};

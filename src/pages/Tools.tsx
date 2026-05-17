@@ -23,13 +23,17 @@ import {
   EyeOff,
   Pencil,
   LayoutGrid,
+  Copy,
+  Building,
 } from "lucide-react";
 import {
   tools,
   billing,
-  User,
   AuditEntry,
   CompanyProfile,
+  org,
+  type OrgMember,
+  type Organization,
 } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
@@ -934,131 +938,237 @@ function AccountProfile() {
   );
 }
 
-/* ---------------- Users & Roles ---------------- */
+/* ---------------- Users & Roles (Organization) ---------------- */
+
+const ROLES = ["owner", "admin", "manager", "accountant", "staff"];
 
 function UsersRoles() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [open, setOpen] = useState(false);
-  const load = () => tools.users().then(setUsers).catch(console.error);
-  useEffect(() => {
-    load();
-  }, []);
+  const { profile, user, updateProfile } = useAuth();
+  const [o, setO] = useState<Organization | null>(null);
+  const [members, setMembers] = useState<OrgMember[]>([]);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const load = () => {
+    org.get().then(setO).catch(() => {});
+    org.members().then(setMembers).catch(() => {});
+  };
+  useEffect(load, []);
+
+  const currentOrg = profile?.org_id || "default";
+  const personal = currentOrg === "default" || !o;
+  const myRole =
+    members.find((m) => m.user_id === user?.id)?.role ??
+    (personal ? "owner" : "staff");
+  const isAdmin = personal || ["owner", "admin"].includes(myRole);
+
+  const switchOrg = async (id: string) => {
+    await updateProfile({ org_id: id });
+    setName("");
+    setCode("");
+    setTimeout(load, 150);
+  };
+
+  const createOrg = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const id = await org.create(name.trim());
+      await switchOrg(id);
+    } catch (e) {
+      alert(`Could not create org: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const joinOrg = async () => {
+    if (!code.trim()) return;
+    setBusy(true);
+    try {
+      await org.join(code.trim());
+      await switchOrg(code.trim());
+    } catch (e) {
+      alert(`Could not join: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <button className="btn-primary" onClick={() => setOpen(true)}>
-          <Plus size={16} /> Add User
-        </button>
-      </div>
-      <DataTable<User>
-        rows={users}
-        empty="No users yet"
-        columns={[
-          {
-            key: "u",
-            label: "Username",
-            render: (u) => (
-              <span className="font-mono text-xs">{u.username}</span>
-            ),
-          },
-          {
-            key: "n",
-            label: "Full Name",
-            render: (u) => (
-              <span className="font-semibold">{u.full_name}</span>
-            ),
-          },
-          {
-            key: "r",
-            label: "Role",
-            render: (u) => <Badge tone="info">{u.role}</Badge>,
-          },
-          {
-            key: "s",
-            label: "Status",
-            render: (u) => (
-              <Badge tone={u.active ? "success" : "danger"}>
-                {u.active ? "active" : "disabled"}
-              </Badge>
-            ),
-          },
-          {
-            key: "a",
-            label: "",
-            render: (u) => (
+      <div className="card">
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-primary-100 text-primary-700 p-2.5">
+            <Building size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-ink">
+              {personal ? "Personal workspace" : o?.name}
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5">
+              {personal
+                ? "You're working solo. Create an organization to invite a team and share data."
+                : "Share the join code below so teammates can join this organization."}
+            </p>
+          </div>
+        </div>
+        {!personal && (
+          <div className="mt-4">
+            <label className="label">Join code (organization ID)</label>
+            <div className="flex gap-2">
+              <input
+                className="input font-mono text-xs"
+                readOnly
+                value={currentOrg}
+              />
               <button
-                className="btn-ghost text-xs"
-                onClick={async () => {
-                  await tools.toggleUser(u.id);
-                  load();
+                className="btn-ghost shrink-0"
+                onClick={() => {
+                  navigator.clipboard
+                    ?.writeText(currentOrg)
+                    .then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    })
+                    .catch(() => {});
                 }}
               >
-                {u.active ? "Disable" : "Enable"}
+                <Copy size={14} /> {copied ? "Copied" : "Copy"}
               </button>
-            ),
-          },
-        ]}
-      />
-      <Modal open={open} onClose={() => setOpen(false)} title="Add User">
-        <UserForm
-          onSaved={() => {
-            load();
-            setOpen(false);
-          }}
-        />
-      </Modal>
-    </div>
-  );
-}
-
-function UserForm({ onSaved }: { onSaved: () => void }) {
-  const [f, setF] = useState({
-    username: "",
-    full_name: "",
-    role: "staff",
-  });
-  return (
-    <div>
-      <div className="space-y-3">
-        <Field label="Username">
-          <input
-            className="input"
-            value={f.username}
-            onChange={(e) => setF({ ...f, username: e.target.value })}
-          />
-        </Field>
-        <Field label="Full Name">
-          <input
-            className="input"
-            value={f.full_name}
-            onChange={(e) => setF({ ...f, full_name: e.target.value })}
-          />
-        </Field>
-        <Field label="Role">
-          <select
-            className="input"
-            value={f.role}
-            onChange={(e) => setF({ ...f, role: e.target.value })}
-          >
-            <option value="admin">Admin</option>
-            <option value="manager">Manager</option>
-            <option value="accountant">Accountant</option>
-            <option value="staff">Staff</option>
-          </select>
-        </Field>
+            </div>
+          </div>
+        )}
       </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button
-          className="btn-primary"
-          disabled={!f.username.trim()}
-          onClick={async () => {
-            await tools.createUser(f.username, f.full_name, f.role);
-            onSaved();
-          }}
-        >
-          Create User
-        </button>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card">
+          <p className="font-bold text-ink mb-1">Create organization</p>
+          <p className="text-xs text-brand-400 mb-3">
+            You become the owner. Your current data stays in your previous
+            workspace.
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="input"
+              placeholder="Acme Trading LLC"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <button
+              className="btn-primary shrink-0"
+              disabled={busy || !name.trim()}
+              onClick={createOrg}
+            >
+              <Plus size={15} /> Create
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <p className="font-bold text-ink mb-1">Join organization</p>
+          <p className="text-xs text-brand-400 mb-3">
+            Paste a join code (organization ID) shared with you.
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="input font-mono text-xs"
+              placeholder="org id…"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+            <button
+              className="btn-ghost shrink-0"
+              disabled={busy || !code.trim()}
+              onClick={joinOrg}
+            >
+              Join
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card !p-0 overflow-hidden">
+        <div className="px-5 pt-4">
+          <p className="font-bold text-ink">Members &amp; Roles</p>
+          <p className="text-xs text-brand-400 mt-0.5 mb-3">
+            {members.length} member{members.length === 1 ? "" : "s"}
+            {!isAdmin && " · only owners/admins can change roles"}
+          </p>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs font-semibold text-brand-400">
+              <th className="px-5 py-2">Member</th>
+              <th className="px-2 py-2">Email</th>
+              <th className="px-2 py-2">Role</th>
+              <th className="px-5 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {members.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="px-5 py-6 text-center text-sm text-brand-400"
+                >
+                  {personal
+                    ? "Just you for now."
+                    : "No members loaded."}
+                </td>
+              </tr>
+            )}
+            {members.map((m) => (
+              <tr key={m.id} className="border-t border-brand-100">
+                <td className="px-5 py-2.5 font-semibold text-ink">
+                  {m.name}
+                  {m.user_id === user?.id && (
+                    <span className="text-[11px] text-brand-400">
+                      {" "}
+                      (you)
+                    </span>
+                  )}
+                </td>
+                <td className="px-2 py-2.5 text-brand-600">{m.email}</td>
+                <td className="px-2 py-2.5">
+                  {isAdmin && m.user_id !== user?.id ? (
+                    <select
+                      className="input !py-1 !w-auto text-xs"
+                      value={m.role}
+                      onChange={async (e) => {
+                        await org.setRole(m.id, e.target.value);
+                        load();
+                      }}
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Badge tone="info">{m.role}</Badge>
+                  )}
+                </td>
+                <td className="px-5 py-2.5 text-right">
+                  {isAdmin && m.user_id !== user?.id && (
+                    <button
+                      aria-label="Remove member"
+                      className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                      onClick={async () => {
+                        await org.remove(m.id);
+                        load();
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

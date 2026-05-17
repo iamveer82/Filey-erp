@@ -21,6 +21,7 @@ export interface Profile {
   email: string;
   name: string;
   company: string;
+  org_id?: string;
   phone?: string;
   role?: string;
   username?: string;
@@ -185,12 +186,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     if (!supabase || !user) throw new Error("Not signed in");
     const name = `${firstName.trim()} ${lastName.trim()}`.trim();
+    // org_id is provisioned by the signup trigger — do NOT set it here,
+    // or the upsert would clobber the user's organization.
     const row = {
       id: user.id,
       email: user.email ?? "",
       name,
       company: company.trim(),
-      org_id: "default",
     };
     const { data, error } = await supabase
       .from("profiles")
