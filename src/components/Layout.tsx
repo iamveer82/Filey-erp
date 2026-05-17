@@ -2,12 +2,15 @@ import { ReactNode } from "react";
 import { NavLink, Link, useLocation } from "react-router-dom";
 import { Boxes, Bell, Search, ChevronDown, LogOut } from "lucide-react";
 import { cn } from "../lib/format";
-import { APPS } from "../lib/apps";
+import { useModules } from "../lib/modules";
+import { MODULES } from "../modules/registry";
 import { useAuth } from "../lib/auth";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const { profile, signOut } = useAuth();
+  const { enabledModules } = useModules();
+  const navModules = enabledModules();
   const name = profile?.name || "User";
   const initials = name
     .split(" ")
@@ -15,7 +18,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-  const current = APPS.find((a) => a.to === loc.pathname)?.label ?? "Overview";
+  const current =
+    MODULES.find((m) => m.to === loc.pathname)?.label ?? "Overview";
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-background p-3 gap-3">
@@ -42,7 +46,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {APPS.map(({ to, label, icon: Icon }) => (
+          {navModules.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}

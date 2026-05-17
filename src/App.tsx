@@ -1,17 +1,7 @@
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
-import Overview from "./pages/Overview";
-import Inventory from "./pages/Inventory";
-import Orders from "./pages/Orders";
-import Invoicing from "./pages/Invoicing";
-import Quoting from "./pages/Quoting";
-import Crm from "./pages/Crm";
-import Suppliers from "./pages/Suppliers";
-import Purchase from "./pages/Purchase";
-import Reports from "./pages/Reports";
-import ToolsPage from "./pages/PdfTools";
-import Settings from "./pages/Tools";
 import Login from "./pages/Login";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
@@ -24,6 +14,36 @@ function Splash() {
   );
 }
 
+function ModuleDisabled({ name }: { name: string }) {
+  return (
+    <div className="card max-w-md mx-auto mt-10 text-center">
+      <p className="text-lg font-bold text-ink">{name} is disabled</p>
+      <p className="text-sm text-brand-500 mt-2">
+        Enable this module from <b>Settings → Apps</b> to use it.
+      </p>
+    </div>
+  );
+}
+
+function AppRoutes() {
+  const { modules, isEnabled } = useModules();
+  return (
+    <Routes>
+      <Route path="/" element={<Navigate to="/overview" replace />} />
+      {modules.map((m) => (
+        <Route
+          key={m.id}
+          path={m.to}
+          element={
+            isEnabled(m.id) ? m.element : <ModuleDisabled name={m.label} />
+          }
+        />
+      ))}
+      <Route path="*" element={<Navigate to="/overview" replace />} />
+    </Routes>
+  );
+}
+
 function Gate() {
   const { loading, configured, user, needsProfile } = useAuth();
   if (loading) return <Splash />;
@@ -32,25 +52,13 @@ function Gate() {
   if (needsProfile) return <ProfileSetup />;
 
   return (
-    <HashRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/overview" replace />} />
-          <Route path="/overview" element={<Overview />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/invoicing" element={<Invoicing />} />
-          <Route path="/quoting" element={<Quoting />} />
-          <Route path="/crm" element={<Crm />} />
-          <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/purchase" element={<Purchase />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/tools" element={<ToolsPage />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/overview" replace />} />
-        </Routes>
-      </Layout>
-    </HashRouter>
+    <ModulesProvider>
+      <HashRouter>
+        <Layout>
+          <AppRoutes />
+        </Layout>
+      </HashRouter>
+    </ModulesProvider>
   );
 }
 
