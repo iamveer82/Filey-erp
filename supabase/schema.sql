@@ -7,8 +7,9 @@
 -- ---------- PROFILES (one row per auth user) ----------
 create table if not exists profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
+  org_id      text not null default 'default',
   email       text not null default '',
-  full_name   text not null default 'User',
+  name        text not null default 'User',
   company     text not null default '',
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
@@ -399,7 +400,7 @@ end $$;
 create or replace function handle_new_user()
 returns trigger language plpgsql security definer as $$
 begin
-  insert into public.profiles (id, email, full_name)
+  insert into public.profiles (id, email, name)
   values (new.id, coalesce(new.email, ''), coalesce(new.raw_user_meta_data->>'full_name', 'User'))
   on conflict (id) do nothing;
   return new;
