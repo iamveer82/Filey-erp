@@ -4,7 +4,8 @@ import Layout from "./components/Layout";
 import Overview from "./pages/Overview";
 import Inventory from "./pages/Inventory";
 import Orders from "./pages/Orders";
-import Quoting from "./pages/Invoicing";
+import Invoicing from "./pages/Invoicing";
+import Crm from "./pages/Crm";
 import Suppliers from "./pages/Suppliers";
 import Purchase from "./pages/Purchase";
 import Reports from "./pages/Reports";
@@ -37,7 +38,8 @@ function Gate() {
           <Route path="/overview" element={<Overview />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/orders" element={<Orders />} />
-          <Route path="/quoting" element={<Quoting />} />
+          <Route path="/invoicing" element={<Invoicing />} />
+          <Route path="/crm" element={<Crm />} />
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/purchase" element={<Purchase />} />
           <Route path="/reports" element={<Reports />} />

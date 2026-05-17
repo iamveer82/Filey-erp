@@ -10,12 +10,25 @@ import {
   X,
   Pencil,
   Copy,
+  Check,
+  CheckCircle2,
+  Eye,
+  MoreHorizontal,
+  Send,
+  Monitor,
+  Smartphone,
+  Minus,
+  Settings,
+  StickyNote,
+  Paperclip,
 } from "lucide-react";
 import {
   billing,
+  crm,
   InvoiceDocSummary,
   InvoiceDocInput,
   CompanyProfile,
+  CrmCustomer,
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import {
@@ -366,280 +379,566 @@ function Editor({
     reader.readAsDataURL(file);
   };
 
+  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
+  const [custModal, setCustModal] = useState(false);
+  const loadCustomers = () =>
+    crm.customers().then(setCustomers).catch(() => {});
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const applyCustomer = (c: CrmCustomer) =>
+    setForm({
+      ...form,
+      customer_name: c.company || c.name,
+      customer_address: c.address ?? "",
+      customer_email: c.email ?? "",
+      customer_trn: c.segment?.startsWith("TRN:")
+        ? c.segment.slice(4).trim()
+        : form.customer_trn,
+    });
+
+  const [viewAll, setViewAll] = useState(false);
+  const [zoom, setZoom] = useState(100);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
+  const m = (v: number) => money(v, form.currency || "AED");
+  const shown = viewAll ? TEMPLATES : TEMPLATES.slice(0, 5);
+
   return (
     <div>
-      <div className="no-print flex items-center justify-between mb-5 gap-3 flex-wrap">
-        <button className="btn-ghost" onClick={onBack}>
-          <ArrowLeft size={16} /> Back
-        </button>
+      {/* header bar */}
+      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
+        <div className="flex items-start gap-3">
+          <button
+            className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            onClick={onBack}
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div>
+            <h1 className="text-[26px] leading-8 font-bold text-ink">
+              Create Invoice
+            </h1>
+            <p className="text-sm text-brand-500 mt-0.5">
+              Create and send professional invoices to your customers
+            </p>
+          </div>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <select
-            className="input !w-auto"
-            value={form.template}
-            onChange={(e) => set("template", e.target.value)}
+          {form.id ? (
+            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-success">
+              <CheckCircle2 size={15} /> Saved
+            </span>
+          ) : (
+            <span className="text-sm font-semibold text-brand-400">
+              Unsaved
+            </span>
+          )}
+          <button
+            className="btn-ghost"
+            onClick={() => window.print()}
           >
-            {TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} template
-              </option>
-            ))}
-          </select>
-          <select
-            className="input !w-auto"
-            value={form.status}
-            onChange={(e) => set("status", e.target.value)}
-          >
-            {["draft", "issued", "paid", "cancelled"].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <label className="flex items-center gap-2 text-sm font-semibold text-brand-600 border border-brand-200 rounded-xl px-3 py-2 cursor-pointer">
-            Accent
-            <input
-              type="color"
-              value={form.accent}
-              onChange={(e) => set("accent", e.target.value)}
-              className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
-            />
-          </label>
+            <Eye size={15} /> Preview
+          </button>
           <button
             className="btn-ghost"
             onClick={onSave}
             disabled={saving}
+            title="Save draft"
           >
-            <Save size={16} /> {saving ? "Saving…" : "Save"}
+            <MoreHorizontal size={15} /> More
           </button>
-          <button className="btn-cta" onClick={() => window.print()}>
-            <Download size={16} /> Download PDF
+          <button
+            className="btn-primary"
+            onClick={onSave}
+            disabled={saving}
+          >
+            <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-6">
-        {/* form */}
-        <div className="no-print space-y-4 overflow-y-auto pr-1">
-          <Section title="Invoice">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Invoice #">
-                <input
-                  className="input"
-                  value={form.number}
-                  onChange={(e) => set("number", e.target.value)}
-                />
-              </Field>
-              <Field label="Currency">
-                <input
-                  className="input"
-                  value={form.currency}
-                  onChange={(e) =>
-                    set("currency", e.target.value.toUpperCase())
-                  }
-                />
-              </Field>
-              <Field label="Issue Date">
-                <input
-                  type="date"
-                  className="input"
-                  value={form.issue_date ?? ""}
-                  onChange={(e) => set("issue_date", e.target.value)}
-                />
-              </Field>
-              <Field label="Due Date">
-                <input
-                  type="date"
-                  className="input"
-                  value={form.due_date ?? ""}
-                  onChange={(e) => set("due_date", e.target.value)}
-                />
-              </Field>
-            </div>
-          </Section>
+      <CustomerModal
+        open={custModal}
+        onClose={() => setCustModal(false)}
+        onSaved={(c) => {
+          applyCustomer(c);
+          setCustModal(false);
+          loadCustomers();
+        }}
+      />
 
-          <Section title="Logo">
-            {form.logo ? (
-              <div className="flex items-center gap-3">
-                <img
-                  src={form.logo}
-                  alt="logo"
-                  className="h-14 w-14 object-contain border border-brand-200 rounded-lg bg-white"
-                />
-                <button
-                  className="btn-ghost"
-                  onClick={() => set("logo", undefined)}
-                >
-                  <X size={14} /> Remove
-                </button>
-              </div>
-            ) : (
-              <label className="btn-ghost w-fit">
-                <Upload size={14} /> Upload logo
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => onLogo(e.target.files?.[0])}
-                />
-              </label>
-            )}
-          </Section>
-
-          <Section title="From (Seller)">
-            <div className="space-y-3">
-              <input
-                className="input"
-                placeholder="Company name"
-                value={form.seller_name}
-                onChange={(e) => set("seller_name", e.target.value)}
-              />
-              <input
-                className="input"
-                placeholder="Address"
-                value={form.seller_address ?? ""}
-                onChange={(e) => set("seller_address", e.target.value)}
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  className="input"
-                  placeholder="TRN"
-                  value={form.seller_trn ?? ""}
-                  onChange={(e) => set("seller_trn", e.target.value)}
-                />
-                <input
-                  className="input"
-                  placeholder="Phone"
-                  value={form.seller_phone ?? ""}
-                  onChange={(e) => set("seller_phone", e.target.value)}
-                />
-              </div>
-              <input
-                className="input"
-                placeholder="Email"
-                value={form.seller_email ?? ""}
-                onChange={(e) => set("seller_email", e.target.value)}
-              />
-            </div>
-          </Section>
-
-          <Section title="Bill To (Customer)">
-            <div className="space-y-3">
-              <input
-                className="input"
-                placeholder="Customer name"
-                value={form.customer_name}
-                onChange={(e) => set("customer_name", e.target.value)}
-              />
-              <input
-                className="input"
-                placeholder="Address"
-                value={form.customer_address ?? ""}
-                onChange={(e) => set("customer_address", e.target.value)}
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  className="input"
-                  placeholder="TRN"
-                  value={form.customer_trn ?? ""}
-                  onChange={(e) => set("customer_trn", e.target.value)}
-                />
-                <input
-                  className="input"
-                  placeholder="Email"
-                  value={form.customer_email ?? ""}
-                  onChange={(e) => set("customer_email", e.target.value)}
-                />
-              </div>
-            </div>
-          </Section>
-
-          <Section title="Line Items">
-            <div className="space-y-2">
-              {form.items.map((it, i) => (
-                <div key={i} className="flex gap-2 items-start">
-                  <input
-                    className="input flex-1"
-                    placeholder="Description"
-                    value={it.description}
-                    onChange={(e) =>
-                      setItem(i, { description: e.target.value })
-                    }
-                  />
-                  <input
-                    type="number"
-                    className="input w-16"
-                    title="Qty"
-                    value={it.qty}
-                    onChange={(e) =>
-                      setItem(i, { qty: +e.target.value })
-                    }
-                  />
-                  <input
-                    type="number"
-                    className="input w-24"
-                    title="Unit price"
-                    value={it.unit_price}
-                    onChange={(e) =>
-                      setItem(i, { unit_price: +e.target.value })
-                    }
-                  />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(420px,560px)] gap-5 items-start">
+        {/* ---------- left: builder ---------- */}
+        <div className="no-print space-y-4">
+          {/* 1 · Choose template */}
+          <Step
+            n={1}
+            title="Choose Template"
+            subtitle="Select a template for your invoice"
+            action={
+              <button
+                className="btn-ghost text-xs"
+                onClick={() => setViewAll((v) => !v)}
+              >
+                {viewAll ? "Show less" : "View all templates"}
+              </button>
+            }
+          >
+            <div
+              className={
+                viewAll
+                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
+                  : "flex gap-3 overflow-x-auto pb-1"
+              }
+            >
+              {shown.map((tpl) => {
+                const active = form.template === tpl.id;
+                return (
                   <button
-                    aria-label="Remove line"
-                    className="text-danger hover:bg-danger/10 rounded-lg p-2 cursor-pointer transition-colors duration-200"
-                    onClick={() => removeItem(i)}
+                    key={tpl.id}
+                    onClick={() => set("template", tpl.id)}
+                    className={`relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
+                      active
+                        ? "border-primary-400 bg-primary-50 shadow-glow"
+                        : "border-brand-200 bg-white hover:border-primary-300"
+                    }`}
                   >
-                    <Trash2 size={15} />
+                    {active && (
+                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center">
+                        <Check size={11} strokeWidth={3} />
+                      </span>
+                    )}
+                    <div className="h-24 rounded-md bg-brand-50 border border-brand-100 p-2 overflow-hidden">
+                      <div className="h-1.5 w-10 rounded bg-brand-300" />
+                      <div className="mt-1 h-1 w-16 rounded bg-brand-200" />
+                      <div className="mt-3 space-y-1">
+                        <div className="h-1 w-full rounded bg-brand-200" />
+                        <div className="h-1 w-full rounded bg-brand-200" />
+                        <div className="h-1 w-2/3 rounded bg-brand-200" />
+                      </div>
+                      <div className="mt-2 ml-auto h-1.5 w-10 rounded bg-primary-300" />
+                    </div>
+                    <p className="text-xs font-semibold text-ink mt-2 capitalize">
+                      {tpl.name}
+                    </p>
                   </button>
-                </div>
-              ))}
-              <button className="btn-ghost" onClick={addItem}>
-                <Plus size={14} /> Add line
+                );
+              })}
+            </div>
+          </Step>
+
+          {/* 2 · Invoice details */}
+          <Step n={2} title="Invoice Details">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Field label="Customer">
+                  <div className="flex gap-2">
+                    <select
+                      className="input"
+                      value=""
+                      onChange={(e) => {
+                        const c = customers.find(
+                          (x) => String(x.id) === e.target.value
+                        );
+                        if (c) applyCustomer(c);
+                      }}
+                    >
+                      <option value="">
+                        {customers.length
+                          ? "Select saved customer…"
+                          : "No saved customers yet"}
+                      </option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.company || c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-ghost shrink-0"
+                      onClick={() => setCustModal(true)}
+                      title="Add customer"
+                    >
+                      <Plus size={15} />
+                    </button>
+                  </div>
+                </Field>
+                <Field label="Customer / Company Name">
+                  <input
+                    className="input"
+                    placeholder="Acme Corporation LLC"
+                    value={form.customer_name}
+                    onChange={(e) => set("customer_name", e.target.value)}
+                  />
+                </Field>
+                <Field label="Billing Address">
+                  <textarea
+                    className="input"
+                    rows={4}
+                    placeholder="Street, City, Country"
+                    value={form.customer_address ?? ""}
+                    onChange={(e) =>
+                      set("customer_address", e.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Customer Email / TRN">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      className="input"
+                      placeholder="Email"
+                      value={form.customer_email ?? ""}
+                      onChange={(e) =>
+                        set("customer_email", e.target.value)
+                      }
+                    />
+                    <input
+                      className="input"
+                      placeholder="TRN"
+                      value={form.customer_trn ?? ""}
+                      onChange={(e) =>
+                        set("customer_trn", e.target.value)
+                      }
+                    />
+                  </div>
+                </Field>
+              </div>
+              <div className="space-y-3">
+                <Field label="Invoice Number">
+                  <div className="flex gap-2">
+                    <input
+                      className="input"
+                      value={form.number}
+                      onChange={(e) => set("number", e.target.value)}
+                    />
+                    <span
+                      className="grid place-items-center rounded-xl border border-brand-200 px-2.5 text-brand-400"
+                      title="Numbering"
+                    >
+                      <Settings size={15} />
+                    </span>
+                  </div>
+                </Field>
+                <Field label="Invoice Date">
+                  <input
+                    type="date"
+                    className="input"
+                    value={form.issue_date ?? ""}
+                    onChange={(e) => set("issue_date", e.target.value)}
+                  />
+                </Field>
+                <Field label="Due Date">
+                  <input
+                    type="date"
+                    className="input"
+                    value={form.due_date ?? ""}
+                    onChange={(e) => set("due_date", e.target.value)}
+                  />
+                </Field>
+                <Field label="Currency">
+                  <input
+                    className="input"
+                    value={form.currency}
+                    onChange={(e) =>
+                      set("currency", e.target.value.toUpperCase())
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
+          </Step>
+
+          {/* 3 · Items */}
+          <Step n={3} title="Items">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-brand-400">
+                    <th className="py-2 pr-2 w-6">#</th>
+                    <th className="py-2 px-2">Description</th>
+                    <th className="py-2 px-2 w-16 text-right">Qty</th>
+                    <th className="py-2 px-2 w-28 text-right">Unit</th>
+                    <th className="py-2 px-2 w-16 text-right">Tax</th>
+                    <th className="py-2 px-2 w-28 text-right">Amount</th>
+                    <th className="w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((it, i) => (
+                    <tr key={i} className="border-t border-brand-100">
+                      <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
+                      <td className="py-2 px-2">
+                        <input
+                          className="input"
+                          placeholder="Item description"
+                          value={it.description}
+                          onChange={(e) =>
+                            setItem(i, { description: e.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          className="input text-right"
+                          value={it.qty}
+                          onChange={(e) =>
+                            setItem(i, { qty: +e.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          className="input text-right"
+                          value={it.unit_price}
+                          onChange={(e) =>
+                            setItem(i, { unit_price: +e.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="py-2 px-2 text-right text-brand-500">
+                        {form.tax_rate}%
+                      </td>
+                      <td className="py-2 px-2 text-right font-semibold text-ink">
+                        {m((it.qty || 0) * (it.unit_price || 0))}
+                      </td>
+                      <td className="py-2">
+                        <button
+                          aria-label="Remove line"
+                          className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                          onClick={() => removeItem(i)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button className="btn-primary" onClick={addItem}>
+                <Plus size={14} /> Add Item
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => setShowDiscount((v) => !v)}
+              >
+                <Plus size={14} /> Add Discount
               </button>
             </div>
-          </Section>
+            {showDiscount && (
+              <div className="mt-3 max-w-xs">
+                <Field label="Discount (amount)">
+                  <input
+                    type="number"
+                    className="input"
+                    value={form.discount}
+                    onChange={(e) => set("discount", +e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
+          </Step>
 
-          <Section title="Totals & Notes">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Tax rate (%)">
-                <input
-                  type="number"
-                  className="input"
-                  value={form.tax_rate}
-                  onChange={(e) => set("tax_rate", +e.target.value)}
+          {/* 5 · Additional settings */}
+          <Step n={5} title="Additional Settings">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+                  <Settings size={15} /> Invoice Settings
+                </div>
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="number"
+                    className="input"
+                    placeholder="Tax rate %"
+                    value={form.tax_rate}
+                    onChange={(e) => set("tax_rate", +e.target.value)}
+                  />
+                  <select
+                    className="input"
+                    value={form.status}
+                    onChange={(e) => set("status", e.target.value)}
+                  >
+                    {["draft", "issued", "paid", "cancelled"].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="flex items-center justify-between text-xs font-semibold text-brand-600 border border-brand-200 rounded-xl px-3 py-2 cursor-pointer">
+                    Accent color
+                    <input
+                      type="color"
+                      value={form.accent}
+                      onChange={(e) => set("accent", e.target.value)}
+                      className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="rounded-xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+                  <StickyNote size={15} /> Notes
+                </div>
+                <textarea
+                  className="input mt-3"
+                  rows={3}
+                  placeholder="Add notes for this invoice"
+                  value={form.notes ?? ""}
+                  onChange={(e) => set("notes", e.target.value)}
                 />
-              </Field>
-              <Field label="Discount (amount)">
-                <input
-                  type="number"
-                  className="input"
-                  value={form.discount}
-                  onChange={(e) => set("discount", +e.target.value)}
+                <textarea
+                  className="input mt-2"
+                  rows={2}
+                  placeholder="Payment terms"
+                  value={form.terms ?? ""}
+                  onChange={(e) => set("terms", e.target.value)}
                 />
-              </Field>
+              </div>
+              <div className="rounded-xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+                  <Paperclip size={15} /> Logo / Attachment
+                </div>
+                <div className="mt-3">
+                  {form.logo ? (
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={form.logo}
+                        alt="logo"
+                        className="h-12 w-12 object-contain border border-brand-200 rounded-lg bg-white"
+                      />
+                      <button
+                        className="btn-ghost text-xs"
+                        onClick={() => set("logo", undefined)}
+                      >
+                        <X size={13} /> Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="btn-ghost w-full justify-center cursor-pointer">
+                      <Upload size={14} /> Upload logo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => onLogo(e.target.files?.[0])}
+                      />
+                    </label>
+                  )}
+                  <p className="text-[11px] text-brand-400 mt-2">
+                    Tip: set this once in Settings → Company Details to
+                    auto-fill every invoice.
+                  </p>
+                </div>
+              </div>
             </div>
-            <Field label="Notes">
-              <textarea
-                className="input"
-                rows={2}
-                value={form.notes ?? ""}
-                onChange={(e) => set("notes", e.target.value)}
-              />
-            </Field>
-            <Field label="Terms">
-              <textarea
-                className="input"
-                rows={2}
-                value={form.terms ?? ""}
-                onChange={(e) => set("terms", e.target.value)}
-              />
-            </Field>
-          </Section>
+          </Step>
         </div>
 
-        {/* live preview */}
-        <div className="bg-brand-100 rounded-2xl p-6 overflow-auto">
-          <div className="invoice-print mx-auto bg-white shadow-bento w-[760px] min-h-[1040px] p-12">
-            <InvoiceView form={form} />
+        {/* ---------- right: live preview ---------- */}
+        <div className="xl:sticky xl:top-2">
+          <div className="card !p-4">
+            <div className="no-print flex items-center justify-between mb-3">
+              <div>
+                <p className="font-bold text-ink flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
+                    4
+                  </span>
+                  Preview
+                </p>
+                <p className="text-xs text-brand-400 mt-0.5 ml-8">
+                  This is how your invoice will look
+                </p>
+              </div>
+              <button
+                className="btn-ghost text-xs"
+                onClick={() => setViewAll(true)}
+              >
+                Change Template
+              </button>
+            </div>
+
+            <div className="bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
+              <div
+                className="invoice-print mx-auto bg-white shadow-bento origin-top transition-all"
+                style={{
+                  width: device === "desktop" ? 760 : 420,
+                  minHeight: 1040,
+                  padding: 48,
+                  transform: `scale(${zoom / 100})`,
+                }}
+              >
+                <InvoiceView form={form} />
+              </div>
+            </div>
+
+            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "desktop"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("desktop")}
+                  aria-label="Desktop preview"
+                >
+                  <Monitor size={15} />
+                </button>
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "mobile"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("mobile")}
+                  aria-label="Mobile preview"
+                >
+                  <Smartphone size={15} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
+                  aria-label="Zoom out"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                  {zoom}%
+                </span>
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
+                  aria-label="Zoom in"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={onSave}
+                  disabled={saving}
+                >
+                  <Save size={14} /> Save
+                </button>
+                <button
+                  className="btn-primary text-xs"
+                  onClick={() => window.print()}
+                >
+                  <Download size={14} /> PDF
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -647,20 +946,177 @@ function Editor({
   );
 }
 
-function Section({
+function Step({
+  n,
   title,
+  subtitle,
+  action,
   children,
 }: {
+  n: number;
   title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="bento-card">
-      <p className="text-xs font-bold uppercase tracking-wider text-brand-400 mb-3">
-        {title}
-      </p>
+    <div className="card">
+      <div className="flex items-start justify-between mb-4 gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold shrink-0">
+            {n}
+          </span>
+          <div>
+            <p className="font-bold text-ink leading-tight">{title}</p>
+            {subtitle && (
+              <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>
+            )}
+          </div>
+        </div>
+        {action}
+      </div>
       {children}
     </div>
+  );
+}
+
+/* ---------------- Customer modal (UAE FTA) ---------------- */
+
+function CustomerModal({
+  open,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: (c: CrmCustomer) => void;
+}) {
+  const [f, setF] = useState({
+    company: "",
+    name: "",
+    address: "",
+    email: "",
+    phone: "",
+    trn: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open)
+      setF({
+        company: "",
+        name: "",
+        address: "",
+        email: "",
+        phone: "",
+        trn: "",
+      });
+  }, [open]);
+
+  const trnValid = !f.trn || /^\d{15}$/.test(f.trn.replace(/\s/g, ""));
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add Customer">
+      <p className="text-xs text-brand-500 -mt-2 mb-4">
+        UAE FTA tax invoices require the customer's legal name, address and
+        15-digit TRN for B2B supplies.
+      </p>
+      <div className="space-y-3">
+        <Field label="Company / Legal Name">
+          <input
+            className="input"
+            placeholder="Acme Corporation LLC"
+            value={f.company}
+            onChange={(e) => setF({ ...f, company: e.target.value })}
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Contact Name">
+            <input
+              className="input"
+              value={f.name}
+              onChange={(e) => setF({ ...f, name: e.target.value })}
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              className="input"
+              value={f.phone}
+              onChange={(e) => setF({ ...f, phone: e.target.value })}
+            />
+          </Field>
+        </div>
+        <Field label="Billing Address">
+          <textarea
+            className="input"
+            rows={2}
+            value={f.address}
+            onChange={(e) => setF({ ...f, address: e.target.value })}
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Email">
+            <input
+              className="input"
+              value={f.email}
+              onChange={(e) => setF({ ...f, email: e.target.value })}
+            />
+          </Field>
+          <Field label="TRN (15 digits)">
+            <input
+              className="input"
+              placeholder="100000000000003"
+              value={f.trn}
+              onChange={(e) => setF({ ...f, trn: e.target.value })}
+            />
+          </Field>
+        </div>
+        {!trnValid && (
+          <p className="text-xs text-danger">
+            TRN must be exactly 15 digits.
+          </p>
+        )}
+      </div>
+      <div className="flex justify-end gap-2 mt-5">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          disabled={
+            saving || (!f.company.trim() && !f.name.trim()) || !trnValid
+          }
+          onClick={async () => {
+            setSaving(true);
+            const trn = f.trn.replace(/\s/g, "");
+            const payload = {
+              name: f.name || f.company,
+              company: f.company || undefined,
+              email: f.email || undefined,
+              phone: f.phone || undefined,
+              address: f.address || undefined,
+              segment: trn ? `TRN:${trn}` : undefined,
+            };
+            try {
+              await crm.createCustomer(
+                payload as Omit<CrmCustomer, "id" | "created_at">
+              );
+            } catch (e) {
+              console.error(e);
+            } finally {
+              setSaving(false);
+            }
+            onSaved({
+              id: 0,
+              created_at: "",
+              ...payload,
+            } as CrmCustomer);
+          }}
+        >
+          {saving ? "Saving…" : "Save Customer"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
