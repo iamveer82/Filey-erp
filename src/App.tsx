@@ -5,6 +5,7 @@ import Overview from "./pages/Overview";
 import Inventory from "./pages/Inventory";
 import Orders from "./pages/Orders";
 import Invoicing from "./pages/Invoicing";
+import Quoting from "./pages/Quoting";
 import Crm from "./pages/Crm";
 import Suppliers from "./pages/Suppliers";
 import Purchase from "./pages/Purchase";
@@ -39,6 +40,7 @@ function Gate() {
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/invoicing" element={<Invoicing />} />
+          <Route path="/quoting" element={<Quoting />} />
           <Route path="/crm" element={<Crm />} />
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/purchase" element={<Purchase />} />

@@ -15,7 +15,6 @@ import {
   Loader2,
   X,
   CheckCircle2,
-  ShieldCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
@@ -23,7 +22,7 @@ import type { OutFile } from "../lib/pdfTools";
 
 type Param = "ranges" | "chunk" | "rotate" | "text";
 
-interface Tool {
+export interface Tool {
   id: string;
   name: string;
   desc: string;
@@ -35,7 +34,7 @@ interface Tool {
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
-const TOOLS: Tool[] = [
+export const PDF_TOOLS: Tool[] = [
   {
     id: "merge",
     name: "Merge PDF",
@@ -146,40 +145,43 @@ const TOOLS: Tool[] = [
   },
 ];
 
-const CATS = ["Organize", "Edit", "Convert", "Optimize"] as const;
+export const PDF_CATS = ["Organize", "Edit", "Convert", "Optimize"] as const;
 
-export default function PdfToolbox() {
-  const [active, setActive] = useState<Tool | null>(null);
+export function toolById(id: string) {
+  return PDF_TOOLS.find((t) => t.id === id);
+}
+
+/** Standalone tool dialog — local processing, downloadable results. */
+export function ToolRunner({
+  tool,
+  onClose,
+  onComplete,
+}: {
+  tool: Tool;
+  onClose: () => void;
+  onComplete?: (toolId: string, files: string[]) => void;
+}) {
   const [files, setFiles] = useState<File[]>([]);
-  const [params, setParams] = useState<Record<string, string>>({});
+  const [params, setParams] = useState<Record<string, string>>(
+    tool.id === "rotate"
+      ? { rotate: "90" }
+      : tool.id === "split"
+      ? { chunk: "1" }
+      : {}
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [results, setResults] = useState<OutFile[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!active) return;
-    const h = (e: KeyboardEvent) => e.key === "Escape" && setActive(null);
+    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [active]);
-
-  const open = (t: Tool) => {
-    setActive(t);
-    setFiles([]);
-    setResults([]);
-    setErr("");
-    setParams(
-      t.id === "rotate"
-        ? { rotate: "90" }
-        : t.id === "split"
-        ? { chunk: "1" }
-        : {}
-    );
-  };
+  }, [onClose]);
 
   const run = async () => {
-    if (!active || !files.length) {
+    if (!files.length) {
       setErr("Add at least one file first.");
       return;
     }
@@ -187,7 +189,12 @@ export default function PdfToolbox() {
     setErr("");
     setResults([]);
     try {
-      setResults(await active.run(files, params));
+      const out = await tool.run(files, params);
+      setResults(out);
+      onComplete?.(
+        tool.id,
+        files.map((f) => f.name)
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -196,32 +203,209 @@ export default function PdfToolbox() {
   };
 
   return (
-    <div>
-      <div className="card mb-4 flex items-start gap-3">
-        <div className="rounded-xl bg-primary-100 text-primary-700 p-2.5">
-          <ShieldCheck size={20} />
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl bg-white shadow-bento-hover p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="rounded-xl bg-primary-100 text-primary-700 p-2">
+              <tool.icon size={18} />
+            </div>
+            <h2 className="text-lg font-bold text-ink">{tool.name}</h2>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 cursor-pointer"
+          >
+            <X size={18} />
+          </button>
         </div>
-        <div>
-          <p className="font-bold text-ink">Local PDF Tools</p>
-          <p className="text-sm text-brand-500 mt-0.5">
-            Every tool runs 100% on this device — files never leave the
-            desktop app. Inspired by the open-source PDFCraft toolkit.
+
+        <p className="text-sm text-brand-500 mb-4">{tool.desc}</p>
+
+        <label className="btn-ghost w-full justify-center mb-3">
+          <Upload size={15} />
+          {tool.multi ? "Select files" : "Select file"}
+          <input
+            ref={fileRef}
+            type="file"
+            accept={tool.accept}
+            multiple={tool.multi}
+            className="hidden"
+            onChange={(e) => {
+              setFiles(Array.from(e.target.files ?? []));
+              setResults([]);
+              setErr("");
+              e.target.value = "";
+            }}
+          />
+        </label>
+
+        {files.length > 0 && (
+          <ul className="mb-3 space-y-1">
+            {files.map((f, i) => (
+              <li
+                key={i}
+                className="text-xs text-brand-600 bg-brand-50 rounded-lg px-3 py-2 truncate"
+              >
+                {f.name}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="space-y-3 mb-4">
+          {tool.params.includes("ranges") && (
+            <div>
+              <label className="label">
+                Pages {tool.id === "rotate" && "(optional)"}
+              </label>
+              <input
+                className="input"
+                placeholder="e.g. 1-3,5,8-"
+                value={params.ranges ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, ranges: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("chunk") && (
+            <div>
+              <label className="label">Pages per file</label>
+              <input
+                type="number"
+                min={1}
+                className="input"
+                value={params.chunk ?? "1"}
+                onChange={(e) =>
+                  setParams({ ...params, chunk: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("rotate") && (
+            <div>
+              <label className="label">Rotation</label>
+              <select
+                className="input"
+                value={params.rotate ?? "90"}
+                onChange={(e) =>
+                  setParams({ ...params, rotate: e.target.value })
+                }
+              >
+                <option value="90">90° clockwise</option>
+                <option value="180">180°</option>
+                <option value="270">90° counter-clockwise</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("text") && (
+            <div>
+              <label className="label">Watermark text</label>
+              <input
+                className="input"
+                placeholder="DRAFT"
+                value={params.text ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, text: e.target.value })
+                }
+              />
+            </div>
+          )}
+        </div>
+
+        {err && (
+          <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 mb-3">
+            {err}
           </p>
+        )}
+
+        {results.length > 0 && (
+          <div className="mb-4">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-success mb-2">
+              <CheckCircle2 size={15} /> {results.length} file
+              {results.length > 1 ? "s" : ""} ready
+            </p>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {results.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => pdf.downloadFile(r)}
+                  className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 cursor-pointer transition-colors"
+                >
+                  <span className="truncate">{r.name}</span>
+                  <Download size={14} />
+                </button>
+              ))}
+            </div>
+            {results.length > 1 && (
+              <button
+                onClick={() => results.forEach(pdf.downloadFile)}
+                className="btn-secondary w-full justify-center mt-2 text-xs"
+              >
+                <Download size={14} /> Download all
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button
+            className="btn-primary"
+            disabled={busy || files.length === 0}
+            onClick={run}
+          >
+            {busy ? (
+              <>
+                <Loader2 size={15} className="animate-spin" /> Working…
+              </>
+            ) : (
+              "Run tool"
+            )}
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {CATS.map((cat) => (
+/** Categorized grid of every local PDF tool. */
+export default function PdfToolbox({
+  filter,
+  onComplete,
+}: {
+  filter?: string;
+  onComplete?: (toolId: string, files: string[]) => void;
+}) {
+  const [active, setActive] = useState<Tool | null>(null);
+  const cats = filter
+    ? PDF_CATS.filter((c) => c === filter)
+    : PDF_CATS;
+
+  return (
+    <div>
+      {cats.map((cat) => (
         <div key={cat} className="mb-5">
           <p className="text-xs font-bold uppercase tracking-wider text-brand-400 mb-2.5">
             {cat}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {TOOLS.filter((t) => t.cat === cat).map((t) => {
+            {PDF_TOOLS.filter((t) => t.cat === cat).map((t) => {
               const Icon = t.icon;
               return (
                 <button
                   key={t.id}
-                  onClick={() => open(t)}
+                  onClick={() => setActive(t)}
                   className="card card-hover text-left flex items-start gap-3"
                 >
                   <div className="rounded-xl bg-primary-100 text-primary-700 p-2.5 shrink-0">
@@ -239,183 +423,11 @@ export default function PdfToolbox() {
       ))}
 
       {active && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4"
-          onClick={() => setActive(null)}
-        >
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white shadow-bento-hover p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-xl bg-primary-100 text-primary-700 p-2">
-                  <active.icon size={18} />
-                </div>
-                <h2 className="text-lg font-bold text-ink">{active.name}</h2>
-              </div>
-              <button
-                onClick={() => setActive(null)}
-                aria-label="Close"
-                className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <p className="text-sm text-brand-500 mb-4">{active.desc}</p>
-
-            <label className="btn-ghost w-full justify-center mb-3">
-              <Upload size={15} />
-              {active.multi ? "Select files" : "Select file"}
-              <input
-                ref={fileRef}
-                type="file"
-                accept={active.accept}
-                multiple={active.multi}
-                className="hidden"
-                onChange={(e) => {
-                  setFiles(Array.from(e.target.files ?? []));
-                  setResults([]);
-                  setErr("");
-                  // Clear so re-selecting the same file still fires.
-                  e.target.value = "";
-                }}
-              />
-            </label>
-
-            {files.length > 0 && (
-              <ul className="mb-3 space-y-1">
-                {files.map((f, i) => (
-                  <li
-                    key={i}
-                    className="text-xs text-brand-600 bg-brand-50 rounded-lg px-3 py-2 truncate"
-                  >
-                    {f.name}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <div className="space-y-3 mb-4">
-              {active.params.includes("ranges") && (
-                <div>
-                  <label className="label">
-                    Pages {active.id === "rotate" && "(optional)"}
-                  </label>
-                  <input
-                    className="input"
-                    placeholder="e.g. 1-3,5,8-"
-                    value={params.ranges ?? ""}
-                    onChange={(e) =>
-                      setParams({ ...params, ranges: e.target.value })
-                    }
-                  />
-                </div>
-              )}
-              {active.params.includes("chunk") && (
-                <div>
-                  <label className="label">Pages per file</label>
-                  <input
-                    type="number"
-                    min={1}
-                    className="input"
-                    value={params.chunk ?? "1"}
-                    onChange={(e) =>
-                      setParams({ ...params, chunk: e.target.value })
-                    }
-                  />
-                </div>
-              )}
-              {active.params.includes("rotate") && (
-                <div>
-                  <label className="label">Rotation</label>
-                  <select
-                    className="input"
-                    value={params.rotate ?? "90"}
-                    onChange={(e) =>
-                      setParams({ ...params, rotate: e.target.value })
-                    }
-                  >
-                    <option value="90">90° clockwise</option>
-                    <option value="180">180°</option>
-                    <option value="270">90° counter-clockwise</option>
-                  </select>
-                </div>
-              )}
-              {active.params.includes("text") && (
-                <div>
-                  <label className="label">Watermark text</label>
-                  <input
-                    className="input"
-                    placeholder="DRAFT"
-                    value={params.text ?? ""}
-                    onChange={(e) =>
-                      setParams({ ...params, text: e.target.value })
-                    }
-                  />
-                </div>
-              )}
-            </div>
-
-            {err && (
-              <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 mb-3">
-                {err}
-              </p>
-            )}
-
-            {results.length > 0 && (
-              <div className="mb-4">
-                <p className="flex items-center gap-1.5 text-sm font-semibold text-success mb-2">
-                  <CheckCircle2 size={15} /> {results.length} file
-                  {results.length > 1 ? "s" : ""} ready
-                </p>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {results.map((r, i) => (
-                    <button
-                      key={i}
-                      onClick={() => pdf.downloadFile(r)}
-                      className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 cursor-pointer transition-colors"
-                    >
-                      <span className="truncate">{r.name}</span>
-                      <Download size={14} />
-                    </button>
-                  ))}
-                </div>
-                {results.length > 1 && (
-                  <button
-                    onClick={() => results.forEach(pdf.downloadFile)}
-                    className="btn-secondary w-full justify-center mt-2 text-xs"
-                  >
-                    <Download size={14} /> Download all
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <button
-                className="btn-ghost"
-                onClick={() => setActive(null)}
-              >
-                Close
-              </button>
-              <button
-                className="btn-primary"
-                disabled={busy || files.length === 0}
-                onClick={run}
-              >
-                {busy ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" /> Working…
-                  </>
-                ) : (
-                  "Run tool"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ToolRunner
+          tool={active}
+          onClose={() => setActive(null)}
+          onComplete={onComplete}
+        />
       )}
     </div>
   );
