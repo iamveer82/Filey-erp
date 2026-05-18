@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Users, UserCheck, CalendarOff, Wallet } from "lucide-react";
 import { hr, Employee, HrSummary } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, num, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -22,6 +23,7 @@ export default function People() {
     hr.summary().then(setSum).catch(console.error);
   };
   useEffect(load, []);
+  useLiveSync(load);
 
   return (
     <div className="animate-fade-up">

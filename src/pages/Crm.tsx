@@ -26,6 +26,7 @@ import {
   Activity,
   Lead,
 } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, num, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -66,6 +67,7 @@ export default function Crm() {
     crm.activities().then(setActs).catch(console.error);
   };
   useEffect(load, []);
+  useLiveSync(load);
 
   const now = Date.now();
   const newCount = customers.filter(

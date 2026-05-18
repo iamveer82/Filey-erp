@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, ClipboardList, CheckCircle2, Clock, RotateCcw } from "lucide-react";
 import { erp, Order } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -22,6 +23,7 @@ export default function Orders() {
   useEffect(() => {
     load();
   }, []);
+  useLiveSync(load);
 
   const stats = useMemo(() => {
     const by = (s: string[]) =>

@@ -30,6 +30,7 @@ import {
   CompanyProfile,
   CrmCustomer,
 } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { fmtDate } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, hasDesktop } from "../lib/email";
@@ -116,10 +117,12 @@ export default function Invoicing() {
   const loadDocs = () =>
     billing.listDocs().then(setDocs).catch(console.error);
 
-  useEffect(() => {
+  const reload = () => {
     billing.getCompany().then(setCompany).catch(console.error);
     loadDocs();
-  }, []);
+  };
+  useEffect(reload, []);
+  useLiveSync(reload);
 
   const newInvoice = () => {
     if (company) setForm(blankForm(company));
