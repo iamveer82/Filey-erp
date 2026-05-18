@@ -24,6 +24,8 @@ import {
   MetricCard,
   InfoCard,
   Badge,
+  OrdersStatCard,
+  StockBreakdownCard,
 } from "../components/ui";
 
 export default function Overview() {
@@ -125,23 +127,15 @@ export default function Overview() {
 
       {/* Middle row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-        <InfoCard title="Orders" tone="accent">
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              ["Completed", orderStats.completed],
-              ["In progress", orderStats.progress],
-              ["Returns", orderStats.returns],
-              ["Overdue", orderStats.overdue],
-            ].map(([k, v]) => (
-              <div key={k as string}>
-                <p className="text-3xl font-bold text-ink">{v as number}</p>
-                <p className="text-xs font-semibold text-ink/70 mt-0.5">
-                  {k as string}
-                </p>
-              </div>
-            ))}
-          </div>
-        </InfoCard>
+        <OrdersStatCard
+          title="Orders"
+          items={[
+            ["Completed", orderStats.completed],
+            ["In progress", orderStats.progress],
+            ["Returns", orderStats.returns],
+            ["Overdue", orderStats.overdue],
+          ]}
+        />
 
         <InfoCard
           title="Delivery status"
@@ -229,37 +223,16 @@ export default function Overview() {
           </ul>
         </InfoCard>
 
-        <InfoCard title="Stock breakdown">
-          <div className="flex items-center gap-5">
-            <div className="text-center shrink-0">
-              <p className="text-4xl font-bold text-ink">
-                {num(stock.total)}
-              </p>
-              <p className="text-xs text-brand-400 mt-1">Total SKUs</p>
-            </div>
-            <div className="flex-1 space-y-2.5">
-              {[
-                ["In stock", stock.inStock, "bg-success"],
-                ["Low stock", stock.low, "bg-warning"],
-                ["Out of stock", stock.out, "bg-danger"],
-                ["Dead stock", stock.dead, "bg-brand-300"],
-              ].map(([k, v, c]) => (
-                <div
-                  key={k as string}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <span className="flex items-center gap-2 text-brand-600">
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full ${c as string}`}
-                    />
-                    {k as string}
-                  </span>
-                  <span className="font-bold text-ink">{v as number}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </InfoCard>
+        <StockBreakdownCard
+          title="Stock"
+          total={stock.total}
+          items={[
+            ["In stock", stock.inStock, "bg-emerald-300"],
+            ["Low stock", stock.low, "bg-primary-400"],
+            ["Out of stock", stock.out, "bg-white"],
+            ["Dead stock", stock.dead, "bg-ink/40"],
+          ]}
+        />
 
         <InfoCard
           title="Reorder spotlight"

@@ -1,5 +1,10 @@
 import { ReactNode, useEffect } from "react";
-import { X, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import {
+  X,
+  ArrowUpRight,
+  ArrowDownRight,
+  SlidersHorizontal,
+} from "lucide-react";
 import { cn } from "../lib/format";
 
 export function PageHeader({
@@ -302,6 +307,102 @@ export function Field({
     <div>
       <label className="label">{label}</label>
       {children}
+    </div>
+  );
+}
+
+/* ---------- Bold dashboard cards (design.md §05) ---------- */
+
+/** Vivid solid-yellow KPI card: stacked value/label rows + a mini
+ *  bar-chart flourish, e.g. the Orders card. */
+export function OrdersStatCard({
+  title,
+  items,
+}: {
+  title: string;
+  items: [string, number][];
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-primary-400 text-ink p-5 shadow-bento">
+      <div className="flex items-center justify-between mb-4">
+        <p className="font-bold text-lg">{title}</p>
+        <span className="grid place-items-center rounded-xl border border-ink/20 p-2">
+          <SlidersHorizontal size={16} />
+        </span>
+      </div>
+      <div className="relative z-10 grid grid-cols-2 gap-x-6 gap-y-4">
+        {items.map(([k, v]) => (
+          <div key={k}>
+            <p className="text-3xl font-bold leading-none">{v}</p>
+            <p className="text-xs font-semibold text-ink/60 mt-1">{k}</p>
+          </div>
+        ))}
+      </div>
+      <div className="pointer-events-none absolute bottom-4 right-4 flex items-end gap-1 h-16 opacity-30">
+        {[40, 65, 30, 80, 55, 95].map((h, i) => (
+          <span
+            key={i}
+            className="w-2.5 rounded-sm bg-ink"
+            style={{ height: `${h}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Vivid orange breakdown card: dot legend + a big number badge and a
+ *  soft decorative pattern, e.g. the Stock card. */
+export function StockBreakdownCard({
+  title,
+  total,
+  items,
+}: {
+  title: string;
+  total: number;
+  items: [string, number, string][];
+}) {
+  return (
+    <div
+      className="relative overflow-hidden rounded-2xl p-5 text-white shadow-bento"
+      style={{
+        background: "linear-gradient(135deg,#FFB23D 0%,#F2691E 100%)",
+      }}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-20"
+        style={{
+          backgroundImage:
+            "radial-gradient(currentColor 1.5px, transparent 1.5px)",
+          backgroundSize: "14px 14px",
+          color: "#7a2f06",
+        }}
+      />
+      <div className="relative flex items-center justify-between mb-4">
+        <p className="font-bold text-lg">{title}</p>
+        <span className="grid place-items-center rounded-xl border border-white/30 p-2">
+          <SlidersHorizontal size={16} />
+        </span>
+      </div>
+      <div className="relative flex items-center gap-5">
+        <ul className="flex-1 space-y-2.5">
+          {items.map(([k, v, dot]) => (
+            <li
+              key={k}
+              className="flex items-center justify-between text-sm"
+            >
+              <span className="flex items-center gap-2 font-medium">
+                <span className={`w-2.5 h-2.5 rounded-full ${dot}`} />
+                {k}
+              </span>
+              <span className="font-bold">{v}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="grid place-items-center rounded-2xl bg-primary-400 text-ink w-16 h-16 shrink-0 shadow-bento">
+          <span className="text-2xl font-bold">{total}</span>
+        </div>
+      </div>
     </div>
   );
 }
