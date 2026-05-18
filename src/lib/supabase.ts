@@ -23,7 +23,7 @@ export const supabase: SupabaseClient | null = isConfigured
 export function sb(): SupabaseClient {
   if (!supabase) {
     throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in filey-erp/.env"
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env"
     );
   }
   return supabase;

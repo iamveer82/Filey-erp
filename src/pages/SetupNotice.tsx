@@ -28,7 +28,7 @@ export default function SetupNotice() {
             <span className="font-semibold text-ink">SQL Editor</span> and run
             the contents of{" "}
             <code className="bg-brand-100 px-1.5 py-0.5 rounded text-xs">
-              filey-erp/supabase/schema.sql
+              supabase/schema.sql
             </code>
             .
           </li>
@@ -42,7 +42,7 @@ export default function SetupNotice() {
           <li>
             Paste them into{" "}
             <code className="bg-brand-100 px-1.5 py-0.5 rounded text-xs">
-              filey-erp/.env
+              .env
             </code>
             :
             <pre className="mt-2 bg-ink text-white text-xs rounded-lg p-3 overflow-x-auto">
