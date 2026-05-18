@@ -33,6 +33,7 @@ import {
 import { fmtDate } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell } from "../lib/email";
+import FitPreview from "../components/FitPreview";
 import {
   PageHeader,
   DataTable,
@@ -955,19 +956,12 @@ function Editor({
               </button>
             </div>
 
-            <div className="bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
-              <div
-                className="invoice-print mx-auto bg-white shadow-bento origin-top transition-all"
-                style={{
-                  width: device === "desktop" ? 760 : 420,
-                  minHeight: 1040,
-                  padding: 48,
-                  transform: `scale(${zoom / 100})`,
-                }}
-              >
-                <InvoiceView form={form} />
-              </div>
-            </div>
+            <FitPreview
+              baseWidth={device === "desktop" ? 760 : 420}
+              zoom={zoom}
+            >
+              <InvoiceView form={form} />
+            </FitPreview>
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
               <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
