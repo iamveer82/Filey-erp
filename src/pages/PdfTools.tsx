@@ -59,27 +59,6 @@ const SAMPLE_FOLDERS = [
   { name: "Scans", files: 27, size: "—" },
 ];
 
-function Ring({ pct }: { pct: number }) {
-  const r = 34;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg width="92" height="92" viewBox="0 0 92 92" className="-rotate-90">
-      <circle cx="46" cy="46" r={r} fill="none" stroke="#F0E9D9" strokeWidth="10" />
-      <circle
-        cx="46"
-        cy="46"
-        r={r}
-        fill="none"
-        stroke="#FFD600"
-        strokeWidth="10"
-        strokeLinecap="round"
-        strokeDasharray={c}
-        strokeDashoffset={c - (pct / 100) * c}
-      />
-    </svg>
-  );
-}
-
 export default function ToolsPage() {
   const [active, setActive] = useState<Tool | null>(null);
   const [runs, setRuns] = useState<RunLog[]>([]);
@@ -280,10 +259,9 @@ export default function ToolsPage() {
       </div>
 
       {/* Files + storage */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <div>
         <InfoCard
           title="Files"
-          className="lg:col-span-3"
           action={
             <button className="btn-ghost text-xs">
               <Upload size={14} /> Upload
@@ -333,39 +311,6 @@ export default function ToolsPage() {
               ))}
             </tbody>
           </table>
-        </InfoCard>
-
-        <InfoCard title="Storage Overview">
-          <div className="flex flex-col items-center">
-            <div className="relative grid place-items-center">
-              <Ring pct={68} />
-              <div className="absolute text-center">
-                <p className="text-lg font-bold text-ink">68.3 GB</p>
-                <p className="text-[10px] text-brand-400">of 100 GB</p>
-              </div>
-            </div>
-            <div className="w-full mt-4 space-y-2">
-              {[
-                ["Documents", "40.2 GB", "bg-primary-400"],
-                ["Images", "16.8 GB", "bg-brand-400"],
-                ["Other Files", "11.3 GB", "bg-brand-300"],
-              ].map(([k, v, c]) => (
-                <div
-                  key={k}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <span className="flex items-center gap-2 text-brand-600">
-                    <span className={`w-2 h-2 rounded-full ${c}`} />
-                    {k}
-                  </span>
-                  <span className="font-semibold text-ink">{v}</span>
-                </div>
-              ))}
-            </div>
-            <button className="btn-secondary w-full justify-center mt-4 text-xs">
-              Upgrade Storage
-            </button>
-          </div>
         </InfoCard>
       </div>
 

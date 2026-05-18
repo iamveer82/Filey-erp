@@ -3,7 +3,7 @@ import {
   Boxes,
   Users,
   AlertTriangle,
-  HardDrive,
+  Wallet,
   Truck,
   Star,
   ArrowUpRight,
@@ -18,7 +18,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { erp, Product, Order } from "../lib/api";
-import { num, fmtDate } from "../lib/format";
+import { num, aed, fmtDate } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -117,10 +117,14 @@ export default function Overview() {
           iconClass="bg-danger/15 text-danger"
         />
         <MetricCard
-          label="Storage Used"
-          value="68.3 GB"
-          delta={6.4}
-          icon={<HardDrive size={20} />}
+          label="Inventory Value"
+          value={aed(
+            products.reduce(
+              (s, p) => s + p.quantity * p.cost_price,
+              0
+            )
+          )}
+          icon={<Wallet size={20} />}
           iconClass="bg-info/15 text-info"
         />
       </div>
