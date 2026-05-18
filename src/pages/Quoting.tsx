@@ -10,6 +10,7 @@ import {
   Check,
   X,
   CalendarDays,
+  Send,
 } from "lucide-react";
 import {
   billing,
@@ -25,6 +26,7 @@ import {
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { quotationTotals } from "../lib/money";
+import { sendEmail, emailShell } from "../lib/email";
 import { Modal, Field } from "../components/ui";
 
 interface Line {
@@ -121,6 +123,43 @@ export default function Quoting() {
 
   const m = (v: number) => money(v, currency);
 
+  const emailQuote = async () => {
+    const to = customer?.email;
+    if (!to) {
+      alert("Select a customer with an email address first.");
+      return;
+    }
+    try {
+      await sendEmail({
+        to,
+        subject: `Quotation ${number} from ${company?.name ?? "us"}`,
+        html: emailShell(
+          `Quotation ${number}`,
+          `<p>Dear ${customer?.company || customer?.name || "customer"},</p>
+           <p>Please find your quotation <b>${number}</b>, valid until ${valid}.</p>
+           <table style="width:100%;font-size:14px;margin:12px 0">
+             <tr><td>Subtotal</td><td style="text-align:right">${m(
+               totals.subtotal
+             )}</td></tr>
+             <tr><td>Discount</td><td style="text-align:right">-${m(
+               totals.discount
+             )}</td></tr>
+             <tr><td>Tax</td><td style="text-align:right">${m(
+               totals.tax
+             )}</td></tr>
+             <tr><td><b>Total (${currency})</b></td><td style="text-align:right"><b>${m(
+               totals.total
+             )}</b></td></tr>
+           </table>
+           <p>Thank you for your business.</p>`
+        ),
+      });
+      alert(`Quotation emailed to ${to}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const setLine = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, x) => (x === i ? { ...l, ...patch } : l)));
   const addLine = () =>
@@ -213,6 +252,9 @@ export default function Quoting() {
             onClick={() => setStep(3)}
           >
             <Eye size={15} /> Preview
+          </button>
+          <button className="btn-ghost" onClick={emailQuote}>
+            <Send size={15} /> Email
           </button>
           <button className="btn-primary" onClick={() => window.print()}>
             <Download size={15} /> Generate PDF

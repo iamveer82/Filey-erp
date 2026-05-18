@@ -1,5 +1,6 @@
 pub mod billing;
 pub mod crm;
+pub mod email;
 pub mod erp;
 pub mod finance;
 pub mod hr;

@@ -10,6 +10,8 @@ pub enum AppError {
     NotFound(String),
     #[error("validation: {0}")]
     Validation(String),
+    #[error("email error: {0}")]
+    Email(String),
 }
 
 impl Serialize for AppError {

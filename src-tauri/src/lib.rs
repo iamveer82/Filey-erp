@@ -92,6 +92,8 @@ pub fn run() {
             modules::tools::tools_set_setting,
             modules::tools::tools_audit_log,
             modules::tools::tools_log_action,
+            // Email (SMTP)
+            modules::email::send_email,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

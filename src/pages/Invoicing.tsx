@@ -32,6 +32,7 @@ import {
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
+import { sendEmail, emailShell } from "../lib/email";
 import {
   PageHeader,
   DataTable,
@@ -405,6 +406,52 @@ function Editor({
   const m = (v: number) => money(v, form.currency || "AED");
   const shown = viewAll ? TEMPLATES : TEMPLATES.slice(0, 5);
 
+  const saveAndSend = async () => {
+    await onSave();
+    if (!form.customer_email) {
+      alert("Add a customer email (Invoice Details) to send this invoice.");
+      return;
+    }
+    const t = invoiceTotals(form.items, form.discount || 0, form.tax_rate || 0);
+    try {
+      await sendEmail({
+        to: form.customer_email,
+        subject: `Invoice ${form.number} from ${form.seller_name}`,
+        html: emailShell(
+          `Invoice ${form.number}`,
+          `<p>Dear ${form.customer_name || "customer"},</p>
+           <p>Please find your invoice <b>${form.number}</b>.</p>
+           <table style="width:100%;font-size:14px;margin:12px 0">
+             <tr><td>Subtotal</td><td style="text-align:right">${m(
+               t.subtotal
+             )}</td></tr>
+             ${
+               t.discount
+                 ? `<tr><td>Discount</td><td style="text-align:right">-${m(
+                     t.discount
+                   )}</td></tr>`
+                 : ""
+             }
+             ${
+               (form.tax_rate || 0) > 0
+                 ? `<tr><td>VAT (${form.tax_rate}%)</td><td style="text-align:right">${m(
+                     t.tax
+                   )}</td></tr>`
+                 : ""
+             }
+             <tr><td><b>Total</b></td><td style="text-align:right"><b>${m(
+               t.total
+             )}</b></td></tr>
+           </table>
+           <p>${form.notes ?? ""}</p>`
+        ),
+      });
+      alert(`Invoice emailed to ${form.customer_email}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div>
       {/* header bar */}
@@ -452,7 +499,7 @@ function Editor({
           </button>
           <button
             className="btn-primary"
-            onClick={onSave}
+            onClick={saveAndSend}
             disabled={saving}
           >
             <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
