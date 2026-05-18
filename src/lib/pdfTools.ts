@@ -204,12 +204,134 @@ export async function compressPdf(file: File): Promise<OutFile> {
   return { name: `${base(file.name)}-compressed.pdf`, bytes };
 }
 
+export type SvgFormat = "png" | "jpeg" | "webp" | "pdf";
+
+// Resolve the SVG's intrinsic pixel size: explicit width/height first,
+// then the viewBox (preserving aspect ratio), with a sane fallback for
+// size-less icons so the raster is never 0×0 or the engine's 300×150.
+function svgPixelSize(svgText: string): { w: number; h: number } {
+  const root = new DOMParser().parseFromString(
+    svgText,
+    "image/svg+xml"
+  ).documentElement;
+  const len = (v: string | null) => {
+    const m = v && /^\s*([\d.]+)\s*(px)?\s*$/i.exec(v);
+    return m ? parseFloat(m[1]) : 0;
+  };
+  let w = len(root.getAttribute("width"));
+  let h = len(root.getAttribute("height"));
+  const vb = (root.getAttribute("viewBox") || "")
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((n) => Number.isFinite(n));
+  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+    if (!w && !h) {
+      w = vb[2];
+      h = vb[3];
+    } else if (!w) {
+      w = (h * vb[2]) / vb[3];
+    } else if (!h) {
+      h = (w * vb[3]) / vb[2];
+    }
+  }
+  return { w: w || 512, h: h || 512 };
+}
+
+/**
+ * Convert an SVG to a raster image (PNG/JPEG/WebP) or a PDF, entirely
+ * in the webview via Canvas + pdf-lib. No network, no native deps —
+ * the same approach as svg2png/CairoSVG but offline and dependency-free.
+ */
+export async function svgToImage(
+  file: File,
+  format: SvgFormat = "png",
+  scale = 2
+): Promise<OutFile> {
+  const text = await file.text();
+  if (!/<svg[\s>]/i.test(text)) throw new Error("That isn't a valid SVG file.");
+
+  const sNum = Number(scale);
+  const s = Number.isFinite(sNum) && sNum > 0 ? Math.min(sNum, 10) : 1;
+  const { w, h } = svgPixelSize(text);
+  const cw = Math.max(1, Math.round(w * s));
+  const ch = Math.max(1, Math.round(h * s));
+  const stem = file.name.replace(/\.svg$/i, "");
+
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "image/svg+xml;charset=utf-8" })
+  );
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error("Could not render this SVG."));
+      im.src = url;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas is not available.");
+    // JPEG/PDF have no alpha channel — flatten onto white.
+    if (format === "jpeg" || format === "pdf") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cw, ch);
+    }
+    ctx.drawImage(img, 0, 0, cw, ch);
+
+    const toBlob = (type: string, q?: number) =>
+      new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) =>
+            b
+              ? resolve(b)
+              : reject(
+                  new Error(
+                    "This SVG can't be rasterized — it may reference external resources."
+                  )
+                ),
+          type,
+          q
+        )
+      );
+
+    if (format === "pdf") {
+      const png = await toBlob("image/png");
+      const doc = await PDFDocument.create();
+      const embedded = await doc.embedPng(await png.arrayBuffer());
+      const page = doc.addPage([w, h]);
+      page.drawImage(embedded, { x: 0, y: 0, width: w, height: h });
+      return { name: `${stem}.pdf`, bytes: await doc.save() };
+    }
+
+    const mime = format === "jpeg" ? "image/jpeg" : `image/${format}`;
+    const blob = await toBlob(mime, format === "png" ? undefined : 0.92);
+    const ext = format === "jpeg" ? "jpg" : format;
+    return {
+      name: `${stem}.${ext}`,
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+    };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+const MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+};
+
 export function downloadFile(f: OutFile) {
-  const isPng = f.name.endsWith(".png");
+  const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
   // Copy into a fresh ArrayBuffer so Blob gets a clean BlobPart.
   const buf = f.bytes.slice();
   const blob = new Blob([buf], {
-    type: isPng ? "image/png" : "application/pdf",
+    type: MIME[ext] ?? "application/octet-stream",
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -10,6 +10,7 @@ import {
   Hash,
   Stamp,
   Minimize2,
+  Shapes,
   Upload,
   Download,
   Loader2,
@@ -20,7 +21,7 @@ import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
 
-type Param = "ranges" | "chunk" | "rotate" | "text";
+type Param = "ranges" | "chunk" | "rotate" | "text" | "svgFormat" | "svgScale";
 
 export interface Tool {
   id: string;
@@ -114,6 +115,22 @@ export const PDF_TOOLS: Tool[] = [
     run: (f) => pdf.pdfToImages(f[0]),
   },
   {
+    id: "svg2img",
+    name: "SVG Converter",
+    desc: "Convert SVG to PNG, JPG, WebP or PDF",
+    icon: Shapes,
+    cat: "Convert",
+    accept: "image/svg+xml,.svg",
+    params: ["svgFormat", "svgScale"],
+    run: async (f, p) => [
+      await pdf.svgToImage(
+        f[0],
+        (p.svgFormat as pdf.SvgFormat) || "png",
+        parseFloat(p.svgScale || "2")
+      ),
+    ],
+  },
+  {
     id: "numbers",
     name: "Page Numbers",
     desc: "Stamp “1 / N” on every page",
@@ -167,6 +184,8 @@ export function ToolRunner({
       ? { rotate: "90" }
       : tool.id === "split"
       ? { chunk: "1" }
+      : tool.id === "svg2img"
+      ? { svgFormat: "png", svgScale: "2" }
       : {}
   );
   const [busy, setBusy] = useState(false);
@@ -315,6 +334,39 @@ export function ToolRunner({
                 value={params.text ?? ""}
                 onChange={(e) =>
                   setParams({ ...params, text: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("svgFormat") && (
+            <div>
+              <label className="label">Output format</label>
+              <select
+                className="input"
+                value={params.svgFormat ?? "png"}
+                onChange={(e) =>
+                  setParams({ ...params, svgFormat: e.target.value })
+                }
+              >
+                <option value="png">PNG — transparent</option>
+                <option value="jpeg">JPG — white background</option>
+                <option value="webp">WebP</option>
+                <option value="pdf">PDF</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("svgScale") && (
+            <div>
+              <label className="label">Scale (×) — higher = sharper</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className="input"
+                value={params.svgScale ?? "2"}
+                onChange={(e) =>
+                  setParams({ ...params, svgScale: e.target.value })
                 }
               />
             </div>
