@@ -10,6 +10,14 @@ import {
   Hash,
   Stamp,
   Minimize2,
+  Shapes,
+  PenTool,
+  Gauge,
+  FileText,
+  Layers,
+  Info,
+  FileType,
+  Table,
   Upload,
   Download,
   Loader2,
@@ -20,7 +28,21 @@ import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
 
-type Param = "ranges" | "chunk" | "rotate" | "text";
+type Param =
+  | "ranges"
+  | "chunk"
+  | "rotate"
+  | "text"
+  | "svgFormat"
+  | "svgScale"
+  | "tracePreset"
+  | "imgFormat"
+  | "imgQuality"
+  | "imgMaxW"
+  | "rasterScale"
+  | "rasterGray"
+  | "metaTitle"
+  | "metaAuthor";
 
 export interface Tool {
   id: string;
@@ -114,6 +136,113 @@ export const PDF_TOOLS: Tool[] = [
     run: (f) => pdf.pdfToImages(f[0]),
   },
   {
+    id: "svg2img",
+    name: "SVG Converter",
+    desc: "Convert SVG to PNG, JPG, WebP or PDF",
+    icon: Shapes,
+    cat: "Convert",
+    accept: "image/svg+xml,.svg",
+    params: ["svgFormat", "svgScale"],
+    run: async (f, p) => [
+      await pdf.svgToImage(
+        f[0],
+        (p.svgFormat as pdf.SvgFormat) || "png",
+        parseFloat(p.svgScale || "2")
+      ),
+    ],
+  },
+  {
+    id: "img2svg",
+    name: "Image → SVG (Vectorize)",
+    desc: "High-quality VTracer raster → vector (PNG/JPG → SVG)",
+    icon: PenTool,
+    cat: "Convert",
+    accept: "image/png,image/jpeg,image/webp",
+    params: ["tracePreset"],
+    run: async (f, p) => [
+      await pdf.imageToSvg(f[0], (p.tracePreset as pdf.TracePreset) || "detailed"),
+    ],
+  },
+  {
+    id: "img-compress",
+    name: "Image Compressor",
+    desc: "Shrink & resize JPG / PNG / WebP in bulk",
+    icon: Gauge,
+    cat: "Optimize",
+    multi: true,
+    accept: "image/png,image/jpeg,image/webp",
+    params: ["imgFormat", "imgQuality", "imgMaxW"],
+    run: (f, p) =>
+      Promise.all(
+        f.map((file) =>
+          pdf.compressImage(
+            file,
+            (p.imgFormat as pdf.ImgFormat) || "keep",
+            parseInt(p.imgQuality || "80", 10),
+            parseInt(p.imgMaxW || "0", 10)
+          )
+        )
+      ),
+  },
+  {
+    id: "pdf2txt",
+    name: "PDF → Text",
+    desc: "Extract the text layer to a .txt file",
+    icon: FileText,
+    cat: "Convert",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.pdfToText(f[0])],
+  },
+  {
+    id: "txt2pdf",
+    name: "Text → PDF",
+    desc: "Lay a .txt / .md file out as an A4 PDF",
+    icon: FileType,
+    cat: "Convert",
+    accept: "text/plain,text/markdown,.txt,.md",
+    params: [],
+    run: async (f) => [await pdf.textToPdf(f[0])],
+  },
+  {
+    id: "csv2pdf",
+    name: "CSV → PDF Table",
+    desc: "Render a CSV as a printable table",
+    icon: Table,
+    cat: "Convert",
+    accept: "text/csv,.csv",
+    params: [],
+    run: async (f) => [await pdf.csvToPdf(f[0])],
+  },
+  {
+    id: "pdf-flatten",
+    name: "Flatten PDF",
+    desc: "Bake pages flat (forms, layers, redactions)",
+    icon: Layers,
+    cat: "Optimize",
+    accept: "application/pdf",
+    params: ["rasterScale", "rasterGray"],
+    run: async (f, p) => [
+      await pdf.flattenPdf(
+        f[0],
+        parseInt(p.rasterScale || "2", 10),
+        (p.rasterGray || "no") === "yes"
+      ),
+    ],
+  },
+  {
+    id: "pdf-meta",
+    name: "Edit PDF Info",
+    desc: "Set the document title & author",
+    icon: Info,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: ["metaTitle", "metaAuthor"],
+    run: async (f, p) => [
+      await pdf.setPdfMeta(f[0], p.metaTitle || "", p.metaAuthor || ""),
+    ],
+  },
+  {
     id: "numbers",
     name: "Page Numbers",
     desc: "Stamp “1 / N” on every page",
@@ -167,6 +296,14 @@ export function ToolRunner({
       ? { rotate: "90" }
       : tool.id === "split"
       ? { chunk: "1" }
+      : tool.id === "svg2img"
+      ? { svgFormat: "png", svgScale: "2" }
+      : tool.id === "img2svg"
+      ? { tracePreset: "photo" }
+      : tool.id === "img-compress"
+      ? { imgFormat: "keep", imgQuality: "80", imgMaxW: "0" }
+      : tool.id === "pdf-flatten"
+      ? { rasterScale: "2", rasterGray: "no" }
       : {}
   );
   const [busy, setBusy] = useState(false);
@@ -315,6 +452,163 @@ export function ToolRunner({
                 value={params.text ?? ""}
                 onChange={(e) =>
                   setParams({ ...params, text: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("svgFormat") && (
+            <div>
+              <label className="label">Output format</label>
+              <select
+                className="input"
+                value={params.svgFormat ?? "png"}
+                onChange={(e) =>
+                  setParams({ ...params, svgFormat: e.target.value })
+                }
+              >
+                <option value="png">PNG — transparent</option>
+                <option value="jpeg">JPG — white background</option>
+                <option value="webp">WebP</option>
+                <option value="pdf">PDF</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("svgScale") && (
+            <div>
+              <label className="label">Scale (×) — higher = sharper</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className="input"
+                value={params.svgScale ?? "2"}
+                onChange={(e) =>
+                  setParams({ ...params, svgScale: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("tracePreset") && (
+            <div>
+              <label className="label">Vectorize style</label>
+              <select
+                className="input"
+                value={params.tracePreset ?? "detailed"}
+                onChange={(e) =>
+                  setParams({ ...params, tracePreset: e.target.value })
+                }
+              >
+                <option value="photo">Photo / detailed — full color</option>
+                <option value="logo">Logo / flat art — clean</option>
+                <option value="bw">Black &amp; white — line art</option>
+                <option value="pixel">Sharp — pixel-precise</option>
+              </select>
+              <p className="text-[11px] text-brand-400 mt-1">
+                Logos &amp; illustrations vectorize cleanly; photos still
+                produce many color layers (large SVG).
+              </p>
+            </div>
+          )}
+          {tool.params.includes("imgFormat") && (
+            <div>
+              <label className="label">Output format</label>
+              <select
+                className="input"
+                value={params.imgFormat ?? "keep"}
+                onChange={(e) =>
+                  setParams({ ...params, imgFormat: e.target.value })
+                }
+              >
+                <option value="keep">Keep original</option>
+                <option value="jpeg">JPG (smallest)</option>
+                <option value="webp">WebP</option>
+                <option value="png">PNG (lossless)</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("imgQuality") && (
+            <div>
+              <label className="label">Quality (1–100)</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                className="input"
+                value={params.imgQuality ?? "80"}
+                onChange={(e) =>
+                  setParams({ ...params, imgQuality: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("imgMaxW") && (
+            <div>
+              <label className="label">Max width px (0 = keep)</label>
+              <input
+                type="number"
+                min={0}
+                className="input"
+                value={params.imgMaxW ?? "0"}
+                onChange={(e) =>
+                  setParams({ ...params, imgMaxW: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("rasterScale") && (
+            <div>
+              <label className="label">Quality (× DPI) — 1–4</label>
+              <input
+                type="number"
+                min={1}
+                max={4}
+                step={1}
+                className="input"
+                value={params.rasterScale ?? "2"}
+                onChange={(e) =>
+                  setParams({ ...params, rasterScale: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("rasterGray") && (
+            <div>
+              <label className="label">Grayscale</label>
+              <select
+                className="input"
+                value={params.rasterGray ?? "no"}
+                onChange={(e) =>
+                  setParams({ ...params, rasterGray: e.target.value })
+                }
+              >
+                <option value="no">No — keep colour</option>
+                <option value="yes">Yes — smaller, ink-saving</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("metaTitle") && (
+            <div>
+              <label className="label">Title</label>
+              <input
+                className="input"
+                placeholder="Document title"
+                value={params.metaTitle ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, metaTitle: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("metaAuthor") && (
+            <div>
+              <label className="label">Author</label>
+              <input
+                className="input"
+                placeholder="Author name"
+                value={params.metaAuthor ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, metaAuthor: e.target.value })
                 }
               />
             </div>

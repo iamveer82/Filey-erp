@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
- * Renders a fixed-width "paper" preview scaled to always fit the
- * available column width (zoom = 100 ⇒ fit-to-width; the zoom control
- * multiplies on top). Reserves correctly-sized layout space so the
- * scaled sheet neither overflows horizontally nor leaves a gap.
+ * Renders the invoice "paper" at its true size: zoom = 100 ⇒ the page
+ * at native A4 scale (never shrunk to fit the column); the zoom control
+ * multiplies on top. The container scrolls both axes when the sheet is
+ * larger than the available area. Reserves correctly-sized layout space
+ * for the transform-scaled sheet so scrollbars track the real size.
  */
 export default function FitPreview({
   baseWidth,
@@ -15,20 +16,8 @@ export default function FitPreview({
   zoom: number;
   children: ReactNode;
 }) {
-  const boxRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
-  const [avail, setAvail] = useState(baseWidth);
-  const [contentH, setContentH] = useState(1040);
-
-  useEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const measure = () => setAvail(Math.max(0, el.clientWidth - 32));
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
-  }, []);
+  const [contentH, setContentH] = useState(1075);
 
   useEffect(() => {
     const el = sheetRef.current;
@@ -40,14 +29,10 @@ export default function FitPreview({
     return () => ro.disconnect();
   });
 
-  const fit = avail > 0 ? avail / baseWidth : 1;
-  const scale = Math.max(0.2, fit * (zoom / 100));
+  const scale = Math.max(0.2, zoom / 100);
 
   return (
-    <div
-      ref={boxRef}
-      className="bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]"
-    >
+    <div className="bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
       <div
         style={{
           width: baseWidth * scale,
@@ -61,7 +46,7 @@ export default function FitPreview({
           className="invoice-print bg-white shadow-bento"
           style={{
             width: baseWidth,
-            minHeight: 1040,
+            minHeight: 1075,
             padding: 48,
             transform: `scale(${scale})`,
             transformOrigin: "top left",

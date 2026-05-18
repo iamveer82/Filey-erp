@@ -47,7 +47,7 @@ function ago(ts: number): string {
 const CAT_META: Record<string, string> = {
   Organize: "Merge, split, extract & delete pages",
   Edit: "Rotate, number & watermark documents",
-  Convert: "Images ↔ PDF conversion",
+  Convert: "Images ↔ PDF · SVG converter",
   Optimize: "Compress & slim files",
 };
 

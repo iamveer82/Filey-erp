@@ -26,7 +26,7 @@ import {
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { quotationTotals } from "../lib/money";
-import { sendEmail, emailShell } from "../lib/email";
+import { sendEmail, emailShell, hasDesktop } from "../lib/email";
 import { Modal, Field } from "../components/ui";
 
 interface Line {
@@ -253,9 +253,18 @@ export default function Quoting() {
           >
             <Eye size={15} /> Preview
           </button>
-          <button className="btn-ghost" onClick={emailQuote}>
-            <Send size={15} /> Email
-          </button>
+          {hasDesktop ? (
+            <button className="btn-ghost" onClick={emailQuote}>
+              <Send size={15} /> Email
+            </button>
+          ) : (
+            <span
+              className="text-[11px] text-brand-400 self-center"
+              title="Emailing is available in the Filey desktop app"
+            >
+              Emailing is desktop-only
+            </span>
+          )}
           <button className="btn-primary" onClick={() => window.print()}>
             <Download size={15} /> Generate PDF
           </button>

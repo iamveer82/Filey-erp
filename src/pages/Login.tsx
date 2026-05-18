@@ -1,12 +1,6 @@
 import { useState } from "react";
-import {
-  Boxes,
-  ArrowLeft,
-  ShieldCheck,
-  Zap,
-  BarChart3,
-  Star,
-} from "lucide-react";
+import { ArrowLeft, ShieldCheck, Zap, BarChart3, Star } from "lucide-react";
+import Logo from "../components/Logo";
 import { useAuth, type Channel } from "../lib/auth";
 
 type Mode = "signin" | "signup";
@@ -177,9 +171,7 @@ export default function Login() {
         <div className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full bg-ink/10 blur-3xl" />
 
         <div className="relative flex items-center gap-3">
-          <div className="rounded-2xl bg-ink p-2.5 text-white">
-            <Boxes size={24} />
-          </div>
+          <Logo size={44} />
           <p className="text-2xl font-bold text-ink">Filey</p>
         </div>
 
@@ -224,9 +216,7 @@ export default function Login() {
       <div className="flex items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-sm">
           <div className="flex lg:hidden flex-col items-center mb-8">
-            <div className="rounded-2xl bg-ink p-3 text-white">
-              <Boxes size={26} />
-            </div>
+            <Logo size={52} />
             <h1 className="text-2xl font-bold text-ink mt-3">Filey</h1>
           </div>
 

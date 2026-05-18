@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { NavLink, Link, useLocation } from "react-router-dom";
-import { Boxes, Bell, Search, ChevronDown, LogOut } from "lucide-react";
+import { Bell, Search, ChevronDown, LogOut } from "lucide-react";
+import Logo from "./Logo";
 import { cn } from "../lib/format";
 import { useModules } from "../lib/modules";
 import { MODULES } from "../modules/registry";
@@ -27,9 +28,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className="w-64 shrink-0 bg-white rounded-2xl border border-brand-200 shadow-bento flex flex-col overflow-hidden">
         <div className="px-5 py-5 flex items-center justify-between border-b border-brand-100">
           <Link to="/overview" className="flex items-center gap-2.5">
-            <div className="rounded-xl bg-primary-400 p-1.5 text-ink">
-              <Boxes size={20} />
-            </div>
+            <Logo size={36} />
             <p className="font-bold text-ink text-lg">Filey</p>
           </Link>
           <div className="flex items-center gap-1">
