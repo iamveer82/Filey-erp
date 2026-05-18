@@ -11,6 +11,7 @@ import {
   Stamp,
   Minimize2,
   Shapes,
+  PenTool,
   Upload,
   Download,
   Loader2,
@@ -21,7 +22,14 @@ import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
 
-type Param = "ranges" | "chunk" | "rotate" | "text" | "svgFormat" | "svgScale";
+type Param =
+  | "ranges"
+  | "chunk"
+  | "rotate"
+  | "text"
+  | "svgFormat"
+  | "svgScale"
+  | "tracePreset";
 
 export interface Tool {
   id: string;
@@ -131,6 +139,18 @@ export const PDF_TOOLS: Tool[] = [
     ],
   },
   {
+    id: "img2svg",
+    name: "Image → SVG (Vectorize)",
+    desc: "Trace PNG / JPG into real SVG vector paths",
+    icon: PenTool,
+    cat: "Convert",
+    accept: "image/png,image/jpeg,image/webp",
+    params: ["tracePreset"],
+    run: async (f, p) => [
+      await pdf.imageToSvg(f[0], (p.tracePreset as pdf.TracePreset) || "detailed"),
+    ],
+  },
+  {
     id: "numbers",
     name: "Page Numbers",
     desc: "Stamp “1 / N” on every page",
@@ -186,6 +206,8 @@ export function ToolRunner({
       ? { chunk: "1" }
       : tool.id === "svg2img"
       ? { svgFormat: "png", svgScale: "2" }
+      : tool.id === "img2svg"
+      ? { tracePreset: "detailed" }
       : {}
   );
   const [busy, setBusy] = useState(false);
@@ -369,6 +391,27 @@ export function ToolRunner({
                   setParams({ ...params, svgScale: e.target.value })
                 }
               />
+            </div>
+          )}
+          {tool.params.includes("tracePreset") && (
+            <div>
+              <label className="label">Vectorize style</label>
+              <select
+                className="input"
+                value={params.tracePreset ?? "detailed"}
+                onChange={(e) =>
+                  setParams({ ...params, tracePreset: e.target.value })
+                }
+              >
+                <option value="logo">Logo / flat art — crisp, few colors</option>
+                <option value="detailed">Detailed — up to 64 colors</option>
+                <option value="smooth">Smooth — softened curves</option>
+                <option value="grayscale">Grayscale</option>
+              </select>
+              <p className="text-[11px] text-brand-400 mt-1">
+                Line art & logos vectorize cleanly; photos trace to many
+                paths (raster images aren't truly vector).
+              </p>
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 // Fully local PDF toolkit — runs entirely in the Tauri webview.
 // No network, no external service. pdf-lib (MIT) + pdfjs-dist (Apache-2.0).
 import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib";
+import ImageTracer from "imagetracerjs";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { parseRanges } from "./ranges";
@@ -312,6 +313,74 @@ export async function svgToImage(
       name: `${stem}.${ext}`,
       bytes: new Uint8Array(await blob.arrayBuffer()),
     };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export type TracePreset = "logo" | "detailed" | "smooth" | "grayscale";
+
+// Friendly preset → ImageTracer preset. "logo" posterizes to a few
+// flat colours with crisp edges (best for logos / flat art); "detailed"
+// keeps up to 64 colours for photos & complex art.
+const TRACE_PRESET: Record<TracePreset, string> = {
+  logo: "posterized2",
+  detailed: "detailed",
+  smooth: "smoothed",
+  grayscale: "grayscale",
+};
+
+/**
+ * Professional raster → vector: traces a PNG/JPG/WebP into real SVG
+ * paths (colour-layered Potrace-style tracing via ImageTracer, MIT),
+ * not a bitmap wrapped in an <svg>. Runs fully in the webview — no
+ * network, no native deps.
+ *
+ * Note: line art, logos and flat illustrations vectorise cleanly;
+ * photographs are inherently raster and will trace to many paths.
+ */
+export async function imageToSvg(
+  file: File,
+  preset: TracePreset = "detailed"
+): Promise<OutFile> {
+  const isRaster =
+    /^image\/(png|jpe?g|webp)$/i.test(file.type) ||
+    /\.(png|jpe?g|webp)$/i.test(file.name);
+  if (!isRaster) throw new Error("Please choose a PNG, JPG or WebP image.");
+
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error("Could not read this image."));
+      im.src = url;
+    });
+
+    // Cap the working resolution. Tracing cost grows with pixel count
+    // and a multi-megapixel photo yields a huge, slow SVG with no
+    // visible gain — pro tracers downsample similarly.
+    const MAX = 1600;
+    const ratio = Math.min(
+      1,
+      MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1)
+    );
+    const w = Math.max(1, Math.round((img.naturalWidth || 1) * ratio));
+    const h = Math.max(1, Math.round((img.naturalHeight || 1) * ratio));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas is not available.");
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const svg = ImageTracer.imagedataToSVG(
+      ctx.getImageData(0, 0, w, h),
+      TRACE_PRESET[preset]
+    );
+    const stem = file.name.replace(/\.(png|jpe?g|webp)$/i, "");
+    return { name: `${stem}.svg`, bytes: new TextEncoder().encode(svg) };
   } finally {
     URL.revokeObjectURL(url);
   }

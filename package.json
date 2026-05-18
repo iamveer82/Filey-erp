@@ -17,6 +17,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "clsx": "^2.1.1",
+    "imagetracerjs": "^1.2.6",
     "lucide-react": "^1.16.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
