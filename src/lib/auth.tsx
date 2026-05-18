@@ -95,23 +95,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      if (data.session?.user) await loadProfile(data.session.user);
-      setLoading(false);
-    });
+    let active = true;
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, s) => {
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+        // Defer DB read: never block while the auth lock may be held.
+        if (data.session?.user) void loadProfile(data.session.user);
+      })
+      .catch((err) => {
+        console.error("[auth] getSession failed:", err);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    // IMPORTANT: callback is sync and does NO awaited Supabase calls here.
+    // Calling supabase.* inside onAuthStateChange while it holds the auth
+    // lock deadlocks getSession(). Defer profile load off the lock.
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s);
       setUser(s?.user ?? null);
-      if (s?.user) await loadProfile(s.user);
-      else {
+      if (s?.user) {
+        const u = s.user;
+        setTimeout(() => {
+          if (active) void loadProfile(u);
+        }, 0);
+      } else {
         setCacheOrg(null);
         setProfile(null);
       }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithPassword = async (c: Credential, password: string) => {
