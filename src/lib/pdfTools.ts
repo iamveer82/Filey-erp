@@ -1,7 +1,8 @@
 // Fully local PDF toolkit — runs entirely in the Tauri webview.
 // No network, no external service. pdf-lib (MIT) + pdfjs-dist (Apache-2.0).
 import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib";
-import ImageTracer from "imagetracerjs";
+import initVtracer, { to_svg as vtracerToSvg } from "vtracer-wasm";
+import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { parseRanges } from "./ranges";
@@ -318,30 +319,98 @@ export async function svgToImage(
   }
 }
 
-export type TracePreset = "logo" | "detailed" | "smooth" | "grayscale";
+export type TracePreset = "photo" | "logo" | "bw" | "pixel";
 
-// Friendly preset → ImageTracer preset. "logo" posterizes to a few
-// flat colours with crisp edges (best for logos / flat art); "detailed"
-// keeps up to 64 colours for photos & complex art.
-const TRACE_PRESET: Record<TracePreset, string> = {
-  logo: "posterized2",
-  detailed: "detailed",
-  smooth: "smoothed",
-  grayscale: "grayscale",
+interface VtracerConfig {
+  binary: boolean;
+  mode: "spline" | "polygon" | "pixel";
+  hierarchical: "stacked" | "cutout";
+  cornerThreshold: number;
+  lengthThreshold: number;
+  maxIterations: number;
+  spliceThreshold: number;
+  filterSpeckle: number;
+  colorPrecision: number;
+  layerDifference: number;
+  pathPrecision: number;
+}
+
+// Tuned VTracer configs. Defaults follow upstream vtracer; "logo"
+// merges aggressively for clean flat art, "pixel" uses polygon mode
+// for a faithful sharp trace, "bw" is binary line-art.
+// NOTE: colorPrecision MUST stay ≤ 6 — visioncortex 0.8.8 panics
+// (wasm `unreachable`) in colour clustering at higher precision.
+const MAX_COLOR_PRECISION = 6;
+const VTRACER_PRESET: Record<TracePreset, VtracerConfig> = {
+  photo: {
+    binary: false,
+    mode: "spline",
+    hierarchical: "stacked",
+    cornerThreshold: 60,
+    lengthThreshold: 4,
+    maxIterations: 10,
+    spliceThreshold: 45,
+    filterSpeckle: 4,
+    colorPrecision: 6,
+    layerDifference: 8,
+    pathPrecision: 8,
+  },
+  logo: {
+    binary: false,
+    mode: "spline",
+    hierarchical: "stacked",
+    cornerThreshold: 80,
+    lengthThreshold: 4,
+    maxIterations: 10,
+    spliceThreshold: 45,
+    filterSpeckle: 8,
+    colorPrecision: 6,
+    layerDifference: 24,
+    pathPrecision: 6,
+  },
+  bw: {
+    binary: true,
+    mode: "spline",
+    hierarchical: "stacked",
+    cornerThreshold: 60,
+    lengthThreshold: 4,
+    maxIterations: 10,
+    spliceThreshold: 45,
+    filterSpeckle: 4,
+    colorPrecision: 6,
+    layerDifference: 16,
+    pathPrecision: 8,
+  },
+  pixel: {
+    binary: false,
+    mode: "polygon",
+    hierarchical: "stacked",
+    cornerThreshold: 60,
+    lengthThreshold: 4,
+    maxIterations: 10,
+    spliceThreshold: 45,
+    filterSpeckle: 2,
+    colorPrecision: 6,
+    layerDifference: 8,
+    pathPrecision: 8,
+  },
 };
 
+let vtracerReady: Promise<unknown> | null = null;
+const ensureVtracer = () =>
+  (vtracerReady ??= initVtracer({ module_or_path: vtracerWasmUrl }));
+
 /**
- * Professional raster → vector: traces a PNG/JPG/WebP into real SVG
- * paths (colour-layered Potrace-style tracing via ImageTracer, MIT),
- * not a bitmap wrapped in an <svg>. Runs fully in the webview — no
- * network, no native deps.
+ * Professional raster → vector via VTracer (visioncortex, MIT) compiled
+ * to WebAssembly — real colour-layered Bézier paths, not a bitmap
+ * wrapped in an <svg>. Runs fully in the webview, no network.
  *
- * Note: line art, logos and flat illustrations vectorise cleanly;
- * photographs are inherently raster and will trace to many paths.
+ * Note: logos & illustrations vectorise cleanly; photos still produce
+ * many colour layers (large SVG) — that is inherent to raster→vector.
  */
 export async function imageToSvg(
   file: File,
-  preset: TracePreset = "detailed"
+  preset: TracePreset = "photo"
 ): Promise<OutFile> {
   const isRaster =
     /^image\/(png|jpe?g|webp)$/i.test(file.type) ||
@@ -357,9 +426,9 @@ export async function imageToSvg(
       im.src = url;
     });
 
-    // Cap the working resolution. Tracing cost grows with pixel count
+    // Cap the working resolution: tracing cost grows with pixel count
     // and a multi-megapixel photo yields a huge, slow SVG with no
-    // visible gain — pro tracers downsample similarly.
+    // visible gain — pro vectorizers downsample similarly.
     const MAX = 1600;
     const ratio = Math.min(
       1,
@@ -374,11 +443,14 @@ export async function imageToSvg(
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas is not available.");
     ctx.drawImage(img, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
 
-    const svg = ImageTracer.imagedataToSVG(
-      ctx.getImageData(0, 0, w, h),
-      TRACE_PRESET[preset]
-    );
+    await ensureVtracer();
+    const cfg = VTRACER_PRESET[preset];
+    const svg = vtracerToSvg(new Uint8Array(data.buffer), w, h, {
+      ...cfg,
+      colorPrecision: Math.min(MAX_COLOR_PRECISION, cfg.colorPrecision),
+    });
     const stem = file.name.replace(/\.(png|jpe?g|webp)$/i, "");
     return { name: `${stem}.svg`, bytes: new TextEncoder().encode(svg) };
   } finally {

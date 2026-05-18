@@ -154,7 +154,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "img2svg",
     name: "Image → SVG (Vectorize)",
-    desc: "Trace PNG / JPG into real SVG vector paths",
+    desc: "High-quality VTracer raster → vector (PNG/JPG → SVG)",
     icon: PenTool,
     cat: "Convert",
     accept: "image/png,image/jpeg,image/webp",
@@ -299,7 +299,7 @@ export function ToolRunner({
       : tool.id === "svg2img"
       ? { svgFormat: "png", svgScale: "2" }
       : tool.id === "img2svg"
-      ? { tracePreset: "detailed" }
+      ? { tracePreset: "photo" }
       : tool.id === "img-compress"
       ? { imgFormat: "keep", imgQuality: "80", imgMaxW: "0" }
       : tool.id === "pdf-flatten"
@@ -499,14 +499,14 @@ export function ToolRunner({
                   setParams({ ...params, tracePreset: e.target.value })
                 }
               >
-                <option value="logo">Logo / flat art — crisp, few colors</option>
-                <option value="detailed">Detailed — up to 64 colors</option>
-                <option value="smooth">Smooth — softened curves</option>
-                <option value="grayscale">Grayscale</option>
+                <option value="photo">Photo / detailed — full color</option>
+                <option value="logo">Logo / flat art — clean</option>
+                <option value="bw">Black &amp; white — line art</option>
+                <option value="pixel">Sharp — pixel-precise</option>
               </select>
               <p className="text-[11px] text-brand-400 mt-1">
-                Line art & logos vectorize cleanly; photos trace to many
-                paths (raster images aren't truly vector).
+                Logos &amp; illustrations vectorize cleanly; photos still
+                produce many color layers (large SVG).
               </p>
             </div>
           )}
