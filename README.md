@@ -81,6 +81,28 @@ npm run tauri build  # outputs to src-tauri/target/release/bundle/
 Or push a `filey-erp-v*` tag to build macOS/Windows/Linux installers via
 the GitHub Actions release workflow.
 
+### 5. Build & deploy the web app
+
+```bash
+npm run build      # static SPA → dist/
+npm run preview     # serve dist/ locally to verify
+```
+
+`dist/` is a self-contained static site (root-hosted, no server needed).
+Deploy it to any static host:
+
+- **Cloudflare Pages** — build command `npm run build`, output dir
+  `dist`. Client-side routing works via the bundled `public/_redirects`
+  (`/* /index.html 200`).
+- **AWS S3 + CloudFront** — upload `dist/`, set the S3 error document
+  (and a CloudFront 403/404 custom error response) to `/index.html` for
+  SPA routing, and ensure `.wasm` is served as `application/wasm`.
+
+The web build runs entirely against your Supabase project. Gmail SMTP
+"Save & Send" is desktop-only (no Rust backend on the web) and is
+hidden/disabled automatically in the browser; everything else —
+including the local PDF/SVG/image tools — works.
+
 ## Module system
 
 Every screen is a module declared in `src/modules/registry.tsx`. Toggle

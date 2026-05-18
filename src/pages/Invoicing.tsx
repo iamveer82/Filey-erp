@@ -32,7 +32,7 @@ import {
 } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
-import { sendEmail, emailShell } from "../lib/email";
+import { sendEmail, emailShell, hasDesktop } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import {
   PageHeader,
@@ -498,13 +498,24 @@ function Editor({
           >
             <MoreHorizontal size={15} /> More
           </button>
-          <button
-            className="btn-primary"
-            onClick={saveAndSend}
-            disabled={saving}
-          >
-            <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
-          </button>
+          {hasDesktop ? (
+            <button
+              className="btn-primary"
+              onClick={saveAndSend}
+              disabled={saving}
+            >
+              <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              onClick={onSave}
+              disabled={saving}
+              title="Emailing is available in the Filey desktop app"
+            >
+              <Save size={15} /> {saving ? "Saving…" : "Save"}
+            </button>
+          )}
         </div>
       </div>
 
