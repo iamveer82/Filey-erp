@@ -593,7 +593,7 @@ function TaskModal({
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
             <select
-              className="input"
+              className="select"
               value={f.kind}
               onChange={(e) => setF({ ...f, kind: e.target.value })}
             >

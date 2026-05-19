@@ -413,7 +413,7 @@ export default function Quoting() {
               <Field label="Customer">
                 <div className="flex gap-2">
                   <select
-                    className="input"
+                    className="select"
                     value={customer?.id ?? ""}
                     onChange={(e) =>
                       setCustomer(
@@ -440,7 +440,7 @@ export default function Quoting() {
               </Field>
               <Field label="Currency">
                 <select
-                  className="input"
+                  className="select"
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                 >

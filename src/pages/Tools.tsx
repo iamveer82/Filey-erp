@@ -341,7 +341,7 @@ function CompanyDetails() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Business Type">
             <select
-              className="input"
+              className="select"
               value={c.business_type ?? ""}
               onChange={(e) => set("business_type", e.target.value)}
             >
@@ -425,7 +425,7 @@ function CompanyDetails() {
           </Field>
           <Field label="Currency">
             <select
-              className="input"
+              className="select"
               value={c.currency ?? "AED"}
               onChange={(e) => set("currency", e.target.value)}
             >
@@ -447,7 +447,7 @@ function CompanyDetails() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Field label="Tax Type">
             <select
-              className="input"
+              className="select"
               value={c.tax_type ?? "VAT"}
               onChange={(e) => set("tax_type", e.target.value)}
             >
@@ -708,7 +708,7 @@ function AccountProfile() {
               </Field>
               <Field label="Role">
                 <select
-                  className="input"
+                  className="select"
                   value={p.role}
                   onChange={(e) => set("role", e.target.value)}
                 >
@@ -797,7 +797,7 @@ function AccountProfile() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Language">
               <select
-                className="input"
+                className="select"
                 value={p.language}
                 onChange={(e) => set("language", e.target.value)}
               >
@@ -810,7 +810,7 @@ function AccountProfile() {
             </Field>
             <Field label="Timezone">
               <select
-                className="input"
+                className="select"
                 value={p.timezone}
                 onChange={(e) => set("timezone", e.target.value)}
               >
@@ -826,7 +826,7 @@ function AccountProfile() {
             </Field>
             <Field label="Date Format">
               <select
-                className="input"
+                className="select"
                 value={p.date_format}
                 onChange={(e) => set("date_format", e.target.value)}
               >
@@ -837,7 +837,7 @@ function AccountProfile() {
             </Field>
             <Field label="Time Format">
               <select
-                className="input"
+                className="select"
                 value={p.time_format}
                 onChange={(e) => set("time_format", e.target.value)}
               >
@@ -1151,7 +1151,7 @@ function UsersRoles() {
                 <td className="px-2 py-2.5">
                   {isAdmin && m.user_id !== user?.id ? (
                     <select
-                      className="input !py-1 !w-auto text-xs"
+                      className="select !py-1 !w-auto text-xs"
                       value={m.role}
                       onChange={async (e) => {
                         await org.setRole(m.id, e.target.value);

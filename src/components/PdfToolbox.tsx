@@ -431,7 +431,7 @@ export function ToolRunner({
             <div>
               <label className="label">Rotation</label>
               <select
-                className="input"
+                className="select"
                 value={params.rotate ?? "90"}
                 onChange={(e) =>
                   setParams({ ...params, rotate: e.target.value })
@@ -460,7 +460,7 @@ export function ToolRunner({
             <div>
               <label className="label">Output format</label>
               <select
-                className="input"
+                className="select"
                 value={params.svgFormat ?? "png"}
                 onChange={(e) =>
                   setParams({ ...params, svgFormat: e.target.value })
@@ -493,7 +493,7 @@ export function ToolRunner({
             <div>
               <label className="label">Vectorize style</label>
               <select
-                className="input"
+                className="select"
                 value={params.tracePreset ?? "detailed"}
                 onChange={(e) =>
                   setParams({ ...params, tracePreset: e.target.value })
@@ -514,7 +514,7 @@ export function ToolRunner({
             <div>
               <label className="label">Output format</label>
               <select
-                className="input"
+                className="select"
                 value={params.imgFormat ?? "keep"}
                 onChange={(e) =>
                   setParams({ ...params, imgFormat: e.target.value })
@@ -576,7 +576,7 @@ export function ToolRunner({
             <div>
               <label className="label">Grayscale</label>
               <select
-                className="input"
+                className="select"
                 value={params.rasterGray ?? "no"}
                 onChange={(e) =>
                   setParams({ ...params, rasterGray: e.target.value })

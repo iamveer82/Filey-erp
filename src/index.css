@@ -126,16 +126,16 @@
     background-position: right 0.75rem center;
   }
   .field {
-    @apply flex flex-col gap-1.5;
+    @apply flex flex-col;
   }
   .label {
-    @apply block text-xs font-semibold text-brand-600;
+    @apply block text-xs font-semibold text-brand-600 mb-1.5;
   }
   .help {
-    @apply text-xs text-brand-400;
+    @apply text-xs text-brand-400 mt-1;
   }
   .error-text {
-    @apply text-xs font-medium text-danger;
+    @apply text-xs font-medium text-danger mt-1;
   }
 
   .pill {

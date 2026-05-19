@@ -225,7 +225,7 @@ function AccountModal({
           </Field>
           <Field label="Type">
             <select
-              className="input"
+              className="select"
               value={f.account_type}
               onChange={(e) =>
                 setF({ ...f, account_type: e.target.value })
@@ -313,7 +313,7 @@ function JournalModal({
       <div className="space-y-3">
         <Field label="Account">
           <select
-            className="input"
+            className="select"
             value={f.account_id}
             onChange={(e) =>
               setF({ ...f, account_id: +e.target.value })
@@ -330,7 +330,7 @@ function JournalModal({
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
             <select
-              className="input"
+              className="select"
               value={f.txn_type}
               onChange={(e) => setF({ ...f, txn_type: e.target.value })}
             >

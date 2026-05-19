@@ -599,7 +599,7 @@ function Editor({
                 <Field label="Customer">
                   <div className="flex gap-2">
                     <select
-                      className="input"
+                      className="select"
                       value=""
                       onChange={(e) => {
                         const c = customers.find(
@@ -867,7 +867,7 @@ function Editor({
                     />
                   )}
                   <select
-                    className="input"
+                    className="select"
                     value={form.status}
                     onChange={(e) => set("status", e.target.value)}
                   >
@@ -1914,7 +1914,7 @@ function CompanyModal({
         <div className="grid grid-cols-2 gap-3">
           <Field label="Default Template">
             <select
-              className="input"
+              className="select"
               value={c.default_template}
               onChange={(e) =>
                 setC({ ...c, default_template: e.target.value })

@@ -228,16 +228,16 @@ export function DataTable<T>({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="td text-brand-300" colSpan={columns.length}>
+                <td
+                  className="td text-center text-sm text-brand-400 py-12"
+                  colSpan={columns.length}
+                >
                   {empty}
                 </td>
               </tr>
             ) : (
               rows.map((row, i) => (
-                <tr
-                  key={i}
-                  className="hover:bg-brand-50/60 transition-colors duration-200"
-                >
+                <tr key={i} className="row-hover">
                   {columns.map((c) => (
                     <td key={c.key} className="td">
                       {c.render(row)}
@@ -277,20 +277,23 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-2xl bg-white shadow-bento-hover p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-bento-hover"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-4 border-b border-brand-100 px-6 py-4">
           <h2 className="text-lg font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 cursor-pointer transition-colors duration-200"
+            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors duration-200"
           >
             <X size={18} />
           </button>
         </div>
-        {children}
+        <div className="overflow-y-auto px-6 py-5">{children}</div>
       </div>
     </div>
   );
