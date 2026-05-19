@@ -47,7 +47,8 @@
   }
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-primary-300 cursor-pointer;
+    @apply hover:shadow-bento-hover hover:border-primary-300
+           hover:-translate-y-0.5 cursor-pointer;
   }
   .card-dark {
     @apply rounded-2xl bg-ink text-white border border-ink shadow-bento p-5;
@@ -60,35 +61,83 @@
     @apply text-xs font-semibold uppercase tracking-wide text-brand-400;
   }
   .stat-value {
-    @apply text-2xl font-bold text-ink mt-1;
+    @apply text-2xl font-bold text-ink mt-1 tabular-nums;
   }
+
+  /* ── Buttons — uniform 40px height, centered, focus-visible ring,
+        subtle press feedback. ── */
   .btn-primary,
   .btn-cta {
-    @apply inline-flex items-center gap-2 rounded-xl bg-primary-400 px-4 py-2
-           text-sm font-semibold text-ink transition-all duration-200
-           hover:bg-primary-500 hover:shadow-glow focus:outline-none
-           focus:ring-2 focus:ring-primary-300 disabled:opacity-50
-           disabled:cursor-not-allowed cursor-pointer;
-  }
-  .btn-secondary {
-    @apply inline-flex items-center gap-2 rounded-xl bg-primary-100 px-4 py-2
-           text-sm font-semibold text-primary-700 transition-colors duration-200
-           hover:bg-primary-200 cursor-pointer;
-  }
-  .btn-ghost {
-    @apply inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm
-           font-semibold text-brand-600 border border-brand-200 bg-white/60
-           transition-colors duration-200 hover:bg-brand-50 hover:text-ink
+    @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
+           bg-primary-400 px-4 text-sm font-semibold text-ink select-none
+           transition-all duration-200 hover:bg-primary-500 hover:shadow-glow
+           active:translate-y-px focus:outline-none focus-visible:ring-2
+           focus-visible:ring-primary-300 focus-visible:ring-offset-1
+           disabled:opacity-50 disabled:cursor-not-allowed
+           disabled:hover:bg-primary-400 disabled:hover:shadow-none
            cursor-pointer;
   }
-  .input {
-    @apply w-full rounded-xl border border-brand-200 bg-white px-3 py-2 text-sm
-           text-ink placeholder:text-brand-400 focus:outline-none
-           focus:ring-2 focus:ring-primary-300 focus:border-primary-400;
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
+           bg-primary-100 px-4 text-sm font-semibold text-primary-700
+           select-none transition-colors duration-200 hover:bg-primary-200
+           active:translate-y-px focus:outline-none focus-visible:ring-2
+           focus-visible:ring-primary-300 disabled:opacity-50
+           disabled:cursor-not-allowed cursor-pointer;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
+           px-3.5 text-sm font-semibold text-brand-600 border border-brand-200
+           bg-white/60 select-none transition-colors duration-200
+           hover:bg-brand-50 hover:text-ink active:translate-y-px
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
+           bg-danger px-4 text-sm font-semibold text-white select-none
+           transition-colors duration-200 hover:opacity-90 active:translate-y-px
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-danger
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+  }
+
+  /* ── Form controls — shared 40px height so labels, inputs, selects
+        and buttons align on the same baseline across every page. ── */
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-xl border border-brand-200 bg-white px-3.5 text-sm
+           text-ink placeholder:text-brand-400 transition-colors duration-200
+           hover:border-brand-300 focus:outline-none focus:ring-2
+           focus:ring-primary-300 focus:border-primary-400
+           disabled:bg-brand-50 disabled:text-brand-400
+           disabled:cursor-not-allowed;
+  }
+  .input,
+  .select {
+    @apply h-10;
+  }
+  .textarea {
+    @apply py-2.5 min-h-[88px] resize-y leading-relaxed;
+  }
+  .select {
+    @apply appearance-none bg-no-repeat pr-9 cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2392827a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+  }
+  .field {
+    @apply flex flex-col gap-1.5;
   }
   .label {
-    @apply block text-xs font-semibold text-brand-600 mb-1;
+    @apply block text-xs font-semibold text-brand-600;
   }
+  .help {
+    @apply text-xs text-brand-400;
+  }
+  .error-text {
+    @apply text-xs font-medium text-danger;
+  }
+
   .pill {
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
   }
@@ -100,12 +149,17 @@
   .chip-active {
     @apply border-primary-300 bg-primary-100 text-primary-700;
   }
+
+  /* ── Tables — sticky-friendly header, hover rows, aligned cells. ── */
   .th {
     @apply text-left text-xs font-semibold uppercase tracking-wide
-           text-brand-400 px-4 py-3;
+           text-brand-400 px-4 py-3 bg-brand-50/60;
   }
   .td {
-    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100;
+    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle;
+  }
+  .row-hover {
+    @apply transition-colors duration-150 hover:bg-brand-50/70;
   }
 }
 

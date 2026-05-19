@@ -1,14 +1,16 @@
 type Props = { size?: number; className?: string };
 
-/** Filey brand mark. Artwork lives at public/filey-logo.png. */
-export default function Logo({ size = 36, className }: Props) {
+/** Filey brand mark. Vector artwork at public/filey-logo.svg —
+ *  stays crisp at any size (sidebar, login, favicon). */
+export default function Logo({ size = 72, className = "" }: Props) {
   return (
     <img
-      src="/filey-logo.png"
+      src="/filey-logo.svg"
       width={size}
       height={size}
       alt="Filey"
-      className={className}
+      draggable={false}
+      className={`object-contain select-none shrink-0 ${className}`}
     />
   );
 }

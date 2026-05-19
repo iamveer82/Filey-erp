@@ -1368,7 +1368,7 @@ function InvoiceView({ form }: { form: Form }) {
           style={{ background: a, color: "#fff" }}
         >
           <div className="flex items-center gap-3">
-            <Logo size={44} />
+            <Logo size={88} />
             <p className="font-bold text-xl">{form.seller_name}</p>
           </div>
           <p className="text-2xl font-extrabold tracking-widest">INVOICE</p>
@@ -1471,7 +1471,7 @@ function InvoiceView({ form }: { form: Form }) {
 
   const Initial = ({ size = 48 }: { size?: number }) =>
     form.logo ? (
-      <Logo size={size} />
+      <Logo size={size * 2} />
     ) : (
       <div
         className="grid place-items-center rounded-full font-bold text-white"
@@ -1487,7 +1487,7 @@ function InvoiceView({ form }: { form: Form }) {
       <div className="text-neutral-900">
         <div className="flex justify-between items-start border-b-4 pb-5" style={{ borderColor: a }}>
           <div className="flex items-center gap-3">
-            <Logo size={48} />
+            <Logo size={96} />
             <div>
               <p className="font-bold text-xl">{form.seller_name}</p>
               <p className="text-xs text-neutral-500 whitespace-pre-line">
@@ -1542,7 +1542,7 @@ function InvoiceView({ form }: { form: Form }) {
     return (
       <div className="text-neutral-800 font-serif">
         <div className="text-center">
-          <Logo size={52} />
+          <Logo size={104} />
           <p className="text-3xl tracking-[0.3em] mt-4" style={{ color: a }}>
             INVOICE
           </p>
@@ -1588,7 +1588,7 @@ function InvoiceView({ form }: { form: Form }) {
           style={{ background: a, color: "#fff" }}
         >
           <div className="flex justify-between items-start">
-            <Logo size={50} />
+            <Logo size={100} />
             <p className="text-5xl font-extrabold tracking-tight">INVOICE</p>
           </div>
           <div className="flex justify-between items-end mt-8">
@@ -1626,7 +1626,7 @@ function InvoiceView({ form }: { form: Form }) {
       <div className="text-neutral-900 font-mono">
         <div className="flex justify-between items-start">
           <div>
-            <Logo size={40} />
+            <Logo size={80} />
             <p className="text-sm font-bold mt-2">{form.seller_name}</p>
             <p className="text-[11px] text-neutral-500 whitespace-pre-line">
               {form.seller_address}

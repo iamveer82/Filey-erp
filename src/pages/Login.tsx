@@ -1,5 +1,19 @@
 import { useState } from "react";
-import { ArrowLeft, ShieldCheck, Zap, BarChart3, Star } from "lucide-react";
+import {
+  ArrowLeft,
+  ShieldCheck,
+  Zap,
+  BarChart3,
+  Star,
+  Mail,
+  Phone,
+  Lock,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+} from "lucide-react";
 import Logo from "../components/Logo";
 import { useAuth, type Channel } from "../lib/auth";
 
@@ -69,6 +83,8 @@ export default function Login() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [otpPurpose, setOtpPurpose] = useState<"signup" | "login">("login");
+  const [showPw, setShowPw] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
@@ -163,6 +179,32 @@ export default function Login() {
     { icon: ShieldCheck, t: "FTA-compliant tax invoices, secured" },
   ];
 
+  const Msg = ({
+    kind,
+    children,
+  }: {
+    kind: "err" | "msg";
+    children: React.ReactNode;
+  }) => (
+    <p
+      role={kind === "err" ? "alert" : "status"}
+      aria-live="polite"
+      className={
+        "flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold " +
+        (kind === "err"
+          ? "text-danger bg-danger/10"
+          : "text-brand-700 bg-brand-100")
+      }
+    >
+      {kind === "err" ? (
+        <AlertCircle size={15} className="mt-px shrink-0" />
+      ) : (
+        <CheckCircle2 size={15} className="mt-px shrink-0" />
+      )}
+      <span>{children}</span>
+    </p>
+  );
+
   return (
     <div className="min-h-full grid lg:grid-cols-2 bg-background">
       {/* ── Brand panel ── */}
@@ -171,7 +213,7 @@ export default function Login() {
         <div className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full bg-ink/10 blur-3xl" />
 
         <div className="relative flex items-center gap-3">
-          <Logo size={44} />
+          <Logo size={88} />
           <p className="text-2xl font-bold text-ink">Filey</p>
         </div>
 
@@ -216,7 +258,7 @@ export default function Login() {
       <div className="flex items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-sm">
           <div className="flex lg:hidden flex-col items-center mb-8">
-            <Logo size={52} />
+            <Logo size={104} />
             <h1 className="text-2xl font-bold text-ink mt-3">Filey</h1>
           </div>
 
@@ -248,60 +290,109 @@ export default function Login() {
                 ]}
               />
 
-              <div>
+              <div className="field">
                 <label className="label" htmlFor="identifier">
                   {idLabel}
                 </label>
-                <input
-                  id="identifier"
-                  className="input"
-                  type={channel === "email" ? "email" : "tel"}
-                  inputMode={channel === "email" ? "email" : "tel"}
-                  autoComplete={channel === "email" ? "email" : "tel"}
-                  placeholder={idPlaceholder}
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  required
-                />
+                <div className="relative">
+                  {channel === "email" ? (
+                    <Mail
+                      size={16}
+                      className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+                    />
+                  ) : (
+                    <Phone
+                      size={16}
+                      className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+                    />
+                  )}
+                  <input
+                    id="identifier"
+                    className="input pl-10"
+                    type={channel === "email" ? "email" : "tel"}
+                    inputMode={channel === "email" ? "email" : "tel"}
+                    autoComplete={channel === "email" ? "email" : "tel"}
+                    placeholder={idPlaceholder}
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
 
               {!(mode === "signin" && method === "otp") && (
-                <div>
+                <div className="field">
                   <label className="label" htmlFor="password">
                     Password
                   </label>
-                  <input
-                    id="password"
-                    className="input"
-                    type="password"
-                    autoComplete={
-                      mode === "signup"
-                        ? "new-password"
-                        : "current-password"
-                    }
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={6}
-                  />
+                  <div className="relative">
+                    <Lock
+                      size={16}
+                      className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+                    />
+                    <input
+                      id="password"
+                      className="input pl-10 pr-10"
+                      type={showPw ? "text" : "password"}
+                      autoComplete={
+                        mode === "signup"
+                          ? "new-password"
+                          : "current-password"
+                      }
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={6}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={showPw ? "Hide password" : "Show password"}
+                      onClick={() => setShowPw((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 transition-colors cursor-pointer"
+                    >
+                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               )}
 
               {mode === "signup" && (
-                <div>
+                <div className="field">
                   <label className="label" htmlFor="confirm">
                     Confirm password
                   </label>
-                  <input
-                    id="confirm"
-                    className="input"
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    required
-                    minLength={6}
-                  />
+                  <div className="relative">
+                    <Lock
+                      size={16}
+                      className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+                    />
+                    <input
+                      id="confirm"
+                      className="input pl-10 pr-10"
+                      type={showConfirm ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      required
+                      minLength={6}
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={
+                        showConfirm ? "Hide password" : "Show password"
+                      }
+                      onClick={() => setShowConfirm((s) => !s)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 transition-colors cursor-pointer"
+                    >
+                      {showConfirm ? (
+                        <EyeOff size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -321,21 +412,11 @@ export default function Login() {
                 />
               )}
 
-              {err && (
-                <p className="text-xs font-semibold text-danger bg-danger/10 rounded-lg px-3 py-2">
-                  {err}
-                </p>
-              )}
-              {msg && (
-                <p className="text-xs font-semibold text-brand-600 bg-brand-100 rounded-lg px-3 py-2">
-                  {msg}
-                </p>
-              )}
+              {err && <Msg kind="err">{err}</Msg>}
+              {msg && <Msg kind="msg">{msg}</Msg>}
 
-              <button
-                className="btn-primary w-full justify-center"
-                disabled={busy}
-              >
+              <button className="btn-primary w-full" disabled={busy}>
+                {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy
                   ? "Please wait…"
                   : mode === "signup"
@@ -386,13 +467,13 @@ export default function Login() {
                 </p>
               </div>
 
-              <div>
+              <div className="field">
                 <label className="label" htmlFor="otp">
                   6-digit code
                 </label>
                 <input
                   id="otp"
-                  className="input tracking-[0.5em] text-center text-lg"
+                  className="input !h-14 text-center text-2xl font-bold tracking-[0.6em]"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   pattern="[0-9]*"
@@ -406,21 +487,14 @@ export default function Login() {
                 />
               </div>
 
-              {err && (
-                <p className="text-xs font-semibold text-danger bg-danger/10 rounded-lg px-3 py-2">
-                  {err}
-                </p>
-              )}
-              {msg && (
-                <p className="text-xs font-semibold text-brand-600 bg-brand-100 rounded-lg px-3 py-2">
-                  {msg}
-                </p>
-              )}
+              {err && <Msg kind="err">{err}</Msg>}
+              {msg && <Msg kind="msg">{msg}</Msg>}
 
               <button
-                className="btn-primary w-full justify-center"
+                className="btn-primary w-full"
                 disabled={busy || token.length < 6}
               >
+                {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy ? "Verifying…" : "Verify"}
               </button>
 
