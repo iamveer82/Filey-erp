@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Boxes, AlertTriangle, Layers, Tag } from "lucide-react";
 import { erp, Product } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
 import {
   PageHeader,
@@ -22,6 +23,7 @@ export default function Inventory() {
   useEffect(() => {
     load();
   }, []);
+  useLiveSync(load);
 
   const categories = useMemo(
     () =>

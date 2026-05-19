@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, TrendingUp, Wallet, Receipt, Banknote } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -33,6 +34,7 @@ export default function Accounting() {
     fin.report().then(setReport).catch(console.error);
   };
   useEffect(load, []);
+  useLiveSync(load);
 
   return (
     <div className="animate-fade-up">

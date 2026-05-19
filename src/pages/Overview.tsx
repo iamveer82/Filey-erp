@@ -18,6 +18,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { erp, Product, Order } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { num, aed, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -32,10 +33,12 @@ export default function Overview() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
 
-  useEffect(() => {
+  const load = () => {
     erp.products().then(setProducts).catch(console.error);
     erp.orders().then(setOrders).catch(console.error);
-  }, []);
+  };
+  useEffect(load, []);
+  useLiveSync(load);
 
   const lowStock = useMemo(
     () => products.filter((p) => p.quantity <= p.reorder_level),

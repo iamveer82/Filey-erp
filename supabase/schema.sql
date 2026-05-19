@@ -524,4 +524,42 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
 
+-- ---------- realtime: broadcast row changes for live multi-client sync ----------
+-- Every table the app reads is added to the supabase_realtime publication
+-- so changes from any client (desktop, web, or a direct DB edit) stream to
+-- open sessions. RLS still filters the feed: a client only receives changes
+-- for rows it may read. Idempotent — safe to re-run.
+do $$
+declare
+  t text;
+  rt_tables text[] := array[
+    'products','orders','order_items','invoices',
+    'employees','attendance','payroll',
+    'accounts','expenses','transactions',
+    'app_users','app_settings','audit_log',
+    'crm_leads','crm_customers','crm_opportunities','crm_activities',
+    'company_profile','invoice_docs','invoice_doc_items',
+    'quotations','quotation_items','quotation_templates','tool_runs',
+    'organizations','org_members','profiles'
+  ];
+begin
+  if not exists (
+    select 1 from pg_publication where pubname = 'supabase_realtime'
+  ) then
+    create publication supabase_realtime;
+  end if;
+  foreach t in array rt_tables loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = t
+    ) then
+      execute format(
+        'alter publication supabase_realtime add table public.%I;', t
+      );
+    end if;
+  end loop;
+end $$;
+
 -- Done. Tables are row-level-secured to the signed-in user.

@@ -8,6 +8,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured } from "./supabase";
 import { setCacheOrg } from "./api";
+import { startRealtime, stopRealtime } from "./realtime";
 
 export type Channel = "email" | "phone";
 
@@ -134,6 +135,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  // Live multi-client sync follows the session: open the channel once
+  // signed in, close it on sign-out so the next user starts clean.
+  useEffect(() => {
+    if (session?.user) void startRealtime();
+    else stopRealtime();
+  }, [session]);
 
   const signInWithPassword = async (c: Credential, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");

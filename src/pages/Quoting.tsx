@@ -24,6 +24,7 @@ import {
   QuoteTemplate,
   QuotationInput,
 } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { fmtDate } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, hasDesktop } from "../lib/email";
@@ -114,6 +115,13 @@ export default function Quoting() {
     crm.customers().then(setCustomers).catch(() => {});
     loadTemplates();
   }, []);
+
+  // Live-sync only the shared lists — re-pulling company here would
+  // stomp a currency the user picked while drafting this quote.
+  useLiveSync(() => {
+    crm.customers().then(setCustomers).catch(() => {});
+    loadTemplates();
+  });
 
   const totals = useMemo(
     () =>

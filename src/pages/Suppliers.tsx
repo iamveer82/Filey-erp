@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Users, Boxes, AlertTriangle, Package } from "lucide-react";
 import { erp, Product } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
 import { PageHeader, MetricCard, Card, Badge } from "../components/ui";
 
@@ -14,9 +15,12 @@ interface Group {
 export default function Suppliers() {
   const [products, setProducts] = useState<Product[]>([]);
 
-  useEffect(() => {
+  const load = () =>
     erp.products().then(setProducts).catch(console.error);
+  useEffect(() => {
+    load();
   }, []);
+  useLiveSync(load);
 
   const groups = useMemo<Group[]>(() => {
     const m = new Map<string, Group>();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate, num } from "../lib/format";
 import {
   PageHeader,
@@ -20,6 +21,7 @@ export default function Purchase() {
   useEffect(() => {
     load();
   }, []);
+  useLiveSync(load);
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const byCat = useMemo(() => {
