@@ -1,15 +1,9 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import {
-  NavLink,
-  Link,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
+import { NavLink, Link, useNavigate } from "react-router-dom";
 import { Bell, Search, ChevronDown, LogOut, X } from "lucide-react";
 import Logo from "./Logo";
 import { cn } from "../lib/format";
 import { useModules } from "../lib/modules";
-import { MODULES } from "../modules/registry";
 import { useAuth } from "../lib/auth";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 
@@ -28,7 +22,6 @@ const TONE_DOT: Record<string, string> = {
 };
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const loc = useLocation();
   const nav = useNavigate();
   const { profile, signOut } = useAuth();
   const { enabledModules } = useModules();
@@ -40,8 +33,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-  const current =
-    MODULES.find((m) => m.to === loc.pathname)?.label ?? "Overview";
 
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -315,13 +306,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </header>
 
         <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
-          <div className="pb-4 pr-1">
-            <p className="text-[11px] font-semibold text-brand-400 uppercase tracking-wide">
-              Filey
-            </p>
-            <h1 className="text-2xl font-bold text-ink mb-4">{current}</h1>
-            {children}
-          </div>
+          <div className="pb-4 pr-1">{children}</div>
         </main>
       </div>
     </div>
