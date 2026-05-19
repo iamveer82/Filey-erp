@@ -29,12 +29,9 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="px-5 py-5 border-b border-brand-100">
           <Link
             to="/overview"
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex items-center gap-2.5 cursor-pointer"
           >
-            <Logo
-              size={72}
-              className="transition-transform duration-200 group-hover:scale-105"
-            />
+            <Logo size={72} />
             <span className="leading-tight">
               <span className="block font-bold text-ink text-lg">Filey</span>
               <span className="block text-[11px] font-semibold text-brand-400">

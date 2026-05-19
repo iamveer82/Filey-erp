@@ -41,9 +41,14 @@
   summary {
     @apply cursor-pointer;
   }
-  /* Consistent keyboard focus ring app-wide. */
+  /* design.md §10: 2px solid focus ring in text color, 2px offset. */
   :focus-visible {
-    @apply outline-none ring-2 ring-primary-300 ring-offset-1;
+    @apply outline-none ring-2 ring-ink ring-offset-2;
+  }
+  /* design.md §7: Lucide icons at 1.75px stroke everywhere.
+     CSS beats the inline stroke-width="2" presentation attribute. */
+  svg.lucide {
+    stroke-width: 1.75;
   }
 }
 
@@ -56,10 +61,10 @@
     @apply rounded-2xl bg-white border border-brand-200 shadow-bento p-5
            transition-all duration-200;
   }
+  /* design.md §9: hover = shadow/border lift only, no translate/scale. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-primary-300
-           hover:-translate-y-0.5 cursor-pointer;
+    @apply hover:shadow-bento-hover hover:border-primary-300 cursor-pointer;
   }
   .card-dark {
     @apply rounded-2xl bg-ink text-white border border-ink shadow-bento p-5;
@@ -82,8 +87,7 @@
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-primary-400 px-4 text-sm font-semibold text-ink select-none
            transition-all duration-200 hover:bg-primary-500 hover:shadow-glow
-           active:translate-y-px focus:outline-none focus-visible:ring-2
-           focus-visible:ring-primary-300 focus-visible:ring-offset-1
+           active:translate-y-px focus:outline-none
            disabled:opacity-50 disabled:cursor-not-allowed
            disabled:hover:bg-primary-400 disabled:hover:shadow-none
            cursor-pointer;
@@ -92,8 +96,7 @@
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-primary-100 px-4 text-sm font-semibold text-primary-700
            select-none transition-colors duration-200 hover:bg-primary-200
-           active:translate-y-px focus:outline-none focus-visible:ring-2
-           focus-visible:ring-primary-300 disabled:opacity-50
+           active:translate-y-px focus:outline-none disabled:opacity-50
            disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-ghost {
@@ -101,15 +104,15 @@
            px-3.5 text-sm font-semibold text-brand-600 border border-brand-200
            bg-white/60 select-none transition-colors duration-200
            hover:bg-brand-50 hover:text-ink active:translate-y-px
-           focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300
-           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+           focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed
+           cursor-pointer;
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-danger px-4 text-sm font-semibold text-white select-none
            transition-colors duration-200 hover:opacity-90 active:translate-y-px
-           focus:outline-none focus-visible:ring-2 focus-visible:ring-danger
-           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+           focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed
+           cursor-pointer;
   }
 
   /* ── Form controls — shared 40px height so labels, inputs, selects
