@@ -906,7 +906,7 @@ function CustomerModal({
         </div>
         <Field label="Billing Address">
           <textarea
-            className="input"
+            className="textarea"
             rows={2}
             value={f.address}
             onChange={(e) => setF({ ...f, address: e.target.value })}

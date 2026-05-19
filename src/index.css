@@ -34,6 +34,17 @@
     background: #cfcfcf;
     border-radius: 8px;
   }
+  /* Every enabled control reads as clickable (a11y: cursor-pointer). */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for],
+  summary {
+    @apply cursor-pointer;
+  }
+  /* Consistent keyboard focus ring app-wide. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-300 ring-offset-1;
+  }
 }
 
 @layer components {

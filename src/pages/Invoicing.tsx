@@ -639,7 +639,7 @@ function Editor({
                 </Field>
                 <Field label="Billing Address">
                   <textarea
-                    className="input"
+                    className="textarea"
                     rows={4}
                     placeholder="Street, City, Country"
                     value={form.customer_address ?? ""}
@@ -893,14 +893,14 @@ function Editor({
                   <StickyNote size={15} /> Notes
                 </div>
                 <textarea
-                  className="input mt-3"
+                  className="textarea mt-3"
                   rows={3}
                   placeholder="Add notes for this invoice"
                   value={form.notes ?? ""}
                   onChange={(e) => set("notes", e.target.value)}
                 />
                 <textarea
-                  className="input mt-2"
+                  className="textarea mt-2"
                   rows={2}
                   placeholder="Payment terms"
                   value={form.terms ?? ""}
@@ -1146,7 +1146,7 @@ function CustomerModal({
         </div>
         <Field label="Billing Address">
           <textarea
-            className="input"
+            className="textarea"
             rows={2}
             value={f.address}
             onChange={(e) => setF({ ...f, address: e.target.value })}

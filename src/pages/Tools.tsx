@@ -1924,7 +1924,7 @@ function EmailPanel() {
           </Field>
           <Field label="Message">
             <textarea
-              className="input"
+              className="textarea"
               rows={5}
               value={c.body}
               onChange={(e) => setC({ ...c, body: e.target.value })}
