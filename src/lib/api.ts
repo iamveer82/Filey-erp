@@ -1264,6 +1264,11 @@ export const billing = {
       const row = clean(input as unknown as Record<string, unknown>);
       if (data) await sUpdate("company_profile", (data as any).id, row);
       else await sInsert("company_profile", row);
+      // Mirror the saved row into the local read-cache so the next
+      // billing.getCompany() (and any other page that loads the
+      // company profile) reflects the change immediately, even if the
+      // user goes offline or before realtime fans out.
+      await cacheSet(`${activeCacheOrg}:company_profile`, input);
     }),
 };
 

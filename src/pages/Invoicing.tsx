@@ -2007,8 +2007,16 @@ function CompanyModal({
         <button
           className="btn-primary"
           onClick={async () => {
-            await billing.saveCompany(c);
-            onSaved(c);
+            try {
+              await billing.saveCompany(c);
+              // Re-fetch so we apply exactly what the server persisted
+              // (server defaults, RLS-trimmed columns, etc.) to the
+              // invoice page and not just the locally-edited copy.
+              const fresh = await billing.getCompany();
+              onSaved(fresh);
+            } catch (e) {
+              alert(`Could not save company details: ${e}`);
+            }
           }}
         >
           Save Company
