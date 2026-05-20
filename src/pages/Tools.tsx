@@ -279,11 +279,16 @@ function CompanyDetails() {
       }
       setSaved(true);
     } catch (e) {
-      alert(
-        `Could not save company details: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
+      const msg =
+        e instanceof Error
+          ? e.message
+          : e && typeof e === "object"
+          ? (e as any).message ??
+            (e as any).details ??
+            (e as any).hint ??
+            JSON.stringify(e)
+          : String(e);
+      alert(`Could not save company details: ${msg}`);
     } finally {
       setSaving(false);
     }

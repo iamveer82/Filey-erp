@@ -760,7 +760,699 @@ const MIME: Record<string, string> = {
   pdf: "application/pdf",
   txt: "text/plain",
   csv: "text/csv",
+  json: "application/json",
 };
+
+/** Reverse the page order of a PDF. */
+export async function reversePdf(file: File): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const idx = src.getPageIndices().slice().reverse();
+  const out = await PDFDocument.create();
+  const pages = await out.copyPages(src, idx);
+  pages.forEach((p) => out.addPage(p));
+  return {
+    name: `${base(file.name)}-reversed.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Append a blank page sized to the last page (or A4 if empty). */
+export async function addBlankPage(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const count = doc.getPageCount();
+  if (count > 0) {
+    const last = doc.getPage(count - 1);
+    doc.addPage([last.getWidth(), last.getHeight()]);
+  } else {
+    doc.addPage([595.28, 841.89]);
+  }
+  return { name: `${base(file.name)}-blank.pdf`, bytes: await doc.save() };
+}
+
+/** Lay every N source pages onto one landscape sheet (2-up or 4-up). */
+export async function nupPdf(file: File, n: 2 | 4): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const total = src.getPageCount();
+  // A4 landscape sheet
+  const sw = 841.89;
+  const sh = 595.28;
+  const cols = n === 2 ? 2 : 2;
+  const rows = n === 2 ? 1 : 2;
+  const cellW = sw / cols;
+  const cellH = sh / rows;
+  for (let i = 0; i < total; i += n) {
+    const slice = src.getPageIndices().slice(i, i + n);
+    const embedded = await out.embedPages(slice.map((j) => src.getPage(j)));
+    const sheet = out.addPage([sw, sh]);
+    embedded.forEach((emb, k) => {
+      const c = k % cols;
+      const r = Math.floor(k / cols);
+      const pw = emb.width;
+      const ph = emb.height;
+      const scale = Math.min(cellW / pw, cellH / ph) * 0.95;
+      const drawW = pw * scale;
+      const drawH = ph * scale;
+      const x = c * cellW + (cellW - drawW) / 2;
+      const y = sh - (r + 1) * cellH + (cellH - drawH) / 2;
+      sheet.drawPage(emb, { x, y, xScale: scale, yScale: scale });
+    });
+  }
+  return {
+    name: `${base(file.name)}-${n}up.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Dump basic PDF info (page count, size, metadata) to a .txt file. */
+export async function pdfInfo(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const count = doc.getPageCount();
+  const sizes = doc.getPages().map((p) => {
+    return `${Math.round(p.getWidth())} × ${Math.round(p.getHeight())} pt`;
+  });
+  const unique = Array.from(new Set(sizes));
+  const lines: string[] = [];
+  lines.push(`File: ${file.name}`);
+  lines.push(`Size: ${(file.size / 1024).toFixed(1)} KB`);
+  lines.push(`Pages: ${count}`);
+  lines.push(`Page sizes: ${unique.join(", ")}`);
+  lines.push(`Title: ${doc.getTitle() ?? "—"}`);
+  lines.push(`Author: ${doc.getAuthor() ?? "—"}`);
+  lines.push(`Subject: ${doc.getSubject() ?? "—"}`);
+  lines.push(`Keywords: ${(doc.getKeywords() ?? "—").toString()}`);
+  lines.push(`Producer: ${doc.getProducer() ?? "—"}`);
+  lines.push(`Creator: ${doc.getCreator() ?? "—"}`);
+  lines.push(
+    `Created: ${doc.getCreationDate()?.toISOString() ?? "—"}`
+  );
+  lines.push(
+    `Modified: ${doc.getModificationDate()?.toISOString() ?? "—"}`
+  );
+  const text = lines.join("\n");
+  return {
+    name: `${base(file.name)}-info.txt`,
+    bytes: new TextEncoder().encode(text),
+  };
+}
+
+/** Convert a CSV file to a JSON array of row objects. */
+export async function csvToJson(file: File): Promise<OutFile> {
+  const rows = parseCsv(await file.text());
+  if (rows.length < 1) throw new Error("That CSV file looks empty.");
+  const header = rows[0].map((h) => h.trim() || "_");
+  const body = rows.slice(1).map((r) => {
+    const obj: Record<string, string> = {};
+    header.forEach((k, i) => (obj[k] = r[i] ?? ""));
+    return obj;
+  });
+  const json = JSON.stringify(body, null, 2);
+  return {
+    name: `${nameStem(file.name)}.json`,
+    bytes: new TextEncoder().encode(json),
+  };
+}
+
+/** Convert a JSON array of flat objects to CSV. */
+export async function jsonToCsv(file: File): Promise<OutFile> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch (e) {
+    throw new Error(
+      `Invalid JSON: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  if (!Array.isArray(parsed) || !parsed.length)
+    throw new Error("JSON must be a non-empty array of objects.");
+  const keys = Array.from(
+    new Set(
+      parsed.flatMap((r) =>
+        r && typeof r === "object" ? Object.keys(r as object) : []
+      )
+    )
+  );
+  if (!keys.length)
+    throw new Error("JSON entries must be objects with at least one field.");
+  const esc = (v: unknown) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [keys.join(",")];
+  for (const row of parsed) {
+    const r = row as Record<string, unknown>;
+    lines.push(keys.map((k) => esc(r?.[k])).join(","));
+  }
+  return {
+    name: `${nameStem(file.name)}.csv`,
+    bytes: new TextEncoder().encode(lines.join("\n")),
+  };
+}
+
+/** Split each page horizontally or vertically into two pages. */
+export async function dividePages(
+  file: File,
+  axis: "h" | "v"
+): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const embedded = await out.embedPages(src.getPages());
+  embedded.forEach((emb) => {
+    const w = emb.width;
+    const h = emb.height;
+    if (axis === "h") {
+      // top half + bottom half
+      const top = out.addPage([w, h / 2]);
+      top.drawPage(emb, { x: 0, y: -h / 2, xScale: 1, yScale: 1 });
+      const bot = out.addPage([w, h / 2]);
+      bot.drawPage(emb, { x: 0, y: 0, xScale: 1, yScale: 1 });
+    } else {
+      // left half + right half
+      const left = out.addPage([w / 2, h]);
+      left.drawPage(emb, { x: 0, y: 0, xScale: 1, yScale: 1 });
+      const right = out.addPage([w / 2, h]);
+      right.drawPage(emb, { x: -w / 2, y: 0, xScale: 1, yScale: 1 });
+    }
+  });
+  return {
+    name: `${base(file.name)}-divided.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Stitch every page into one tall page (preserves widest width). */
+export async function combineToSinglePage(file: File): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const embedded = await out.embedPages(src.getPages());
+  const width = Math.max(...embedded.map((e) => e.width));
+  const totalH = embedded.reduce((s, e) => s + e.height, 0);
+  const sheet = out.addPage([width, totalH]);
+  let y = totalH;
+  for (const emb of embedded) {
+    y -= emb.height;
+    sheet.drawPage(emb, { x: (width - emb.width) / 2, y });
+  }
+  return {
+    name: `${base(file.name)}-single.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Interleave pages from multiple PDFs (A1,B1,C1,A2,B2,…). */
+export async function alternateMerge(files: File[]): Promise<OutFile> {
+  if (!files.length) throw new Error("Add at least one PDF.");
+  const docs = await Promise.all(files.map(loadDoc));
+  const out = await PDFDocument.create();
+  const max = Math.max(...docs.map((d) => d.getPageCount()));
+  for (let i = 0; i < max; i++) {
+    for (const d of docs) {
+      if (i < d.getPageCount()) {
+        const [p] = await out.copyPages(d, [i]);
+        out.addPage(p);
+      }
+    }
+  }
+  return { name: `interleaved.pdf`, bytes: await out.save() };
+}
+
+/** Crop margins by an inset percentage (0–40). */
+export async function cropPdf(
+  file: File,
+  marginPct: number
+): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const pct = Math.max(0, Math.min(40, marginPct)) / 100;
+  doc.getPages().forEach((p) => {
+    const w = p.getWidth();
+    const h = p.getHeight();
+    const dx = w * pct;
+    const dy = h * pct;
+    p.setCropBox(dx, dy, w - dx * 2, h - dy * 2);
+  });
+  return {
+    name: `${base(file.name)}-cropped.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+/** Strip every annotation from every page. */
+export async function removeAnnotations(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const { PDFName } = await import("pdf-lib");
+  doc.getPages().forEach((p) => {
+    p.node.delete(PDFName.of("Annots"));
+  });
+  return {
+    name: `${base(file.name)}-clean.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+/** Add header / footer text on every page. */
+export async function addHeaderFooter(
+  file: File,
+  header: string,
+  footer: string
+): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const size = 9;
+  doc.getPages().forEach((p) => {
+    const w = p.getWidth();
+    const h = p.getHeight();
+    if (header.trim()) {
+      const tw = font.widthOfTextAtSize(header, size);
+      p.drawText(header, {
+        x: w / 2 - tw / 2,
+        y: h - 18,
+        size,
+        font,
+        color: rgb(0.35, 0.35, 0.35),
+      });
+    }
+    if (footer.trim()) {
+      const tw = font.widthOfTextAtSize(footer, size);
+      p.drawText(footer, {
+        x: w / 2 - tw / 2,
+        y: 10,
+        size,
+        font,
+        color: rgb(0.35, 0.35, 0.35),
+      });
+    }
+  });
+  return {
+    name: `${base(file.name)}-headed.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+export type StampKind = "approved" | "rejected" | "draft" | "confidential" | "paid";
+const STAMP_COLOR: Record<StampKind, [number, number, number]> = {
+  approved: [0.2, 0.6, 0.2],
+  rejected: [0.85, 0.18, 0.18],
+  draft: [0.45, 0.45, 0.45],
+  confidential: [0.85, 0.18, 0.18],
+  paid: [0.2, 0.55, 0.4],
+};
+/** Diagonal coloured stamp ("APPROVED", "REJECTED", etc.) on every page. */
+export async function addStamp(file: File, kind: StampKind): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const font = await doc.embedFont(StandardFonts.HelveticaBold);
+  const label = kind.toUpperCase();
+  const [r, g, b] = STAMP_COLOR[kind] ?? [0.5, 0.5, 0.5];
+  doc.getPages().forEach((p) => {
+    const w = p.getWidth();
+    const h = p.getHeight();
+    const diag = Math.hypot(w, h);
+    let size = 80;
+    while (size > 14 && font.widthOfTextAtSize(label, size) > diag * 0.6)
+      size -= 4;
+    const tw = font.widthOfTextAtSize(label, size);
+    const rad = (30 * Math.PI) / 180;
+    p.drawText(label, {
+      x: w / 2 - (tw / 2) * Math.cos(rad),
+      y: h / 2 - (tw / 2) * Math.sin(rad),
+      size,
+      font,
+      color: rgb(r, g, b),
+      rotate: degrees(30),
+      opacity: 0.45,
+    });
+  });
+  return {
+    name: `${base(file.name)}-${kind}.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+/** Embed a signature image (PNG/JPG data URL) at bottom-right of last page. */
+export async function signPdf(
+  file: File,
+  signatureDataUrl: string
+): Promise<OutFile> {
+  if (!signatureDataUrl) throw new Error("Provide a signature image.");
+  const doc = await loadDoc(file);
+  const pages = doc.getPages();
+  if (!pages.length) throw new Error("PDF has no pages.");
+  const isPng = signatureDataUrl.startsWith("data:image/png");
+  const b64 = signatureDataUrl.split(",")[1] ?? "";
+  const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const img = isPng ? await doc.embedPng(raw) : await doc.embedJpg(raw);
+  const target = pages[pages.length - 1];
+  const w = Math.min(180, target.getWidth() * 0.3);
+  const h = (w / img.width) * img.height;
+  target.drawImage(img, {
+    x: target.getWidth() - w - 40,
+    y: 40,
+    width: w,
+    height: h,
+  });
+  return {
+    name: `${base(file.name)}-signed.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+/** Strip Title/Author/Subject/Keywords/Producer/Creator metadata. */
+export async function removeMetadata(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  doc.setTitle("");
+  doc.setAuthor("");
+  doc.setSubject("");
+  doc.setKeywords([]);
+  doc.setProducer("");
+  doc.setCreator("");
+  doc.setCreationDate(new Date(0));
+  doc.setModificationDate(new Date());
+  return {
+    name: `${base(file.name)}-nometa.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
+/** Sanitize: strip metadata + annotations + clear document outline. */
+export async function sanitizePdf(file: File): Promise<OutFile> {
+  const cleaned = await removeAnnotations(file);
+  const noMetaFile = new File([cleaned.bytes.slice()], file.name, {
+    type: "application/pdf",
+  });
+  return removeMetadata(noMetaFile);
+}
+
+/** Resize every page to A4 portrait (or landscape if originally landscape). */
+export async function fixPageSizeA4(file: File): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const A4 = { w: 595.28, h: 841.89 };
+  const embedded = await out.embedPages(src.getPages());
+  embedded.forEach((emb) => {
+    const isLand = emb.width > emb.height;
+    const tw = isLand ? A4.h : A4.w;
+    const th = isLand ? A4.w : A4.h;
+    const scale = Math.min(tw / emb.width, th / emb.height);
+    const dw = emb.width * scale;
+    const dh = emb.height * scale;
+    const page = out.addPage([tw, th]);
+    page.drawPage(emb, {
+      x: (tw - dw) / 2,
+      y: (th - dh) / 2,
+      xScale: scale,
+      yScale: scale,
+    });
+  });
+  return {
+    name: `${base(file.name)}-a4.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Re-save without object streams — closer to legacy "linearized" output. */
+export async function linearizePdf(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  return {
+    name: `${base(file.name)}-linear.pdf`,
+    bytes: await doc.save({ useObjectStreams: false }),
+  };
+}
+
+/** Pretty-print JSON as a paginated PDF. */
+export async function jsonToPdf(file: File): Promise<OutFile> {
+  const text = await file.text();
+  let pretty: string;
+  try {
+    pretty = JSON.stringify(JSON.parse(text), null, 2);
+  } catch (e) {
+    throw new Error(
+      `Invalid JSON: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+  const blob = new Blob([pretty], { type: "text/plain" });
+  const stub = new File([blob], `${nameStem(file.name)}.txt`, {
+    type: "text/plain",
+  });
+  return textToPdf(stub);
+}
+
+/** Markdown → PDF (plain-text rendering; preserves structure visually). */
+export async function markdownToPdf(file: File): Promise<OutFile> {
+  return textToPdf(file);
+}
+
+/** Extract every page's text + basic metadata as JSON. */
+export async function pdfToJsonText(file: File): Promise<OutFile> {
+  const data = new Uint8Array(await readBuf(file));
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const doc = await loadDoc(file);
+  const pages: { page: number; text: string }[] = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const tc = await page.getTextContent();
+    const txt = tc.items
+      .map((it: any) => ("str" in it ? it.str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    pages.push({ page: n, text: txt });
+  }
+  const payload = {
+    file: file.name,
+    pages: pdf.numPages,
+    title: doc.getTitle() ?? null,
+    author: doc.getAuthor() ?? null,
+    subject: doc.getSubject() ?? null,
+    keywords: doc.getKeywords() ?? null,
+    content: pages,
+  };
+  return {
+    name: `${nameStem(file.name)}.json`,
+    bytes: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
+  };
+}
+
+/** Render each page to an image format (JPG/PNG/WebP/BMP). */
+export async function pdfToImageFormat(
+  file: File,
+  format: "png" | "jpeg" | "webp" | "bmp",
+  scale = 2
+): Promise<OutFile[]> {
+  const data = new Uint8Array(await readBuf(file));
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const out: OutFile[] = [];
+  const mime =
+    format === "bmp" ? "image/bmp" :
+    format === "jpeg" ? "image/jpeg" : `image/${format}`;
+  const ext = format === "jpeg" ? "jpg" : format;
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    if (format === "jpeg" || format === "bmp") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob: Blob | null = await new Promise((res) =>
+      canvas.toBlob((b) => res(b), mime, format === "jpeg" ? 0.92 : undefined)
+    );
+    if (!blob) throw new Error(`Browser cannot encode ${format}.`);
+    out.push({
+      name: `${base(file.name)}-p${n}.${ext}`,
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+    });
+  }
+  return out;
+}
+
+/** Render every page through a canvas filter (greyscale or invert). */
+async function rasterTransform(
+  file: File,
+  mode: "grey" | "invert",
+  scale = 2
+): Promise<OutFile> {
+  const data = new Uint8Array(await readBuf(file));
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const out = await PDFDocument.create();
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = img.data;
+    if (mode === "grey") {
+      for (let i = 0; i < px.length; i += 4) {
+        const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        px[i] = px[i + 1] = px[i + 2] = g;
+      }
+    } else {
+      for (let i = 0; i < px.length; i += 4) {
+        px[i] = 255 - px[i];
+        px[i + 1] = 255 - px[i + 1];
+        px[i + 2] = 255 - px[i + 2];
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const blob: Blob = await new Promise((res) =>
+      canvas.toBlob((b) => res(b!), "image/png")
+    );
+    const buf = await blob.arrayBuffer();
+    const embedded = await out.embedPng(buf);
+    const ow = viewport.width / scale;
+    const oh = viewport.height / scale;
+    const sheet = out.addPage([ow, oh]);
+    sheet.drawImage(embedded, { x: 0, y: 0, width: ow, height: oh });
+  }
+  return {
+    name: `${base(file.name)}-${mode === "grey" ? "grey" : "inverted"}.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+export const greyscalePdf = (file: File) => rasterTransform(file, "grey");
+export const invertColors = (file: File) => rasterTransform(file, "invert");
+
+/** Remove pages with effectively no text and near-blank pixel content. */
+export async function removeBlankPages(file: File): Promise<OutFile> {
+  const data = new Uint8Array(await readBuf(file));
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const keep: number[] = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const tc = await page.getTextContent();
+    const txt = tc.items
+      .map((it: any) => ("str" in it ? it.str : ""))
+      .join("")
+      .trim();
+    if (txt.length > 0) {
+      keep.push(n - 1);
+      continue;
+    }
+    const viewport = page.getViewport({ scale: 0.5 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let inked = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i] + px[i + 1] + px[i + 2] < 720) inked++;
+      if (inked > 200) break;
+    }
+    if (inked > 200) keep.push(n - 1);
+  }
+  if (!keep.length) throw new Error("Every page looks blank.");
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(src, keep);
+  copied.forEach((p) => out.addPage(p));
+  return {
+    name: `${base(file.name)}-trimmed.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Reorder pages for saddle-stitch booklet (4-up imposition). */
+export async function bookletOrder(file: File): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const total = src.getPageCount();
+  if (total < 2) throw new Error("Need at least 2 pages for a booklet.");
+  // Pad page count to multiple of 4 with blank pages, then impose.
+  const padded = total + ((4 - (total % 4)) % 4);
+  const order: number[] = [];
+  let left = 0;
+  let right = padded - 1;
+  while (left < right) {
+    order.push(right, left, left + 1, right - 1);
+    left += 2;
+    right -= 2;
+  }
+  const out = await PDFDocument.create();
+  // Build the padded source (real pages then blanks at the end).
+  const padDoc = await PDFDocument.create();
+  const firstSize = src.getPage(0);
+  const pw = firstSize.getWidth();
+  const ph = firstSize.getHeight();
+  const realCopied = await padDoc.copyPages(src, src.getPageIndices());
+  realCopied.forEach((p) => padDoc.addPage(p));
+  for (let i = total; i < padded; i++) padDoc.addPage([pw, ph]);
+  // 2-up onto landscape sheets following the imposition order.
+  const sw = ph; // landscape
+  const sh = pw;
+  for (let i = 0; i < order.length; i += 2) {
+    const pages = order.slice(i, i + 2).map((idx) => padDoc.getPage(idx));
+    const embedded = await out.embedPages(pages);
+    const sheet = out.addPage([sw * 1, sh * 1]);
+    // pdf-lib swap not needed: use real values
+    embedded.forEach((emb, k) => {
+      const scale = Math.min((sw / 2) / emb.width, sh / emb.height) * 0.96;
+      const drawW = emb.width * scale;
+      const drawH = emb.height * scale;
+      const x = k * (sw / 2) + (sw / 2 - drawW) / 2;
+      const y = (sh - drawH) / 2;
+      sheet.drawPage(emb, { x, y, xScale: scale, yScale: scale });
+    });
+  }
+  return {
+    name: `${base(file.name)}-booklet.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Split each page into N×N tiles for poster printing. */
+export async function posterizePdf(
+  file: File,
+  tiles: 2 | 3 | 4 = 2
+): Promise<OutFile> {
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const embedded = await out.embedPages(src.getPages());
+  for (const emb of embedded) {
+    const w = emb.width;
+    const h = emb.height;
+    const tw = w / tiles;
+    const th = h / tiles;
+    for (let r = tiles - 1; r >= 0; r--) {
+      for (let c = 0; c < tiles; c++) {
+        const tile = out.addPage([tw, th]);
+        tile.drawPage(emb, { x: -c * tw, y: -r * th });
+      }
+    }
+  }
+  return {
+    name: `${base(file.name)}-poster.pdf`,
+    bytes: await out.save(),
+  };
+}
+
+/** Page dimensions report (.txt). */
+export async function pageDimensionsText(file: File): Promise<OutFile> {
+  const doc = await loadDoc(file);
+  const lines: string[] = [`File: ${file.name}`, ""];
+  doc.getPages().forEach((p, i) => {
+    lines.push(
+      `Page ${i + 1}: ${Math.round(p.getWidth())} × ${Math.round(
+        p.getHeight()
+      )} pt`
+    );
+  });
+  return {
+    name: `${base(file.name)}-pages.txt`,
+    bytes: new TextEncoder().encode(lines.join("\n")),
+  };
+}
 
 export function downloadFile(f: OutFile) {
   const ext = f.name.split(".").pop()?.toLowerCase() ?? "";

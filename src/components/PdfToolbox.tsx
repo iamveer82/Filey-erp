@@ -23,6 +23,29 @@ import {
   Loader2,
   X,
   CheckCircle2,
+  ArrowDownUp,
+  FilePlus,
+  Columns2,
+  Braces,
+  FileJson,
+  Search,
+  SplitSquareHorizontal,
+  AlignVerticalSpaceBetween,
+  Shuffle,
+  Crop,
+  PanelTopOpen,
+  CheckCircle,
+  Eraser,
+  Grid3X3,
+  BookOpen,
+  Ruler,
+  Maximize,
+  Zap,
+  Shield,
+  Eye,
+  Contrast,
+  Droplet,
+  FileCode2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
@@ -42,14 +65,31 @@ type Param =
   | "rasterScale"
   | "rasterGray"
   | "metaTitle"
-  | "metaAuthor";
+  | "metaAuthor"
+  | "n"
+  | "axis"
+  | "marginPct"
+  | "header"
+  | "footer"
+  | "stampKind"
+  | "tiles"
+  | "imgOutFmt";
+
+export type ToolCat =
+  | "Organize"
+  | "Edit"
+  | "To PDF"
+  | "From PDF"
+  | "Optimize"
+  | "Secure"
+  | "Data";
 
 export interface Tool {
   id: string;
   name: string;
   desc: string;
   icon: LucideIcon;
-  cat: "Organize" | "Convert" | "Edit" | "Optimize";
+  cat: ToolCat;
   multi?: boolean;
   accept: string;
   params: Param[];
@@ -119,7 +159,7 @@ export const PDF_TOOLS: Tool[] = [
     name: "Images → PDF",
     desc: "Turn JPG / PNG images into a PDF",
     icon: ImageIcon,
-    cat: "Convert",
+    cat: "To PDF",
     multi: true,
     accept: "image/png,image/jpeg",
     params: [],
@@ -128,19 +168,23 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "pdf2img",
     name: "PDF → Images",
-    desc: "Render every page to a PNG image",
+    desc: "Render every page to PNG / JPG / WebP / BMP",
     icon: FileImage,
-    cat: "Convert",
+    cat: "From PDF",
     accept: "application/pdf",
-    params: [],
-    run: (f) => pdf.pdfToImages(f[0]),
+    params: ["imgOutFmt"],
+    run: (f, p) =>
+      pdf.pdfToImageFormat(
+        f[0],
+        (p.imgOutFmt as "png" | "jpeg" | "webp" | "bmp") || "png"
+      ),
   },
   {
     id: "svg2img",
     name: "SVG Converter",
     desc: "Convert SVG to PNG, JPG, WebP or PDF",
     icon: Shapes,
-    cat: "Convert",
+    cat: "Data",
     accept: "image/svg+xml,.svg",
     params: ["svgFormat", "svgScale"],
     run: async (f, p) => [
@@ -156,7 +200,7 @@ export const PDF_TOOLS: Tool[] = [
     name: "Image → SVG (Vectorize)",
     desc: "High-quality VTracer raster → vector (PNG/JPG → SVG)",
     icon: PenTool,
-    cat: "Convert",
+    cat: "Data",
     accept: "image/png,image/jpeg,image/webp",
     params: ["tracePreset"],
     run: async (f, p) => [
@@ -189,7 +233,7 @@ export const PDF_TOOLS: Tool[] = [
     name: "PDF → Text",
     desc: "Extract the text layer to a .txt file",
     icon: FileText,
-    cat: "Convert",
+    cat: "From PDF",
     accept: "application/pdf",
     params: [],
     run: async (f) => [await pdf.pdfToText(f[0])],
@@ -199,7 +243,7 @@ export const PDF_TOOLS: Tool[] = [
     name: "Text → PDF",
     desc: "Lay a .txt / .md file out as an A4 PDF",
     icon: FileType,
-    cat: "Convert",
+    cat: "To PDF",
     accept: "text/plain,text/markdown,.txt,.md",
     params: [],
     run: async (f) => [await pdf.textToPdf(f[0])],
@@ -209,7 +253,7 @@ export const PDF_TOOLS: Tool[] = [
     name: "CSV → PDF Table",
     desc: "Render a CSV as a printable table",
     icon: Table,
-    cat: "Convert",
+    cat: "To PDF",
     accept: "text/csv,.csv",
     params: [],
     run: async (f) => [await pdf.csvToPdf(f[0])],
@@ -272,9 +316,302 @@ export const PDF_TOOLS: Tool[] = [
     params: [],
     run: async (f) => [await pdf.compressPdf(f[0])],
   },
+  {
+    id: "reverse",
+    name: "Reverse Pages",
+    desc: "Flip the page order — last page first",
+    icon: ArrowDownUp,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.reversePdf(f[0])],
+  },
+  {
+    id: "blank",
+    name: "Add Blank Page",
+    desc: "Append a blank page sized to match the last",
+    icon: FilePlus,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.addBlankPage(f[0])],
+  },
+  {
+    id: "nup",
+    name: "Booklet (N-up)",
+    desc: "Lay 2 or 4 pages on one landscape sheet",
+    icon: Columns2,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: ["n"],
+    run: async (f, p) => [
+      await pdf.nupPdf(f[0], (parseInt(p.n || "2", 10) === 4 ? 4 : 2) as 2 | 4),
+    ],
+  },
+  {
+    id: "pdf-info",
+    name: "PDF Info",
+    desc: "Dump page count, sizes & metadata to a .txt",
+    icon: Search,
+    cat: "From PDF",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.pdfInfo(f[0])],
+  },
+  {
+    id: "csv2json",
+    name: "CSV → JSON",
+    desc: "Convert a CSV file to a JSON array",
+    icon: Braces,
+    cat: "Data",
+    accept: "text/csv,.csv",
+    params: [],
+    run: async (f) => [await pdf.csvToJson(f[0])],
+  },
+  {
+    id: "json2csv",
+    name: "JSON → CSV",
+    desc: "Convert a JSON array of objects to CSV",
+    icon: FileJson,
+    cat: "Data",
+    accept: "application/json,.json",
+    params: [],
+    run: async (f) => [await pdf.jsonToCsv(f[0])],
+  },
+  // ===== Organize additions =====
+  {
+    id: "divide",
+    name: "Divide Pages",
+    desc: "Split each page horizontally or vertically into two",
+    icon: SplitSquareHorizontal,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: ["axis"],
+    run: async (f, p) => [
+      await pdf.dividePages(f[0], (p.axis as "h" | "v") || "h"),
+    ],
+  },
+  {
+    id: "combine-single",
+    name: "Combine to Single Page",
+    desc: "Stitch every page into one tall continuous page",
+    icon: AlignVerticalSpaceBetween,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.combineToSinglePage(f[0])],
+  },
+  {
+    id: "alternate",
+    name: "Alternate Merge",
+    desc: "Interleave pages from multiple PDFs (A1,B1,A2,B2…)",
+    icon: Shuffle,
+    cat: "Organize",
+    multi: true,
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.alternateMerge(f)],
+  },
+  {
+    id: "posterize",
+    name: "Posterize",
+    desc: "Tile each page into N×N printable sheets",
+    icon: Grid3X3,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: ["tiles"],
+    run: async (f, p) => [
+      await pdf.posterizePdf(
+        f[0],
+        (parseInt(p.tiles || "2", 10) as 2 | 3 | 4) || 2
+      ),
+    ],
+  },
+  {
+    id: "booklet",
+    name: "PDF Booklet",
+    desc: "Reorder for saddle-stitch booklet printing (2-up)",
+    icon: BookOpen,
+    cat: "Organize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.bookletOrder(f[0])],
+  },
+  // ===== Edit additions =====
+  {
+    id: "crop",
+    name: "Crop PDF",
+    desc: "Trim a percentage off all sides via crop box",
+    icon: Crop,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: ["marginPct"],
+    run: async (f, p) => [
+      await pdf.cropPdf(f[0], parseInt(p.marginPct || "5", 10)),
+    ],
+  },
+  {
+    id: "header-footer",
+    name: "Header & Footer",
+    desc: "Add running header and footer text on every page",
+    icon: PanelTopOpen,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: ["header", "footer"],
+    run: async (f, p) => [
+      await pdf.addHeaderFooter(f[0], p.header || "", p.footer || ""),
+    ],
+  },
+  {
+    id: "stamp",
+    name: "Add Stamp",
+    desc: "Apply Approved / Rejected / Paid / Draft / Confidential",
+    icon: CheckCircle,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: ["stampKind"],
+    run: async (f, p) => [
+      await pdf.addStamp(
+        f[0],
+        (p.stampKind as pdf.StampKind) || "approved"
+      ),
+    ],
+  },
+  {
+    id: "remove-annots",
+    name: "Remove Annotations",
+    desc: "Strip every annotation, highlight and comment",
+    icon: Eraser,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.removeAnnotations(f[0])],
+  },
+  {
+    id: "remove-blank",
+    name: "Remove Blank Pages",
+    desc: "Auto-detect and drop empty pages",
+    icon: Eraser,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.removeBlankPages(f[0])],
+  },
+  {
+    id: "greyscale",
+    name: "PDF → Greyscale",
+    desc: "Re-render every page in black and white",
+    icon: Droplet,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.greyscalePdf(f[0])],
+  },
+  {
+    id: "invert",
+    name: "Invert Colors",
+    desc: "Create a dark-mode style negative",
+    icon: Contrast,
+    cat: "Edit",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.invertColors(f[0])],
+  },
+  // ===== To PDF additions =====
+  {
+    id: "json2pdf",
+    name: "JSON → PDF",
+    desc: "Pretty-print JSON onto an A4 PDF",
+    icon: FileCode2,
+    cat: "To PDF",
+    accept: "application/json,.json",
+    params: [],
+    run: async (f) => [await pdf.jsonToPdf(f[0])],
+  },
+  {
+    id: "md2pdf",
+    name: "Markdown → PDF",
+    desc: "Lay a Markdown file out as a plain A4 PDF",
+    icon: FileType,
+    cat: "To PDF",
+    accept: "text/markdown,.md",
+    params: [],
+    run: async (f) => [await pdf.markdownToPdf(f[0])],
+  },
+  // ===== From PDF additions =====
+  {
+    id: "pdf2json",
+    name: "PDF → JSON",
+    desc: "Extract per-page text and metadata as JSON",
+    icon: Braces,
+    cat: "From PDF",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.pdfToJsonText(f[0])],
+  },
+  {
+    id: "page-dims",
+    name: "Page Dimensions",
+    desc: "List every page's width × height (.txt report)",
+    icon: Ruler,
+    cat: "From PDF",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.pageDimensionsText(f[0])],
+  },
+  // ===== Optimize additions =====
+  {
+    id: "fix-a4",
+    name: "Fix Page Size (A4)",
+    desc: "Resize every page to A4 portrait / landscape",
+    icon: Maximize,
+    cat: "Optimize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.fixPageSizeA4(f[0])],
+  },
+  {
+    id: "linearize",
+    name: "Linearize PDF",
+    desc: "Re-save without object streams for fast web view",
+    icon: Zap,
+    cat: "Optimize",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.linearizePdf(f[0])],
+  },
+  // ===== Secure =====
+  {
+    id: "sanitize",
+    name: "Sanitize PDF",
+    desc: "Strip annotations, metadata and embedded scripts",
+    icon: Shield,
+    cat: "Secure",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.sanitizePdf(f[0])],
+  },
+  {
+    id: "remove-meta",
+    name: "Remove Metadata",
+    desc: "Erase title, author, dates and producer info",
+    icon: Eye,
+    cat: "Secure",
+    accept: "application/pdf",
+    params: [],
+    run: async (f) => [await pdf.removeMetadata(f[0])],
+  },
 ];
 
-export const PDF_CATS = ["Organize", "Edit", "Convert", "Optimize"] as const;
+export const PDF_CATS = [
+  "Organize",
+  "Edit",
+  "To PDF",
+  "From PDF",
+  "Optimize",
+  "Secure",
+  "Data",
+] as const;
 
 export function toolById(id: string) {
   return PDF_TOOLS.find((t) => t.id === id);
@@ -304,6 +641,18 @@ export function ToolRunner({
       ? { imgFormat: "keep", imgQuality: "80", imgMaxW: "0" }
       : tool.id === "pdf-flatten"
       ? { rasterScale: "2", rasterGray: "no" }
+      : tool.id === "nup"
+      ? { n: "2" }
+      : tool.id === "divide"
+      ? { axis: "h" }
+      : tool.id === "crop"
+      ? { marginPct: "5" }
+      : tool.id === "stamp"
+      ? { stampKind: "approved" }
+      : tool.id === "posterize"
+      ? { tiles: "2" }
+      : tool.id === "pdf2img"
+      ? { imgOutFmt: "png" }
       : {}
   );
   const [busy, setBusy] = useState(false);
@@ -611,6 +960,128 @@ export function ToolRunner({
                   setParams({ ...params, metaAuthor: e.target.value })
                 }
               />
+            </div>
+          )}
+          {tool.params.includes("n") && (
+            <div>
+              <label className="label">Pages per sheet</label>
+              <select
+                className="select"
+                value={params.n ?? "2"}
+                onChange={(e) =>
+                  setParams({ ...params, n: e.target.value })
+                }
+              >
+                <option value="2">2-up (booklet)</option>
+                <option value="4">4-up (handout)</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("axis") && (
+            <div>
+              <label className="label">Split direction</label>
+              <select
+                className="select"
+                value={params.axis ?? "h"}
+                onChange={(e) =>
+                  setParams({ ...params, axis: e.target.value })
+                }
+              >
+                <option value="h">Horizontal (top / bottom)</option>
+                <option value="v">Vertical (left / right)</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("marginPct") && (
+            <div>
+              <label className="label">Trim percent (0–40)</label>
+              <input
+                type="number"
+                min={0}
+                max={40}
+                className="input"
+                value={params.marginPct ?? "5"}
+                onChange={(e) =>
+                  setParams({ ...params, marginPct: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("header") && (
+            <div>
+              <label className="label">Header text</label>
+              <input
+                className="input"
+                placeholder="Top of each page"
+                value={params.header ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, header: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("footer") && (
+            <div>
+              <label className="label">Footer text</label>
+              <input
+                className="input"
+                placeholder="Bottom of each page"
+                value={params.footer ?? ""}
+                onChange={(e) =>
+                  setParams({ ...params, footer: e.target.value })
+                }
+              />
+            </div>
+          )}
+          {tool.params.includes("stampKind") && (
+            <div>
+              <label className="label">Stamp</label>
+              <select
+                className="select"
+                value={params.stampKind ?? "approved"}
+                onChange={(e) =>
+                  setParams({ ...params, stampKind: e.target.value })
+                }
+              >
+                <option value="approved">APPROVED — green</option>
+                <option value="rejected">REJECTED — red</option>
+                <option value="draft">DRAFT — grey</option>
+                <option value="confidential">CONFIDENTIAL — red</option>
+                <option value="paid">PAID — green</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("tiles") && (
+            <div>
+              <label className="label">Tiles per side</label>
+              <select
+                className="select"
+                value={params.tiles ?? "2"}
+                onChange={(e) =>
+                  setParams({ ...params, tiles: e.target.value })
+                }
+              >
+                <option value="2">2 × 2 (4 sheets)</option>
+                <option value="3">3 × 3 (9 sheets)</option>
+                <option value="4">4 × 4 (16 sheets)</option>
+              </select>
+            </div>
+          )}
+          {tool.params.includes("imgOutFmt") && (
+            <div>
+              <label className="label">Image format</label>
+              <select
+                className="select"
+                value={params.imgOutFmt ?? "png"}
+                onChange={(e) =>
+                  setParams({ ...params, imgOutFmt: e.target.value })
+                }
+              >
+                <option value="png">PNG (lossless, transparent)</option>
+                <option value="jpeg">JPG (smallest, white bg)</option>
+                <option value="webp">WebP</option>
+                <option value="bmp">BMP</option>
+              </select>
             </div>
           )}
         </div>

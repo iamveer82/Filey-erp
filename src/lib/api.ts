@@ -1359,13 +1359,15 @@ export const billing = {
       );
     await flushOutbox();
     const uid = await currentUid();
-    let sel: any = sb().from("company_profile").select("id");
-    if (uid) sel = sel.eq("user_id", uid);
-    const { data, error: selError } = await sel.maybeSingle();
-    if (selError) throw selError;
-    const row = clean(input as unknown as Record<string, unknown>);
-    if (data) await sUpdate("company_profile", (data as any).id, row);
-    else await sInsert("company_profile", row);
+    if (!uid) throw new Error("Not signed in. Cannot save company details.");
+    const row = {
+      ...clean(input as unknown as Record<string, unknown>),
+      user_id: uid,
+    };
+    const { error } = await sb()
+      .from("company_profile")
+      .upsert(row, { onConflict: "user_id" });
+    if (error) throw error;
     await cacheSet(`${activeCacheOrg}:company_profile`, input);
   },
 };

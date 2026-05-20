@@ -2020,7 +2020,16 @@ function CompanyModal({
               }
               onSaved(fresh);
             } catch (e) {
-              alert(`Could not save company details: ${e}`);
+              const msg =
+                e instanceof Error
+                  ? e.message
+                  : e && typeof e === "object"
+                  ? (e as any).message ??
+                    (e as any).details ??
+                    (e as any).hint ??
+                    JSON.stringify(e)
+                  : String(e);
+              alert(`Could not save company details: ${msg}`);
             }
           }}
         >
