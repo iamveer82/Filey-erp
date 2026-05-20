@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+/** A4 portrait at 96dpi: 210mm × 297mm = 794 × 1123 px (ratio 1:√2). */
+const A4_RATIO = 297 / 210; // ≈ 1.4142
+
 /**
- * Renders the invoice "paper" at its true size: zoom = 100 ⇒ the page
- * at native A4 scale (never shrunk to fit the column); the zoom control
- * multiplies on top. The container scrolls both axes when the sheet is
- * larger than the available area. Reserves correctly-sized layout space
- * for the transform-scaled sheet so scrollbars track the real size.
+ * Renders the invoice "paper" at true A4 portrait dimensions:
+ * the sheet is always sized to A4 (baseWidth × baseWidth·√2) and is
+ * scaled via transform by the zoom control. The container reserves
+ * the correct layout space for the scaled sheet and scrolls when the
+ * page outgrows it.
  */
 export default function FitPreview({
   baseWidth,
@@ -17,12 +20,14 @@ export default function FitPreview({
   children: ReactNode;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
-  const [contentH, setContentH] = useState(1075);
+  const a4Height = Math.round(baseWidth * A4_RATIO);
+  const [contentH, setContentH] = useState(a4Height);
 
   useEffect(() => {
     const el = sheetRef.current;
     if (!el) return;
-    const measure = () => setContentH(el.scrollHeight);
+    const measure = () =>
+      setContentH(Math.max(a4Height, el.scrollHeight));
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     measure();
@@ -32,8 +37,9 @@ export default function FitPreview({
   const scale = Math.max(0.2, zoom / 100);
 
   return (
-    <div className="bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
+    <div className="fp-box bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
       <div
+        className="fp-frame"
         style={{
           width: baseWidth * scale,
           height: contentH * scale,
@@ -46,7 +52,7 @@ export default function FitPreview({
           className="invoice-print bg-white shadow-bento"
           style={{
             width: baseWidth,
-            minHeight: 1075,
+            minHeight: a4Height,
             padding: 48,
             transform: `scale(${scale})`,
             transformOrigin: "top left",

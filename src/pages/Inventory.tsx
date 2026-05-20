@@ -7,7 +7,14 @@ import {
   Layers,
   Tag,
   Search,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/DropdownMenu";
 import { erp, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
@@ -179,16 +186,27 @@ export default function Inventory() {
             key: "act",
             label: "",
             render: (p) => (
-              <button
-                aria-label={`Delete ${p.name}`}
-                className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                onClick={async () => {
-                  await erp.deleteProduct(p.id);
-                  load();
-                }}
-              >
-                <Trash2 size={16} />
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`Actions for ${p.name}`}
+                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors duration-200"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    tone="danger"
+                    onSelect={async () => {
+                      await erp.deleteProduct(p.id);
+                      load();
+                    }}
+                  >
+                    <Trash2 size={14} /> Delete product
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ),
           },
         ]}

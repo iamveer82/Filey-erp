@@ -971,7 +971,7 @@ function Editor({
             </div>
 
             <FitPreview
-              baseWidth={device === "desktop" ? 760 : 420}
+              baseWidth={device === "desktop" ? 794 : 420}
               zoom={zoom}
             >
               <InvoiceView form={form} />

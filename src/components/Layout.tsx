@@ -1,11 +1,27 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { NavLink, Link, useNavigate } from "react-router-dom";
-import { Bell, Search, ChevronDown, LogOut, X } from "lucide-react";
+import {
+  Bell,
+  Search,
+  ChevronDown,
+  LogOut,
+  X,
+  UserRound,
+  Settings,
+} from "lucide-react";
 import Logo from "./Logo";
 import { cn } from "../lib/format";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./DropdownMenu";
 
 const GROUP_ORDER = [
   "Pages",
@@ -290,18 +306,40 @@ export default function Layout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            <div className="flex items-center gap-2.5 h-10 rounded-xl bg-white border border-brand-200 pl-1.5 pr-3">
-              <div className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
-                {initials}
-              </div>
-              <div className="hidden md:block leading-tight">
-                <p className="text-xs font-bold text-ink">{name}</p>
-                <p className="text-[11px] text-brand-400">
-                  {profile?.company ?? "Admin"}
-                </p>
-              </div>
-              <ChevronDown size={15} className="text-brand-400" />
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Account menu"
+                  className="flex items-center gap-2.5 h-10 rounded-xl bg-white border border-brand-200 pl-1.5 pr-3 hover:bg-brand-50 transition-colors cursor-pointer"
+                >
+                  <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
+                    {initials}
+                  </span>
+                  <span className="hidden md:block leading-tight text-left">
+                    <span className="block text-xs font-bold text-ink">
+                      {name}
+                    </span>
+                    <span className="block text-[11px] text-brand-400">
+                      {profile?.company ?? "Admin"}
+                    </span>
+                  </span>
+                  <ChevronDown size={15} className="text-brand-400" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-52">
+                <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => nav("/tools")}>
+                  <UserRound size={14} /> Account
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => nav("/settings")}>
+                  <Settings size={14} /> Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem tone="danger" onSelect={signOut}>
+                  <LogOut size={14} /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
