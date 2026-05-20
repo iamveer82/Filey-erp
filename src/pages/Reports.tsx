@@ -18,7 +18,8 @@ import { erp, fin, Product, FinanceReport } from "../lib/api";
 import { aed, num } from "../lib/format";
 import { PageHeader, MetricCard, InfoCard } from "../components/ui";
 
-const PIE = ["#FFD600", "#FFBA3D", "#0EA5E9", "#16A34A", "#CBBEAA"];
+// design.md §2 / §6.7 — primary, secondary, info, success, surface
+const PIE = ["#FFD600", "#FFBA3D", "#0EA5E9", "#3FB984", "#CBBEAA"];
 
 export default function Reports() {
   const [products, setProducts] = useState<Product[]>([]);

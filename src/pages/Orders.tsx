@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, ClipboardList, CheckCircle2, Clock, RotateCcw } from "lucide-react";
+import {
+  Plus,
+  ClipboardList,
+  CheckCircle2,
+  Clock,
+  Wallet,
+} from "lucide-react";
 import { erp, Order } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate } from "../lib/format";
@@ -69,7 +75,7 @@ export default function Orders() {
         <MetricCard
           label="Order Value"
           value={aed(stats.value)}
-          icon={<RotateCcw size={20} />}
+          icon={<Wallet size={20} />}
           iconClass="bg-info/15 text-info"
         />
       </div>

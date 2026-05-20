@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Boxes, AlertTriangle, Layers, Tag } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Boxes,
+  AlertTriangle,
+  Layers,
+  Tag,
+  Search,
+} from "lucide-react";
 import { erp, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
@@ -89,27 +97,38 @@ export default function Inventory() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <input
-          className="input max-w-xs"
-          placeholder="Search products…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button
-          onClick={() => setCat("all")}
-          className={`chip ${cat === "all" ? "chip-active" : ""}`}
-        >
-          All
-        </button>
-        {categories.map((c) => (
+        <div className="relative w-full max-w-xs">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+          />
+          <input
+            className="input pl-10"
+            placeholder="Search products or SKU…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={`chip ${cat === c ? "chip-active" : ""}`}
+            onClick={() => setCat("all")}
+            className={`chip ${cat === "all" ? "chip-active" : ""}`}
           >
-            {c}
+            All
           </button>
-        ))}
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCat(c)}
+              className={`chip ${cat === c ? "chip-active" : ""}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <span className="ml-auto text-xs font-semibold text-brand-400">
+          {filtered.length} of {products.length}
+        </span>
       </div>
 
       <DataTable<Product>
