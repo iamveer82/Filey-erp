@@ -1,11 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, Boxes, AlertTriangle, Package } from "lucide-react";
-import { erp, Product } from "../lib/api";
+import {
+  Users,
+  Boxes,
+  AlertTriangle,
+  Package,
+  Plus,
+  Trash2,
+  Pencil,
+} from "lucide-react";
+import { erp, suppliers as suppliersApi, Product, Supplier } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
-import { PageHeader, MetricCard, Card, Badge } from "../components/ui";
+import {
+  PageHeader,
+  MetricCard,
+  Card,
+  Badge,
+  DataTable,
+  Modal,
+  Field,
+} from "../components/ui";
 
-interface Group {
+interface CategoryGroup {
   name: string;
   skus: number;
   value: number;
@@ -14,16 +30,21 @@ interface Group {
 
 export default function Suppliers() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [edit, setEdit] = useState<Supplier | null>(null);
+  const [open, setOpen] = useState(false);
 
-  const load = () =>
+  const load = () => {
     erp.products().then(setProducts).catch(console.error);
+    suppliersApi.list().then(setSuppliers).catch(console.error);
+  };
   useEffect(() => {
     load();
   }, []);
   useLiveSync(load);
 
-  const groups = useMemo<Group[]>(() => {
-    const m = new Map<string, Group>();
+  const groups = useMemo<CategoryGroup[]>(() => {
+    const m = new Map<string, CategoryGroup>();
     for (const p of products) {
       const key = p.category || "Unsorted";
       const g =
@@ -43,13 +64,24 @@ export default function Suppliers() {
     <div className="animate-fade-up">
       <PageHeader
         title="Suppliers"
-        subtitle="Supply groups & sourcing performance"
+        subtitle="Vendor records & sourcing performance"
+        action={
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setEdit(null);
+              setOpen(true);
+            }}
+          >
+            <Plus size={16} /> New Supplier
+          </button>
+        }
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
-          label="Supply Groups"
-          value={num(groups.length)}
+          label="Suppliers"
+          value={num(suppliers.length)}
           icon={<Users size={20} />}
         />
         <MetricCard
@@ -72,6 +104,67 @@ export default function Suppliers() {
         />
       </div>
 
+      <DataTable<Supplier>
+        rows={suppliers}
+        empty="No suppliers yet — add your first one"
+        columns={[
+          {
+            key: "name",
+            label: "Supplier",
+            render: (s) => (
+              <span className="font-semibold text-ink">{s.name}</span>
+            ),
+          },
+          {
+            key: "contact",
+            label: "Contact",
+            render: (s) => s.contact_person ?? "—",
+          },
+          {
+            key: "email",
+            label: "Email",
+            render: (s) => s.email ?? "—",
+          },
+          {
+            key: "phone",
+            label: "Phone",
+            render: (s) => s.phone ?? "—",
+          },
+          {
+            key: "act",
+            label: "",
+            render: (s) => (
+              <div className="flex gap-1">
+                <button
+                  aria-label="Edit"
+                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  onClick={() => {
+                    setEdit(s);
+                    setOpen(true);
+                  }}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  aria-label="Delete"
+                  className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                  onClick={async () => {
+                    if (!confirm(`Delete supplier "${s.name}"?`)) return;
+                    await suppliersApi.remove(s.id);
+                    load();
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ),
+          },
+        ]}
+      />
+
+      <p className="mt-8 mb-3 text-xs font-bold uppercase tracking-wider text-brand-400">
+        By product category
+      </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {groups.map((g) => (
           <Card key={g.name} hover className="flex flex-col gap-4">
@@ -108,6 +201,153 @@ export default function Suppliers() {
           </Card>
         )}
       </div>
+
+      <SupplierModal
+        open={open}
+        initial={edit}
+        onClose={() => setOpen(false)}
+        onSaved={() => {
+          setOpen(false);
+          load();
+        }}
+      />
     </div>
+  );
+}
+
+function SupplierModal({
+  open,
+  initial,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  initial: Supplier | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [f, setF] = useState({
+    name: "",
+    contact_person: "",
+    email: "",
+    phone: "",
+    address: "",
+    tax_id: "",
+    notes: "",
+  });
+  useEffect(() => {
+    if (open) {
+      setF({
+        name: initial?.name ?? "",
+        contact_person: initial?.contact_person ?? "",
+        email: initial?.email ?? "",
+        phone: initial?.phone ?? "",
+        address: initial?.address ?? "",
+        tax_id: initial?.tax_id ?? "",
+        notes: initial?.notes ?? "",
+      });
+    }
+  }, [open, initial]);
+
+  const save = async () => {
+    if (!f.name.trim()) {
+      alert("Supplier name is required");
+      return;
+    }
+    const payload = {
+      name: f.name.trim(),
+      contact_person: f.contact_person || undefined,
+      email: f.email || undefined,
+      phone: f.phone || undefined,
+      address: f.address || undefined,
+      tax_id: f.tax_id || undefined,
+      notes: f.notes || undefined,
+    };
+    try {
+      if (initial) await suppliersApi.update(initial.id, payload);
+      else await suppliersApi.create(payload);
+      onSaved();
+    } catch (e) {
+      alert(
+        `Could not save supplier: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={initial ? "Edit Supplier" : "New Supplier"}
+    >
+      <div className="space-y-3">
+        <Field label="Name *">
+          <input
+            className="input"
+            value={f.name}
+            onChange={(e) => setF({ ...f, name: e.target.value })}
+          />
+        </Field>
+        <Field label="Contact person">
+          <input
+            className="input"
+            value={f.contact_person}
+            onChange={(e) =>
+              setF({ ...f, contact_person: e.target.value })
+            }
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Email">
+            <input
+              className="input"
+              type="email"
+              value={f.email}
+              onChange={(e) => setF({ ...f, email: e.target.value })}
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              className="input"
+              value={f.phone}
+              onChange={(e) => setF({ ...f, phone: e.target.value })}
+            />
+          </Field>
+        </div>
+        <Field label="Address">
+          <textarea
+            className="input"
+            rows={2}
+            value={f.address}
+            onChange={(e) => setF({ ...f, address: e.target.value })}
+          />
+        </Field>
+        <Field label="Tax ID / TRN">
+          <input
+            className="input"
+            value={f.tax_id}
+            onChange={(e) => setF({ ...f, tax_id: e.target.value })}
+          />
+        </Field>
+        <Field label="Notes">
+          <textarea
+            className="input"
+            rows={2}
+            value={f.notes}
+            onChange={(e) => setF({ ...f, notes: e.target.value })}
+          />
+        </Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-5">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn-primary" onClick={save}>
+          Save Supplier
+        </button>
+      </div>
+    </Modal>
   );
 }

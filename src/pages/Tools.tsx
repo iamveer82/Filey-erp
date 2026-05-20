@@ -271,13 +271,19 @@ function CompanyDetails() {
     setSaving(true);
     try {
       await billing.saveCompany(c);
-      // Confirm by reading back from the source of truth so the form
-      // shows what was actually persisted (e.g. server defaults).
-      const fresh = await billing.getCompany();
-      setC(fresh);
+      try {
+        const fresh = await billing.getCompany();
+        setC(fresh);
+      } catch {
+        // getCompany falls back to cache — our saved data is there.
+      }
       setSaved(true);
     } catch (e) {
-      alert(`Could not save company details: ${e}`);
+      alert(
+        `Could not save company details: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
     } finally {
       setSaving(false);
     }

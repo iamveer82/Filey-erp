@@ -14,7 +14,18 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { erp, fin, Product, FinanceReport } from "../lib/api";
+import {
+  erp,
+  fin,
+  billing,
+  hr,
+  Product,
+  FinanceReport,
+  InvoiceDocSummary,
+  Expense,
+  Payroll,
+} from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
 import { PageHeader, MetricCard, InfoCard } from "../components/ui";
 
@@ -24,11 +35,55 @@ const PIE = ["#FFD600", "#FFBA3D", "#0EA5E9", "#3FB984", "#CBBEAA"];
 export default function Reports() {
   const [products, setProducts] = useState<Product[]>([]);
   const [report, setReport] = useState<FinanceReport | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [payroll, setPayroll] = useState<Payroll[]>([]);
 
-  useEffect(() => {
+  const load = () => {
     erp.products().then(setProducts).catch(console.error);
     fin.report().then(setReport).catch(console.error);
-  }, []);
+    billing.listDocs().then(setInvoices).catch(console.error);
+    fin.expenses().then(setExpenses).catch(console.error);
+    hr.payroll().then(setPayroll).catch(console.error);
+  };
+  useEffect(load, []);
+  useLiveSync(load);
+
+  const invoiceRevenue = useMemo(
+    () =>
+      invoices
+        .filter((i) => i.status === "paid")
+        .reduce((s, i) => s + i.total, 0),
+    [invoices]
+  );
+  const accountsReceivable = useMemo(
+    () =>
+      invoices
+        .filter((i) => i.status !== "paid")
+        .reduce((s, i) => s + i.total, 0),
+    [invoices]
+  );
+  const totalExpenses = useMemo(
+    () => expenses.reduce((s, e) => s + e.amount, 0),
+    [expenses]
+  );
+  const monthExpenses = useMemo(() => {
+    const now = new Date();
+    return expenses
+      .filter((e) => {
+        const d = new Date(e.expense_date);
+        return (
+          d.getMonth() === now.getMonth() &&
+          d.getFullYear() === now.getFullYear()
+        );
+      })
+      .reduce((s, e) => s + e.amount, 0);
+  }, [expenses]);
+  const payrollCost = useMemo(
+    () => payroll.reduce((s, p) => s + p.net_pay, 0),
+    [payroll]
+  );
+  const grossProfit = invoiceRevenue - totalExpenses - payrollCost;
 
   const catValue = useMemo(() => {
     const m = new Map<string, number>();
@@ -55,15 +110,14 @@ export default function Reports() {
     })
   );
 
-  const financials = report
-    ? [
-        { name: "Assets", value: report.total_assets },
-        { name: "Liabilities", value: report.total_liabilities },
-        { name: "Equity", value: report.total_equity },
-        { name: "Revenue", value: report.total_revenue },
-        { name: "Expenses", value: report.total_expenses },
-      ]
-    : [];
+  const financials = [
+    { name: "Assets", value: report?.total_assets ?? 0 },
+    { name: "Liabilities", value: report?.total_liabilities ?? 0 },
+    { name: "Equity", value: report?.total_equity ?? 0 },
+    { name: "Revenue", value: invoiceRevenue },
+    { name: "Expenses", value: totalExpenses + payrollCost },
+    { name: "AR", value: accountsReceivable },
+  ];
 
   return (
     <div className="animate-fade-up">
@@ -76,22 +130,43 @@ export default function Reports() {
         <MetricCard
           label="Inventory Value"
           value={aed(invValue)}
-          delta={6.4}
           icon={<Boxes size={20} />}
         />
         <MetricCard
-          label="Net Profit"
-          value={aed(report?.net_profit ?? 0)}
-          delta={12.5}
-          icon={<TrendingUp size={20} />}
+          label="Invoice Revenue (paid)"
+          value={aed(invoiceRevenue)}
+          icon={<Wallet size={20} />}
           iconClass="bg-success/15 text-success"
         />
         <MetricCard
-          label="Revenue"
-          value={aed(report?.total_revenue ?? 0)}
-          delta={8.2}
+          label="Accounts Receivable"
+          value={aed(accountsReceivable)}
           icon={<Wallet size={20} />}
           iconClass="bg-secondary-400/20 text-secondary-600"
+        />
+        <MetricCard
+          label="Gross Profit"
+          value={aed(grossProfit)}
+          icon={<TrendingUp size={20} />}
+          iconClass="bg-info/15 text-info"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <MetricCard
+          label="Total Expenses"
+          value={aed(totalExpenses)}
+          icon={<Wallet size={20} />}
+        />
+        <MetricCard
+          label="This Month Expenses"
+          value={aed(monthExpenses)}
+          icon={<Wallet size={20} />}
+        />
+        <MetricCard
+          label="Payroll Cost"
+          value={aed(payrollCost)}
+          icon={<Wallet size={20} />}
         />
         <MetricCard
           label="Cash Position"

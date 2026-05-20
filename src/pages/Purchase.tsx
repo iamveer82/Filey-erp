@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
-import { fin, Expense } from "../lib/api";
+import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate, num } from "../lib/format";
 import {
@@ -176,7 +176,12 @@ function PurchaseModal({
     description: "",
     amount: 0,
     expense_date: new Date().toISOString().slice(0, 10),
+    account_id: "" as string,
   });
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  useEffect(() => {
+    if (open) fin.accounts().then(setAccounts).catch(() => setAccounts([]));
+  }, [open]);
   return (
     <Modal open={open} onClose={onClose} title="New Purchase">
       <div className="space-y-3">
@@ -212,6 +217,20 @@ function PurchaseModal({
             onChange={(e) => setF({ ...f, expense_date: e.target.value })}
           />
         </Field>
+        <Field label="Pay from account (posts to ledger)">
+          <select
+            className="select"
+            value={f.account_id}
+            onChange={(e) => setF({ ...f, account_id: e.target.value })}
+          >
+            <option value="">Not linked (no ledger post)</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={String(a.id)}>
+                {a.code} — {a.name}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose}>
@@ -220,15 +239,23 @@ function PurchaseModal({
         <button
           className="btn-primary"
           onClick={async () => {
-            await fin.createExpense(
-              f.category,
-              f.description || null,
-              f.amount,
-              f.expense_date,
-              null
-            );
-            onSaved();
-            onClose();
+            try {
+              await fin.createExpense(
+                f.category,
+                f.description || null,
+                f.amount,
+                f.expense_date,
+                f.account_id ? Number(f.account_id) : null
+              );
+              onSaved();
+              onClose();
+            } catch (e) {
+              alert(
+                `Could not save purchase: ${
+                  e instanceof Error ? e.message : String(e)
+                }`
+              );
+            }
           }}
         >
           Save Purchase

@@ -17,7 +17,15 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { erp, Product, Order } from "../lib/api";
+import {
+  erp,
+  billing,
+  fin,
+  Product,
+  Order,
+  InvoiceDocSummary,
+  Expense,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { num, aed, fmtDate } from "../lib/format";
 import {
@@ -32,10 +40,14 @@ import {
 export default function Overview() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
   const load = () => {
     erp.products().then(setProducts).catch(console.error);
     erp.orders().then(setOrders).catch(console.error);
+    billing.listDocs().then(setInvoices).catch(console.error);
+    fin.expenses().then(setExpenses).catch(console.error);
   };
   useEffect(load, []);
   useLiveSync(load);
@@ -82,12 +94,45 @@ export default function Overview() {
     }));
   }, [products]);
 
-  const activity = [
-    { who: "Sarah Johnson", what: "added 24 items to inventory", when: "2m ago" },
-    { who: "You", what: "created a quote for Acme Corp", when: "15m ago" },
-    { who: "System", what: "new order #ORD-1245 received", when: "1h ago" },
-    { who: "Mark Wilson", what: "updated stock for Jaunt 360", when: "2h ago" },
-  ];
+  const activity = useMemo(() => {
+    const items: { who: string; what: string; ts: number }[] = [];
+    for (const o of orders)
+      items.push({
+        who: "Orders",
+        what: `created order ${o.order_number}${
+          o.customer_name ? ` for ${o.customer_name}` : ""
+        }`,
+        ts: new Date(o.created_at).getTime(),
+      });
+    for (const i of invoices)
+      items.push({
+        who: "Invoicing",
+        what: `${i.status === "paid" ? "paid" : "issued"} invoice ${i.number}${
+          i.customer_name ? ` to ${i.customer_name}` : ""
+        }`,
+        ts: new Date(i.updated_at).getTime(),
+      });
+    for (const e of expenses)
+      items.push({
+        who: "Purchase",
+        what: `recorded expense ${e.category}${
+          e.description ? ` — ${e.description}` : ""
+        }`,
+        ts: new Date(e.expense_date).getTime(),
+      });
+    const now = Date.now();
+    const since = (t: number) => {
+      const s = Math.max(0, (now - t) / 1000);
+      if (s < 60) return `${Math.round(s)}s ago`;
+      if (s < 3600) return `${Math.round(s / 60)}m ago`;
+      if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+      return `${Math.round(s / 86400)}d ago`;
+    };
+    return items
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 4)
+      .map((a) => ({ who: a.who, what: a.what, when: since(a.ts) }));
+  }, [orders, invoices, expenses]);
 
   return (
     <div className="animate-fade-up">
@@ -216,6 +261,9 @@ export default function Overview() {
           }
         >
           <ul className="space-y-3.5">
+            {activity.length === 0 && (
+              <li className="text-sm text-brand-400">No activity yet.</li>
+            )}
             {activity.map((a, i) => (
               <li key={i} className="flex gap-3">
                 <span className="mt-1 w-2 h-2 rounded-full bg-primary-400 shrink-0" />

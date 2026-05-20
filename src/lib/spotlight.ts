@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   erp,
+  billing,
   crm,
   type Product,
   type Order,
-  type Invoice,
+  type InvoiceDocSummary,
   type CrmCustomer,
 } from "./api";
 import { MODULES } from "../modules/registry";
@@ -12,7 +13,7 @@ import { MODULES } from "../modules/registry";
 type Dataset = {
   products: Product[];
   orders: Order[];
-  invoices: Invoice[];
+  invoices: InvoiceDocSummary[];
   customers: CrmCustomer[];
 };
 
@@ -32,7 +33,7 @@ function useDataset(): Dataset {
     Promise.all([
       erp.products().catch(() => [] as Product[]),
       erp.orders().catch(() => [] as Order[]),
-      erp.invoices().catch(() => [] as Invoice[]),
+      billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
       crm.customers().catch(() => [] as CrmCustomer[]),
     ]).then(([products, orders, invoices, customers]) => {
       if (alive) setData({ products, orders, invoices, customers });
@@ -82,10 +83,10 @@ export function useGlobalSearch(query: string): SearchHit[] {
           to: "/orders",
         });
     for (const i of invoices)
-      if (has(i.invoice_number, i.customer_name))
+      if (has(i.number, i.customer_name))
         hits.push({
           group: "Invoices",
-          label: i.invoice_number,
+          label: i.number,
           sub: i.customer_name,
           to: "/invoicing",
         });
@@ -130,7 +131,7 @@ export function useNotifications(): Notif[] {
       if (i.status !== "paid" && i.due_date && i.due_date < today)
         n.push({
           id: `ovd-${i.id}`,
-          title: `Overdue invoice ${i.invoice_number}`,
+          title: `Overdue invoice ${i.number}`,
           detail: `${i.customer_name} · due ${i.due_date}`,
           to: "/invoicing",
           tone: "danger",

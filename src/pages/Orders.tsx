@@ -198,7 +198,7 @@ function BuildOrderModal({
     }
   }, [open]);
 
-  const checkout = async (_lines: CartLine[], total: number) => {
+  const checkout = async (lines: CartLine[], total: number) => {
     if (!customer.trim()) {
       setErr("Enter a customer name first.");
       return;
@@ -206,9 +206,16 @@ function BuildOrderModal({
     setErr(null);
     setBusy(true);
     try {
-      await erp.createOrder(nextOrderNumber(), customer.trim(), total);
-      // line items not persisted (orders schema stores only total);
-      // they exist in the on-screen cart until close.
+      await erp.createOrderWithItems(
+        nextOrderNumber(),
+        customer.trim(),
+        lines.map((l) => ({
+          product_id: l.id,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+        })),
+        total
+      );
       onSaved();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));

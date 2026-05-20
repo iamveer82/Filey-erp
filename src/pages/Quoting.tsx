@@ -12,7 +12,9 @@ import {
   CalendarDays,
   Send,
   Pencil,
+  FileText,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   billing,
   crm,
@@ -103,6 +105,8 @@ export default function Quoting() {
   const [annotOpen, setAnnotOpen] = useState(false);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [savedNote, setSavedNote] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const navigate = useNavigate();
 
   const loadTemplates = () =>
     quoteTemplates.list().then(setSaved).catch(() => {});
@@ -390,6 +394,30 @@ export default function Quoting() {
               Emailing is desktop-only
             </span>
           )}
+          {docId ? (
+            <button
+              className="btn-ghost"
+              disabled={converting}
+              onClick={async () => {
+                setConverting(true);
+                try {
+                  await quotes.convertToInvoice(docId);
+                  navigate("/invoicing");
+                } catch (e) {
+                  alert(
+                    `Could not convert: ${
+                      e instanceof Error ? e.message : String(e)
+                    }`
+                  );
+                } finally {
+                  setConverting(false);
+                }
+              }}
+            >
+              <FileText size={15} />{" "}
+              {converting ? "Converting…" : "Convert to Invoice"}
+            </button>
+          ) : null}
           <button className="btn-primary" onClick={() => window.print()}>
             <Download size={15} /> Generate PDF
           </button>

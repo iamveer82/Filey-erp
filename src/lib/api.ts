@@ -19,6 +19,7 @@ export interface Order {
   id: number;
   order_number: string;
   customer_name: string;
+  customer_id?: number;
   status: string;
   total: number;
   created_at: string;
@@ -27,10 +28,19 @@ export interface Invoice {
   id: number;
   invoice_number: string;
   customer_name: string;
+  customer_id?: number;
+  order_id?: number;
   amount: number;
   status: string;
   due_date?: string;
   created_at: string;
+}
+export interface OrderItem {
+  id?: number;
+  order_id?: number;
+  product_id?: number;
+  quantity: number;
+  unit_price: number;
 }
 export interface ErpSummary {
   total_products: number;
@@ -186,6 +196,7 @@ export interface InvoiceItem {
   description: string;
   qty: number;
   unit_price: number;
+  product_id?: number;
 }
 export interface InvoiceDocSummary {
   id: number;
@@ -195,6 +206,7 @@ export interface InvoiceDocSummary {
   template: string;
   total: number;
   issue_date?: string;
+  due_date?: string;
   updated_at: string;
 }
 export interface InvoiceDoc {
@@ -210,6 +222,7 @@ export interface InvoiceDoc {
   seller_email?: string;
   seller_phone?: string;
   logo?: string;
+  customer_id?: number;
   customer_name: string;
   customer_address?: string;
   customer_trn?: string;
@@ -220,6 +233,7 @@ export interface InvoiceDoc {
   terms?: string;
   tax_rate: number;
   discount: number;
+  quotation_id?: number;
   created_at: string;
   updated_at: string;
   items: InvoiceItem[];
@@ -476,6 +490,15 @@ const clean = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== undefined)
   ) as Record<string, unknown>;
 
+async function currentUid(): Promise<string | null> {
+  try {
+    const { data } = await sb().auth.getUser();
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ===== ERP Core =====
 export const erp = {
   products: () =>
@@ -523,48 +546,73 @@ export const erp = {
       sInsert("orders", row), -1
     );
   },
+  createOrderWithItems: (
+    orderNumber: string,
+    customerName: string,
+    lines: { product_id: number; quantity: number; unit_price: number }[],
+    total: number,
+    customerId?: number
+  ) =>
+    online(async () => {
+      const orderId = await sInsert("orders", {
+        order_number: orderNumber,
+        customer_name: customerName,
+        customer_id: customerId ?? null,
+        status: "draft",
+        total,
+      });
+      if (lines.length) {
+        const { error: itemsErr } = await sb()
+          .from("order_items")
+          .insert(
+            lines.map((l) => ({
+              order_id: orderId,
+              product_id: l.product_id,
+              quantity: l.quantity,
+              unit_price: l.unit_price,
+            }))
+          );
+        if (itemsErr) throw itemsErr;
+        for (const l of lines) {
+          const { data, error } = await sb()
+            .from("products")
+            .select("quantity")
+            .eq("id", l.product_id)
+            .single();
+          if (error) throw error;
+          await sUpdate("products", l.product_id, {
+            quantity: Math.max(
+              0,
+              ((data as { quantity: number }).quantity ?? 0) - l.quantity
+            ),
+          });
+        }
+      }
+      return orderId;
+    }),
   setOrderStatus: (orderId: number, status: string) =>
     write({ k: "update", t: "orders", id: orderId, row: { status } }, () =>
       sUpdate("orders", orderId, { status }), undefined
-    ),
-  invoices: () =>
-    readCached<Invoice[]>(
-      "erp_invoices",
-      () => sList<Invoice>("invoices", [{ col: "id", asc: false }]),
-      []
-    ),
-  createInvoice: (
-    invoiceNumber: string,
-    customerName: string,
-    amount: number,
-    dueDate?: string
-  ) => {
-    const row = {
-      invoice_number: invoiceNumber,
-      customer_name: customerName,
-      amount,
-      status: "unpaid",
-      due_date: dueDate ?? null,
-    };
-    return write({ k: "insert", t: "invoices", row }, () =>
-      sInsert("invoices", row), -1
-    );
-  },
-  markInvoicePaid: (invoiceId: number) =>
-    write(
-      { k: "update", t: "invoices", id: invoiceId, row: { status: "paid" } },
-      () => sUpdate("invoices", invoiceId, { status: "paid" }),
-      undefined
     ),
   summary: () =>
     readCached<ErpSummary>(
       "erp_summary",
       async () => {
-        const [products, orders, invoices] = await Promise.all([
+        const [products, orders, docs, items] = await Promise.all([
           sList<Product>("products"),
           sList<Order>("orders"),
-          sList<Invoice>("invoices"),
+          sList<any>("invoice_docs"),
+          sList<any>("invoice_doc_items"),
         ]);
+        const byDoc = new Map<number, any[]>();
+        for (const it of items) {
+          const a = byDoc.get(it.invoice_id) ?? [];
+          a.push(it);
+          byDoc.set(it.invoice_id, a);
+        }
+        const unpaid = docs
+          .filter((d) => d.status !== "paid")
+          .reduce((s, d) => s + docTotal(d, byDoc.get(d.id) ?? []), 0);
         return {
           total_products: products.length,
           low_stock: products.filter((p) => p.quantity <= p.reorder_level)
@@ -576,9 +624,7 @@ export const erp = {
           open_orders: orders.filter((o) =>
             ["draft", "confirmed"].includes(o.status)
           ).length,
-          unpaid_invoices: invoices
-            .filter((i) => i.status === "unpaid")
-            .reduce((s, i) => s + i.amount, 0),
+          unpaid_invoices: unpaid,
         };
       },
       {
@@ -685,20 +731,45 @@ export const hr = {
     period: string,
     basic: number,
     allowances: number,
-    deductions: number
+    deductions: number,
+    accountId?: number | null
   ) => {
+    const net = basic + allowances - deductions;
     const row = {
       employee_id: employeeId,
       period,
       basic,
       allowances,
       deductions,
-      net_pay: basic + allowances - deductions,
+      net_pay: net,
       status: "pending",
     };
-    return write({ k: "insert", t: "payroll", row }, () =>
-      sInsert("payroll", row), -1
-    );
+    if (accountId == null) {
+      return write({ k: "insert", t: "payroll", row }, () =>
+        sInsert("payroll", row), -1
+      );
+    }
+    return online(async () => {
+      const id = await sInsert("payroll", row);
+      await sInsert("transactions", {
+        account_id: accountId,
+        txn_type: "debit",
+        amount: net,
+        description: `Payroll ${period}`,
+        txn_date: new Date().toISOString().slice(0, 10),
+      });
+      const { data, error } = await sb()
+        .from("accounts")
+        .select("balance")
+        .eq("id", accountId)
+        .single();
+      if (error) throw error;
+      await sUpdate("accounts", accountId, {
+        balance:
+          Number((data as { balance: number }).balance ?? 0) - net,
+      });
+      return id;
+    });
   },
   markPayrollPaid: (payrollId: number) =>
     write(
@@ -769,9 +840,32 @@ export const fin = {
       expense_date: expenseDate,
       account_id: accountId,
     };
-    return write({ k: "insert", t: "expenses", row }, () =>
-      sInsert("expenses", row), -1
-    );
+    if (accountId == null) {
+      return write({ k: "insert", t: "expenses", row }, () =>
+        sInsert("expenses", row), -1
+      );
+    }
+    return online(async () => {
+      const id = await sInsert("expenses", row);
+      await sInsert("transactions", {
+        account_id: accountId,
+        txn_type: "debit",
+        amount,
+        description: description ?? category,
+        txn_date: expenseDate,
+      });
+      const { data, error } = await sb()
+        .from("accounts")
+        .select("balance")
+        .eq("id", accountId)
+        .single();
+      if (error) throw error;
+      await sUpdate("accounts", accountId, {
+        balance:
+          Number((data as { balance: number }).balance ?? 0) - amount,
+      });
+      return id;
+    });
   },
   deleteExpense: (expenseId: number) =>
     write({ k: "delete", t: "expenses", id: expenseId }, () =>
@@ -1125,6 +1219,7 @@ export const billing = {
           template: d.template,
           total: docTotal(d, byDoc.get(d.id) ?? []),
           issue_date: d.issue_date ?? undefined,
+          due_date: d.due_date ?? undefined,
           updated_at: d.updated_at,
         })) as InvoiceDocSummary[];
       },
@@ -1207,10 +1302,11 @@ export const billing = {
     readCached<CompanyProfile>(
       "company_profile",
       async () => {
-        const { data } = await sb()
-          .from("company_profile")
-          .select("*")
-          .maybeSingle();
+        const uid = await currentUid();
+        let q: any = sb().from("company_profile").select("*");
+        if (uid) q = q.eq("user_id", uid);
+        const { data, error } = await q.maybeSingle();
+        if (error) throw error;
         if (data) {
           const c = data as any;
           return {
@@ -1255,27 +1351,30 @@ export const billing = {
         default_template: "minimal",
       }
     ),
-  saveCompany: (input: CompanyProfile) =>
-    online(async () => {
-      const { data } = await sb()
-        .from("company_profile")
-        .select("id")
-        .maybeSingle();
-      const row = clean(input as unknown as Record<string, unknown>);
-      if (data) await sUpdate("company_profile", (data as any).id, row);
-      else await sInsert("company_profile", row);
-      // Mirror the saved row into the local read-cache so the next
-      // billing.getCompany() (and any other page that loads the
-      // company profile) reflects the change immediately, even if the
-      // user goes offline or before realtime fans out.
-      await cacheSet(`${activeCacheOrg}:company_profile`, input);
-    }),
+  saveCompany: async (input: CompanyProfile) => {
+    if (!isConfigured) throw new Error("Cloud storage is not configured.");
+    if (!onLine())
+      throw new Error(
+        "You're offline. Company details need a connection to save."
+      );
+    await flushOutbox();
+    const uid = await currentUid();
+    let sel: any = sb().from("company_profile").select("id");
+    if (uid) sel = sel.eq("user_id", uid);
+    const { data, error: selError } = await sel.maybeSingle();
+    if (selError) throw selError;
+    const row = clean(input as unknown as Record<string, unknown>);
+    if (data) await sUpdate("company_profile", (data as any).id, row);
+    else await sInsert("company_profile", row);
+    await cacheSet(`${activeCacheOrg}:company_profile`, input);
+  },
 };
 
 // ===== Quoting =====
 export interface QuotationItem {
   id?: number;
   product: string;
+  product_id?: number;
   sku?: string;
   qty: number;
   rate: number;
@@ -1302,6 +1401,7 @@ export interface QuotationDoc {
   quote_date?: string;
   valid_until?: string;
   sales_person?: string;
+  customer_id?: number;
   customer_name: string;
   customer_address?: string;
   customer_trn?: string;
@@ -1436,6 +1536,75 @@ export const quotes = {
       () => sUpdate("quotations", docId, { status }),
       undefined
     ),
+  convertToInvoice: (quotationId: number) =>
+    online(async () => {
+      const { data: q, error } = await sb()
+        .from("quotations")
+        .select("*")
+        .eq("id", quotationId)
+        .single();
+      if (error) throw error;
+      const qd = q as any;
+      const qItems = await sList<any>(
+        "quotation_items",
+        [{ col: "position", asc: true }]
+      );
+      const items = qItems.filter((i) => i.quotation_id === quotationId);
+      const company = await billing.getCompany().catch(() => null);
+      const y = new Date().getFullYear();
+      const number = `INV-${y}-${String(
+        Math.floor(Math.random() * 9000) + 1000
+      )}`;
+      const issue = new Date().toISOString().slice(0, 10);
+      const due = new Date(Date.now() + 30 * 86400000)
+        .toISOString()
+        .slice(0, 10);
+      const docId = await sInsert("invoice_docs", {
+        number,
+        status: "draft",
+        template: company?.default_template ?? "minimal",
+        accent: company?.default_accent ?? "#0A0A0A",
+        currency: qd.currency,
+        seller_name: company?.name ?? "",
+        seller_address: company?.address ?? null,
+        seller_trn: company?.trn ?? null,
+        seller_email: company?.email ?? null,
+        seller_phone: company?.phone ?? null,
+        logo: company?.logo ?? null,
+        customer_id: qd.customer_id ?? null,
+        customer_name: qd.customer_name,
+        customer_address: qd.customer_address ?? null,
+        customer_trn: qd.customer_trn ?? null,
+        customer_email: qd.customer_email ?? null,
+        issue_date: issue,
+        due_date: due,
+        notes: null,
+        terms: qd.terms ?? null,
+        tax_rate: company?.default_tax_rate ?? 5,
+        discount: 0,
+        quotation_id: quotationId,
+      });
+      if (items.length) {
+        const { error: itemsErr } = await sb()
+          .from("invoice_doc_items")
+          .insert(
+            items.map((it, i) => ({
+              invoice_id: docId,
+              product_id: it.product_id ?? null,
+              description: it.sku
+                ? `${it.product} (${it.sku})`
+                : it.product,
+              qty: it.qty,
+              unit_price:
+                Number(it.rate) * (1 - Number(it.discount || 0) / 100),
+              position: i,
+            }))
+          );
+        if (itemsErr) throw itemsErr;
+      }
+      await sUpdate("quotations", quotationId, { status: "accepted" });
+      return docId;
+    }),
 };
 
 export const quoteTemplates = {
@@ -1457,6 +1626,215 @@ export const quoteTemplates = {
   remove: (id: number) =>
     write({ k: "delete", t: "quotation_templates", id }, () =>
       sDelete("quotation_templates", id), undefined
+    ),
+};
+
+// ===== Suppliers =====
+export interface Supplier {
+  id: number;
+  name: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  tax_id?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export const suppliers = {
+  list: () =>
+    readCached<Supplier[]>(
+      "suppliers",
+      () => sList<Supplier>("suppliers", [{ col: "name", asc: true }]),
+      []
+    ),
+  create: (input: Omit<Supplier, "id" | "created_at">) => {
+    const row = clean(input as Record<string, unknown>);
+    return write({ k: "insert", t: "suppliers", row }, () =>
+      sInsert("suppliers", row), -1
+    );
+  },
+  update: (id: number, patch: Partial<Omit<Supplier, "id" | "created_at">>) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write(
+      { k: "update", t: "suppliers", id, row },
+      () => sUpdate("suppliers", id, row),
+      undefined
+    );
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "suppliers", id }, () =>
+      sDelete("suppliers", id), undefined
+    ),
+};
+
+// ===== Purchase Orders =====
+export interface PoItem {
+  id?: number;
+  product_id?: number;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+}
+export interface PoSummary {
+  id: number;
+  po_number: string;
+  supplier_id?: number;
+  supplier_name: string;
+  status: string;
+  total: number;
+  order_date: string;
+  expected_date?: string;
+  updated_at: string;
+}
+export interface PurchaseOrder {
+  id: number;
+  po_number: string;
+  supplier_id?: number;
+  status: string;
+  total: number;
+  order_date: string;
+  expected_date?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  items: PoItem[];
+}
+export type PoInput = Omit<
+  PurchaseOrder,
+  "id" | "created_at" | "updated_at"
+> & { id?: number };
+
+export const pos = {
+  list: () =>
+    readCached<PoSummary[]>(
+      "purchase_orders",
+      async () => {
+        const [rows, supRows] = await Promise.all([
+          sList<any>("purchase_orders", [{ col: "updated_at", asc: false }]),
+          sList<Supplier>("suppliers"),
+        ]);
+        const byId = new Map(supRows.map((s) => [s.id, s]));
+        return rows.map((r) => ({
+          id: r.id,
+          po_number: r.po_number,
+          supplier_id: r.supplier_id ?? undefined,
+          supplier_name: byId.get(r.supplier_id)?.name ?? "—",
+          status: r.status,
+          total: Number(r.total),
+          order_date: r.order_date,
+          expected_date: r.expected_date ?? undefined,
+          updated_at: r.updated_at,
+        })) as PoSummary[];
+      },
+      []
+    ),
+  get: (poId: number) =>
+    readCached<PurchaseOrder>(
+      `purchase_order:${poId}`,
+      async () => {
+        const { data, error } = await sb()
+          .from("purchase_orders")
+          .select("*")
+          .eq("id", poId)
+          .single();
+        if (error) throw error;
+        const items = await sList<any>("purchase_order_items", [
+          { col: "position", asc: true },
+        ]);
+        const filtered = items
+          .filter((i) => i.po_id === poId)
+          .map((i) => ({
+            id: i.id,
+            product_id: i.product_id ?? undefined,
+            description: i.description,
+            quantity: Number(i.quantity),
+            unit_cost: Number(i.unit_cost),
+          }));
+        const d = data as any;
+        return {
+          id: d.id,
+          po_number: d.po_number,
+          supplier_id: d.supplier_id ?? undefined,
+          status: d.status,
+          total: Number(d.total),
+          order_date: d.order_date,
+          expected_date: d.expected_date ?? undefined,
+          notes: d.notes ?? undefined,
+          created_at: d.created_at,
+          updated_at: d.updated_at,
+          items: filtered,
+        };
+      },
+      null as unknown as PurchaseOrder
+    ),
+  save: (input: PoInput) =>
+    online(async () => {
+      const { items, id, ...fields } = input;
+      const total = items.reduce(
+        (s, it) => s + it.quantity * it.unit_cost,
+        0
+      );
+      const row = clean({ ...fields, total } as Record<string, unknown>);
+      let poId: number;
+      if (id && id > 0) {
+        await sUpdate("purchase_orders", id, row);
+        const { error } = await sb()
+          .from("purchase_order_items")
+          .delete()
+          .eq("po_id", id);
+        if (error) throw error;
+        poId = id;
+      } else {
+        poId = await sInsert("purchase_orders", row);
+      }
+      if (items.length) {
+        const { error } = await sb()
+          .from("purchase_order_items")
+          .insert(
+            items.map((it, i) => ({
+              po_id: poId,
+              product_id: it.product_id ?? null,
+              description: it.description,
+              quantity: it.quantity,
+              unit_cost: it.unit_cost,
+              position: i,
+            }))
+          );
+        if (error) throw error;
+      }
+      return poId;
+    }),
+  setStatus: (poId: number, status: string) =>
+    write(
+      { k: "update", t: "purchase_orders", id: poId, row: { status } },
+      () => sUpdate("purchase_orders", poId, { status }),
+      undefined
+    ),
+  /** Receive items into stock: increments products.quantity by each line. */
+  receive: (poId: number) =>
+    online(async () => {
+      const po = await pos.get(poId);
+      for (const it of po.items) {
+        if (!it.product_id) continue;
+        const { data, error } = await sb()
+          .from("products")
+          .select("quantity")
+          .eq("id", it.product_id)
+          .single();
+        if (error) throw error;
+        await sUpdate("products", it.product_id, {
+          quantity:
+            Number((data as { quantity: number }).quantity ?? 0) +
+            it.quantity,
+        });
+      }
+      await sUpdate("purchase_orders", poId, { status: "received" });
+    }),
+  remove: (poId: number) =>
+    write({ k: "delete", t: "purchase_orders", id: poId }, () =>
+      sDelete("purchase_orders", poId), undefined
     ),
 };
 

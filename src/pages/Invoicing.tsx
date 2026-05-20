@@ -2012,7 +2012,12 @@ function CompanyModal({
               // Re-fetch so we apply exactly what the server persisted
               // (server defaults, RLS-trimmed columns, etc.) to the
               // invoice page and not just the locally-edited copy.
-              const fresh = await billing.getCompany();
+              let fresh: CompanyProfile;
+              try {
+                fresh = await billing.getCompany();
+              } catch {
+                fresh = c; // server unreachable — use what we saved
+              }
               onSaved(fresh);
             } catch (e) {
               alert(`Could not save company details: ${e}`);
