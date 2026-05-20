@@ -5,8 +5,9 @@ import {
   CheckCircle2,
   Clock,
   Wallet,
+  ShoppingCart,
 } from "lucide-react";
-import { erp, Order } from "../lib/api";
+import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate } from "../lib/format";
 import {
@@ -18,14 +19,25 @@ import {
   Modal,
   Field,
 } from "../components/ui";
+import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
+
+const nextOrderNumber = () => {
+  const y = new Date().getFullYear();
+  return `SO-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+};
 
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [open, setOpen] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
 
-  const load = () => erp.orders().then(setOrders).catch(console.error);
+  const load = () => {
+    erp.orders().then(setOrders).catch(console.error);
+    erp.products().then(setProducts).catch(console.error);
+  };
   useEffect(() => {
     load();
   }, []);
@@ -48,9 +60,17 @@ export default function Orders() {
         title="Orders"
         subtitle="Sales orders & fulfilment status"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus size={16} /> New order
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-ghost" onClick={() => setOpen(true)}>
+              <Plus size={16} /> Quick order
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => setBuildOpen(true)}
+            >
+              <ShoppingCart size={16} /> Build order
+            </button>
+          </div>
         }
       />
 
@@ -142,7 +162,84 @@ export default function Orders() {
         onClose={() => setOpen(false)}
         onSaved={load}
       />
+
+      <BuildOrderModal
+        open={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        products={products}
+        onSaved={() => {
+          setBuildOpen(false);
+          load();
+        }}
+      />
     </div>
+  );
+}
+
+function BuildOrderModal({
+  open,
+  onClose,
+  products,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  products: Product[];
+  onSaved: () => void;
+}) {
+  const [customer, setCustomer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setCustomer("");
+      setErr(null);
+    }
+  }, [open]);
+
+  const checkout = async (_lines: CartLine[], total: number) => {
+    if (!customer.trim()) {
+      setErr("Enter a customer name first.");
+      return;
+    }
+    setErr(null);
+    setBusy(true);
+    try {
+      await erp.createOrder(nextOrderNumber(), customer.trim(), total);
+      // line items not persisted (orders schema stores only total);
+      // they exist in the on-screen cart until close.
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Build sales order" size="2xl">
+      <div className="mb-4">
+        <Field label="Customer">
+          <input
+            className="input"
+            placeholder="e.g. Acme Corp"
+            value={customer}
+            onChange={(e) => setCustomer(e.target.value)}
+          />
+        </Field>
+        {err && (
+          <p className="text-xs font-semibold text-danger bg-danger/10 rounded-xl px-3 py-2 mt-2">
+            {err}
+          </p>
+        )}
+      </div>
+      <ProductPicker
+        products={products}
+        onCheckout={checkout}
+        busy={busy}
+      />
+    </Modal>
   );
 }
 

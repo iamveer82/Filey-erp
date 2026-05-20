@@ -258,12 +258,21 @@ export function Modal({
   onClose,
   title,
   children,
+  size = "md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  size?: "md" | "lg" | "xl" | "2xl" | "3xl";
 }) {
+  const widthClass = {
+    md: "max-w-lg",
+    lg: "max-w-2xl",
+    xl: "max-w-3xl",
+    "2xl": "max-w-4xl",
+    "3xl": "max-w-5xl",
+  }[size];
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", h);
@@ -280,7 +289,10 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-bento-hover"
+        className={cn(
+          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-bento-hover",
+          widthClass
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-4 border-b border-brand-100 px-6 py-4">
