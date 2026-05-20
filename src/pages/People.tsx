@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { Plus, Users, UserCheck, CalendarOff, Wallet } from "lucide-react";
+import {
+  Plus,
+  Users,
+  UserCheck,
+  CalendarOff,
+  Wallet,
+  MoreHorizontal,
+} from "lucide-react";
+import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, num, fmtDate } from "../lib/format";
@@ -12,11 +20,19 @@ import {
   Modal,
   Field,
 } from "../components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/DropdownMenu";
+import MultiDatePicker from "../components/MultiDatePicker";
 
 export default function People() {
   const [emps, setEmps] = useState<Employee[]>([]);
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
+  const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
 
   const load = () => {
     hr.employees().then(setEmps).catch(console.error);
@@ -127,7 +143,37 @@ export default function People() {
               </button>
             ),
           },
+          {
+            key: "act",
+            label: "",
+            render: (e) => (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`Actions for ${e.name}`}
+                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors duration-200"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setLeaveFor(e)}>
+                    <CalendarOff size={14} /> Mark leave days
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ),
+          },
         ]}
+      />
+
+      <LeaveModal
+        employee={leaveFor}
+        onClose={() => setLeaveFor(null)}
+        onSaved={() => {
+          setLeaveFor(null);
+          load();
+        }}
       />
 
       <EmployeeModal
@@ -261,6 +307,57 @@ function EmployeeModal({
           Save Employee
         </button>
       </div>
+    </Modal>
+  );
+}
+
+function LeaveModal({
+  employee,
+  onClose,
+  onSaved,
+}: {
+  employee: Employee | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [dates, setDates] = useState<Date[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (employee) setDates([]);
+  }, [employee]);
+  if (!employee) return null;
+  const save = async () => {
+    setBusy(true);
+    try {
+      for (const d of dates) {
+        await hr.markAttendance(
+          employee.id,
+          format(d, "yyyy-MM-dd"),
+          "leave"
+        );
+      }
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={!!employee}
+      onClose={onClose}
+      title={`Mark leave — ${employee.name}`}
+    >
+      <MultiDatePicker value={dates} onChange={setDates} onConfirm={save} />
+      <p className="text-xs text-brand-400 mt-3">
+        {dates.length === 0
+          ? "Pick one or more days to record as leave."
+          : `${dates.length} day${dates.length === 1 ? "" : "s"} will be saved as “leave”.`}
+      </p>
+      {busy && (
+        <p className="text-xs font-semibold text-brand-500 mt-2">
+          Saving attendance…
+        </p>
+      )}
     </Modal>
   );
 }
