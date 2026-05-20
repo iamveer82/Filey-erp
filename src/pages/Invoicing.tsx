@@ -35,6 +35,7 @@ import { fmtDate } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, hasDesktop } from "../lib/email";
 import FitPreview from "../components/FitPreview";
+import AnnotationLayer from "../components/AnnotationLayer";
 import {
   PageHeader,
   DataTable,
@@ -406,6 +407,7 @@ function Editor({
   const [viewAll, setViewAll] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [annotOpen, setAnnotOpen] = useState(false);
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
   const m = (v: number) => money(v, form.currency || "AED");
   const shown = viewAll ? TEMPLATES : TEMPLATES.slice(0, 5);
@@ -964,9 +966,9 @@ function Editor({
               </div>
               <button
                 className="btn-ghost text-xs"
-                onClick={() => setViewAll(true)}
+                onClick={() => setAnnotOpen(true)}
               >
-                Change Template
+                <Pencil size={13} /> Edit
               </button>
             </div>
 
@@ -975,6 +977,10 @@ function Editor({
               zoom={zoom}
             >
               <InvoiceView form={form} />
+              <AnnotationLayer
+                id={`invoice:${form.id ?? form.number}`}
+                editable={false}
+              />
             </FitPreview>
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
@@ -1040,6 +1046,29 @@ function Editor({
           </div>
         </div>
       </div>
+
+      <Modal
+        open={annotOpen}
+        onClose={() => setAnnotOpen(false)}
+        title="Annotate invoice"
+        size="3xl"
+      >
+        <p className="text-xs text-brand-400 mb-3">
+          Use the toolbar (pen, eraser, text, color, brush size, undo,
+          redo) to mark up the invoice. Save when done; changes appear on
+          the preview and printed PDF.
+        </p>
+        <div className="no-print">
+          <FitPreview baseWidth={794} zoom={70}>
+            <InvoiceView form={form} />
+            <AnnotationLayer
+              id={`invoice:${form.id ?? form.number}`}
+              editable
+              onSave={() => setAnnotOpen(false)}
+            />
+          </FitPreview>
+        </div>
+      </Modal>
     </div>
   );
 }

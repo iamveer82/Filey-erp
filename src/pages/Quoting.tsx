@@ -11,6 +11,7 @@ import {
   X,
   CalendarDays,
   Send,
+  Pencil,
 } from "lucide-react";
 import {
   billing,
@@ -29,6 +30,7 @@ import { fmtDate } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, hasDesktop } from "../lib/email";
 import { Modal, Field } from "../components/ui";
+import AnnotationLayer from "../components/AnnotationLayer";
 
 interface Line {
   product: string;
@@ -98,6 +100,7 @@ export default function Quoting() {
   const [invModal, setInvModal] = useState(false);
   const [vat, setVat] = useState(true);
   const [docId, setDocId] = useState<number | undefined>(undefined);
+  const [annotOpen, setAnnotOpen] = useState(false);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [savedNote, setSavedNote] = useState(false);
 
@@ -233,6 +236,120 @@ export default function Quoting() {
       alert(`Could not save template: ${e}`);
     }
   };
+
+  const renderQuoteBody = () => (
+    <>
+      <div className="flex justify-between items-start">
+        <div className="flex items-center gap-2">
+          {company?.logo && (
+            <img
+              src={company.logo}
+              alt="logo"
+              className="h-9 object-contain"
+            />
+          )}
+          <span
+            className="text-lg font-bold"
+            style={{ color: accent }}
+          >
+            {company?.name ?? "Your Company"}
+          </span>
+        </div>
+        <div className="text-right">
+          <p
+            className="text-2xl font-bold tracking-tight"
+            style={{ color: accent }}
+          >
+            QUOTATION
+          </p>
+          <p className="text-xs text-neutral-500 mt-1">{number}</p>
+        </div>
+      </div>
+
+      <div className="flex justify-between mt-6 text-xs">
+        <div>
+          <p className="uppercase tracking-wide text-neutral-400">From</p>
+          <p className="font-semibold text-sm mt-1">{company?.name}</p>
+          <p className="text-neutral-500 whitespace-pre-line">
+            {company?.address}
+          </p>
+          {company?.email && (
+            <p className="text-neutral-500">{company.email}</p>
+          )}
+        </div>
+        <div className="text-right">
+          <p className="uppercase tracking-wide text-neutral-400">To</p>
+          <p className="font-semibold text-sm mt-1">
+            {customer?.company || customer?.name || "Customer"}
+          </p>
+          <p className="text-neutral-500 whitespace-pre-line">
+            {customer?.address}
+          </p>
+          <p className="text-neutral-500 mt-2">Date: {fmtDate(date)}</p>
+          <p className="text-neutral-500">Valid Until: {fmtDate(valid)}</p>
+        </div>
+      </div>
+
+      <table className="w-full text-xs mt-6 border-collapse">
+        <thead>
+          <tr style={{ color: accent }} className="border-b-2 text-left">
+            <th className="py-2">#</th>
+            <th className="py-2">Item</th>
+            <th className="py-2 text-right">Qty</th>
+            <th className="py-2 text-right">Rate</th>
+            <th className="py-2 text-right">Disc</th>
+            {vat && <th className="py-2 text-right">Tax</th>}
+            <th className="py-2 text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i} className="border-b border-neutral-200">
+              <td className="py-2">{i + 1}</td>
+              <td className="py-2">
+                <p className="font-semibold">{l.product || "—"}</p>
+                <p className="text-neutral-400">{l.sku}</p>
+              </td>
+              <td className="py-2 text-right">{l.qty}</td>
+              <td className="py-2 text-right">{m(l.rate)}</td>
+              <td className="py-2 text-right">{l.discount}%</td>
+              {vat && <td className="py-2 text-right">{l.tax}%</td>}
+              <td className="py-2 text-right font-semibold">
+                {m(lineAmount(l))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="ml-auto w-60 mt-5 text-xs">
+        <Row k="Subtotal" v={m(totals.subtotal)} />
+        <Row
+          k="Discount"
+          v={`-${m(totals.discount)}`}
+          tone="text-green-600"
+        />
+        {vat && <Row k="Tax" v={m(totals.tax)} />}
+        <div
+          className="flex justify-between py-2 mt-1 font-bold text-sm"
+          style={{ borderTop: `2px solid ${accent}`, color: accent }}
+        >
+          <span>Total ({currency})</span>
+          <span>{m(totals.total)}</span>
+        </div>
+      </div>
+
+      <div className="mt-6 pt-3 border-t border-neutral-200">
+        <p className="text-xs font-semibold">Terms &amp; Conditions</p>
+        <p className="text-[11px] text-neutral-500 whitespace-pre-line mt-1">
+          {terms}
+        </p>
+        <p className="text-xs font-semibold mt-3">
+          Thank you for your business!
+        </p>
+      </div>
+    </>
+  );
 
   return (
     <div className="animate-fade-up">
@@ -627,141 +744,46 @@ export default function Quoting() {
         {/* preview */}
         <div className="xl:sticky xl:top-2 space-y-4">
           <div className="card !p-4">
-            <p className="font-bold text-ink no-print">Quotation Preview</p>
-            <p className="text-xs text-brand-400 mb-3 no-print">
-              This is how your quotation will look
-            </p>
-            <div className="invoice-print bg-white border border-brand-200 rounded-xl p-7 text-neutral-900">
-              <div className="flex justify-between items-start">
-                <div className="flex items-center gap-2">
-                  {company?.logo && (
-                    <img
-                      src={company.logo}
-                      alt="logo"
-                      className="h-9 object-contain"
-                    />
-                  )}
-                  <span
-                    className="text-lg font-bold"
-                    style={{ color: accent }}
-                  >
-                    {company?.name ?? "Your Company"}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <p
-                    className="text-2xl font-bold tracking-tight"
-                    style={{ color: accent }}
-                  >
-                    QUOTATION
-                  </p>
-                  <p className="text-xs text-neutral-500 mt-1">
-                    {number}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-between mt-6 text-xs">
-                <div>
-                  <p className="uppercase tracking-wide text-neutral-400">
-                    From
-                  </p>
-                  <p className="font-semibold text-sm mt-1">
-                    {company?.name}
-                  </p>
-                  <p className="text-neutral-500 whitespace-pre-line">
-                    {company?.address}
-                  </p>
-                  {company?.email && (
-                    <p className="text-neutral-500">{company.email}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="uppercase tracking-wide text-neutral-400">
-                    To
-                  </p>
-                  <p className="font-semibold text-sm mt-1">
-                    {customer?.company || customer?.name || "Customer"}
-                  </p>
-                  <p className="text-neutral-500 whitespace-pre-line">
-                    {customer?.address}
-                  </p>
-                  <p className="text-neutral-500 mt-2">
-                    Date: {fmtDate(date)}
-                  </p>
-                  <p className="text-neutral-500">
-                    Valid Until: {fmtDate(valid)}
-                  </p>
-                </div>
-              </div>
-
-              <table className="w-full text-xs mt-6 border-collapse">
-                <thead>
-                  <tr
-                    style={{ color: accent }}
-                    className="border-b-2 text-left"
-                  >
-                    <th className="py-2">#</th>
-                    <th className="py-2">Item</th>
-                    <th className="py-2 text-right">Qty</th>
-                    <th className="py-2 text-right">Rate</th>
-                    <th className="py-2 text-right">Disc</th>
-                    {vat && <th className="py-2 text-right">Tax</th>}
-                    <th className="py-2 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={i} className="border-b border-neutral-200">
-                      <td className="py-2">{i + 1}</td>
-                      <td className="py-2">
-                        <p className="font-semibold">
-                          {l.product || "—"}
-                        </p>
-                        <p className="text-neutral-400">{l.sku}</p>
-                      </td>
-                      <td className="py-2 text-right">{l.qty}</td>
-                      <td className="py-2 text-right">{m(l.rate)}</td>
-                      <td className="py-2 text-right">{l.discount}%</td>
-                      {vat && (
-                        <td className="py-2 text-right">{l.tax}%</td>
-                      )}
-                      <td className="py-2 text-right font-semibold">
-                        {m(lineAmount(l))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div className="ml-auto w-60 mt-5 text-xs">
-                <Row k="Subtotal" v={m(totals.subtotal)} />
-                <Row
-                  k="Discount"
-                  v={`-${m(totals.discount)}`}
-                  tone="text-green-600"
-                />
-                {vat && <Row k="Tax" v={m(totals.tax)} />}
-                <div
-                  className="flex justify-between py-2 mt-1 font-bold text-sm"
-                  style={{ borderTop: `2px solid ${accent}`, color: accent }}
-                >
-                  <span>Total ({currency})</span>
-                  <span>{m(totals.total)}</span>
-                </div>
-              </div>
-
-              <div className="mt-6 pt-3 border-t border-neutral-200">
-                <p className="text-xs font-semibold">Terms &amp; Conditions</p>
-                <p className="text-[11px] text-neutral-500 whitespace-pre-line mt-1">
-                  {terms}
-                </p>
-                <p className="text-xs font-semibold mt-3">
-                  Thank you for your business!
+            <div className="no-print flex items-start justify-between mb-3">
+              <div>
+                <p className="font-bold text-ink">Quotation Preview</p>
+                <p className="text-xs text-brand-400">
+                  This is how your quotation will look
                 </p>
               </div>
+              <button
+                className="btn-ghost text-xs"
+                onClick={() => setAnnotOpen(true)}
+              >
+                <Pencil size={13} /> Edit
+              </button>
+            </div>
+            <div className="invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900">
+              {renderQuoteBody()}
+              <AnnotationLayer id={`quote:${docId ?? "new"}`} editable={false} />
             </div>
           </div>
+
+          <Modal
+            open={annotOpen}
+            onClose={() => setAnnotOpen(false)}
+            title="Annotate quotation"
+            size="3xl"
+          >
+            <p className="text-xs text-brand-400 mb-3">
+              Use the toolbar (pen, eraser, text, color, brush size, undo,
+              redo) to mark up the quotation. Save when done; changes appear
+              on the preview and printed PDF.
+            </p>
+            <div className="no-print invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900">
+              {renderQuoteBody()}
+              <AnnotationLayer
+                id={`quote:${docId ?? "new"}`}
+                editable
+                onSave={() => setAnnotOpen(false)}
+              />
+            </div>
+          </Modal>
 
           <div className="card no-print">
             <div className="flex items-center justify-between mb-1">
