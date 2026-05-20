@@ -184,8 +184,20 @@
   }
 }
 
-/* ===== Invoice print → PDF ===== */
+/* ===== Invoice / quote print → PDF =====
+   The on-screen preview wraps `.invoice-print` in scaled / clipped
+   ancestors (FitPreview's .fp-box, .fp-frame, the main scroll area,
+   the sidebar) — when printing we collapse all of that and pin the
+   sheet to the full A4 page so the output is never cropped. */
 @media print {
+  /* Let every ancestor be tall enough that nothing clips the sheet. */
+  html,
+  body,
+  #root {
+    overflow: visible !important;
+    height: auto !important;
+    background: #fff !important;
+  }
   body * {
     visibility: hidden !important;
   }
@@ -193,32 +205,49 @@
   .invoice-print * {
     visibility: visible !important;
   }
-  .invoice-print {
-    position: fixed;
-    left: 0;
-    top: 0;
-    width: 100% !important;
-    min-height: 0 !important;
+
+  /* Collapse FitPreview's on-screen scaling/clipping in print. */
+  .fp-box,
+  .fp-frame {
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
+    width: auto !important;
     height: auto !important;
-    margin: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    transform: none !important;
+  }
+
+  /* Pin the printed sheet to the full A4 page; override inline
+     position/transform/size set by FitPreview with !important. */
+  .invoice-print {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
     padding: 14mm !important;
     transform: none !important;
     box-shadow: none !important;
     border: none !important;
+    overflow: visible !important;
+    background: #fff !important;
   }
+
   .no-print {
     display: none !important;
   }
-  /* margin:0 suppresses the browser's print header/footer
-     (document title + localhost URL). Page margin is supplied
-     by .invoice-print padding instead. */
+
+  /* @page margin: 0 suppresses the browser's "Document title /
+     localhost URL" header/footer; page margin is supplied by
+     .invoice-print padding (14mm). */
   @page {
     size: A4;
     margin: 0;
-  }
-  html,
-  body {
-    background: #fff !important;
   }
   * {
     -webkit-print-color-adjust: exact !important;
