@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:rls": "node scripts/rls-test.mjs",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },

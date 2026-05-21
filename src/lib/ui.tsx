@@ -1,0 +1,211 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
+
+type ToastKind = "success" | "error" | "info";
+interface Toast {
+  id: number;
+  kind: ToastKind;
+  message: string;
+}
+
+interface ConfirmOpts {
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}
+interface PromptOpts {
+  title: string;
+  label?: string;
+  defaultValue?: string;
+  confirmLabel?: string;
+  placeholder?: string;
+}
+
+interface UIValue {
+  toast: {
+    success: (m: string) => void;
+    error: (m: string) => void;
+    info: (m: string) => void;
+  };
+  confirm: (opts: ConfirmOpts) => Promise<boolean>;
+  prompt: (opts: PromptOpts) => Promise<string | null>;
+}
+
+const Ctx = createContext<UIValue | null>(null);
+
+let nextId = 1;
+
+export function UIProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmState, setConfirmState] = useState<
+    (ConfirmOpts & { resolve: (v: boolean) => void }) | null
+  >(null);
+  const [promptState, setPromptState] = useState<
+    (PromptOpts & { resolve: (v: string | null) => void }) | null
+  >(null);
+  const promptInput = useRef<HTMLInputElement>(null);
+
+  const push = useCallback((kind: ToastKind, message: string) => {
+    const id = nextId++;
+    setToasts((t) => [...t, { id, kind, message }]);
+    setTimeout(() => {
+      setToasts((t) => t.filter((x) => x.id !== id));
+    }, 4000);
+  }, []);
+
+  const toast = {
+    success: (m: string) => push("success", m),
+    error: (m: string) => push("error", m),
+    info: (m: string) => push("info", m),
+  };
+
+  const confirm = useCallback(
+    (opts: ConfirmOpts) =>
+      new Promise<boolean>((resolve) =>
+        setConfirmState({ ...opts, resolve })
+      ),
+    []
+  );
+
+  const prompt = useCallback(
+    (opts: PromptOpts) =>
+      new Promise<string | null>((resolve) =>
+        setPromptState({ ...opts, resolve })
+      ),
+    []
+  );
+
+  const closeConfirm = (v: boolean) => {
+    confirmState?.resolve(v);
+    setConfirmState(null);
+  };
+  const closePrompt = (v: string | null) => {
+    promptState?.resolve(v);
+    setPromptState(null);
+  };
+
+  const TOAST_STYLE: Record<ToastKind, string> = {
+    success: "text-success bg-white border-success/30",
+    error: "text-danger bg-white border-danger/30",
+    info: "text-brand-700 bg-white border-brand-200",
+  };
+  const TOAST_ICON: Record<ToastKind, ReactNode> = {
+    success: <CheckCircle2 size={16} className="text-success" />,
+    error: <AlertCircle size={16} className="text-danger" />,
+    info: <Info size={16} className="text-brand-500" />,
+  };
+
+  return (
+    <Ctx.Provider value={{ toast, confirm, prompt }}>
+      {children}
+
+      {/* toasts */}
+      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 shadow-bento text-sm font-semibold animate-fade-up ${TOAST_STYLE[t.kind]}`}
+          >
+            <span className="mt-px shrink-0">{TOAST_ICON[t.kind]}</span>
+            <span className="text-ink/90">{t.message}</span>
+            <button
+              aria-label="Dismiss"
+              onClick={() => setToasts((x) => x.filter((z) => z.id !== t.id))}
+              className="ml-auto text-brand-400 hover:text-ink cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* confirm dialog */}
+      {confirmState && (
+        <div
+          className="fixed inset-0 z-[101] bg-ink/40 backdrop-blur-sm grid place-items-center p-4"
+          onClick={() => closeConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white shadow-bento-hover p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-bold text-ink text-lg">{confirmState.title}</p>
+            {confirmState.message && (
+              <p className="text-sm text-brand-500 mt-1.5">
+                {confirmState.message}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 mt-5">
+              <button className="btn-ghost" onClick={() => closeConfirm(false)}>
+                {confirmState.cancelLabel ?? "Cancel"}
+              </button>
+              <button
+                className={confirmState.danger ? "btn-danger" : "btn-primary"}
+                onClick={() => closeConfirm(true)}
+              >
+                {confirmState.confirmLabel ?? "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* prompt dialog */}
+      {promptState && (
+        <div
+          className="fixed inset-0 z-[101] bg-ink/40 backdrop-blur-sm grid place-items-center p-4"
+          onClick={() => closePrompt(null)}
+        >
+          <form
+            className="w-full max-w-sm rounded-2xl bg-white shadow-bento-hover p-6"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              closePrompt(promptInput.current?.value ?? "");
+            }}
+          >
+            <p className="font-bold text-ink text-lg">{promptState.title}</p>
+            {promptState.label && (
+              <label className="label mt-3">{promptState.label}</label>
+            )}
+            <input
+              ref={promptInput}
+              autoFocus
+              className="input mt-1"
+              placeholder={promptState.placeholder}
+              defaultValue={promptState.defaultValue}
+            />
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => closePrompt(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary">
+                {promptState.confirmLabel ?? "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </Ctx.Provider>
+  );
+}
+
+export function useUI(): UIValue {
+  const c = useContext(Ctx);
+  if (!c) throw new Error("useUI must be used within UIProvider");
+  return c;
+}

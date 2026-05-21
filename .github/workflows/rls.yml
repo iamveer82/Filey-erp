@@ -1,0 +1,25 @@
+name: RLS regression
+
+# Behavioral multi-tenant security test. Runs on demand and on pushes
+# that touch the schema or the test. Skips cleanly when the Supabase
+# secrets are not configured (so forks / PRs without secrets stay green).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "supabase/schema.sql"
+      - "scripts/rls-test.mjs"
+
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/rls-test.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}

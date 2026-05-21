@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { UIProvider } from "./lib/ui";
 import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
@@ -28,19 +30,24 @@ function ModuleDisabled({ name }: { name: string }) {
 function AppRoutes() {
   const { modules, isEnabled } = useModules();
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/overview" replace />} />
-      {modules.map((m) => (
-        <Route
-          key={m.id}
-          path={m.to}
-          element={
-            isEnabled(m.id) ? m.element : <ModuleDisabled name={m.label} />
-          }
-        />
-      ))}
-      <Route path="*" element={<Navigate to="/overview" replace />} />
-    </Routes>
+    <Suspense fallback={<Splash />}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        {modules.map((m) => {
+          const Page = m.Component;
+          return (
+            <Route
+              key={m.id}
+              path={m.to}
+              element={
+                isEnabled(m.id) ? <Page /> : <ModuleDisabled name={m.label} />
+              }
+            />
+          );
+        })}
+        <Route path="*" element={<Navigate to="/overview" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -64,8 +71,10 @@ function Gate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Gate />
-    </AuthProvider>
+    <UIProvider>
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
+    </UIProvider>
   );
 }

@@ -103,12 +103,27 @@ export default function Reports() {
     0
   );
 
-  const trend = ["Apr 1", "Apr 8", "Apr 15", "Apr 22", "Apr 29"].map(
-    (d, i) => ({
-      name: d,
-      value: Math.round((invValue || 10000) * (0.7 + i * 0.1)),
-    })
-  );
+  // Real revenue trend: paid invoices grouped into the last 6 months.
+  const trend = useMemo(() => {
+    const now = new Date();
+    const buckets: { name: string; value: number; key: string }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      buckets.push({
+        name: d.toLocaleString("en", { month: "short" }),
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        value: 0,
+      });
+    }
+    const byKey = new Map(buckets.map((b) => [b.key, b]));
+    for (const inv of invoices) {
+      if (inv.status !== "paid" || !inv.issue_date) continue;
+      const d = new Date(inv.issue_date);
+      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
+      if (b) b.value += inv.total;
+    }
+    return buckets.map(({ name, value }) => ({ name, value }));
+  }, [invoices]);
 
   const financials = [
     { name: "Assets", value: report?.total_assets ?? 0 },
@@ -178,7 +193,7 @@ export default function Reports() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
         <InfoCard
-          title="Inventory value trend"
+          title="Revenue (paid) — last 6 months"
           className="lg:col-span-2"
         >
           <div className="h-64">

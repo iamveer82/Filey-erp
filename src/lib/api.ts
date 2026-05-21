@@ -13,6 +13,7 @@ export interface Product {
   cost_price: number;
   quantity: number;
   reorder_level: number;
+  shared?: boolean;
   created_at: string;
 }
 export interface Order {
@@ -22,17 +23,7 @@ export interface Order {
   customer_id?: number;
   status: string;
   total: number;
-  created_at: string;
-}
-export interface Invoice {
-  id: number;
-  invoice_number: string;
-  customer_name: string;
-  customer_id?: number;
-  order_id?: number;
-  amount: number;
-  status: string;
-  due_date?: string;
+  shared?: boolean;
   created_at: string;
 }
 export interface OrderItem {
@@ -161,6 +152,7 @@ export interface CrmCustomer {
   phone?: string;
   address?: string;
   segment?: string;
+  shared?: boolean;
   created_at: string;
 }
 export interface Opportunity {
@@ -207,6 +199,7 @@ export interface InvoiceDocSummary {
   total: number;
   issue_date?: string;
   due_date?: string;
+  shared?: boolean;
   updated_at: string;
 }
 export interface InvoiceDoc {
@@ -485,19 +478,35 @@ async function sDelete(table: string, id: number): Promise<void> {
   if (error) throw error;
 }
 
+/** Toggle a record's org-sharing. Shared rows are visible (read-only) to
+ *  the whole org; private rows only to their owner + org admins. */
+export const shareRecord = (table: string, id: number, shared: boolean) =>
+  write(
+    { k: "update", t: table, id, row: { shared } },
+    () => sUpdate(table, id, { shared }),
+    undefined
+  );
+
+/** Share a parent doc and cascade the flag to its line items. */
+async function shareWithItems(
+  parent: string,
+  itemsTable: string,
+  fk: string,
+  id: number,
+  shared: boolean
+): Promise<void> {
+  await sUpdate(parent, id, { shared });
+  const { error } = await sb()
+    .from(itemsTable)
+    .update({ shared })
+    .eq(fk, id);
+  if (error) throw error;
+}
+
 const clean = <T extends Record<string, unknown>>(o: T) =>
   Object.fromEntries(
     Object.entries(o).filter(([, v]) => v !== undefined)
   ) as Record<string, unknown>;
-
-async function currentUid(): Promise<string | null> {
-  try {
-    const { data } = await sb().auth.getUser();
-    return data.user?.id ?? null;
-  } catch {
-    return null;
-  }
-}
 
 // ===== ERP Core =====
 export const erp = {
@@ -593,6 +602,10 @@ export const erp = {
   setOrderStatus: (orderId: number, status: string) =>
     write({ k: "update", t: "orders", id: orderId, row: { status } }, () =>
       sUpdate("orders", orderId, { status }), undefined
+    ),
+  shareOrder: (orderId: number, shared: boolean) =>
+    online(() =>
+      shareWithItems("orders", "order_items", "order_id", orderId, shared)
     ),
   summary: () =>
     readCached<ErpSummary>(
@@ -1298,14 +1311,25 @@ export const billing = {
       () => sUpdate("invoice_docs", docId, { status }),
       undefined
     ),
+  shareDoc: (docId: number, shared: boolean) =>
+    online(() =>
+      shareWithItems(
+        "invoice_docs",
+        "invoice_doc_items",
+        "invoice_id",
+        docId,
+        shared
+      )
+    ),
   getCompany: () =>
     readCached<CompanyProfile>(
       "company_profile",
       async () => {
-        const uid = await currentUid();
-        let q: any = sb().from("company_profile").select("*");
-        if (uid) q = q.eq("user_id", uid);
-        const { data, error } = await q.maybeSingle();
+        // One row per org; RLS scopes the read to the caller's org.
+        const { data, error } = await sb()
+          .from("company_profile")
+          .select("*")
+          .maybeSingle();
         if (error) throw error;
         if (data) {
           const c = data as any;
@@ -1358,16 +1382,17 @@ export const billing = {
         "You're offline. Company details need a connection to save."
       );
     await flushOutbox();
-    const uid = await currentUid();
-    if (!uid) throw new Error("Not signed in. Cannot save company details.");
-    const row = {
-      ...clean(input as unknown as Record<string, unknown>),
-      user_id: uid,
-    };
-    const { error } = await sb()
+    const row = clean(input as unknown as Record<string, unknown>);
+    // One profile per org. Update the existing row if present, else insert
+    // (org_id/user_id fill from defaults). RLS permits writes for org
+    // admins only, so an invited member's save is rejected by the server.
+    const { data, error: selErr } = await sb()
       .from("company_profile")
-      .upsert(row, { onConflict: "user_id" });
-    if (error) throw error;
+      .select("id")
+      .maybeSingle();
+    if (selErr) throw selErr;
+    if (data) await sUpdate("company_profile", (data as any).id, row);
+    else await sInsert("company_profile", row);
     await cacheSet(`${activeCacheOrg}:company_profile`, input);
   },
 };
@@ -1391,6 +1416,7 @@ export interface QuotationSummary {
   template: string;
   total: number;
   valid_until?: string;
+  shared?: boolean;
   updated_at: string;
 }
 export interface QuotationDoc {
@@ -1540,6 +1566,16 @@ export const quotes = {
       () => sUpdate("quotations", docId, { status }),
       undefined
     ),
+  shareDoc: (docId: number, shared: boolean) =>
+    online(() =>
+      shareWithItems(
+        "quotations",
+        "quotation_items",
+        "quotation_id",
+        docId,
+        shared
+      )
+    ),
   convertToInvoice: (quotationId: number) =>
     online(async () => {
       const { data: q, error } = await sb()
@@ -1643,6 +1679,7 @@ export interface Supplier {
   address?: string;
   tax_id?: string;
   notes?: string;
+  shared?: boolean;
   created_at: string;
 }
 
@@ -1896,6 +1933,16 @@ export interface OrgMember {
   role: string;
   name: string;
   email: string;
+  modules?: string[] | null;
+}
+export interface Invitation {
+  id: string;
+  org_id: string;
+  email: string;
+  role: string;
+  modules?: string[] | null;
+  status: string;
+  created_at: string;
 }
 
 export const org = {
@@ -1922,13 +1969,14 @@ export const org = {
           org_id: m.org_id,
           user_id: m.user_id,
           role: m.role,
+          modules: m.modules ?? null,
           name: byId.get(m.user_id)?.name ?? "—",
           email: byId.get(m.user_id)?.email ?? "",
         })) as OrgMember[];
       },
       []
     ),
-  /** Create a new organization; returns its id (the join code). */
+  /** Create a new organization; returns its id. */
   create: (name: string) =>
     online(async () => {
       const id = await sInsert("organizations", { name });
@@ -1938,20 +1986,55 @@ export const org = {
       });
       return String(id);
     }),
-  /** Join an existing organization by its id (join code). */
-  join: (code: string) =>
-    online(async () => {
-      await sInsert("org_members", { org_id: code, role: "staff" });
-      return code;
-    }),
   setRole: (memberId: number, role: string) =>
     write(
       { k: "update", t: "org_members", id: memberId, row: { role } },
       () => sUpdate("org_members", memberId, { role }),
       undefined
     ),
+  setMemberModules: (memberId: number, modules: string[] | null) =>
+    write(
+      { k: "update", t: "org_members", id: memberId, row: { modules } },
+      () => sUpdate("org_members", memberId, { modules }),
+      undefined
+    ),
   remove: (memberId: number) =>
     write({ k: "delete", t: "org_members", id: memberId }, () =>
       sDelete("org_members", memberId), undefined
     ),
+  // ----- invitations -----
+  invites: () =>
+    readCached<Invitation[]>(
+      "invitations",
+      () => sList<Invitation>("invitations", [{ col: "created_at", asc: false }]),
+      []
+    ),
+  invite: (email: string, role: string, modules: string[] | null) =>
+    online(() =>
+      sInsert("invitations", {
+        email: email.trim().toLowerCase(),
+        role,
+        modules,
+      }).then(() => undefined)
+    ),
+  revokeInvite: (id: string) =>
+    online(async () => {
+      const { error } = await sb().from("invitations").delete().eq("id", id);
+      if (error) throw error;
+    }),
+  /** Pending invitations addressed to the signed-in user's email. */
+  myInvites: () =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("invitations")
+        .select("*")
+        .eq("status", "pending");
+      if (error) throw error;
+      return (data ?? []) as Invitation[];
+    }),
+  acceptInvite: (id: string) =>
+    online(async () => {
+      const { error } = await sb().rpc("accept_invitation", { invite: id });
+      if (error) throw error;
+    }),
 };

@@ -23,7 +23,6 @@ import {
   EyeOff,
   Pencil,
   LayoutGrid,
-  Copy,
   Building,
   Download,
   Wifi,
@@ -42,9 +41,11 @@ import {
   org,
   type OrgMember,
   type Organization,
+  type Invitation,
 } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
+import { useUI } from "../lib/ui";
 import { useModules } from "../lib/modules";
 import {
   loadEmailConfig,
@@ -54,8 +55,9 @@ import {
   hasDesktop,
   type EmailConfig,
 } from "../lib/email";
-import { fmtDate } from "../lib/format";
+import { fmtDate, numInput } from "../lib/format";
 import { PageHeader, DataTable, Badge, Modal, Field } from "../components/ui";
+import { MODULES } from "../modules/registry";
 
 type Section =
   | "company"
@@ -240,6 +242,7 @@ function ManageRow({
 /* ---------------- Company Details ---------------- */
 
 function CompanyDetails() {
+  const { toast } = useUI();
   const [c, setC] = useState<CompanyProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -278,6 +281,7 @@ function CompanyDetails() {
         // getCompany falls back to cache — our saved data is there.
       }
       setSaved(true);
+      toast.success("Company details saved.");
     } catch (e) {
       const msg =
         e instanceof Error
@@ -288,7 +292,7 @@ function CompanyDetails() {
             (e as any).hint ??
             JSON.stringify(e)
           : String(e);
-      alert(`Could not save company details: ${msg}`);
+      toast.error(`Could not save company details: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -487,7 +491,7 @@ function CompanyDetails() {
               placeholder="5"
               value={c.default_tax_rate ?? ""}
               onChange={(e) =>
-                set("default_tax_rate", +e.target.value)
+                set("default_tax_rate", numInput(e.target.value))
               }
             />
           </Field>
@@ -555,6 +559,7 @@ function PwInput({
 
 function AccountProfile() {
   const { profile, user, updateProfile, signInWithPassword } = useAuth();
+  const { toast, prompt } = useUI();
   const [p, setP] = useState({
     name: profile?.name ?? "",
     phone: profile?.phone ?? "",
@@ -598,14 +603,16 @@ function AccountProfile() {
   const pwValid = PW_RULES.every((r) => r.test(npw));
 
   const changeEmail = async () => {
-    const next = prompt("New email address?", profile?.email ?? "");
+    const next = await prompt({
+      title: "Change email",
+      label: "New email address",
+      defaultValue: profile?.email ?? "",
+      placeholder: "you@company.com",
+    });
     if (!next || !supabase) return;
     const { error } = await supabase.auth.updateUser({ email: next });
-    alert(
-      error
-        ? `Could not change email: ${error.message}`
-        : "Confirmation sent to the new email address."
-    );
+    if (error) toast.error(`Could not change email: ${error.message}`);
+    else toast.success("Confirmation sent to the new email address.");
   };
 
   const updatePassword = async () => {
@@ -662,8 +669,11 @@ function AccountProfile() {
                   });
                   setSavedProfile(true);
                   setTimeout(() => setSavedProfile(false), 2500);
+                  toast.success("Profile saved.");
                 } catch (e) {
-                  alert(`Could not save: ${e}`);
+                  toast.error(
+                    `Could not save: ${e instanceof Error ? e.message : e}`
+                  );
                 }
               }}
             >
@@ -770,7 +780,7 @@ function AccountProfile() {
               className="btn-ghost shrink-0"
               onClick={async () => {
                 await updateProfile({ username: p.username });
-                alert("Username saved.");
+                toast.success("Username saved.");
               }}
             >
               Change Username
@@ -880,8 +890,11 @@ function AccountProfile() {
                   });
                   setSavedPrefs(true);
                   setTimeout(() => setSavedPrefs(false), 2500);
+                  toast.success("Preferences saved.");
                 } catch (e) {
-                  alert(`Could not save: ${e}`);
+                  toast.error(
+                    `Could not save: ${e instanceof Error ? e.message : e}`
+                  );
                 }
               }}
             >
@@ -976,16 +989,22 @@ const ROLES = ["owner", "admin", "manager", "accountant", "staff"];
 
 function UsersRoles() {
   const { profile, user, updateProfile } = useAuth();
+  const { toast } = useUI();
   const [o, setO] = useState<Organization | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
+  const [invites, setInvites] = useState<Invitation[]>([]);
+  const [myInvites, setMyInvites] = useState<Invitation[]>([]);
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("staff");
+  const [accessFor, setAccessFor] = useState<OrgMember | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const load = () => {
     org.get().then(setO).catch(() => {});
     org.members().then(setMembers).catch(() => {});
+    org.invites().then(setInvites).catch(() => setInvites([]));
+    org.myInvites().then(setMyInvites).catch(() => setMyInvites([]));
   };
   useEffect(load, []);
 
@@ -999,7 +1018,6 @@ function UsersRoles() {
   const switchOrg = async (id: string) => {
     await updateProfile({ org_id: id });
     setName("");
-    setCode("");
     setTimeout(load, 150);
   };
 
@@ -1009,21 +1027,39 @@ function UsersRoles() {
     try {
       const id = await org.create(name.trim());
       await switchOrg(id);
+      toast.success("Organization created.");
     } catch (e) {
-      alert(`Could not create org: ${e}`);
+      toast.error(
+        `Could not create org: ${e instanceof Error ? e.message : e}`
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const joinOrg = async () => {
-    if (!code.trim()) return;
+  const sendInvite = async () => {
+    if (!inviteEmail.trim()) return;
     setBusy(true);
     try {
-      await org.join(code.trim());
-      await switchOrg(code.trim());
+      await org.invite(inviteEmail.trim(), inviteRole, null);
+      setInviteEmail("");
+      toast.success(`Invitation sent to ${inviteEmail.trim()}.`);
+      load();
     } catch (e) {
-      alert(`Could not join: ${e}`);
+      toast.error(`Could not invite: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptInvite = async (id: string) => {
+    setBusy(true);
+    try {
+      await org.acceptInvite(id);
+      toast.success("Joined organization.");
+      setTimeout(load, 150);
+    } catch (e) {
+      toast.error(`Could not accept: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(false);
     }
@@ -1043,37 +1079,37 @@ function UsersRoles() {
             <p className="text-sm text-brand-500 mt-0.5">
               {personal
                 ? "You're working solo. Create an organization to invite a team and share data."
-                : "Share the join code below so teammates can join this organization."}
+                : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
             </p>
           </div>
         </div>
-        {!personal && (
-          <div className="mt-4">
-            <label className="label">Join code (organization ID)</label>
-            <div className="flex gap-2">
-              <input
-                className="input font-mono text-xs"
-                readOnly
-                value={currentOrg}
-              />
-              <button
-                className="btn-ghost shrink-0"
-                onClick={() => {
-                  navigator.clipboard
-                    ?.writeText(currentOrg)
-                    .then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    })
-                    .catch(() => {});
-                }}
-              >
-                <Copy size={14} /> {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Invitations addressed to you */}
+      {myInvites.length > 0 && (
+        <div className="card border-primary-300 bg-primary-50/50">
+          <p className="font-bold text-ink mb-2">Invitations for you</p>
+          <ul className="space-y-2">
+            {myInvites.map((inv) => (
+              <li
+                key={inv.id}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="text-sm text-ink">
+                  Join as <b>{inv.role}</b>
+                </span>
+                <button
+                  className="btn-primary text-xs"
+                  disabled={busy}
+                  onClick={() => acceptInvite(inv.id)}
+                >
+                  Accept
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="card">
@@ -1098,28 +1134,75 @@ function UsersRoles() {
             </button>
           </div>
         </div>
-        <div className="card">
-          <p className="font-bold text-ink mb-1">Join organization</p>
-          <p className="text-xs text-brand-400 mb-3">
-            Paste a join code (organization ID) shared with you.
-          </p>
-          <div className="flex gap-2">
-            <input
-              className="input font-mono text-xs"
-              placeholder="org id…"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <button
-              className="btn-ghost shrink-0"
-              disabled={busy || !code.trim()}
-              onClick={joinOrg}
-            >
-              Join
-            </button>
+        {!personal && isAdmin && (
+          <div className="card">
+            <p className="font-bold text-ink mb-1">Invite teammate</p>
+            <p className="text-xs text-brand-400 mb-3">
+              They sign up with this email, then accept from their Settings →
+              Users.
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="input"
+                type="email"
+                placeholder="teammate@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+              />
+              <select
+                className="select !w-auto"
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+              >
+                {ROLES.filter((r) => r !== "owner").map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn-primary shrink-0"
+                disabled={busy || !inviteEmail.trim()}
+                onClick={sendInvite}
+              >
+                Invite
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
+
+      {/* Pending invitations the org has sent */}
+      {!personal && isAdmin && invites.filter((i) => i.status === "pending").length > 0 && (
+        <div className="card">
+          <p className="font-bold text-ink mb-2">Pending invitations</p>
+          <ul className="space-y-2">
+            {invites
+              .filter((i) => i.status === "pending")
+              .map((inv) => (
+                <li
+                  key={inv.id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="text-sm">
+                    <b className="text-ink">{inv.email}</b>{" "}
+                    <span className="text-brand-400">· {inv.role}</span>
+                  </span>
+                  <button
+                    aria-label="Revoke invitation"
+                    className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                    onClick={async () => {
+                      await org.revokeInvite(inv.id);
+                      load();
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
 
       <div className="card !p-0 overflow-hidden">
         <div className="px-5 pt-4">
@@ -1185,16 +1268,24 @@ function UsersRoles() {
                 </td>
                 <td className="px-5 py-2.5 text-right">
                   {isAdmin && m.user_id !== user?.id && (
-                    <button
-                      aria-label="Remove member"
-                      className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
-                      onClick={async () => {
-                        await org.remove(m.id);
-                        load();
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        className="btn-ghost text-xs"
+                        onClick={() => setAccessFor(m)}
+                      >
+                        Access
+                      </button>
+                      <button
+                        aria-label="Remove member"
+                        className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                        onClick={async () => {
+                          await org.remove(m.id);
+                          load();
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -1202,7 +1293,109 @@ function UsersRoles() {
           </tbody>
         </table>
       </div>
+
+      <MemberAccessModal
+        member={accessFor}
+        onClose={() => setAccessFor(null)}
+        onSaved={() => {
+          setAccessFor(null);
+          load();
+        }}
+      />
     </div>
+  );
+}
+
+function MemberAccessModal({
+  member,
+  onClose,
+  onSaved,
+}: {
+  member: OrgMember | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useUI();
+  // Assignable modules = everything except core (always available).
+  const assignable = MODULES.filter((m) => !m.core);
+  const [sel, setSel] = useState<string[]>([]);
+  const [all, setAll] = useState(true);
+
+  useEffect(() => {
+    if (member) {
+      const m = member.modules;
+      if (Array.isArray(m)) {
+        setAll(false);
+        setSel(m);
+      } else {
+        setAll(true);
+        setSel(assignable.map((x) => x.id));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member]);
+
+  const save = async () => {
+    if (!member) return;
+    try {
+      await org.setMemberModules(member.id, all ? null : sel);
+      toast.success("Access updated.");
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <Modal
+      open={!!member}
+      onClose={onClose}
+      title={`App access — ${member?.name ?? ""}`}
+    >
+      <p className="text-xs text-brand-400 mb-3">
+        Choose which apps this member can open. Overview &amp; Settings are
+        always available.
+      </p>
+      <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={all}
+          onChange={(e) => setAll(e.target.checked)}
+        />
+        <span className="text-sm font-semibold text-ink">All apps</span>
+      </label>
+      {!all && (
+        <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+          {assignable.map((m) => (
+            <label
+              key={m.id}
+              className="flex items-center gap-2 text-sm cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={sel.includes(m.id)}
+                onChange={(e) =>
+                  setSel((s) =>
+                    e.target.checked
+                      ? [...s, m.id]
+                      : s.filter((x) => x !== m.id)
+                  )
+                }
+              />
+              {m.label}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-end gap-2 mt-5">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn-primary" onClick={save}>
+          Save access
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1792,8 +1985,15 @@ function EmailPanel() {
   const save = async () => {
     const next = { ...cfg, from_email: cfg.username };
     setCfg(next);
-    await saveEmailConfig(next);
-    setSaved(true);
+    try {
+      await saveEmailConfig(next);
+      setSaved(true);
+    } catch (e) {
+      setTest({
+        busy: false,
+        msg: e instanceof Error ? e.message : String(e),
+      });
+    }
   };
 
   const sendTest = async () => {
@@ -1892,7 +2092,7 @@ function EmailPanel() {
                 type="number"
                 className="input"
                 value={cfg.port}
-                onChange={(e) => set("port", +e.target.value || 587)}
+                onChange={(e) => set("port", numInput(e.target.value) || 587)}
               />
             </Field>
           </div>

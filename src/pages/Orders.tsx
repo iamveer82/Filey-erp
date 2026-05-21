@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate } from "../lib/format";
+import { useUI } from "../lib/ui";
+import { aed, fmtDate, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -18,6 +19,7 @@ import {
   statusTone,
   Modal,
   Field,
+  ShareToggle,
 } from "../components/ui";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
@@ -29,6 +31,7 @@ const nextOrderNumber = () => {
 };
 
 export default function Orders() {
+  const { toast } = useUI();
   const [orders, setOrders] = useState<Order[]>([]);
   const [open, setOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
@@ -134,6 +137,26 @@ export default function Orders() {
             key: "date",
             label: "Created",
             render: (o) => fmtDate(o.created_at),
+          },
+          {
+            key: "share",
+            label: "Sharing",
+            render: (o) => (
+              <ShareToggle
+                shared={o.shared}
+                onToggle={async (next) => {
+                  try {
+                    await erp.shareOrder(o.id, next);
+                    load();
+                    toast.success(
+                      next ? "Shared with team." : "Set to private."
+                    );
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              />
+            ),
           },
           {
             key: "act",
@@ -288,7 +311,7 @@ function OrderModal({
             className="input"
             placeholder="0"
             value={f.total || ""}
-            onChange={(e) => setF({ ...f, total: +e.target.value })}
+            onChange={(e) => setF({ ...f, total: numInput(e.target.value) })}
           />
         </Field>
       </div>

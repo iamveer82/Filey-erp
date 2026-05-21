@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, TrendingUp, Wallet, Receipt, Banknote } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate } from "../lib/format";
+import { aed, fmtDate, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -253,7 +253,7 @@ function AccountModal({
             className="input"
             placeholder="0"
             value={f.balance || ""}
-            onChange={(e) => setF({ ...f, balance: +e.target.value })}
+            onChange={(e) => setF({ ...f, balance: numInput(e.target.value) })}
           />
         </Field>
       </div>
@@ -316,7 +316,7 @@ function JournalModal({
             className="select"
             value={f.account_id}
             onChange={(e) =>
-              setF({ ...f, account_id: +e.target.value })
+              setF({ ...f, account_id: numInput(e.target.value) })
             }
           >
             {accounts.length === 0 && <option value={0}>No accounts</option>}
@@ -344,7 +344,7 @@ function JournalModal({
               className="input"
               placeholder="0"
               value={f.amount || ""}
-              onChange={(e) => setF({ ...f, amount: +e.target.value })}
+              onChange={(e) => setF({ ...f, amount: numInput(e.target.value) })}
             />
           </Field>
         </div>

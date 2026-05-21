@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "../lib/format";
+import { useUI } from "../lib/ui";
 
 type Point = { x: number; y: number };
 type Stroke = { color: string; size: number; pts: Point[] };
@@ -69,6 +70,7 @@ export default function AnnotationLayer({
   editable?: boolean;
   onSave?: () => void;
 }) {
+  const { confirm, prompt } = useUI();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<Annotations>(load(id));
@@ -183,22 +185,25 @@ export default function AnnotationLayer({
         pts: [p],
       };
     } else if (tool === "text") {
-      const text = window.prompt("Text:");
-      if (text && text.trim()) {
-        stateRef.current.texts.push({
-          id: crypto.randomUUID(),
-          x: p.x,
-          y: p.y,
-          color,
-          size: Math.max(12, size * 4),
-          text: text.trim(),
-        });
-        opsRef.current.push("text");
-        undoneRef.current = [];
-        persist();
-        rerender();
-      }
-      setTool("select");
+      void prompt({ title: "Add text", label: "Text", confirmLabel: "Add" }).then(
+        (text) => {
+          if (text && text.trim()) {
+            stateRef.current.texts.push({
+              id: crypto.randomUUID(),
+              x: p.x,
+              y: p.y,
+              color,
+              size: Math.max(12, size * 4),
+              text: text.trim(),
+            });
+            opsRef.current.push("text");
+            undoneRef.current = [];
+            persist();
+            rerender();
+          }
+          setTool("select");
+        }
+      );
     }
   }
 
@@ -264,13 +269,20 @@ export default function AnnotationLayer({
   }
 
   function clearAll() {
-    if (!confirm("Clear all annotations on this doc?")) return;
-    stateRef.current = { strokes: [], texts: [] };
-    opsRef.current = [];
-    undoneRef.current = [];
-    persist();
-    redraw();
-    rerender();
+    void confirm({
+      title: "Clear annotations",
+      message: "Clear all annotations on this document?",
+      confirmLabel: "Clear",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
+      stateRef.current = { strokes: [], texts: [] };
+      opsRef.current = [];
+      undoneRef.current = [];
+      persist();
+      redraw();
+      rerender();
+    });
   }
 
   function removeText(tid: string) {

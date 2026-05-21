@@ -4,8 +4,40 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   SlidersHorizontal,
+  Users,
+  Lock,
 } from "lucide-react";
 import { cn } from "../lib/format";
+
+/** Per-record sharing toggle. Private = owner-only; Shared = visible
+ *  (read-only) to the whole organization. */
+export function ShareToggle({
+  shared,
+  onToggle,
+}: {
+  shared?: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={() => onToggle(!shared)}
+      title={
+        shared
+          ? "Shared with your team — click to make private"
+          : "Private to you — click to share with your team"
+      }
+      className={cn(
+        "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+        shared
+          ? "bg-info/15 text-info hover:bg-info/25"
+          : "bg-brand-100 text-brand-500 hover:bg-brand-200"
+      )}
+    >
+      {shared ? <Users size={12} /> : <Lock size={12} />}
+      {shared ? "Shared" : "Private"}
+    </button>
+  );
+}
 
 export function PageHeader({
   title,

@@ -5,7 +5,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { tools } from "./api";
+import { tools, org } from "./api";
+import { useAuth } from "./auth";
 import { MODULES, type AppModule } from "../modules/registry";
 
 const KEY = "modules.disabled";
@@ -21,7 +22,11 @@ interface ModulesValue {
 const Ctx = createContext<ModulesValue | null>(null);
 
 export function ModulesProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [disabled, setDisabled] = useState<string[]>([]);
+  // Allowed module ids for the current member (null = no restriction).
+  // Owners/admins are never restricted.
+  const [allowed, setAllowed] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,10 +47,35 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setAllowed(null);
+      return;
+    }
+    org
+      .members()
+      .then((ms) => {
+        const me = ms.find((m) => m.user_id === user.id);
+        if (
+          me &&
+          !["owner", "admin"].includes(me.role) &&
+          Array.isArray(me.modules)
+        ) {
+          setAllowed(me.modules);
+        } else {
+          setAllowed(null);
+        }
+      })
+      .catch(() => setAllowed(null));
+  }, [user?.id]);
+
   const isEnabled = (id: string) => {
     const m = MODULES.find((x) => x.id === id);
     if (m?.core) return true;
-    return !disabled.includes(id);
+    if (disabled.includes(id)) return false;
+    // Member-level access restriction set by the org owner.
+    if (allowed && !allowed.includes(id)) return false;
+    return true;
   };
 
   const persist = (next: string[]) => {

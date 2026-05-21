@@ -8,8 +8,15 @@ import {
   Trash2,
   Pencil,
 } from "lucide-react";
-import { erp, suppliers as suppliersApi, Product, Supplier } from "../lib/api";
+import {
+  erp,
+  suppliers as suppliersApi,
+  shareRecord,
+  Product,
+  Supplier,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
 import { aed, num } from "../lib/format";
 import {
   PageHeader,
@@ -19,6 +26,7 @@ import {
   DataTable,
   Modal,
   Field,
+  ShareToggle,
 } from "../components/ui";
 
 interface CategoryGroup {
@@ -33,6 +41,7 @@ export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [open, setOpen] = useState(false);
+  const { confirm, toast } = useUI();
 
   const load = () => {
     erp.products().then(setProducts).catch(console.error);
@@ -131,6 +140,26 @@ export default function Suppliers() {
             render: (s) => s.phone ?? "—",
           },
           {
+            key: "share",
+            label: "Sharing",
+            render: (s) => (
+              <ShareToggle
+                shared={s.shared}
+                onToggle={async (next) => {
+                  try {
+                    await shareRecord("suppliers", s.id, next);
+                    load();
+                    toast.success(
+                      next ? "Shared with team." : "Set to private."
+                    );
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              />
+            ),
+          },
+          {
             key: "act",
             label: "",
             render: (s) => (
@@ -149,7 +178,13 @@ export default function Suppliers() {
                   aria-label="Delete"
                   className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
                   onClick={async () => {
-                    if (!confirm(`Delete supplier "${s.name}"?`)) return;
+                    const ok = await confirm({
+                      title: "Delete supplier",
+                      message: `Delete supplier "${s.name}"?`,
+                      confirmLabel: "Delete",
+                      danger: true,
+                    });
+                    if (!ok) return;
                     await suppliersApi.remove(s.id);
                     load();
                   }}
@@ -226,6 +261,7 @@ function SupplierModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     name: "",
     contact_person: "",
@@ -251,7 +287,7 @@ function SupplierModal({
 
   const save = async () => {
     if (!f.name.trim()) {
-      alert("Supplier name is required");
+      toast.error("Supplier name is required.");
       return;
     }
     const payload = {
@@ -266,9 +302,10 @@ function SupplierModal({
     try {
       if (initial) await suppliersApi.update(initial.id, payload);
       else await suppliersApi.create(payload);
+      toast.success(initial ? "Supplier updated." : "Supplier added.");
       onSaved();
     } catch (e) {
-      alert(
+      toast.error(
         `Could not save supplier: ${
           e instanceof Error ? e.message : String(e)
         }`

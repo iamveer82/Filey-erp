@@ -85,14 +85,26 @@ export default function Overview() {
     };
   }, [orders]);
 
+  // Real trend: orders created per month over the last 6 months.
   const trend = useMemo(() => {
-    const days = ["Apr 1", "Apr 8", "Apr 15", "Apr 22", "Apr 29"];
-    const base = products.length || 12;
-    return days.map((d, i) => ({
-      name: d,
-      items: Math.round(base * (0.8 + i * 0.12) * 100),
-    }));
-  }, [products]);
+    const now = new Date();
+    const buckets: { name: string; key: string; items: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      buckets.push({
+        name: d.toLocaleString("en", { month: "short" }),
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        items: 0,
+      });
+    }
+    const byKey = new Map(buckets.map((b) => [b.key, b]));
+    for (const o of orders) {
+      const d = new Date(o.created_at);
+      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
+      if (b) b.items += 1;
+    }
+    return buckets.map(({ name, items }) => ({ name, items }));
+  }, [orders]);
 
   const activity = useMemo(() => {
     const items: { who: string; what: string; ts: number }[] = [];
@@ -146,21 +158,18 @@ export default function Overview() {
         <MetricCard
           label="Total Items"
           value={num(products.length)}
-          delta={12.5}
           icon={<Boxes size={20} />}
           iconClass="bg-primary-100 text-primary-700"
         />
         <MetricCard
-          label="Total Suppliers"
+          label="Categories"
           value={num(suppliers)}
-          delta={8.2}
           icon={<Users size={20} />}
           iconClass="bg-secondary-400/20 text-secondary-600"
         />
         <MetricCard
           label="Low Stock Items"
           value={num(lowStock.length)}
-          delta={3.7}
           icon={<AlertTriangle size={20} />}
           iconClass="bg-danger/15 text-danger"
         />
@@ -190,9 +199,8 @@ export default function Overview() {
         />
 
         <InfoCard
-          title="Delivery status"
+          title="Orders over time"
           className="lg:col-span-2"
-          action={<Badge tone="warn">Live</Badge>}
         >
           <div className="flex items-center gap-4">
             <div className="rounded-2xl bg-brand-50 p-4">
@@ -200,11 +208,12 @@ export default function Overview() {
             </div>
             <div>
               <p className="text-lg font-bold text-ink">
-                {orderStats.progress} shipments in transit
+                {orderStats.progress} order
+                {orderStats.progress === 1 ? "" : "s"} in progress
               </p>
               <p className="text-sm text-brand-500 mt-0.5">
-                Avg. delay +2d on {orderStats.overdue} routes — carrier capacity
-                constrained this week.
+                {orderStats.completed} completed · {orderStats.overdue}{" "}
+                cancelled / overdue
               </p>
             </div>
           </div>

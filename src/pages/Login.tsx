@@ -4,7 +4,6 @@ import {
   ShieldCheck,
   Zap,
   BarChart3,
-  Star,
   Mail,
   Phone,
   Lock,
@@ -239,17 +238,14 @@ export default function Login() {
         </div>
 
         <div className="relative rounded-2xl bg-white/30 backdrop-blur p-4 max-w-sm">
-          <div className="flex gap-1 text-ink">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Star key={i} size={14} fill="currentColor" />
-            ))}
+          <div className="flex items-center gap-2 text-ink">
+            <ShieldCheck size={16} />
+            <p className="text-sm font-semibold">Private by design</p>
           </div>
           <p className="text-sm text-ink/80 mt-2">
-            “Filey replaced three tools for us. The invoicing alone pays
-            for itself.”
-          </p>
-          <p className="text-xs font-semibold text-ink mt-2">
-            Olivia Rhye · Operations Lead
+            Your data stays in your own secured workspace. PDF tools run
+            locally on your device — files are never uploaded unless you
+            choose to save them.
           </p>
         </div>
       </div>

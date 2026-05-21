@@ -31,9 +31,10 @@ import {
   CrmCustomer,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { fmtDate } from "../lib/format";
+import { useUI } from "../lib/ui";
+import { fmtDate, numInput } from "../lib/format";
 import { invoiceTotals } from "../lib/money";
-import { sendEmail, emailShell, hasDesktop } from "../lib/email";
+import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import AnnotationLayer from "../components/AnnotationLayer";
 import {
@@ -43,6 +44,7 @@ import {
   statusTone,
   Modal,
   Field,
+  ShareToggle,
 } from "../components/ui";
 
 type Item = { description: string; qty: number; unit_price: number };
@@ -109,6 +111,7 @@ const totals = (f: Form) =>
   invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
 
 export default function Invoicing() {
+  const { toast } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -209,7 +212,7 @@ export default function Invoicing() {
       setForm({ ...form, id });
       await loadDocs();
     } catch (e) {
-      alert(`Could not save: ${e}`);
+      toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
     } finally {
       setSaving(false);
     }
@@ -297,6 +300,24 @@ export default function Invoicing() {
             render: (d) => fmtDate(d.updated_at),
           },
           {
+            key: "share",
+            label: "Sharing",
+            render: (d) => (
+              <ShareToggle
+                shared={d.shared}
+                onToggle={async (next) => {
+                  try {
+                    await billing.shareDoc(d.id, next);
+                    loadDocs();
+                    toast.success(next ? "Shared with team." : "Set to private.");
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              />
+            ),
+          },
+          {
             key: "act",
             label: "",
             render: (d) => (
@@ -361,6 +382,7 @@ function Editor({
   onSave: () => void;
   saving: boolean;
 }) {
+  const { toast } = useUI();
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setForm({ ...form, [k]: v });
 
@@ -415,7 +437,7 @@ function Editor({
   const saveAndSend = async () => {
     await onSave();
     if (!form.customer_email) {
-      alert("Add a customer email (Invoice Details) to send this invoice.");
+      toast.error("Add a customer email (Invoice Details) to send this invoice.");
       return;
     }
     const t = invoiceTotals(form.items, form.discount || 0, form.tax_rate || 0);
@@ -425,8 +447,8 @@ function Editor({
         subject: `Invoice ${form.number} from ${form.seller_name}`,
         html: emailShell(
           `Invoice ${form.number}`,
-          `<p>Dear ${form.customer_name || "customer"},</p>
-           <p>Please find your invoice <b>${form.number}</b>.</p>
+          `<p>Dear ${esc(form.customer_name || "customer")},</p>
+           <p>Please find your invoice <b>${esc(form.number)}</b>.</p>
            <table style="width:100%;font-size:14px;margin:12px 0">
              <tr><td>Subtotal</td><td style="text-align:right">${m(
                t.subtotal
@@ -449,12 +471,12 @@ function Editor({
                t.total
              )}</b></td></tr>
            </table>
-           <p>${form.notes ?? ""}</p>`
+           <p>${esc(form.notes ?? "")}</p>`
         ),
       });
-      alert(`Invoice emailed to ${form.customer_email}`);
+      toast.success(`Invoice emailed to ${form.customer_email}`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -503,24 +525,13 @@ function Editor({
           >
             <MoreHorizontal size={15} /> More
           </button>
-          {hasDesktop ? (
-            <button
-              className="btn-primary"
-              onClick={saveAndSend}
-              disabled={saving}
-            >
-              <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
-            </button>
-          ) : (
-            <button
-              className="btn-primary"
-              onClick={onSave}
-              disabled={saving}
-              title="Emailing is available in the Filey desktop app"
-            >
-              <Save size={15} /> {saving ? "Saving…" : "Save"}
-            </button>
-          )}
+          <button
+            className="btn-primary"
+            onClick={saveAndSend}
+            disabled={saving}
+          >
+            <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
+          </button>
         </div>
       </div>
 
@@ -753,7 +764,7 @@ function Editor({
                           className="input text-right"
                           value={it.qty}
                           onChange={(e) =>
-                            setItem(i, { qty: +e.target.value })
+                            setItem(i, { qty: numInput(e.target.value) })
                           }
                         />
                       </td>
@@ -764,7 +775,7 @@ function Editor({
                           placeholder="0"
                           value={it.unit_price || ""}
                           onChange={(e) =>
-                            setItem(i, { unit_price: +e.target.value })
+                            setItem(i, { unit_price: numInput(e.target.value) })
                           }
                         />
                       </td>
@@ -809,7 +820,7 @@ function Editor({
                     className="input"
                     placeholder="0"
                     value={form.discount || ""}
-                    onChange={(e) => set("discount", +e.target.value)}
+                    onChange={(e) => set("discount", numInput(e.target.value))}
                   />
                 </Field>
               </div>
@@ -865,7 +876,7 @@ function Editor({
                       className="input"
                       placeholder="VAT rate %"
                       value={form.tax_rate}
-                      onChange={(e) => set("tax_rate", +e.target.value)}
+                      onChange={(e) => set("tax_rate", numInput(e.target.value))}
                     />
                   )}
                   <select
@@ -1886,6 +1897,7 @@ function CompanyModal({
   onClose: () => void;
   onSaved: (c: CompanyProfile) => void;
 }) {
+  const { toast } = useUI();
   const [c, setC] = useState<CompanyProfile>(company);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -2019,6 +2031,7 @@ function CompanyModal({
                 fresh = c; // server unreachable — use what we saved
               }
               onSaved(fresh);
+              toast.success("Company details saved.");
             } catch (e) {
               const msg =
                 e instanceof Error
@@ -2029,7 +2042,7 @@ function CompanyModal({
                     (e as any).hint ??
                     JSON.stringify(e)
                   : String(e);
-              alert(`Could not save company details: ${msg}`);
+              toast.error(`Could not save company details: ${msg}`);
             }
           }}
         >

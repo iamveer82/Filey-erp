@@ -28,9 +28,10 @@ import {
   QuotationInput,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { fmtDate } from "../lib/format";
+import { useUI } from "../lib/ui";
+import { fmtDate, numInput } from "../lib/format";
 import { quotationTotals } from "../lib/money";
-import { sendEmail, emailShell, hasDesktop } from "../lib/email";
+import { sendEmail, emailShell, esc } from "../lib/email";
 import { Modal, Field } from "../components/ui";
 import AnnotationLayer from "../components/AnnotationLayer";
 
@@ -107,6 +108,7 @@ export default function Quoting() {
   const [savedNote, setSavedNote] = useState(false);
   const [converting, setConverting] = useState(false);
   const navigate = useNavigate();
+  const { toast, prompt } = useUI();
 
   const loadTemplates = () =>
     quoteTemplates.list().then(setSaved).catch(() => {});
@@ -141,7 +143,7 @@ export default function Quoting() {
   const emailQuote = async () => {
     const to = customer?.email;
     if (!to) {
-      alert("Select a customer with an email address first.");
+      toast.error("Select a customer with an email address first.");
       return;
     }
     try {
@@ -150,8 +152,8 @@ export default function Quoting() {
         subject: `Quotation ${number} from ${company?.name ?? "us"}`,
         html: emailShell(
           `Quotation ${number}`,
-          `<p>Dear ${customer?.company || customer?.name || "customer"},</p>
-           <p>Please find your quotation <b>${number}</b>, valid until ${valid}.</p>
+          `<p>Dear ${esc(customer?.company || customer?.name || "customer")},</p>
+           <p>Please find your quotation <b>${esc(number)}</b>, valid until ${esc(valid)}.</p>
            <table style="width:100%;font-size:14px;margin:12px 0">
              <tr><td>Subtotal</td><td style="text-align:right">${m(
                totals.subtotal
@@ -169,9 +171,9 @@ export default function Quoting() {
            <p>Thank you for your business.</p>`
         ),
       });
-      alert(`Quotation emailed to ${to}`);
+      toast.success(`Quotation emailed to ${to}`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -226,18 +228,25 @@ export default function Quoting() {
       setSavedNote(true);
       setTimeout(() => setSavedNote(false), 2500);
     } catch (e) {
-      alert(`Could not save: ${e}`);
+      toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
     }
   };
 
   const saveTemplate = async () => {
-    const name = prompt("Template name?");
-    if (!name) return;
+    const name = await prompt({
+      title: "Save template",
+      label: "Template name",
+      placeholder: "e.g. Standard quote",
+    });
+    if (!name || !name.trim()) return;
     try {
-      await quoteTemplates.create(name, tpl);
+      await quoteTemplates.create(name.trim(), tpl);
       loadTemplates();
+      toast.success("Template saved.");
     } catch (e) {
-      alert(`Could not save template: ${e}`);
+      toast.error(
+        `Could not save template: ${e instanceof Error ? e.message : e}`
+      );
     }
   };
 
@@ -382,18 +391,9 @@ export default function Quoting() {
           >
             <Eye size={15} /> Preview
           </button>
-          {hasDesktop ? (
-            <button className="btn-ghost" onClick={emailQuote}>
-              <Send size={15} /> Email
-            </button>
-          ) : (
-            <span
-              className="text-[11px] text-brand-400 self-center"
-              title="Emailing is available in the Filey desktop app"
-            >
-              Emailing is desktop-only
-            </span>
-          )}
+          <button className="btn-ghost" onClick={emailQuote}>
+            <Send size={15} /> Email
+          </button>
           {docId ? (
             <button
               className="btn-ghost"
@@ -402,9 +402,10 @@ export default function Quoting() {
                 setConverting(true);
                 try {
                   await quotes.convertToInvoice(docId);
+                  toast.success("Invoice created from quotation.");
                   navigate("/invoicing");
                 } catch (e) {
-                  alert(
+                  toast.error(
                     `Could not convert: ${
                       e instanceof Error ? e.message : String(e)
                     }`
@@ -686,7 +687,7 @@ export default function Quoting() {
                           className="input text-right"
                           value={l.qty}
                           onChange={(e) =>
-                            setLine(i, { qty: +e.target.value })
+                            setLine(i, { qty: numInput(e.target.value) })
                           }
                         />
                       </td>
@@ -697,7 +698,7 @@ export default function Quoting() {
                           placeholder="0"
                           value={l.rate || ""}
                           onChange={(e) =>
-                            setLine(i, { rate: +e.target.value })
+                            setLine(i, { rate: numInput(e.target.value) })
                           }
                         />
                       </td>
@@ -708,7 +709,7 @@ export default function Quoting() {
                           placeholder="0"
                           value={l.discount || ""}
                           onChange={(e) =>
-                            setLine(i, { discount: +e.target.value })
+                            setLine(i, { discount: numInput(e.target.value) })
                           }
                         />
                       </td>
@@ -720,7 +721,7 @@ export default function Quoting() {
                             placeholder="0"
                             value={l.tax || ""}
                             onChange={(e) =>
-                              setLine(i, { tax: +e.target.value })
+                              setLine(i, { tax: numInput(e.target.value) })
                             }
                           />
                         </td>

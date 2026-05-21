@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, num } from "../lib/format";
+import { useUI } from "../lib/ui";
+import { aed, fmtDate, num, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -171,6 +172,7 @@ function PurchaseModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     category: "",
     description: "",
@@ -206,7 +208,7 @@ function PurchaseModal({
             className="input"
             placeholder="0"
             value={f.amount || ""}
-            onChange={(e) => setF({ ...f, amount: +e.target.value })}
+            onChange={(e) => setF({ ...f, amount: numInput(e.target.value) })}
           />
         </Field>
         <Field label="Date">
@@ -247,10 +249,11 @@ function PurchaseModal({
                 f.expense_date,
                 f.account_id ? Number(f.account_id) : null
               );
+              toast.success("Purchase saved.");
               onSaved();
               onClose();
             } catch (e) {
-              alert(
+              toast.error(
                 `Could not save purchase: ${
                   e instanceof Error ? e.message : String(e)
                 }`

@@ -10,7 +10,7 @@ import {
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, num, fmtDate } from "../lib/format";
+import { aed, num, fmtDate, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -271,7 +271,7 @@ function EmployeeModal({
             className="input"
             placeholder="0"
             value={f.salary || ""}
-            onChange={(e) => setF({ ...f, salary: +e.target.value })}
+            onChange={(e) => setF({ ...f, salary: numInput(e.target.value) })}
           />
         </Field>
         <Field label="Hire Date">

@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Upload,
-  FolderClosed,
-  FolderPlus,
   MoreHorizontal,
   CheckCircle2,
   LayoutGrid,
@@ -15,6 +12,7 @@ import {
 } from "lucide-react";
 import { PageHeader, InfoCard } from "../components/ui";
 import { toolRuns } from "../lib/api";
+import { useUI } from "../lib/ui";
 import {
   uploadOutputs,
   removePaths,
@@ -57,20 +55,13 @@ function ago(ts: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-const SAMPLE_FOLDERS = [
-  { name: "Invoices", files: 24, size: "245 MB" },
-  { name: "Contracts", files: 16, size: "120 MB" },
-  { name: "Receipts", files: 32, size: "310 MB" },
-  { name: "Reports", files: 18, size: "180 MB" },
-  { name: "Scans", files: 27, size: "—" },
-];
-
 export default function ToolsPage() {
   const [active, setActive] = useState<Tool | null>(null);
   const [runs, setRuns] = useState<RunLog[]>([]);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [preview, setPreview] = useState<RunLog | null>(null);
   const [used, setUsed] = useState(0);
+  const { toast, confirm, prompt } = useUI();
 
   const refreshRuns = () => {
     toolRuns
@@ -137,31 +128,47 @@ export default function ToolsPage() {
         if (got) downloadFile({ name: fileNameOf(p), bytes: got.bytes });
       }
     } catch (e) {
-      alert(
+      toast.error(
         `Could not download: ${e instanceof Error ? e.message : String(e)}`
       );
     }
   };
 
   const renameRun = async (r: RunLog) => {
-    const next = prompt("Rename file", r.file);
+    const next = await prompt({
+      title: "Rename file",
+      label: "File name",
+      defaultValue: r.file,
+    });
     if (next == null || !next.trim() || next === r.file) return;
     try {
       await toolRuns.rename(r.id, next.trim());
       refreshRuns();
+      toast.success("File renamed.");
     } catch (e) {
-      alert(`Could not rename: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(
+        `Could not rename: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
   };
 
   const deleteRun = async (r: RunLog) => {
-    if (!confirm(`Remove "${r.file}" and its stored files?`)) return;
+    const ok = await confirm({
+      title: "Delete file",
+      message: `Remove "${r.file}" and its stored files? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await removePaths(r.paths);
       await toolRuns.remove(r.id);
       refreshRuns();
+      toast.success("Removed.");
     } catch (e) {
-      alert(`Could not delete: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(
+        `Could not delete: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
   };
 
@@ -171,7 +178,7 @@ export default function ToolsPage() {
       if (navigator.share) await navigator.share({ title: r.file, text });
       else {
         await navigator.clipboard.writeText(text);
-        alert("Copied details to clipboard.");
+        toast.info("Copied details to clipboard.");
       }
     } catch {
       /* user dismissed share sheet */
@@ -297,62 +304,6 @@ export default function ToolsPage() {
           </ul>
         )}
       </InfoCard>
-
-      {/* Files + storage */}
-      <div>
-        <InfoCard
-          title="Files"
-          action={
-            <button className="btn-ghost text-xs">
-              <Upload size={14} /> Upload
-            </button>
-          }
-        >
-          <p className="text-xs text-brand-400 -mt-3 mb-4">
-            Organize and manage files for your tools
-          </p>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {SAMPLE_FOLDERS.map((f) => (
-              <div
-                key={f.name}
-                className="flex items-center gap-2 rounded-xl border border-brand-200 px-3 py-2"
-              >
-                <FolderClosed size={16} className="text-secondary-500" />
-                <div className="leading-tight">
-                  <p className="text-xs font-semibold text-ink">{f.name}</p>
-                  <p className="text-[10px] text-brand-400">
-                    {f.files} files
-                  </p>
-                </div>
-              </div>
-            ))}
-            <button className="flex items-center gap-2 rounded-xl border border-dashed border-brand-300 px-3 py-2 text-brand-500 text-xs font-semibold hover:bg-brand-50 cursor-pointer">
-              <FolderPlus size={16} /> New Folder
-            </button>
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs font-semibold text-brand-400">
-                <th className="py-2">Name</th>
-                <th className="py-2">Files</th>
-                <th className="py-2">Size</th>
-              </tr>
-            </thead>
-            <tbody>
-              {SAMPLE_FOLDERS.slice(0, 4).map((f) => (
-                <tr key={f.name} className="border-t border-brand-100">
-                  <td className="py-2.5 font-semibold text-ink flex items-center gap-2">
-                    <FolderClosed size={15} className="text-secondary-500" />
-                    {f.name}
-                  </td>
-                  <td className="py-2.5 text-brand-600">{f.files} files</td>
-                  <td className="py-2.5 text-brand-600">{f.size}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </InfoCard>
-      </div>
 
       {active && (
         <ToolRunner

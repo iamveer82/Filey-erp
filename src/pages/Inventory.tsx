@@ -15,9 +15,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/DropdownMenu";
-import { erp, Product } from "../lib/api";
+import { erp, shareRecord, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, num } from "../lib/format";
+import { useUI } from "../lib/ui";
+import { aed, num, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -25,13 +26,25 @@ import {
   Badge,
   Modal,
   Field,
+  ShareToggle,
 } from "../components/ui";
 
 export default function Inventory() {
+  const { toast } = useUI();
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
+
+  const toggleShare = async (p: Product, next: boolean) => {
+    try {
+      await shareRecord("products", p.id, next);
+      load();
+      toast.success(next ? "Shared with your team." : "Set to private.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const load = () =>
     erp.products().then(setProducts).catch(console.error);
@@ -183,6 +196,16 @@ export default function Inventory() {
             ),
           },
           {
+            key: "share",
+            label: "Sharing",
+            render: (p) => (
+              <ShareToggle
+                shared={p.shared}
+                onToggle={(next) => toggleShare(p, next)}
+              />
+            ),
+          },
+          {
             key: "act",
             label: "",
             render: (p) => (
@@ -269,7 +292,7 @@ function ProductModal({
             className="input"
             placeholder="0"
             value={f.unit_price || ""}
-            onChange={(e) => setF({ ...f, unit_price: +e.target.value })}
+            onChange={(e) => setF({ ...f, unit_price: numInput(e.target.value) })}
           />
         </Field>
         <Field label="Cost Price (AED)">
@@ -278,7 +301,7 @@ function ProductModal({
             className="input"
             placeholder="0"
             value={f.cost_price || ""}
-            onChange={(e) => setF({ ...f, cost_price: +e.target.value })}
+            onChange={(e) => setF({ ...f, cost_price: numInput(e.target.value) })}
           />
         </Field>
         <Field label="Quantity">
@@ -287,7 +310,7 @@ function ProductModal({
             className="input"
             placeholder="0"
             value={f.quantity || ""}
-            onChange={(e) => setF({ ...f, quantity: +e.target.value })}
+            onChange={(e) => setF({ ...f, quantity: numInput(e.target.value) })}
           />
         </Field>
         <Field label="Reorder Level">
@@ -296,7 +319,7 @@ function ProductModal({
             className="input"
             placeholder="0"
             value={f.reorder_level || ""}
-            onChange={(e) => setF({ ...f, reorder_level: +e.target.value })}
+            onChange={(e) => setF({ ...f, reorder_level: numInput(e.target.value) })}
           />
         </Field>
       </div>

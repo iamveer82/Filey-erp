@@ -1,6 +1,8 @@
 // Filey module registry — an Odoo-style "mini app" system.
 // Every screen is a self-contained module with a manifest. Non-core
 // modules can be enabled/disabled per user from Settings → Apps.
+// Pages are lazy-loaded so the initial bundle stays small; heavy
+// screens (PDF tools, charts) only download when first visited.
 import {
   LayoutGrid,
   Boxes,
@@ -17,21 +19,21 @@ import {
   Settings2,
   type LucideIcon,
 } from "lucide-react";
-import type { ReactElement } from "react";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
-import Overview from "../pages/Overview";
-import Inventory from "../pages/Inventory";
-import Orders from "../pages/Orders";
-import Invoicing from "../pages/Invoicing";
-import Quoting from "../pages/Quoting";
-import Crm from "../pages/Crm";
-import Suppliers from "../pages/Suppliers";
-import Purchase from "../pages/Purchase";
-import Reports from "../pages/Reports";
-import People from "../pages/People";
-import Accounting from "../pages/Accounting";
-import ToolsPage from "../pages/PdfTools";
-import Settings from "../pages/Tools";
+const Overview = lazy(() => import("../pages/Overview"));
+const Inventory = lazy(() => import("../pages/Inventory"));
+const Orders = lazy(() => import("../pages/Orders"));
+const Invoicing = lazy(() => import("../pages/Invoicing"));
+const Quoting = lazy(() => import("../pages/Quoting"));
+const Crm = lazy(() => import("../pages/Crm"));
+const Suppliers = lazy(() => import("../pages/Suppliers"));
+const Purchase = lazy(() => import("../pages/Purchase"));
+const Reports = lazy(() => import("../pages/Reports"));
+const People = lazy(() => import("../pages/People"));
+const Accounting = lazy(() => import("../pages/Accounting"));
+const ToolsPage = lazy(() => import("../pages/PdfTools"));
+const Settings = lazy(() => import("../pages/Tools"));
 
 export interface AppModule {
   id: string;
@@ -40,7 +42,7 @@ export interface AppModule {
   desc: string;
   icon: LucideIcon;
   to: string;
-  element: ReactElement;
+  Component: LazyExoticComponent<ComponentType>;
   /** Core modules are always on and cannot be disabled. */
   core?: boolean;
 }
@@ -53,7 +55,7 @@ export const MODULES: AppModule[] = [
     desc: "Inventory KPIs & operational snapshot",
     icon: LayoutGrid,
     to: "/overview",
-    element: <Overview />,
+    Component: Overview,
     core: true,
   },
   {
@@ -63,7 +65,7 @@ export const MODULES: AppModule[] = [
     desc: "Products, stock levels & reorder alerts",
     icon: Boxes,
     to: "/inventory",
-    element: <Inventory />,
+    Component: Inventory,
   },
   {
     id: "orders",
@@ -72,7 +74,7 @@ export const MODULES: AppModule[] = [
     desc: "Sales orders & fulfilment status",
     icon: ClipboardList,
     to: "/orders",
-    element: <Orders />,
+    Component: Orders,
   },
   {
     id: "invoicing",
@@ -81,7 +83,7 @@ export const MODULES: AppModule[] = [
     desc: "FTA tax invoices with live preview",
     icon: FileText,
     to: "/invoicing",
-    element: <Invoicing />,
+    Component: Invoicing,
   },
   {
     id: "quoting",
@@ -90,7 +92,7 @@ export const MODULES: AppModule[] = [
     desc: "Create quotations & convert leads",
     icon: FileSignature,
     to: "/quoting",
-    element: <Quoting />,
+    Component: Quoting,
   },
   {
     id: "crm",
@@ -99,7 +101,7 @@ export const MODULES: AppModule[] = [
     desc: "Customer dashboard & pipeline",
     icon: Target,
     to: "/crm",
-    element: <Crm />,
+    Component: Crm,
   },
   {
     id: "suppliers",
@@ -108,7 +110,7 @@ export const MODULES: AppModule[] = [
     desc: "Supply groups & sourcing performance",
     icon: Users,
     to: "/suppliers",
-    element: <Suppliers />,
+    Component: Suppliers,
   },
   {
     id: "purchase",
@@ -117,7 +119,7 @@ export const MODULES: AppModule[] = [
     desc: "Purchase spend & expense tracking",
     icon: ShoppingCart,
     to: "/purchase",
-    element: <Purchase />,
+    Component: Purchase,
   },
   {
     id: "reports",
@@ -126,7 +128,7 @@ export const MODULES: AppModule[] = [
     desc: "Inventory & financial reporting",
     icon: BarChart3,
     to: "/reports",
-    element: <Reports />,
+    Component: Reports,
   },
   {
     id: "people",
@@ -135,7 +137,7 @@ export const MODULES: AppModule[] = [
     desc: "Employees, attendance & payroll",
     icon: Contact,
     to: "/people",
-    element: <People />,
+    Component: People,
   },
   {
     id: "accounting",
@@ -144,7 +146,7 @@ export const MODULES: AppModule[] = [
     desc: "Chart of accounts & journal entries",
     icon: Landmark,
     to: "/accounting",
-    element: <Accounting />,
+    Component: Accounting,
   },
   {
     id: "tools",
@@ -153,7 +155,7 @@ export const MODULES: AppModule[] = [
     desc: "Local PDF toolkit",
     icon: Wrench,
     to: "/tools",
-    element: <ToolsPage />,
+    Component: ToolsPage,
   },
   {
     id: "settings",
@@ -162,7 +164,7 @@ export const MODULES: AppModule[] = [
     desc: "Company, account, users & system",
     icon: Settings2,
     to: "/settings",
-    element: <Settings />,
+    Component: Settings,
     core: true,
   },
 ];

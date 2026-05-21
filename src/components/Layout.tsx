@@ -10,9 +10,11 @@ import {
   Settings,
 } from "lucide-react";
 import Logo from "./Logo";
-import { cn } from "../lib/format";
+import { cn, setDisplayCurrency } from "../lib/format";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
+import { billing } from "../lib/api";
+import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 import {
   DropdownMenu,
@@ -43,6 +45,16 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { enabledModules } = useModules();
   const navModules = enabledModules();
   const name = profile?.name || "User";
+
+  // Keep the org's display currency in sync for dashboards/aggregates.
+  const syncCurrency = () => {
+    billing
+      .getCompany()
+      .then((c) => setDisplayCurrency(c.currency))
+      .catch(() => {});
+  };
+  useEffect(syncCurrency, []);
+  useLiveSync(syncCurrency);
   const initials = name
     .split(" ")
     .map((s) => s[0])
