@@ -1945,6 +1945,45 @@ export interface Invitation {
   created_at: string;
 }
 
+// ===== Company message board =====
+export interface OrgMessage {
+  id: number;
+  user_id: string;
+  body: string;
+  author: string;
+  created_at: string;
+}
+
+export const messages = {
+  list: () =>
+    readCached<OrgMessage[]>(
+      "org_messages",
+      async () => {
+        const [rows, profs] = await Promise.all([
+          sList<any>("org_messages", [{ col: "id", asc: false }]),
+          sList<any>("profiles"),
+        ]);
+        const byId = new Map(profs.map((p) => [p.id, p]));
+        return rows.slice(0, 50).map((r) => ({
+          id: r.id,
+          user_id: r.user_id,
+          body: r.body,
+          author: byId.get(r.user_id)?.name ?? "Team member",
+          created_at: r.created_at,
+        })) as OrgMessage[];
+      },
+      []
+    ),
+  post: (body: string) =>
+    write({ k: "insert", t: "org_messages", row: { body } }, () =>
+      sInsert("org_messages", { body }).then(() => undefined), undefined
+    ),
+  remove: (id: number) =>
+    write({ k: "delete", t: "org_messages", id }, () =>
+      sDelete("org_messages", id), undefined
+    ),
+};
+
 export const org = {
   get: () =>
     readCached<Organization | null>(

@@ -27,6 +27,7 @@ import {
   Expense,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import CompanyMessages from "../components/CompanyMessages";
 import { num, aed, fmtDate } from "../lib/format";
 import {
   PageHeader,
@@ -279,6 +280,11 @@ export default function Overview() {
             </ResponsiveContainer>
           </div>
         </InfoCard>
+      </div>
+
+      {/* Company messages */}
+      <div className="mb-4">
+        <CompanyMessages />
       </div>
 
       {/* Bottom row */}
