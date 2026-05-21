@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Building2,
   UserCircle,
@@ -46,6 +46,7 @@ import {
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
+import { useLiveSync } from "../lib/realtime";
 import { useModules } from "../lib/modules";
 import {
   loadEmailConfig,
@@ -1401,31 +1402,115 @@ function MemberAccessModal({
 
 /* ---------------- Activity Log ---------------- */
 
+const ACTION_TONE: Record<string, "success" | "warn" | "danger" | "info"> = {
+  insert: "success",
+  update: "warn",
+  delete: "danger",
+};
+const prettyEntity = (e: string) =>
+  e.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 function ActivityLog() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
-  useEffect(() => {
-    tools.auditLog().then(setAudit).catch(console.error);
-  }, []);
+  const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState("all");
+  const [entity, setEntity] = useState("all");
+  const [q, setQ] = useState("");
+
+  const load = () => {
+    tools
+      .auditLog()
+      .then(setAudit)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+  useLiveSync(load);
+
+  const entities = useMemo(
+    () => Array.from(new Set(audit.map((a) => a.entity))).sort(),
+    [audit]
+  );
+  const filtered = useMemo(
+    () =>
+      audit.filter(
+        (a) =>
+          (action === "all" || a.action === action) &&
+          (entity === "all" || a.entity === entity) &&
+          (!q.trim() ||
+            a.actor.toLowerCase().includes(q.toLowerCase()) ||
+            (a.details ?? "").toLowerCase().includes(q.toLowerCase()))
+      ),
+    [audit, action, entity, q]
+  );
+
   return (
-    <DataTable<AuditEntry>
-      rows={audit}
-      empty="No activity recorded"
-      columns={[
-        { key: "t", label: "When", render: (a) => fmtDate(a.created_at) },
-        {
-          key: "actor",
-          label: "Actor",
-          render: (a) => <span className="font-semibold">{a.actor}</span>,
-        },
-        {
-          key: "act",
-          label: "Action",
-          render: (a) => <Badge tone="info">{a.action}</Badge>,
-        },
-        { key: "ent", label: "Entity", render: (a) => a.entity },
-        { key: "d", label: "Details", render: (a) => a.details ?? "—" },
-      ]}
-    />
+    <div className="space-y-3">
+      <div className="card flex flex-wrap items-center gap-2">
+        <input
+          className="input flex-1 min-w-[160px]"
+          placeholder="Search actor or details…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <select
+          className="select !w-auto"
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+        >
+          <option value="all">All actions</option>
+          <option value="insert">Created</option>
+          <option value="update">Updated</option>
+          <option value="delete">Deleted</option>
+        </select>
+        <select
+          className="select !w-auto"
+          value={entity}
+          onChange={(e) => setEntity(e.target.value)}
+        >
+          <option value="all">All types</option>
+          {entities.map((e) => (
+            <option key={e} value={e}>
+              {prettyEntity(e)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <DataTable<AuditEntry>
+        rows={filtered}
+        loading={loading}
+        empty="No activity recorded yet"
+        columns={[
+          { key: "t", label: "When", render: (a) => fmtDate(a.created_at) },
+          {
+            key: "actor",
+            label: "Actor",
+            render: (a) => (
+              <span className="font-semibold text-ink">{a.actor}</span>
+            ),
+          },
+          {
+            key: "act",
+            label: "Action",
+            render: (a) => (
+              <Badge tone={ACTION_TONE[a.action] ?? "info"}>
+                {a.action === "insert"
+                  ? "created"
+                  : a.action === "delete"
+                  ? "deleted"
+                  : a.action}
+              </Badge>
+            ),
+          },
+          {
+            key: "ent",
+            label: "Type",
+            render: (a) => prettyEntity(a.entity),
+          },
+          { key: "d", label: "Details", render: (a) => a.details ?? "—" },
+        ]}
+      />
+    </div>
   );
 }
 
