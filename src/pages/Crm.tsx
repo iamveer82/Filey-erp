@@ -9,6 +9,8 @@ import {
   Plus,
   Trophy,
   CalendarDays,
+  Download,
+  Upload,
 } from "lucide-react";
 import {
   AreaChart,
@@ -27,6 +29,8 @@ import {
   Lead,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { downloadCsv } from "../lib/csv";
+import ImportCsvModal from "../components/ImportCsvModal";
 import { aed, num, fmtDate, cn } from "../lib/format";
 import {
   PageHeader,
@@ -61,6 +65,7 @@ export default function Crm() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [acts, setActs] = useState<Activity[]>([]);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -179,20 +184,44 @@ export default function Crm() {
         title="CRM"
         subtitle="Manage relationships, track interactions and grow your business"
         action={
-          <div className="flex rounded-xl bg-brand-100 p-1 gap-1">
-            {(["dashboard", "pipeline"] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize cursor-pointer transition-colors ${
-                  view === v
-                    ? "bg-white text-ink shadow-bento"
-                    : "text-brand-500 hover:text-ink"
-                }`}
-              >
-                {v === "pipeline" ? "Pipeline board" : "Dashboard"}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-ghost"
+              onClick={() =>
+                downloadCsv(
+                  "customers",
+                  customers as unknown as Record<string, unknown>[],
+                  [
+                    { key: "name", label: "Name" },
+                    { key: "company", label: "Company" },
+                    { key: "email", label: "Email" },
+                    { key: "phone", label: "Phone" },
+                    { key: "address", label: "Address" },
+                    { key: "segment", label: "Segment" },
+                  ]
+                )
+              }
+            >
+              <Download size={15} /> Export
+            </button>
+            <button className="btn-ghost" onClick={() => setImportOpen(true)}>
+              <Upload size={15} /> Import
+            </button>
+            <div className="flex rounded-xl bg-brand-100 p-1 gap-1">
+              {(["dashboard", "pipeline"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize cursor-pointer transition-colors ${
+                    view === v
+                      ? "bg-white text-ink shadow-bento"
+                      : "text-brand-500 hover:text-ink"
+                  }`}
+                >
+                  {v === "pipeline" ? "Pipeline board" : "Dashboard"}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
@@ -461,6 +490,34 @@ export default function Crm() {
           setTaskOpen(false);
           load();
         }}
+      />
+
+      <ImportCsvModal
+        open={importOpen}
+        title="Import customers"
+        onClose={() => setImportOpen(false)}
+        onImport={async (rows) => {
+          for (const r of rows) {
+            if (!String(r.name ?? "").trim()) continue;
+            await crm.createCustomer({
+              name: String(r.name ?? ""),
+              company: String(r.company ?? "") || undefined,
+              email: String(r.email ?? "") || undefined,
+              phone: String(r.phone ?? "") || undefined,
+              address: String(r.address ?? "") || undefined,
+              segment: String(r.segment ?? "") || undefined,
+            } as Omit<CrmCustomer, "id" | "created_at">);
+          }
+          load();
+        }}
+        fields={[
+          { key: "name", label: "Name", required: true },
+          { key: "company", label: "Company" },
+          { key: "email", label: "Email" },
+          { key: "phone", label: "Phone" },
+          { key: "address", label: "Address" },
+          { key: "segment", label: "Segment" },
+        ]}
       />
     </div>
   );

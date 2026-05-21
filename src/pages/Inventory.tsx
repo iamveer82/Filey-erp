@@ -8,6 +8,8 @@ import {
   Tag,
   Search,
   MoreHorizontal,
+  Download,
+  Upload,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -18,6 +20,8 @@ import {
 import { erp, shareRecord, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { downloadCsv } from "../lib/csv";
+import ImportCsvModal from "../components/ImportCsvModal";
 import { aed, num, numInput, cn } from "../lib/format";
 import {
   PageHeader,
@@ -36,6 +40,7 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -97,9 +102,34 @@ export default function Inventory() {
         title="Inventory"
         subtitle="Products, stock levels & reorder alerts"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus size={16} /> New product
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="btn-ghost"
+              onClick={() =>
+                downloadCsv(
+                  "products",
+                  products as unknown as Record<string, unknown>[],
+                  [
+                    { key: "sku", label: "SKU" },
+                    { key: "name", label: "Name" },
+                    { key: "category", label: "Category" },
+                    { key: "unit_price", label: "Unit Price" },
+                    { key: "cost_price", label: "Cost Price" },
+                    { key: "quantity", label: "Quantity" },
+                    { key: "reorder_level", label: "Reorder Level" },
+                  ]
+                )
+              }
+            >
+              <Download size={15} /> Export
+            </button>
+            <button className="btn-ghost" onClick={() => setImportOpen(true)}>
+              <Upload size={15} /> Import
+            </button>
+            <button className="btn-primary" onClick={() => setOpen(true)}>
+              <Plus size={16} /> New product
+            </button>
+          </div>
         }
       />
 
@@ -259,6 +289,37 @@ export default function Inventory() {
         open={open}
         onClose={() => setOpen(false)}
         onSaved={load}
+      />
+
+      <ImportCsvModal
+        open={importOpen}
+        title="Import products"
+        onClose={() => setImportOpen(false)}
+        onImport={async (rows) => {
+          for (const r of rows) {
+            if (!String(r.name ?? "").trim()) continue;
+            await erp.createProduct({
+              sku: String(r.sku ?? ""),
+              name: String(r.name ?? ""),
+              category: String(r.category ?? "") || undefined,
+              unit_price: Number(r.unit_price) || 0,
+              cost_price: Number(r.cost_price) || 0,
+              quantity: Number(r.quantity) || 0,
+              reorder_level: Number(r.reorder_level) || 0,
+              description: "",
+            } as Omit<Product, "id" | "created_at">);
+          }
+          load();
+        }}
+        fields={[
+          { key: "sku", label: "SKU" },
+          { key: "name", label: "Name", required: true },
+          { key: "category", label: "Category" },
+          { key: "unit_price", label: "Unit Price" },
+          { key: "cost_price", label: "Cost Price" },
+          { key: "quantity", label: "Quantity" },
+          { key: "reorder_level", label: "Reorder Level" },
+        ]}
       />
     </div>
   );
