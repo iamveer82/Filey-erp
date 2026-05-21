@@ -1989,6 +1989,46 @@ export const messages = {
     ),
 };
 
+// ===== Notifications (per-user inbox) =====
+export interface Notification {
+  id: number;
+  actor: string;
+  kind: string;
+  body: string;
+  link?: string;
+  read: boolean;
+  created_at: string;
+}
+
+export const notifs = {
+  list: () =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("notifications")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data ?? []) as Notification[];
+    }),
+  markRead: (id: number) =>
+    online(async () => {
+      const { error } = await sb()
+        .from("notifications")
+        .update({ read: true })
+        .eq("id", id);
+      if (error) throw error;
+    }),
+  markAllRead: () =>
+    online(async () => {
+      const { error } = await sb()
+        .from("notifications")
+        .update({ read: true })
+        .eq("read", false);
+      if (error) throw error;
+    }),
+};
+
 export const org = {
   get: () =>
     readCached<Organization | null>(

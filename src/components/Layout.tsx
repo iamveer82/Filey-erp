@@ -15,9 +15,10 @@ import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
-import { billing } from "../lib/api";
+import { billing, notifs as notifsApi, type Notification } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
+import { useUI } from "../lib/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,8 +82,53 @@ export default function Layout({ children }: { children: ReactNode }) {
   const notifRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const { toast } = useUI();
   const hits = useGlobalSearch(q);
-  const notifs = useNotifications();
+  const alerts = useNotifications();
+  const [inbox, setInbox] = useState<Notification[]>([]);
+  const seenRef = useRef<Set<number> | null>(null);
+
+  const initialsOf = (s: string) =>
+    s
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?";
+
+  const loadInbox = () => {
+    notifsApi
+      .list()
+      .then((rows) => {
+        setInbox(rows);
+        // First load seeds the seen-set silently; later loads (realtime)
+        // pop a floating toast for any newly-arrived unread notification.
+        if (seenRef.current === null) {
+          seenRef.current = new Set(rows.map((r) => r.id));
+          return;
+        }
+        const seen = seenRef.current;
+        for (const r of rows) {
+          if (!seen.has(r.id)) {
+            seen.add(r.id);
+            if (!r.read)
+              toast.notify({
+                title: `${r.actor} ${
+                  r.kind === "mention" ? "mentioned you" : ""
+                }`.trim(),
+                message: r.body,
+                avatar: initialsOf(r.actor),
+                to: r.link,
+              });
+          }
+        }
+      })
+      .catch(() => {});
+  };
+  useEffect(loadInbox, []);
+  useLiveSync(loadInbox);
+  const unread = inbox.filter((n) => !n.read).length;
+  const badge = unread + alerts.length;
 
   // ⌘K / Ctrl+K focuses search; Escape closes overlays.
   useEffect(() => {
@@ -316,9 +362,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                 className="relative grid h-10 w-10 place-items-center rounded-xl bg-white border border-brand-200 text-brand-500 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer"
               >
                 <Bell size={18} />
-                {notifs.length > 0 && (
+                {badge > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[9px] font-bold grid place-items-center">
-                    {notifs.length > 9 ? "9+" : notifs.length}
+                    {badge > 9 ? "9+" : badge}
                   </span>
                 )}
               </button>
@@ -329,17 +375,61 @@ export default function Layout({ children }: { children: ReactNode }) {
                     <p className="text-sm font-bold text-ink">
                       Notifications
                     </p>
-                    <span className="text-xs font-semibold text-brand-400">
-                      {notifs.length}
-                    </span>
+                    {unread > 0 && (
+                      <button
+                        onClick={async () => {
+                          await notifsApi.markAllRead();
+                          loadInbox();
+                        }}
+                        className="text-xs font-semibold text-primary-700 hover:underline cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
                   </div>
-                  {notifs.length === 0 ? (
+                  {inbox.length === 0 && alerts.length === 0 ? (
                     <p className="px-4 py-8 text-center text-sm text-brand-400">
                       You’re all caught up.
                     </p>
                   ) : (
                     <div className="p-1.5">
-                      {notifs.map((n) => (
+                      {/* personal inbox (mentions etc.) */}
+                      {inbox.map((n) => (
+                        <button
+                          key={`n${n.id}`}
+                          onClick={async () => {
+                            if (!n.read) {
+                              await notifsApi.markRead(n.id);
+                              loadInbox();
+                            }
+                            if (n.link) go(n.link);
+                          }}
+                          className={cn(
+                            "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors cursor-pointer",
+                            n.read ? "hover:bg-brand-50" : "bg-primary-50/60 hover:bg-primary-100"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                              n.read ? "bg-brand-200" : "bg-primary-500"
+                            )}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold text-ink">
+                              {n.actor}{" "}
+                              {n.kind === "mention"
+                                ? "mentioned you"
+                                : n.kind}
+                            </span>
+                            <span className="block text-xs text-brand-400 truncate">
+                              {n.body}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                      {/* derived operational alerts */}
+                      {alerts.map((n) => (
                         <button
                           key={n.id}
                           onClick={() => go(n.to)}

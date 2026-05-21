@@ -13,6 +13,15 @@ interface Toast {
   id: number;
   kind: ToastKind;
   message: string;
+  title?: string;
+  avatar?: string; // initials for a circle avatar
+  to?: string; // optional navigation target on click
+}
+interface NotifyOpts {
+  title: string;
+  message: string;
+  avatar?: string;
+  to?: string;
 }
 
 interface ConfirmOpts {
@@ -35,6 +44,8 @@ interface UIValue {
     success: (m: string) => void;
     error: (m: string) => void;
     info: (m: string) => void;
+    /** Rich floating notification with avatar + title + message. */
+    notify: (opts: NotifyOpts) => void;
   };
   confirm: (opts: ConfirmOpts) => Promise<boolean>;
   prompt: (opts: PromptOpts) => Promise<string | null>;
@@ -54,18 +65,34 @@ export function UIProvider({ children }: { children: ReactNode }) {
   >(null);
   const promptInput = useRef<HTMLInputElement>(null);
 
-  const push = useCallback((kind: ToastKind, message: string) => {
-    const id = nextId++;
-    setToasts((t) => [...t, { id, kind, message }]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-    }, 4000);
+  const dismiss = useCallback((id: number) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
+  const add = useCallback(
+    (toast: Omit<Toast, "id">, ttl = 4000) => {
+      const id = nextId++;
+      setToasts((t) => [...t, { ...toast, id }]);
+      setTimeout(() => dismiss(id), ttl);
+    },
+    [dismiss]
+  );
+
   const toast = {
-    success: (m: string) => push("success", m),
-    error: (m: string) => push("error", m),
-    info: (m: string) => push("info", m),
+    success: (m: string) => add({ kind: "success", message: m }),
+    error: (m: string) => add({ kind: "error", message: m }),
+    info: (m: string) => add({ kind: "info", message: m }),
+    notify: (o: NotifyOpts) =>
+      add(
+        {
+          kind: "info",
+          message: o.message,
+          title: o.title,
+          avatar: o.avatar,
+          to: o.to,
+        },
+        6000
+      ),
   };
 
   const confirm = useCallback(
@@ -110,23 +137,48 @@ export function UIProvider({ children }: { children: ReactNode }) {
 
       {/* toasts */}
       <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 shadow-bento text-sm font-semibold animate-fade-up ${TOAST_STYLE[t.kind]}`}
-          >
-            <span className="mt-px shrink-0">{TOAST_ICON[t.kind]}</span>
-            <span className="text-ink/90">{t.message}</span>
-            <button
-              aria-label="Dismiss"
-              onClick={() => setToasts((x) => x.filter((z) => z.id !== t.id))}
-              className="ml-auto text-brand-400 hover:text-ink cursor-pointer"
+        {toasts.map((t) => {
+          const clickable = !!t.to;
+          return (
+            <div
+              key={t.id}
+              role="status"
+              onClick={() => {
+                if (t.to) window.location.hash = `#${t.to}`;
+                if (clickable) dismiss(t.id);
+              }}
+              className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 shadow-bento text-sm font-semibold animate-fade-up ${
+                TOAST_STYLE[t.kind]
+              } ${clickable ? "cursor-pointer hover:shadow-bento-hover" : ""}`}
             >
-              <X size={14} />
-            </button>
-          </div>
-        ))}
+              {t.avatar ? (
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-[11px] font-bold">
+                  {t.avatar}
+                </span>
+              ) : (
+                <span className="mt-px shrink-0">{TOAST_ICON[t.kind]}</span>
+              )}
+              <span className="min-w-0">
+                {t.title && (
+                  <span className="block text-ink font-bold">{t.title}</span>
+                )}
+                <span className="block text-ink/90 font-normal break-words">
+                  {t.message}
+                </span>
+              </span>
+              <button
+                aria-label="Dismiss"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  dismiss(t.id);
+                }}
+                className="ml-auto text-brand-400 hover:text-ink cursor-pointer shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {/* confirm dialog */}
