@@ -483,6 +483,9 @@ create table if not exists org_messages (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- Threaded replies: a reply points at its parent message.
+alter table org_messages add column if not exists parent_id bigint
+  references org_messages(id) on delete cascade;
 
 -- Pending team invitations issued by an org owner/admin.
 create table if not exists invitations (

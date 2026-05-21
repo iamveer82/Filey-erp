@@ -1951,6 +1951,7 @@ export interface OrgMessage {
   user_id: string;
   body: string;
   author: string;
+  parent_id?: number | null;
   created_at: string;
 }
 
@@ -1964,20 +1965,24 @@ export const messages = {
           sList<any>("profiles"),
         ]);
         const byId = new Map(profs.map((p) => [p.id, p]));
-        return rows.slice(0, 50).map((r) => ({
+        return rows.slice(0, 200).map((r) => ({
           id: r.id,
           user_id: r.user_id,
           body: r.body,
           author: byId.get(r.user_id)?.name ?? "Team member",
+          parent_id: r.parent_id ?? null,
           created_at: r.created_at,
         })) as OrgMessage[];
       },
       []
     ),
-  post: (body: string) =>
-    write({ k: "insert", t: "org_messages", row: { body } }, () =>
-      sInsert("org_messages", { body }).then(() => undefined), undefined
-    ),
+  post: (body: string, parentId?: number | null) => {
+    const row: Record<string, unknown> = { body };
+    if (parentId) row.parent_id = parentId;
+    return write({ k: "insert", t: "org_messages", row }, () =>
+      sInsert("org_messages", row).then(() => undefined), undefined
+    );
+  },
   remove: (id: number) =>
     write({ k: "delete", t: "org_messages", id }, () =>
       sDelete("org_messages", id), undefined

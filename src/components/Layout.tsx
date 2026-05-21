@@ -8,6 +8,8 @@ import {
   X,
   UserRound,
   Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
@@ -62,6 +64,16 @@ export default function Layout({ children }: { children: ReactNode }) {
     .join("")
     .toUpperCase();
 
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("sidebar.collapsed") === "1"
+  );
+  const toggleCollapsed = () =>
+    setCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem("sidebar.collapsed", next ? "1" : "0");
+      return next;
+    });
+
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -113,34 +125,51 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full w-full overflow-hidden bg-background p-3 gap-3">
       {/* ───────────── Sidebar ───────────── */}
-      <aside className="w-64 shrink-0 bg-white rounded-2xl border border-brand-200 shadow-bento flex flex-col overflow-hidden">
-        <div className="px-5 py-5 border-b border-brand-100">
+      <aside
+        className={cn(
+          "shrink-0 bg-white rounded-2xl border border-brand-200 shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
+          collapsed ? "w-[76px]" : "w-64"
+        )}
+      >
+        <div
+          className={cn(
+            "border-b border-brand-100 flex items-center",
+            collapsed ? "px-2 py-4 justify-center" : "px-5 py-5"
+          )}
+        >
           <Link
             to="/overview"
-            className="flex items-center gap-2.5 cursor-pointer"
+            className="flex items-center gap-2.5 cursor-pointer min-w-0"
+            title="Filey"
           >
-            <Logo size={72} />
-            <span className="leading-tight">
-              <span className="block font-bold text-ink text-lg">Filey</span>
-              <span className="block text-[11px] font-semibold text-brand-400">
-                Business Suite
+            <Logo size={collapsed ? 40 : 72} />
+            {!collapsed && (
+              <span className="leading-tight">
+                <span className="block font-bold text-ink text-lg">Filey</span>
+                <span className="block text-[11px] font-semibold text-brand-400">
+                  Business Suite
+                </span>
               </span>
-            </span>
+            )}
           </Link>
         </div>
 
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
-          <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-            Menu
-          </p>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
+          {!collapsed && (
+            <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+              Menu
+            </p>
+          )}
           <div className="space-y-1">
             {navModules.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
+                title={collapsed ? label : undefined}
                 className={({ isActive }) =>
                   cn(
-                    "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
+                    "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
+                    collapsed ? "justify-center px-0" : "px-3",
                     isActive
                       ? "bg-primary-100 text-primary-700"
                       : "text-brand-500 hover:bg-brand-50 hover:text-ink"
@@ -156,7 +185,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       )}
                     />
                     <Icon size={18} className="shrink-0" />
-                    {label}
+                    {!collapsed && <span className="truncate">{label}</span>}
                   </>
                 )}
               </NavLink>
@@ -164,13 +193,33 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t border-brand-100">
+        <div className="px-3 py-3 border-t border-brand-100 space-y-1">
           <button
             onClick={signOut}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer"
+            title={collapsed ? "Sign out" : undefined}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer",
+              collapsed ? "justify-center px-0" : "px-3"
+            )}
           >
             <LogOut size={18} className="shrink-0" />
-            Sign out
+            {!collapsed && "Sign out"}
+          </button>
+          <button
+            onClick={toggleCollapsed}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-400 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer",
+              collapsed ? "justify-center px-0" : "px-3"
+            )}
+          >
+            {collapsed ? (
+              <PanelLeftOpen size={18} className="shrink-0" />
+            ) : (
+              <PanelLeftClose size={18} className="shrink-0" />
+            )}
+            {!collapsed && "Collapse"}
           </button>
         </div>
       </aside>

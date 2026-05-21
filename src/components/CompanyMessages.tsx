@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Send, Trash2, MessageSquare, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Send, Trash2, MessageSquare, Loader2, Reply } from "lucide-react";
 import { messages, type OrgMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
@@ -34,32 +34,73 @@ const tone = (id: string) => {
   return AVATAR_TONES[h];
 };
 
-/** Company message board — an org-wide team feed on the dashboard. */
+/** Render message body, highlighting @mentions. */
+function renderBody(body: string): ReactNode {
+  const parts = body.split(/(@[\w.\-]+)/g);
+  return parts.map((p, i) =>
+    p.startsWith("@") ? (
+      <span key={i} className="font-semibold text-primary-700">
+        {p}
+      </span>
+    ) : (
+      <span key={i}>{p}</span>
+    )
+  );
+}
+
+/** Company message board — org-wide team feed with threaded replies and
+ *  @mention highlighting. */
 export default function CompanyMessages() {
   const { user } = useAuth();
   const { toast } = useUI();
-  const [items, setItems] = useState<OrgMessage[]>([]);
+  const [all, setAll] = useState<OrgMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [replyTo, setReplyTo] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState("");
 
   const load = () => {
     messages
       .list()
-      .then(setItems)
+      .then(setAll)
       .catch(() => {})
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
   useLiveSync(load);
 
-  const send = async () => {
-    const body = text.trim();
-    if (!body) return;
+  const roots = useMemo(
+    () =>
+      all
+        .filter((m) => !m.parent_id)
+        .sort((a, b) => b.id - a.id),
+    [all]
+  );
+  const repliesByParent = useMemo(() => {
+    const map = new Map<number, OrgMessage[]>();
+    for (const m of all) {
+      if (!m.parent_id) continue;
+      const arr = map.get(m.parent_id) ?? [];
+      arr.push(m);
+      map.set(m.parent_id, arr);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.id - b.id);
+    return map;
+  }, [all]);
+
+  const post = async (body: string, parentId: number | null) => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
     setBusy(true);
     try {
-      await messages.post(body);
-      setText("");
+      await messages.post(trimmed, parentId);
+      if (parentId) {
+        setReplyText("");
+        setReplyTo(null);
+      } else {
+        setText("");
+      }
       load();
     } catch (e) {
       toast.error(
@@ -79,12 +120,54 @@ export default function CompanyMessages() {
     }
   };
 
+  const Message = ({ m, isReply }: { m: OrgMessage; isReply?: boolean }) => (
+    <div className="flex gap-3 group">
+      <span
+        className={`grid ${
+          isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"
+        } shrink-0 place-items-center rounded-full font-bold ${tone(
+          m.user_id
+        )}`}
+      >
+        {initials(m.author)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-snug">
+          <span className="font-semibold text-ink">{m.author}</span>{" "}
+          <span className="text-[11px] text-brand-400">{ago(m.created_at)}</span>
+        </p>
+        <p className="text-sm text-brand-600 whitespace-pre-wrap break-words">
+          {renderBody(m.body)}
+        </p>
+        {!isReply && (
+          <button
+            onClick={() =>
+              setReplyTo((r) => (r === m.id ? null : m.id))
+            }
+            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400 hover:text-primary-700 cursor-pointer"
+          >
+            <Reply size={11} /> Reply
+          </button>
+        )}
+      </div>
+      {m.user_id === user?.id && (
+        <button
+          aria-label="Delete message"
+          onClick={() => remove(m.id)}
+          className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer self-start"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <InfoCard
       title="Company Messages"
       action={
         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400">
-          <MessageSquare size={12} /> {items.length}
+          <MessageSquare size={12} /> {all.length}
         </span>
       }
     >
@@ -92,14 +175,14 @@ export default function CompanyMessages() {
       <div className="flex items-center gap-2 mb-3">
         <input
           className="input"
-          placeholder="Share an update with your team…"
+          placeholder="Share an update… use @name to mention"
           value={text}
           maxLength={500}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send();
+              post(text, null);
             }
           }}
         />
@@ -107,7 +190,7 @@ export default function CompanyMessages() {
           aria-label="Post message"
           className="btn-primary shrink-0"
           disabled={busy || !text.trim()}
-          onClick={send}
+          onClick={() => post(text, null)}
         >
           {busy ? (
             <Loader2 size={15} className="animate-spin" />
@@ -118,45 +201,54 @@ export default function CompanyMessages() {
       </div>
 
       {/* feed */}
-      {loading && items.length === 0 ? (
+      {loading && all.length === 0 ? (
         <p className="text-sm text-brand-400 py-4 text-center">Loading…</p>
-      ) : items.length === 0 ? (
+      ) : roots.length === 0 ? (
         <p className="text-sm text-brand-400 py-4 text-center">
           No messages yet — say hello to your team.
         </p>
       ) : (
-        <ul className="space-y-3 max-h-72 overflow-y-auto">
-          {items.map((m) => (
-            <li key={m.id} className="flex gap-3 group">
-              <span
-                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold ${tone(
-                  m.user_id
-                )}`}
-              >
-                {initials(m.author)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm leading-snug">
-                  <span className="font-semibold text-ink">{m.author}</span>{" "}
-                  <span className="text-[11px] text-brand-400">
-                    {ago(m.created_at)}
-                  </span>
-                </p>
-                <p className="text-sm text-brand-600 whitespace-pre-wrap break-words">
-                  {m.body}
-                </p>
-              </div>
-              {m.user_id === user?.id && (
-                <button
-                  aria-label="Delete message"
-                  onClick={() => remove(m.id)}
-                  className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </li>
-          ))}
+        <ul className="space-y-4 max-h-96 overflow-y-auto">
+          {roots.map((m) => {
+            const replies = repliesByParent.get(m.id) ?? [];
+            return (
+              <li key={m.id}>
+                <Message m={m} />
+                {(replies.length > 0 || replyTo === m.id) && (
+                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 pl-3">
+                    {replies.map((r) => (
+                      <Message key={r.id} m={r} isReply />
+                    ))}
+                    {replyTo === m.id && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          autoFocus
+                          className="input !py-1.5 text-sm"
+                          placeholder={`Reply to ${m.author}…`}
+                          value={replyText}
+                          maxLength={500}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              post(replyText, m.id);
+                            }
+                          }}
+                        />
+                        <button
+                          className="btn-primary shrink-0 !py-1.5"
+                          disabled={busy || !replyText.trim()}
+                          onClick={() => post(replyText, m.id)}
+                        >
+                          <Send size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </InfoCard>
