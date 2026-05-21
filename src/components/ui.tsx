@@ -158,7 +158,9 @@ export function MetricCard({
         )}
         <div className="min-w-0">
           <p className="text-xs font-semibold text-brand-500">{label}</p>
-          <p className="text-2xl font-bold text-ink mt-1 truncate">{value}</p>
+          <p className="font-display text-2xl font-bold text-ink mt-1 truncate tabular-nums">
+            {value}
+          </p>
         </div>
       </div>
       {delta !== undefined && (
@@ -189,7 +191,7 @@ export function InfoCard({
       <div className="flex items-center justify-between mb-4">
         <p
           className={cn(
-            "font-bold",
+            "font-display font-bold",
             tone === "dark" ? "text-white" : "text-ink"
           )}
         >

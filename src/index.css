@@ -12,6 +12,16 @@
     @apply bg-canvas text-ink font-sans antialiased;
     margin: 0;
   }
+  /* Display face (Poppins) for headings & semantic titles; body stays
+     Open Sans for dense data and long-form readability. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-display;
+  }
   /* Hide the up/down spinner on number inputs app-wide */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
@@ -86,7 +96,8 @@
   .btn-cta {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-primary-400 px-4 text-sm font-semibold text-ink select-none
-           transition-all duration-200 hover:bg-primary-500 hover:shadow-glow
+           transition-[background-color,box-shadow,transform] duration-200
+           hover:bg-primary-500 hover:shadow-glow
            active:translate-y-px focus:outline-none
            disabled:opacity-50 disabled:cursor-not-allowed
            disabled:hover:bg-primary-400 disabled:hover:shadow-none
@@ -162,6 +173,22 @@
   }
   .chip-active {
     @apply border-primary-300 bg-primary-100 text-primary-700;
+  }
+
+  /* Brand chrome stays on the display face (Poppins); body text and
+     table data inherit Open Sans for readability. */
+  .btn-primary,
+  .btn-cta,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger,
+  .label,
+  .stat-label,
+  .stat-value,
+  .th,
+  .pill,
+  .chip {
+    @apply font-display;
   }
 
   /* ── Tables — sticky-friendly header, hover rows, aligned cells. ── */

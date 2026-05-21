@@ -9,7 +9,7 @@
 
 1. **Never** introduce colors, fonts, radii, shadows, or spacing values that are not defined in this file.
 2. **Always** use the design tokens (Section 4) instead of hard-coded values in components.
-3. **Always** use Poppins. No fallbacks except `system-ui, sans-serif` at the end of the stack.
+3. **Type pairing:** **Poppins** (display) for headings, metrics, buttons, labels & UI chrome — use the `font-display` utility or a heading tag. **Open Sans** (body) for paragraphs, table data, descriptions & long-form text — the default `font-sans`. No other faces; only `system-ui, sans-serif` fallbacks.
 4. **Always** use the 4px base spacing scale. No `5px`, `7px`, `13px`, `15px`, etc.
 5. **Always** use **16px** border-radius for cards and **12px** for buttons. No other radii unless listed below.
 6. **Always** use line-style icons with consistent stroke width (Lucide React, 1.75px stroke).
@@ -79,7 +79,11 @@ Use only these. CSS variables defined below — components must reference variab
 
 ## 3. Typography
 
-**Font family:** `Poppins`, system-ui, sans-serif. Load weights: 400 (Regular), 500 (Medium), 600 (SemiBold), 700 (Bold).
+**Display:** `Poppins`, system-ui, sans-serif — headings, metric values, buttons, labels, table headers, pills/chips. Weights 500/600/700. Use the `font-display` Tailwind utility (heading tags get it automatically).
+
+**Body:** `Open Sans`, system-ui, sans-serif — paragraphs, table cell data, descriptions, message bodies, inputs. Weights 400/500/600/700. This is the default `font-sans`.
+
+Geometric Poppins gives the brand voice on chrome; humanist Open Sans keeps dense data and long-form text readable.
 
 | Style | Size / Line height | Weight | Use |
 |---|---|---|---|

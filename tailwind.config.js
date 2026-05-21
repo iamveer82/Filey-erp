@@ -57,7 +57,10 @@ export default {
         chartdark: "#1F1F1F",
       },
       fontFamily: {
-        sans: ['"Poppins"', "system-ui", "-apple-system", "sans-serif"],
+        // Body: humanist sans for dense data + long-form readability.
+        sans: ['"Open Sans"', "system-ui", "-apple-system", "sans-serif"],
+        // Display: geometric Poppins for headings, metrics & UI chrome.
+        display: ['"Poppins"', "system-ui", "sans-serif"],
       },
       fontSize: {
         h1: ["32px", { lineHeight: "40px", fontWeight: "700" }],
