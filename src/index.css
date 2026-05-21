@@ -199,7 +199,7 @@
            text-brand-400 px-4 py-3 bg-brand-50/60;
   }
   .td {
-    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle;
+    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle tabular-nums;
   }
   .row-hover {
     @apply transition-colors duration-150 hover:bg-brand-50/70;
