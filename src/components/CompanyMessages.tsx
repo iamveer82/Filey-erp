@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Send, Trash2, MessageSquare, Loader2, Reply } from "lucide-react";
-import { messages, type OrgMessage } from "../lib/api";
+import { messages, org, type OrgMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { InfoCard } from "./ui";
+import MentionInput, { type MentionMember } from "./MentionInput";
 
 function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -59,6 +60,7 @@ export default function CompanyMessages() {
   const [loading, setLoading] = useState(true);
   const [replyTo, setReplyTo] = useState<number | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [members, setMembers] = useState<MentionMember[]>([]);
 
   const load = () => {
     messages
@@ -69,6 +71,14 @@ export default function CompanyMessages() {
   };
   useEffect(load, []);
   useLiveSync(load);
+  useEffect(() => {
+    org
+      .members()
+      .then((ms) =>
+        setMembers(ms.map((m) => ({ id: m.user_id, name: m.name })))
+      )
+      .catch(() => {});
+  }, []);
 
   const roots = useMemo(
     () =>
@@ -173,18 +183,12 @@ export default function CompanyMessages() {
     >
       {/* composer */}
       <div className="flex items-center gap-2 mb-3">
-        <input
-          className="input"
-          placeholder="Share an update… use @name to mention"
+        <MentionInput
           value={text}
-          maxLength={500}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              post(text, null);
-            }
-          }}
+          onChange={setText}
+          onEnter={() => post(text, null)}
+          members={members}
+          placeholder="Share an update… type @ to mention"
         />
         <button
           aria-label="Post message"
@@ -221,19 +225,13 @@ export default function CompanyMessages() {
                     ))}
                     {replyTo === m.id && (
                       <div className="flex items-center gap-2 pt-1">
-                        <input
-                          autoFocus
-                          className="input !py-1.5 text-sm"
-                          placeholder={`Reply to ${m.author}…`}
+                        <MentionInput
+                          small
                           value={replyText}
-                          maxLength={500}
-                          onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              post(replyText, m.id);
-                            }
-                          }}
+                          onChange={setReplyText}
+                          onEnter={() => post(replyText, m.id)}
+                          members={members}
+                          placeholder={`Reply to ${m.author}… type @ to mention`}
                         />
                         <button
                           className="btn-primary shrink-0 !py-1.5"
