@@ -27,7 +27,6 @@ import {
   Modal,
   Field,
   ShareToggle,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 
@@ -170,14 +169,10 @@ export default function Inventory() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && products.length === 0 && !error && (
-        <div className="card">
-          <Spinner label="Loading products…" />
-        </div>
-      )}
 
       <DataTable<Product>
         rows={filtered}
+        loading={loading}
         empty="No products match your filters"
         columns={[
           {

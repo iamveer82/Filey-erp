@@ -276,11 +276,15 @@ export function DataTable<T>({
   columns,
   rows,
   empty = "No records",
+  loading = false,
 }: {
   columns: { key: string; label: string; render: (row: T) => ReactNode }[];
   rows: T[];
   empty?: string;
+  /** Show skeleton rows while the first load is in flight. */
+  loading?: boolean;
 }) {
+  const showSkeleton = loading && rows.length === 0;
   return (
     <div className="card overflow-hidden p-0">
       <div className="overflow-x-auto">
@@ -295,7 +299,17 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {showSkeleton ? (
+              Array.from({ length: 5 }).map((_, r) => (
+                <tr key={`sk${r}`}>
+                  {columns.map((c) => (
+                    <td key={c.key} className="td">
+                      <Skeleton className="h-4 w-[70%]" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : rows.length === 0 ? (
               <tr>
                 <td className="td py-14" colSpan={columns.length}>
                   <div className="flex flex-col items-center gap-2 text-center">

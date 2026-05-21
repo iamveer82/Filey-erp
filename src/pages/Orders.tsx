@@ -20,7 +20,6 @@ import {
   Modal,
   Field,
   ShareToggle,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
@@ -93,11 +92,6 @@ export default function Orders() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && orders.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading orders…" />
-        </div>
-      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
@@ -127,6 +121,7 @@ export default function Orders() {
 
       <DataTable<Order>
         rows={orders}
+        loading={loading}
         empty="No orders yet"
         columns={[
           {

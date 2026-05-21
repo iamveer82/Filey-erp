@@ -27,7 +27,6 @@ import {
   Modal,
   Field,
   ShareToggle,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 
@@ -103,11 +102,6 @@ export default function Suppliers() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && suppliers.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading suppliers…" />
-        </div>
-      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
@@ -137,6 +131,7 @@ export default function Suppliers() {
 
       <DataTable<Supplier>
         rows={suppliers}
+        loading={loading}
         empty="No suppliers yet — add your first one"
         columns={[
           {
