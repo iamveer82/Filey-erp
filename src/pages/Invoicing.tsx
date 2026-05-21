@@ -21,12 +21,14 @@ import {
   Settings,
   StickyNote,
   Paperclip,
+  CreditCard,
 } from "lucide-react";
 import {
   billing,
   crm,
   InvoiceDocSummary,
   InvoiceDocInput,
+  InvoicePayment,
   CompanyProfile,
   CrmCustomer,
 } from "../lib/api";
@@ -117,6 +119,7 @@ export default function Invoicing() {
   const [form, setForm] = useState<Form | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
 
   const loadDocs = () =>
     billing.listDocs().then(setDocs).catch(console.error);
@@ -290,9 +293,26 @@ export default function Invoicing() {
           {
             key: "status",
             label: "Status",
-            render: (d) => (
-              <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-            ),
+            render: (d) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const overdue =
+                (d.balance ?? 0) > 0 &&
+                !!d.due_date &&
+                d.due_date < today &&
+                d.status !== "paid";
+              return (
+                <div>
+                  <Badge tone={overdue ? "danger" : statusTone(d.status)}>
+                    {overdue ? "overdue" : d.status}
+                  </Badge>
+                  {(d.paid ?? 0) > 0 && (d.balance ?? 0) > 0 && (
+                    <p className="text-[11px] text-brand-400 mt-0.5 tabular-nums">
+                      {money(d.balance ?? 0, "AED")} due
+                    </p>
+                  )}
+                </div>
+              );
+            },
           },
           {
             key: "upd",
@@ -322,6 +342,14 @@ export default function Invoicing() {
             label: "",
             render: (d) => (
               <div className="flex items-center gap-1">
+                <button
+                  aria-label="Payments"
+                  title="Record payment"
+                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  onClick={() => setPayFor(d)}
+                >
+                  <CreditCard size={15} />
+                </button>
                 <button
                   aria-label="Edit"
                   className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
@@ -363,7 +391,161 @@ export default function Invoicing() {
           }}
         />
       )}
+
+      <PaymentsModal
+        doc={payFor}
+        onClose={() => setPayFor(null)}
+        onSaved={loadDocs}
+      />
     </div>
+  );
+}
+
+/* ---------------- Payments ---------------- */
+
+function PaymentsModal({
+  doc,
+  onClose,
+  onSaved,
+}: {
+  doc: InvoiceDocSummary | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useUI();
+  const [rows, setRows] = useState<InvoicePayment[]>([]);
+  const [amount, setAmount] = useState(0);
+  const [method, setMethod] = useState("bank transfer");
+  const [paidAt, setPaidAt] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    if (!doc) return;
+    billing.payments(doc.id).then(setRows).catch(() => setRows([]));
+  };
+  useEffect(load, [doc?.id]);
+
+  const total = doc?.total ?? 0;
+  const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
+  const balance = Math.max(0, total - paid);
+
+  const add = async () => {
+    if (!doc || amount <= 0) return;
+    setBusy(true);
+    try {
+      await billing.addPayment(doc.id, amount, method || null, paidAt);
+      setAmount(0);
+      load();
+      onSaved();
+      toast.success("Payment recorded.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    try {
+      await billing.removePayment(id);
+      load();
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  if (!doc) return null;
+  return (
+    <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="rounded-xl bg-brand-50 px-3 py-2.5">
+          <p className="text-[11px] text-brand-400">Total</p>
+          <p className="font-display font-bold text-ink tabular-nums">
+            {money(total, "AED")}
+          </p>
+        </div>
+        <div className="rounded-xl bg-success/10 px-3 py-2.5">
+          <p className="text-[11px] text-brand-400">Paid</p>
+          <p className="font-display font-bold text-success tabular-nums">
+            {money(paid, "AED")}
+          </p>
+        </div>
+        <div className="rounded-xl bg-primary-100 px-3 py-2.5">
+          <p className="text-[11px] text-brand-400">Balance</p>
+          <p className="font-display font-bold text-primary-700 tabular-nums">
+            {money(balance, "AED")}
+          </p>
+        </div>
+      </div>
+
+      {rows.length > 0 && (
+        <ul className="space-y-1.5 mb-4 max-h-44 overflow-y-auto">
+          {rows.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-center justify-between rounded-lg bg-white border border-brand-100 px-3 py-2 text-sm"
+            >
+              <span className="tabular-nums font-semibold text-ink">
+                {money(Number(p.amount), "AED")}
+              </span>
+              <span className="text-brand-400 text-xs">
+                {p.method ?? "—"} · {fmtDate(p.paid_at)}
+              </span>
+              <button
+                aria-label="Remove payment"
+                onClick={() => remove(p.id)}
+                className="text-brand-300 hover:text-danger cursor-pointer"
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+        <Field label="Amount">
+          <input
+            type="number"
+            className="input"
+            placeholder="0"
+            value={amount || ""}
+            onChange={(e) => setAmount(numInput(e.target.value))}
+          />
+        </Field>
+        <Field label="Method">
+          <select
+            className="select"
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+          >
+            <option value="bank transfer">Bank transfer</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="cheque">Cheque</option>
+            <option value="other">Other</option>
+          </select>
+        </Field>
+        <button
+          className="btn-primary"
+          disabled={busy || amount <= 0}
+          onClick={add}
+        >
+          <Plus size={15} /> Add
+        </button>
+      </div>
+      <Field label="Date">
+        <input
+          type="date"
+          className="input mt-2"
+          value={paidAt}
+          onChange={(e) => setPaidAt(e.target.value)}
+        />
+      </Field>
+    </Modal>
   );
 }
 

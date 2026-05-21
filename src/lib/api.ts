@@ -197,10 +197,20 @@ export interface InvoiceDocSummary {
   status: string;
   template: string;
   total: number;
+  paid?: number;
+  balance?: number;
   issue_date?: string;
   due_date?: string;
   shared?: boolean;
   updated_at: string;
+}
+export interface InvoicePayment {
+  id: number;
+  invoice_id: number;
+  amount: number;
+  method?: string;
+  note?: string;
+  paid_at: string;
 }
 export interface InvoiceDoc {
   id: number;
@@ -1214,9 +1224,10 @@ export const billing = {
     readCached<InvoiceDocSummary[]>(
       "billing_docs",
       async () => {
-        const [docs, items] = await Promise.all([
+        const [docs, items, payments] = await Promise.all([
           sList<any>("invoice_docs", [{ col: "updated_at", asc: false }]),
           sList<any>("invoice_doc_items"),
+          sList<any>("invoice_payments"),
         ]);
         const byDoc = new Map<number, any[]>();
         for (const it of items) {
@@ -1224,17 +1235,30 @@ export const billing = {
           a.push(it);
           byDoc.set(it.invoice_id, a);
         }
-        return docs.map((d) => ({
-          id: d.id,
-          number: d.number,
-          customer_name: d.customer_name,
-          status: d.status,
-          template: d.template,
-          total: docTotal(d, byDoc.get(d.id) ?? []),
-          issue_date: d.issue_date ?? undefined,
-          due_date: d.due_date ?? undefined,
-          updated_at: d.updated_at,
-        })) as InvoiceDocSummary[];
+        const paidByDoc = new Map<number, number>();
+        for (const p of payments)
+          paidByDoc.set(
+            p.invoice_id,
+            (paidByDoc.get(p.invoice_id) ?? 0) + Number(p.amount)
+          );
+        return docs.map((d) => {
+          const total = docTotal(d, byDoc.get(d.id) ?? []);
+          const paid = paidByDoc.get(d.id) ?? 0;
+          return {
+            id: d.id,
+            number: d.number,
+            customer_name: d.customer_name,
+            status: d.status,
+            template: d.template,
+            total,
+            paid,
+            balance: Math.max(0, total - paid),
+            issue_date: d.issue_date ?? undefined,
+            due_date: d.due_date ?? undefined,
+            shared: d.shared ?? undefined,
+            updated_at: d.updated_at,
+          };
+        }) as InvoiceDocSummary[];
       },
       []
     ),
@@ -1321,6 +1345,54 @@ export const billing = {
         shared
       )
     ),
+  // ----- payments -----
+  payments: (invoiceId: number) =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("invoice_payments")
+        .select("*")
+        .eq("invoice_id", invoiceId)
+        .order("paid_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as InvoicePayment[];
+    }),
+  addPayment: (
+    invoiceId: number,
+    amount: number,
+    method: string | null,
+    paidAt: string
+  ) =>
+    online(async () => {
+      await sInsert("invoice_payments", {
+        invoice_id: invoiceId,
+        amount,
+        method: method ?? null,
+        paid_at: paidAt,
+      });
+      // Auto-mark the invoice paid once the balance is cleared.
+      const [{ data: doc }, items, { data: pays }] = await Promise.all([
+        sb().from("invoice_docs").select("*").eq("id", invoiceId).single(),
+        sList<any>("invoice_doc_items"),
+        sb()
+          .from("invoice_payments")
+          .select("amount")
+          .eq("invoice_id", invoiceId),
+      ]);
+      const total = docTotal(
+        doc as any,
+        (items as any[]).filter((i) => i.invoice_id === invoiceId)
+      );
+      const paid = ((pays as any[]) ?? []).reduce(
+        (s, p) => s + Number(p.amount),
+        0
+      );
+      const status =
+        paid >= total - 0.005 ? "paid" : (doc as any).status === "paid" ? "sent" : (doc as any).status;
+      if (status !== (doc as any).status)
+        await sUpdate("invoice_docs", invoiceId, { status });
+    }),
+  removePayment: (id: number) =>
+    online(() => sDelete("invoice_payments", id)),
   getCompany: () =>
     readCached<CompanyProfile>(
       "company_profile",
