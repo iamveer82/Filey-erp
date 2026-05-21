@@ -69,7 +69,7 @@
   .card,
   .bento-card {
     @apply rounded-2xl bg-white border border-brand-200 shadow-bento p-5
-           transition-all duration-200;
+           transition-[box-shadow,border-color] duration-200;
   }
   /* design.md §9: hover = shadow/border lift only, no translate/scale. */
   .card-hover,

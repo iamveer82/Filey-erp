@@ -8,6 +8,7 @@ import {
   Lock,
   Loader2,
   AlertCircle,
+  Inbox,
 } from "lucide-react";
 import { cn } from "../lib/format";
 
@@ -296,11 +297,15 @@ export function DataTable<T>({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td
-                  className="td text-center text-sm text-brand-400 py-12"
-                  colSpan={columns.length}
-                >
-                  {empty}
+                <td className="td py-14" colSpan={columns.length}>
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 text-brand-300">
+                      <Inbox size={20} />
+                    </span>
+                    <p className="text-sm font-semibold text-brand-500">
+                      {empty ?? "Nothing here yet"}
+                    </p>
+                  </div>
                 </td>
               </tr>
             ) : (
