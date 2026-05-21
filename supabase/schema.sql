@@ -430,6 +430,9 @@ create table if not exists tool_runs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- Stored output object paths in the tool-outputs bucket (additive).
+alter table tool_runs add column if not exists storage_paths text[] not null default '{}';
+alter table tool_runs add column if not exists size_bytes bigint not null default 0;
 
 -- ---------- MULTI-TENANCY (organizations + members + RBAC) ----------
 create extension if not exists pgcrypto;
@@ -643,6 +646,79 @@ begin
       );
     end if;
   end loop;
+end $$;
+
+-- ---------- STORAGE: tool-outputs bucket ----------
+-- Private bucket holding processed tool files. Each object lives under
+-- {auth.uid()}/{run_id}/{i}_{name}; RLS scopes every object to its owner
+-- so files persist until the user deletes the run. Idempotent.
+insert into storage.buckets (id, name, public)
+values ('tool-outputs', 'tool-outputs', false)
+on conflict (id) do nothing;
+
+drop policy if exists tool_outputs_read on storage.objects;
+create policy tool_outputs_read on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'tool-outputs'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists tool_outputs_insert on storage.objects;
+create policy tool_outputs_insert on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'tool-outputs'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists tool_outputs_update on storage.objects;
+create policy tool_outputs_update on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'tool-outputs'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'tool-outputs'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists tool_outputs_delete on storage.objects;
+create policy tool_outputs_delete on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'tool-outputs'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- ---------- RETENTION: auto-purge old tool outputs ----------
+-- Deletes tool_runs (and their stored files) older than max_age. Run on a
+-- schedule via pg_cron when available; client also enforces a per-user
+-- storage quota. security definer so the scheduled job may touch storage.
+create or replace function public.prune_tool_runs(max_age interval default '30 days')
+returns void language plpgsql security definer
+set search_path = public, storage as $$
+begin
+  delete from storage.objects o
+   using public.tool_runs r
+   where o.bucket_id = 'tool-outputs'
+     and o.name = any(r.storage_paths)
+     and r.created_at < now() - max_age;
+  delete from public.tool_runs where created_at < now() - max_age;
+end $$;
+
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron;
+    -- pg_cron 1.4+ upserts by job name; safe to re-run.
+    perform cron.schedule(
+      'prune-tool-runs',
+      '0 3 * * *',
+      'select public.prune_tool_runs();'
+    );
+  end if;
 end $$;
 
 -- Done. Tables are row-level-secured to the signed-in user.

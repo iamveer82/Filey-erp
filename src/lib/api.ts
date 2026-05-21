@@ -1428,6 +1428,8 @@ export interface ToolRun {
   tool: string;
   tool_name: string;
   file_name: string;
+  storage_paths?: string[];
+  size_bytes?: number;
   created_at: string;
 }
 
@@ -1853,6 +1855,31 @@ export const toolRuns = {
       sInsert("tool_runs", row), -1
     );
   },
+  rename: (id: number, fileName: string) =>
+    write(
+      { k: "update", t: "tool_runs", id, row: { file_name: fileName } },
+      () => sUpdate("tool_runs", id, { file_name: fileName }),
+      undefined
+    ),
+  setPaths: (id: number, paths: string[], sizeBytes = 0) =>
+    write(
+      {
+        k: "update",
+        t: "tool_runs",
+        id,
+        row: { storage_paths: paths, size_bytes: sizeBytes },
+      },
+      () =>
+        sUpdate("tool_runs", id, {
+          storage_paths: paths,
+          size_bytes: sizeBytes,
+        }),
+      undefined
+    ),
+  remove: (id: number) =>
+    write({ k: "delete", t: "tool_runs", id }, () =>
+      sDelete("tool_runs", id), undefined
+    ),
 };
 
 // ===== Organizations / RBAC =====

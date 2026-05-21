@@ -625,7 +625,7 @@ export function ToolRunner({
 }: {
   tool: Tool;
   onClose: () => void;
-  onComplete?: (toolId: string, files: string[]) => void;
+  onComplete?: (toolId: string, files: string[], outputs: OutFile[]) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [params, setParams] = useState<Record<string, string>>(
@@ -679,7 +679,8 @@ export function ToolRunner({
       setResults(out);
       onComplete?.(
         tool.id,
-        files.map((f) => f.name)
+        files.map((f) => f.name),
+        out
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
