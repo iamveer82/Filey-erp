@@ -20,6 +20,8 @@ import {
   Modal,
   Field,
   ShareToggle,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
@@ -36,10 +38,19 @@ export default function Orders() {
   const [open, setOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    erp.orders().then(setOrders).catch(console.error);
-    erp.products().then(setProducts).catch(console.error);
+    setError("");
+    return Promise.all([
+      erp.orders().then(setOrders),
+      erp.products().then(setProducts),
+    ])
+      .catch((e) =>
+        setError(`Could not load orders: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
   useEffect(() => {
     load();
@@ -76,6 +87,17 @@ export default function Orders() {
           </div>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && orders.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading orders…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard

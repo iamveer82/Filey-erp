@@ -19,6 +19,8 @@ import {
   statusTone,
   Modal,
   Field,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 import {
   DropdownMenu,
@@ -33,12 +35,21 @@ export default function People() {
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    hr.employees().then(setEmps).catch(console.error);
-    hr.summary().then(setSum).catch(console.error);
+    setError("");
+    return Promise.all([
+      hr.employees().then(setEmps),
+      hr.summary().then(setSum),
+    ])
+      .catch((e) =>
+        setError(`Could not load people: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   useLiveSync(load);
 
   return (
@@ -52,6 +63,17 @@ export default function People() {
           </button>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && emps.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading employees…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard

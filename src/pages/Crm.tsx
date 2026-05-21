@@ -35,6 +35,8 @@ import {
   Badge,
   Modal,
   Field,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 const STAGES = [
@@ -59,14 +61,23 @@ export default function Crm() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [acts, setActs] = useState<Activity[]>([]);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    crm.customers().then(setCustomers).catch(console.error);
-    crm.opportunities().then(setOpps).catch(console.error);
-    crm.leads().then(setLeads).catch(console.error);
-    crm.activities().then(setActs).catch(console.error);
+    setError("");
+    return Promise.all([
+      crm.customers().then(setCustomers),
+      crm.opportunities().then(setOpps),
+      crm.leads().then(setLeads),
+      crm.activities().then(setActs),
+    ])
+      .catch((e) =>
+        setError(`Could not load CRM: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   useLiveSync(load);
 
   const now = Date.now();
@@ -82,12 +93,26 @@ export default function Crm() {
     .filter((o) => !["won", "lost"].includes(o.stage))
     .reduce((s, o) => s + o.value, 0);
 
+  // Real trend: new customers per month over the last 6 months.
   const trend = useMemo(() => {
-    const base = customers.length || 8;
-    return ["Apr 1", "Apr 8", "Apr 15", "Apr 22", "Apr 29"].map((d, i) => ({
-      name: d,
-      v: Math.round(base * (0.45 + i * 0.14) * 100),
-    }));
+    const n = new Date();
+    const buckets: { name: string; key: string; v: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(n.getFullYear(), n.getMonth() - i, 1);
+      buckets.push({
+        name: d.toLocaleString("en", { month: "short" }),
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        v: 0,
+      });
+    }
+    const byKey = new Map(buckets.map((b) => [b.key, b]));
+    for (const c of customers) {
+      if (!c.created_at) continue;
+      const d = new Date(c.created_at);
+      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
+      if (b) b.v += 1;
+    }
+    return buckets.map(({ name, v }) => ({ name, v }));
   }, [customers]);
 
   const funnel = useMemo(() => {
@@ -172,6 +197,20 @@ export default function Crm() {
         }
       />
 
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading &&
+        customers.length === 0 &&
+        opps.length === 0 &&
+        !error && (
+          <div className="card mb-4">
+            <Spinner label="Loading CRM…" />
+          </div>
+        )}
+
       {view === "pipeline" ? (
         <PipelineBoard opps={opps} setOpps={setOpps} reload={load} />
       ) : (
@@ -180,34 +219,29 @@ export default function Crm() {
             <MetricCard
               label="Total Customers"
               value={num(customers.length)}
-              delta={8.2}
               icon={<Users size={20} />}
             />
             <MetricCard
               label="Active Customers"
               value={num(activeCount)}
-              delta={12.4}
               icon={<UserCheck size={20} />}
               iconClass="bg-success/15 text-success"
             />
             <MetricCard
               label="New Customers"
               value={num(newCount)}
-              delta={6.7}
               icon={<UserPlus size={20} />}
               iconClass="bg-secondary-400/20 text-secondary-600"
             />
             <MetricCard
               label="Total Deals"
               value={num(opps.length)}
-              delta={10.3}
               icon={<Target size={20} />}
               iconClass="bg-info/15 text-info"
             />
             <MetricCard
               label="Pipeline Value"
               value={aed(pipelineValue)}
-              delta={15.8}
               icon={<TrendingUp size={20} />}
               iconClass="bg-primary-100 text-primary-700"
             />

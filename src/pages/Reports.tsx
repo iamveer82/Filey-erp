@@ -27,7 +27,13 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, num } from "../lib/format";
-import { PageHeader, MetricCard, InfoCard } from "../components/ui";
+import {
+  PageHeader,
+  MetricCard,
+  InfoCard,
+  Spinner,
+  ErrorBanner,
+} from "../components/ui";
 
 // design.md §2 / §6.7 — primary, secondary, info, success, surface
 const PIE = ["#FFD600", "#FFBA3D", "#0EA5E9", "#3FB984", "#CBBEAA"];
@@ -38,15 +44,24 @@ export default function Reports() {
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payroll, setPayroll] = useState<Payroll[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    erp.products().then(setProducts).catch(console.error);
-    fin.report().then(setReport).catch(console.error);
-    billing.listDocs().then(setInvoices).catch(console.error);
-    fin.expenses().then(setExpenses).catch(console.error);
-    hr.payroll().then(setPayroll).catch(console.error);
+    setError("");
+    return Promise.all([
+      erp.products().then(setProducts),
+      fin.report().then(setReport),
+      billing.listDocs().then(setInvoices),
+      fin.expenses().then(setExpenses),
+      hr.payroll().then(setPayroll),
+    ])
+      .catch((e) =>
+        setError(`Could not load reports: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   useLiveSync(load);
 
   const invoiceRevenue = useMemo(
@@ -140,6 +155,17 @@ export default function Reports() {
         title="Reports"
         subtitle="Inventory & financial reporting"
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && products.length === 0 && invoices.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading reports…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard

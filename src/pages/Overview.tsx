@@ -35,6 +35,8 @@ import {
   Badge,
   OrdersStatCard,
   StockBreakdownCard,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 export default function Overview() {
@@ -42,14 +44,23 @@ export default function Overview() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    erp.products().then(setProducts).catch(console.error);
-    erp.orders().then(setOrders).catch(console.error);
-    billing.listDocs().then(setInvoices).catch(console.error);
-    fin.expenses().then(setExpenses).catch(console.error);
+    setError("");
+    return Promise.all([
+      erp.products().then(setProducts),
+      erp.orders().then(setOrders),
+      billing.listDocs().then(setInvoices),
+      fin.expenses().then(setExpenses),
+    ])
+      .catch((e) =>
+        setError(`Could not load overview: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   useLiveSync(load);
 
   const lowStock = useMemo(
@@ -152,6 +163,17 @@ export default function Overview() {
         title="Overview"
         subtitle="Inventory at a glance — every card answers one question"
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && products.length === 0 && orders.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading overview…" />
+        </div>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">

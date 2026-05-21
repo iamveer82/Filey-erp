@@ -10,6 +10,8 @@ import {
   Badge,
   Modal,
   Field,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 const ACCOUNT_TYPES = [
@@ -27,13 +29,22 @@ export default function Accounting() {
   const [acctOpen, setAcctOpen] = useState(false);
   const [jOpen, setJOpen] = useState(false);
   const [tab, setTab] = useState<"journal" | "accounts">("journal");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = () => {
-    fin.accounts().then(setAccounts).catch(console.error);
-    fin.transactions().then(setTxns).catch(console.error);
-    fin.report().then(setReport).catch(console.error);
+    setError("");
+    return Promise.all([
+      fin.accounts().then(setAccounts),
+      fin.transactions().then(setTxns),
+      fin.report().then(setReport),
+    ])
+      .catch((e) =>
+        setError(`Could not load accounting: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
   useLiveSync(load);
 
   return (
@@ -55,6 +66,17 @@ export default function Accounting() {
           </div>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && accounts.length === 0 && txns.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading accounting…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard

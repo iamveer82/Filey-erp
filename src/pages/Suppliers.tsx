@@ -27,6 +27,8 @@ import {
   Modal,
   Field,
   ShareToggle,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 interface CategoryGroup {
@@ -41,11 +43,20 @@ export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const { confirm, toast } = useUI();
 
   const load = () => {
-    erp.products().then(setProducts).catch(console.error);
-    suppliersApi.list().then(setSuppliers).catch(console.error);
+    setError("");
+    return Promise.all([
+      erp.products().then(setProducts),
+      suppliersApi.list().then(setSuppliers),
+    ])
+      .catch((e) =>
+        setError(`Could not load suppliers: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
   };
   useEffect(() => {
     load();
@@ -86,6 +97,17 @@ export default function Suppliers() {
           </button>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && suppliers.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading suppliers…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard

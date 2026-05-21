@@ -12,13 +12,26 @@ import {
   Badge,
   Modal,
   Field,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 export default function Purchase() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const load = () => fin.expenses().then(setExpenses).catch(console.error);
+  const load = () => {
+    setError("");
+    return fin
+      .expenses()
+      .then(setExpenses)
+      .catch((e) =>
+        setError(`Could not load purchases: ${e instanceof Error ? e.message : e}`)
+      )
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
   }, []);
@@ -49,6 +62,17 @@ export default function Purchase() {
           </button>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && expenses.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading purchases…" />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
