@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import {
   X,
   ArrowUpRight,
@@ -6,8 +6,42 @@ import {
   SlidersHorizontal,
   Users,
   Lock,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "../lib/format";
+
+/** Design-token skeleton placeholder (no new deps). */
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "animate-pulse rounded-lg bg-brand-100",
+        className
+      )}
+    />
+  );
+}
+
+/** Centered spinner for loading panels. */
+export function Spinner({ label }: { label?: string }) {
+  return (
+    <div className="flex items-center justify-center gap-2 py-10 text-brand-400">
+      <Loader2 size={18} className="animate-spin" />
+      {label && <span className="text-sm">{label}</span>}
+    </div>
+  );
+}
+
+/** Inline error banner — for surfacing load/save failures visibly. */
+export function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm font-semibold text-danger">
+      <AlertCircle size={16} className="mt-px shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
 
 /** Per-record sharing toggle. Private = owner-only; Shared = visible
  *  (read-only) to the whole organization. */
@@ -305,10 +339,43 @@ export function Modal({
     "2xl": "max-w-4xl",
     "3xl": "max-w-5xl",
   }[size];
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    // Move focus into the dialog on open.
+    const focusables = () =>
+      Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+    (focusables()[0] ?? dialogRef.current)?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = focusables();
+      if (!els.length) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      prevFocus?.focus?.();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -318,11 +385,13 @@ export function Modal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-bento-hover",
+          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-bento-hover outline-none",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}

@@ -18,7 +18,7 @@ import {
 import { erp, shareRecord, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num, numInput } from "../lib/format";
+import { aed, num, numInput, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -27,6 +27,8 @@ import {
   Modal,
   Field,
   ShareToggle,
+  Spinner,
+  ErrorBanner,
 } from "../components/ui";
 
 export default function Inventory() {
@@ -35,6 +37,8 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const toggleShare = async (p: Product, next: boolean) => {
     try {
@@ -46,8 +50,18 @@ export default function Inventory() {
     }
   };
 
-  const load = () =>
-    erp.products().then(setProducts).catch(console.error);
+  const load = () => {
+    setError("");
+    return erp
+      .products()
+      .then(setProducts)
+      .catch((e) =>
+        setError(
+          `Could not load products: ${e instanceof Error ? e.message : e}`
+        )
+      )
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
   }, []);
@@ -151,6 +165,17 @@ export default function Inventory() {
         </span>
       </div>
 
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && products.length === 0 && !error && (
+        <div className="card">
+          <Spinner label="Loading products…" />
+        </div>
+      )}
+
       <DataTable<Product>
         rows={filtered}
         empty="No products match your filters"
@@ -253,6 +278,9 @@ function ProductModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
+  const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
   const [f, setF] = useState({
     sku: "",
     name: "",
@@ -262,22 +290,48 @@ function ProductModal({
     quantity: 0,
     reorder_level: 0,
   });
+  const nameErr = !f.name.trim();
+  const skuErr = !f.sku.trim();
+  const valid = !nameErr && !skuErr;
+
+  const save = async () => {
+    setTouched(true);
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await erp.createProduct({ ...f, description: "" } as any);
+      toast.success("Product added.");
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title="New Product">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="SKU">
+        <Field label="SKU *">
           <input
-            className="input"
+            className={cn("input", touched && skuErr && "border-danger")}
             value={f.sku}
             onChange={(e) => setF({ ...f, sku: e.target.value })}
           />
+          {touched && skuErr && (
+            <p className="text-[11px] text-danger mt-1">SKU is required.</p>
+          )}
         </Field>
-        <Field label="Name">
+        <Field label="Name *">
           <input
-            className="input"
+            className={cn("input", touched && nameErr && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
+          {touched && nameErr && (
+            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+          )}
         </Field>
         <Field label="Category">
           <input
@@ -329,13 +383,10 @@ function ProductModal({
         </button>
         <button
           className="btn-primary"
-          onClick={async () => {
-            await erp.createProduct({ ...f, description: "" } as any);
-            onSaved();
-            onClose();
-          }}
+          disabled={saving || (touched && !valid)}
+          onClick={save}
         >
-          Save Product
+          {saving ? "Saving…" : "Save Product"}
         </button>
       </div>
     </Modal>
