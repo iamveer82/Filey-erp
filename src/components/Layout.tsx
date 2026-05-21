@@ -10,6 +10,7 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Command,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
@@ -35,6 +36,21 @@ const GROUP_ORDER = [
   "Invoices",
   "Customers",
 ] as const;
+
+/** Quick-action commands for the ⌘K palette. `create` deep-links a page
+ *  to auto-open its create form via the ?new=1 query. */
+const COMMANDS: { label: string; to: string; keywords: string }[] = [
+  { label: "New invoice", to: "/invoicing?new=1", keywords: "create invoice bill" },
+  { label: "New quotation", to: "/quoting?new=1", keywords: "create quote" },
+  { label: "Add product", to: "/inventory?new=1", keywords: "create product stock item" },
+  { label: "Add customer", to: "/crm?new=1", keywords: "create customer client crm" },
+  { label: "Add supplier", to: "/suppliers?new=1", keywords: "create supplier vendor" },
+  { label: "New sales order", to: "/orders?new=1", keywords: "create order" },
+  { label: "Record expense", to: "/purchase?new=1", keywords: "create purchase expense spend" },
+  { label: "Go to Reports", to: "/reports", keywords: "reports analytics" },
+  { label: "Open Tools", to: "/tools", keywords: "pdf tools utilities" },
+  { label: "Settings", to: "/settings", keywords: "settings company account" },
+];
 
 const TONE_DOT: Record<string, string> = {
   warn: "bg-warning",
@@ -84,6 +100,14 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const { toast } = useUI();
   const hits = useGlobalSearch(q);
+  const cmdHits = (() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return COMMANDS;
+    return COMMANDS.filter(
+      (c) =>
+        c.label.toLowerCase().includes(s) || c.keywords.includes(s)
+    );
+  })();
   const alerts = useNotifications();
   const [inbox, setInbox] = useState<Notification[]>([]);
   const seenRef = useRef<Set<number> | null>(null);
@@ -309,9 +333,31 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
             )}
 
-            {searchOpen && q.trim() && (
+            {searchOpen && (
               <div className="absolute left-0 right-0 top-12 z-30 max-h-[60vh] overflow-y-auto rounded-2xl bg-white border border-brand-200 shadow-bento-hover p-2">
-                {hits.length === 0 ? (
+                {/* Quick actions (command palette) */}
+                {cmdHits.length > 0 && (
+                  <div className="mb-1">
+                    <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                      Actions
+                    </p>
+                    {cmdHits.map((c) => (
+                      <button
+                        key={c.to}
+                        onClick={() => go(c.to)}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+                      >
+                        <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-primary-700">
+                          <Command size={13} />
+                        </span>
+                        <span className="text-sm font-semibold text-ink">
+                          {c.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {q.trim() && hits.length === 0 && cmdHits.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-brand-400">
                     No matches for “{q.trim()}”
                   </p>

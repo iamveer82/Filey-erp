@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Trash2,
@@ -130,6 +131,15 @@ export default function Invoicing() {
   };
   useEffect(reload, []);
   useLiveSync(reload);
+
+  // ⌘K "New invoice" deep-link: open a blank invoice once company loads.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get("new") === "1" && company && !form) {
+      setForm(blankForm(company));
+      setParams({}, { replace: true });
+    }
+  }, [params, company, form, setParams]);
 
   const newInvoice = () => {
     if (company) setForm(blankForm(company));

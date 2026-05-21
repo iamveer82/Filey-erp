@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Trash2,
@@ -43,6 +44,13 @@ export default function Inventory() {
   const [importOpen, setImportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get("new") === "1") {
+      setOpen(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
 
   const toggleShare = async (p: Product, next: boolean) => {
     try {

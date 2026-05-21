@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -20,6 +21,13 @@ export default function Purchase() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get("new") === "1") {
+      setOpen(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
 
   const load = () => {
     setError("");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Users,
   Boxes,
@@ -45,6 +46,14 @@ export default function Suppliers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const { confirm, toast } = useUI();
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get("new") === "1") {
+      setEdit(null);
+      setOpen(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
 
   const load = () => {
     setError("");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   ClipboardList,
@@ -39,6 +40,13 @@ export default function Orders() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get("new") === "1") {
+      setOpen(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
 
   const load = () => {
     setError("");
