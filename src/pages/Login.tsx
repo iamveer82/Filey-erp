@@ -208,8 +208,16 @@ export default function Login() {
     <div className="min-h-full grid lg:grid-cols-2 bg-background">
       {/* ── Brand panel ── */}
       <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-gradient-to-br from-primary-300 via-primary-400 to-secondary-400">
-        <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-white/20 blur-2xl" />
-        <div className="absolute -bottom-32 -left-20 w-96 h-96 rounded-full bg-ink/10 blur-3xl" />
+        {/* Fine dot-grid texture — purposeful depth, not floating orbs. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.18]"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle, rgba(34,34,34,0.45) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }}
+        />
 
         <div className="relative flex items-center gap-3">
           <Logo size={88} />

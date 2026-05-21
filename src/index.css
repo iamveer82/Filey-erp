@@ -98,7 +98,8 @@
            bg-primary-400 px-4 text-sm font-semibold text-ink select-none
            transition-[background-color,box-shadow,transform] duration-200
            hover:bg-primary-500 hover:shadow-glow
-           active:translate-y-px focus:outline-none
+           active:translate-y-px outline-none
+           focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed
            disabled:hover:bg-primary-400 disabled:hover:shadow-none
            cursor-pointer;
@@ -107,23 +108,24 @@
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-primary-100 px-4 text-sm font-semibold text-primary-700
            select-none transition-colors duration-200 hover:bg-primary-200
-           active:translate-y-px focus:outline-none disabled:opacity-50
-           disabled:cursor-not-allowed cursor-pointer;
+           active:translate-y-px outline-none
+           focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            px-3.5 text-sm font-semibold text-brand-600 border border-brand-200
            bg-white/60 select-none transition-colors duration-200
            hover:bg-brand-50 hover:text-ink active:translate-y-px
-           focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed
-           cursor-pointer;
+           outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-danger px-4 text-sm font-semibold text-white select-none
            transition-colors duration-200 hover:opacity-90 active:translate-y-px
-           focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed
-           cursor-pointer;
+           outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
 
   /* ── Form controls — shared 40px height so labels, inputs, selects
