@@ -10,7 +10,7 @@ import {
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, num, fmtDate, numInput } from "../lib/format";
+import { aed, num, fmtDate, numInput, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -252,12 +252,15 @@ function EmployeeModal({
             onChange={(e) => setF({ ...f, employee_code: e.target.value })}
           />
         </Field>
-        <Field label="Full Name">
+        <Field label="Full Name *">
           <input
-            className="input"
+            className={cn("input", !f.name.trim() && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
+          {!f.name.trim() && (
+            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+          )}
         </Field>
         <Field label="Email">
           <input

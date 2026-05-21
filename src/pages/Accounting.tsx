@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, TrendingUp, Wallet, Receipt, Banknote } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, numInput } from "../lib/format";
+import { aed, fmtDate, numInput, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -229,21 +229,30 @@ function AccountModal({
     account_type: "asset",
     balance: 0,
   });
+  const [touched, setTouched] = useState(false);
   useEffect(() => {
-    if (open)
+    if (open) {
       setF({ code: "", name: "", account_type: "asset", balance: 0 });
+      setTouched(false);
+    }
   }, [open]);
+  const codeErr = !f.code.trim();
+  const nameErr = !f.name.trim();
+  const valid = !codeErr && !nameErr;
   return (
     <Modal open={open} onClose={onClose} title="New Account">
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Code">
+          <Field label="Code *">
             <input
-              className="input"
+              className={cn("input", touched && codeErr && "border-danger")}
               placeholder="1000"
               value={f.code}
               onChange={(e) => setF({ ...f, code: e.target.value })}
             />
+            {touched && codeErr && (
+              <p className="text-[11px] text-danger mt-1">Code is required.</p>
+            )}
           </Field>
           <Field label="Type">
             <select
@@ -261,13 +270,16 @@ function AccountModal({
             </select>
           </Field>
         </div>
-        <Field label="Account Name">
+        <Field label="Account Name *">
           <input
-            className="input"
+            className={cn("input", touched && nameErr && "border-danger")}
             placeholder="Cash at Bank"
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
+          {touched && nameErr && (
+            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+          )}
         </Field>
         <Field label="Opening Balance (AED)">
           <input
@@ -285,8 +297,10 @@ function AccountModal({
         </button>
         <button
           className="btn-primary"
-          disabled={!f.name.trim()}
+          disabled={touched && !valid}
           onClick={async () => {
+            setTouched(true);
+            if (!valid) return;
             await fin.createAccount({
               code: f.code,
               name: f.name,

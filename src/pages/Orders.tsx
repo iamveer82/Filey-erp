@@ -10,7 +10,7 @@ import {
 import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput } from "../lib/format";
+import { aed, fmtDate, numInput, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -320,12 +320,17 @@ function OrderModal({
             placeholder="SO-2026-0004"
           />
         </Field>
-        <Field label="Customer Name">
+        <Field label="Customer Name *">
           <input
-            className="input"
+            className={cn("input", !f.customer_name.trim() && "border-danger")}
             value={f.customer_name}
             onChange={(e) => setF({ ...f, customer_name: e.target.value })}
           />
+          {!f.customer_name.trim() && (
+            <p className="text-[11px] text-danger mt-1">
+              Customer name is required.
+            </p>
+          )}
         </Field>
         <Field label="Total (AED)">
           <input
@@ -343,6 +348,7 @@ function OrderModal({
         </button>
         <button
           className="btn-primary"
+          disabled={!f.customer_name.trim()}
           onClick={async () => {
             await erp.createOrder(f.order_number, f.customer_name, f.total);
             onSaved();

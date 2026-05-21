@@ -27,7 +27,7 @@ import {
   Lead,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, num, fmtDate } from "../lib/format";
+import { aed, num, fmtDate, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -616,13 +616,18 @@ function TaskModal({
   return (
     <Modal open={open} onClose={onClose} title="New Task / Follow-up">
       <div className="space-y-3">
-        <Field label="What needs doing?">
+        <Field label="What needs doing? *">
           <input
-            className="input"
+            className={cn("input", !f.subject.trim() && "border-danger")}
             placeholder="Follow up with Acme Corp"
             value={f.subject}
             onChange={(e) => setF({ ...f, subject: e.target.value })}
           />
+          {!f.subject.trim() && (
+            <p className="text-[11px] text-danger mt-1">
+              A task description is required.
+            </p>
+          )}
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">

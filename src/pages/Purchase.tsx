@@ -3,7 +3,7 @@ import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, num, numInput } from "../lib/format";
+import { aed, fmtDate, num, numInput, cn } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -211,13 +211,18 @@ function PurchaseModal({
   return (
     <Modal open={open} onClose={onClose} title="New Purchase">
       <div className="space-y-3">
-        <Field label="Category">
+        <Field label="Category *">
           <input
-            className="input"
+            className={cn("input", !f.category.trim() && "border-danger")}
             value={f.category}
             onChange={(e) => setF({ ...f, category: e.target.value })}
             placeholder="Raw materials"
           />
+          {!f.category.trim() && (
+            <p className="text-[11px] text-danger mt-1">
+              Category is required.
+            </p>
+          )}
         </Field>
         <Field label="Description">
           <input
@@ -264,6 +269,7 @@ function PurchaseModal({
         </button>
         <button
           className="btn-primary"
+          disabled={!f.category.trim() || f.amount <= 0}
           onClick={async () => {
             try {
               await fin.createExpense(
