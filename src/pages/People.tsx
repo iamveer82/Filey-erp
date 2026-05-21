@@ -19,7 +19,6 @@ import {
   statusTone,
   Modal,
   Field,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 import {
@@ -69,12 +68,6 @@ export default function People() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && emps.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading employees…" />
-        </div>
-      )}
-
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
           label="Headcount"
@@ -103,6 +96,7 @@ export default function People() {
 
       <DataTable<Employee>
         rows={emps}
+        loading={loading}
         empty="No employees yet"
         columns={[
           {

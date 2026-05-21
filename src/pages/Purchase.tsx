@@ -12,7 +12,6 @@ import {
   Badge,
   Modal,
   Field,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 
@@ -66,11 +65,6 @@ export default function Purchase() {
       {error && (
         <div className="mb-4">
           <ErrorBanner message={error} />
-        </div>
-      )}
-      {loading && expenses.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading purchases…" />
         </div>
       )}
 
@@ -129,6 +123,7 @@ export default function Purchase() {
         <div className="lg:col-span-2">
           <DataTable<Expense>
             rows={expenses}
+            loading={loading}
             empty="No purchases recorded"
             columns={[
               {

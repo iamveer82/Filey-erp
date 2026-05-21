@@ -10,7 +10,6 @@ import {
   Badge,
   Modal,
   Field,
-  Spinner,
   ErrorBanner,
 } from "../components/ui";
 
@@ -72,11 +71,6 @@ export default function Accounting() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && accounts.length === 0 && txns.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading accounting…" />
-        </div>
-      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
@@ -119,6 +113,7 @@ export default function Accounting() {
       {tab === "journal" ? (
         <DataTable<Txn>
           rows={txns}
+          loading={loading}
           empty="No journal entries yet"
           columns={[
             { key: "d", label: "Date", render: (t) => fmtDate(t.txn_date) },
@@ -157,6 +152,7 @@ export default function Accounting() {
       ) : (
         <DataTable<Account>
           rows={accounts}
+          loading={loading}
           empty="No accounts — add your first chart-of-accounts entry"
           columns={[
             {
