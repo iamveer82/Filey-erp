@@ -17,6 +17,7 @@ import {
   Landmark,
   Wrench,
   Settings2,
+  PackageCheck,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
@@ -29,6 +30,7 @@ const Quoting = lazy(() => import("../pages/Quoting"));
 const Crm = lazy(() => import("../pages/Crm"));
 const Suppliers = lazy(() => import("../pages/Suppliers"));
 const Purchase = lazy(() => import("../pages/Purchase"));
+const PurchaseOrders = lazy(() => import("../pages/PurchaseOrders"));
 const Reports = lazy(() => import("../pages/Reports"));
 const People = lazy(() => import("../pages/People"));
 const Accounting = lazy(() => import("../pages/Accounting"));
@@ -120,6 +122,15 @@ export const MODULES: AppModule[] = [
     icon: ShoppingCart,
     to: "/purchase",
     Component: Purchase,
+  },
+  {
+    id: "purchase-orders",
+    label: "Purchase Orders",
+    short: "POs",
+    desc: "Order from suppliers & receive stock",
+    icon: PackageCheck,
+    to: "/purchase-orders",
+    Component: PurchaseOrders,
   },
   {
     id: "reports",
