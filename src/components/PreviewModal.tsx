@@ -161,11 +161,11 @@ export default function PreviewModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl h-full bg-white shadow-bento-hover flex flex-col"
+        className="w-full max-w-3xl h-full bg-white dark:bg-[#201D16] shadow-bento-hover flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2A261E] shrink-0">
           <div className="min-w-0">
             <p className="font-bold text-ink truncate">
               {name || title || "Preview"}
@@ -186,7 +186,7 @@ export default function PreviewModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 cursor-pointer"
+              className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -205,7 +205,7 @@ export default function PreviewModal({
 
         {/* multi-file tabs */}
         {paths.length > 1 && (
-          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 overflow-x-auto shrink-0">
+          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2A261E] overflow-x-auto shrink-0">
             {paths.map((p) => (
               <button
                 key={p}
@@ -213,7 +213,7 @@ export default function PreviewModal({
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
                   activePath === p
                     ? "bg-primary-100 text-primary-700"
-                    : "text-brand-500 hover:bg-brand-50"
+                    : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"
                 }`}
               >
                 {fileNameOf(p)}
@@ -223,7 +223,7 @@ export default function PreviewModal({
         )}
 
         {/* body */}
-        <div className="flex-1 overflow-auto bg-brand-50 p-5">
+        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#17150F] p-5">
           {busy && (
             <div className="h-full grid place-items-center text-brand-400">
               <Loader2 size={28} className="animate-spin" />
@@ -263,7 +263,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white rounded-xl border border-brand-200 p-4 text-brand-700">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1B1812] rounded-xl border border-brand-200 dark:border-[#322E25] p-4 text-brand-700 dark:text-[#C9C0B0]">
               {text}
             </pre>
           )}

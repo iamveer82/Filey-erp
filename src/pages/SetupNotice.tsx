@@ -2,7 +2,7 @@ import { CloudOff } from "lucide-react";
 
 export default function SetupNotice() {
   return (
-    <div className="min-h-full grid place-items-center bg-brand-50 p-6">
+    <div className="min-h-full grid place-items-center bg-brand-50 dark:bg-[#17150F] p-6">
       <div className="w-full max-w-lg bento-card">
         <div className="flex items-center gap-3 mb-4">
           <div className="rounded-2xl bg-ink p-3 text-white">
@@ -27,7 +27,7 @@ export default function SetupNotice() {
             In the Supabase dashboard open{" "}
             <span className="font-semibold text-ink">SQL Editor</span> and run
             the contents of{" "}
-            <code className="bg-brand-100 px-1.5 py-0.5 rounded text-xs">
+            <code className="bg-brand-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-xs">
               supabase/schema.sql
             </code>
             .
@@ -41,7 +41,7 @@ export default function SetupNotice() {
           </li>
           <li>
             Paste them into{" "}
-            <code className="bg-brand-100 px-1.5 py-0.5 rounded text-xs">
+            <code className="bg-brand-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-xs">
               .env
             </code>
             :
@@ -52,7 +52,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
           </li>
           <li>
             Stop and restart{" "}
-            <code className="bg-brand-100 px-1.5 py-0.5 rounded text-xs">
+            <code className="bg-brand-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-xs">
               npm run tauri dev
             </code>
             .

@@ -695,7 +695,7 @@ export function ToolRunner({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-2xl bg-white shadow-bento-hover p-6"
+        className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -708,7 +708,7 @@ export function ToolRunner({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 cursor-pointer"
+            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
           >
             <X size={18} />
           </button>
@@ -739,7 +739,7 @@ export function ToolRunner({
             {files.map((f, i) => (
               <li
                 key={i}
-                className="text-xs text-brand-600 bg-brand-50 rounded-lg px-3 py-2 truncate"
+                className="text-xs text-brand-600 dark:text-[#C9C0B0] bg-brand-50 dark:bg-white/5 rounded-lg px-3 py-2 truncate"
               >
                 {f.name}
               </li>
@@ -1104,7 +1104,7 @@ export function ToolRunner({
                 <button
                   key={i}
                   onClick={() => pdf.downloadFile(r)}
-                  className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 cursor-pointer transition-colors"
+                  className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 dark:bg-white/5 dark:hover:bg-white/10 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 dark:text-[#C9C0B0] cursor-pointer transition-colors"
                 >
                   <span className="truncate">{r.name}</span>
                   <Download size={14} />

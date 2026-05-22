@@ -75,11 +75,11 @@ export default function ToolBrowserModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-6xl h-[85vh] rounded-2xl bg-white shadow-bento-hover flex flex-col overflow-hidden"
+        className="w-full max-w-6xl h-[85vh] rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2A261E]">
           <div>
             <p className="font-bold text-ink">All tools</p>
             <p className="text-xs text-brand-400">
@@ -89,7 +89,7 @@ export default function ToolBrowserModal({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 cursor-pointer"
+            className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
           >
             <X size={18} />
           </button>
@@ -98,8 +98,8 @@ export default function ToolBrowserModal({
         {/* body */}
         <div className="flex flex-1 min-h-0">
           {/* left: search + list */}
-          <div className="w-[340px] shrink-0 border-r border-brand-100 flex flex-col min-h-0">
-            <div className="p-3 border-b border-brand-100">
+          <div className="w-[340px] shrink-0 border-r border-brand-100 dark:border-[#2A261E] flex flex-col min-h-0">
+            <div className="p-3 border-b border-brand-100 dark:border-[#2A261E]">
               <div className="relative">
                 <Search
                   size={15}
@@ -145,7 +145,7 @@ export default function ToolBrowserModal({
                           className={`w-full flex items-start gap-2.5 rounded-xl px-2.5 py-2 text-left cursor-pointer transition-colors ${
                             isActive
                               ? "bg-primary-100 text-primary-700"
-                              : "hover:bg-brand-50"
+                              : "hover:bg-brand-50 dark:hover:bg-white/5"
                           }`}
                         >
                           <span
@@ -284,7 +284,7 @@ function ToolPane({
         <div>
           <p className="font-bold text-ink text-lg">{tool.name}</p>
           <p className="text-sm text-brand-500 mt-0.5">{tool.desc}</p>
-          <span className="pill bg-brand-50 text-brand-600 mt-2 inline-block">
+          <span className="pill bg-brand-50 dark:bg-white/5 text-brand-600 dark:text-[#C9C0B0] mt-2 inline-block">
             {tool.cat}
           </span>
         </div>
@@ -313,7 +313,7 @@ function ToolPane({
           {files.map((f, i) => (
             <li
               key={i}
-              className="text-xs text-brand-600 bg-brand-50 rounded-lg px-3 py-2 truncate"
+              className="text-xs text-brand-600 bg-brand-50 dark:bg-white/5 dark:text-[#C9C0B0] rounded-lg px-3 py-2 truncate"
             >
               {f.name}
             </li>
@@ -340,7 +340,7 @@ function ToolPane({
               <button
                 key={i}
                 onClick={() => pdf.downloadFile(r)}
-                className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 cursor-pointer transition-colors"
+                className="w-full flex items-center justify-between bg-brand-50 hover:bg-brand-100 dark:bg-white/5 dark:hover:bg-white/10 rounded-lg px-3 py-2 text-xs font-semibold text-brand-700 dark:text-[#C9C0B0] cursor-pointer transition-colors"
               >
                 <span className="truncate">{r.name}</span>
                 <Download size={14} />

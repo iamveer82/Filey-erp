@@ -24,7 +24,7 @@ export default function ProfileSetup() {
   };
 
   return (
-    <div className="min-h-full grid place-items-center bg-brand-50 p-6">
+    <div className="min-h-full grid place-items-center bg-brand-50 dark:bg-[#17150F] p-6">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <div className="rounded-2xl bg-ink p-3 text-white">
