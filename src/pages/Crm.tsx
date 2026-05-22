@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Users,
   UserCheck,
@@ -59,6 +60,7 @@ const STAGE_PROB: Record<string, number> = {
 };
 
 export default function Crm() {
+  const nav = useNavigate();
   const [view, setView] = useState<"dashboard" | "pipeline">("dashboard");
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
@@ -398,7 +400,12 @@ export default function Crm() {
                     {topCustomers.map(({ c, orders, spent }) => (
                       <tr
                         key={c.id || c.name}
-                        className="border-t border-brand-100 dark:border-[#2A261E]"
+                        onClick={() => c.id && nav(`/customers/${c.id}`)}
+                        className={cn(
+                          "border-t border-brand-100 dark:border-[#2A261E] transition-colors",
+                          c.id &&
+                            "cursor-pointer hover:bg-brand-50/70 dark:hover:bg-white/5"
+                        )}
                       >
                         <td className="py-2.5">
                           <p className="font-semibold text-ink">

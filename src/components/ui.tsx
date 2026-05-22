@@ -287,6 +287,7 @@ export function DataTable<T>({
   loading = false,
   rowKey,
   bulkActions,
+  onRowClick,
 }: {
   columns: { key: string; label: string; render: (row: T) => ReactNode }[];
   rows: T[];
@@ -296,6 +297,9 @@ export function DataTable<T>({
   /** Stable id per row — enables multi-select + bulk actions. */
   rowKey?: (row: T) => string | number;
   bulkActions?: BulkAction<T>[];
+  /** Make rows clickable (Odoo-style drill-down). Clicks on buttons,
+   *  links, inputs or menus inside the row are ignored. */
+  onRowClick?: (row: T) => void;
 }) {
   const showSkeleton = loading && rows.length === 0;
   const selectable = !!rowKey && !!bulkActions?.length;
@@ -412,7 +416,24 @@ export function DataTable<T>({
                 return (
                   <tr
                     key={k}
-                    className={cn("row-hover", checked && "bg-primary-50/40")}
+                    onClick={
+                      onRowClick
+                        ? (e) => {
+                            if (
+                              (e.target as HTMLElement).closest(
+                                "button, a, input, select, label, [role='menu'], [data-no-row-click]"
+                              )
+                            )
+                              return;
+                            onRowClick(row);
+                          }
+                        : undefined
+                    }
+                    className={cn(
+                      "row-hover",
+                      checked && "bg-primary-50/40",
+                      onRowClick && "cursor-pointer"
+                    )}
                   >
                     {selectable && (
                       <td className="td w-10">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Users,
   Boxes,
@@ -46,6 +46,7 @@ export default function Suppliers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const { confirm, toast } = useUI();
+  const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1") {
@@ -142,6 +143,7 @@ export default function Suppliers() {
         rows={suppliers}
         loading={loading}
         empty="No suppliers yet — add your first one"
+        onRowClick={(s) => nav(`/suppliers/${s.id}`)}
         columns={[
           {
             key: "name",
