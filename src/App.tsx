@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { UIProvider } from "./lib/ui";
@@ -7,6 +7,9 @@ import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
+
+const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
+const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
 
 function Splash() {
   return (
@@ -45,6 +48,8 @@ function AppRoutes() {
             />
           );
         })}
+        <Route path="/customers/:id" element={<CustomerDetail />} />
+        <Route path="/suppliers/:id" element={<SupplierDetail />} />
         <Route path="*" element={<Navigate to="/overview" replace />} />
       </Routes>
     </Suspense>
