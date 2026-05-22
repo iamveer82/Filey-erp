@@ -123,7 +123,7 @@ export default function MentionInput({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
       {open && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-brand-200 bg-white shadow-bento-hover p-1.5">
+        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-brand-200 dark:border-[#322E25] bg-white dark:bg-[#201D16] shadow-bento-hover p-1.5">
           {matches.map((m, i) => (
             <button
               key={m.id}
@@ -133,7 +133,7 @@ export default function MentionInput({
                 pick(m);
               }}
               className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left cursor-pointer transition-colors ${
-                i === active ? "bg-primary-100" : "hover:bg-brand-50"
+                i === active ? "bg-primary-100 dark:bg-primary-400/15" : "hover:bg-brand-50 dark:hover:bg-white/5"
               }`}
             >
               <span

@@ -192,7 +192,7 @@ export default function Suppliers() {
               <div className="flex gap-1">
                 <button
                   aria-label="Edit"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-lg p-1.5 cursor-pointer"
                   onClick={() => {
                     setEdit(s);
                     setOpen(true);
@@ -245,7 +245,7 @@ export default function Suppliers() {
                 {g.skus} SKU{g.skus === 1 ? "" : "s"} sourced
               </p>
             </div>
-            <div className="mt-auto pt-3 border-t border-brand-100 flex items-center justify-between">
+            <div className="mt-auto pt-3 border-t border-brand-100 dark:border-[#2A261E] flex items-center justify-between">
               <span className="text-xs font-semibold text-brand-400">
                 Sourcing value
               </span>

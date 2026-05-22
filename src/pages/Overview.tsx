@@ -226,7 +226,7 @@ export default function Overview() {
           className="lg:col-span-2"
         >
           <div className="flex items-center gap-4">
-            <div className="rounded-2xl bg-brand-50 p-4">
+            <div className="rounded-2xl bg-brand-50 dark:bg-white/5 p-4">
               <Truck size={28} className="text-brand-500" />
             </div>
             <div>

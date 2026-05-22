@@ -11,9 +11,13 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Command,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
+import { getTheme, setTheme, type Theme } from "../lib/theme";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
 import { billing, notifs as notifsApi, type Notification } from "../lib/api";
@@ -90,6 +94,18 @@ export default function Layout({ children }: { children: ReactNode }) {
       localStorage.setItem("sidebar.collapsed", next ? "1" : "0");
       return next;
     });
+
+  // Theme: cycle light → dark → system.
+  const [theme, setThemeState] = useState<Theme>(() => getTheme());
+  const cycleTheme = () => {
+    const next: Theme =
+      theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+    setTheme(next);
+    setThemeState(next);
+  };
+  const ThemeIcon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
+  const themeLabel =
+    theme === "light" ? "Light" : theme === "dark" ? "Dark" : "System";
 
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -193,17 +209,17 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-background p-3 gap-3">
+    <div className="flex h-full w-full overflow-hidden bg-background dark:bg-[#17150F] p-3 gap-3">
       {/* ───────────── Sidebar ───────────── */}
       <aside
         className={cn(
-          "shrink-0 bg-white rounded-2xl border border-brand-200 shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
+          "shrink-0 bg-white dark:bg-[#201D16] rounded-2xl border border-brand-200 dark:border-[#322E25] shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
           collapsed ? "w-[76px]" : "w-64"
         )}
       >
         <div
           className={cn(
-            "border-b border-brand-100 flex items-center",
+            "border-b border-brand-100 dark:border-[#2A261E] flex items-center",
             collapsed ? "px-2 py-4 justify-center" : "px-5 py-5"
           )}
         >
@@ -241,8 +257,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                     "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
                     collapsed ? "justify-center px-0" : "px-3",
                     isActive
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-brand-500 hover:bg-brand-50 hover:text-ink"
+                      ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
+                      : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#A89F8C] dark:hover:bg-white/5 dark:hover:text-[#ECE7DD]"
                   )
                 }
               >
@@ -263,7 +279,24 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t border-brand-100 space-y-1">
+        <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A261E] space-y-1">
+          <button
+            onClick={cycleTheme}
+            title={collapsed ? `Theme: ${themeLabel}` : undefined}
+            aria-label={`Theme: ${themeLabel} (click to change)`}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-400 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer dark:hover:bg-white/5 dark:hover:text-[#ECE7DD]",
+              collapsed ? "justify-center px-0" : "px-3"
+            )}
+          >
+            <ThemeIcon size={18} className="shrink-0" />
+            {!collapsed && (
+              <span className="flex-1 text-left">Theme</span>
+            )}
+            {!collapsed && (
+              <span className="text-xs text-brand-400">{themeLabel}</span>
+            )}
+          </button>
           <button
             onClick={signOut}
             title={collapsed ? "Sign out" : undefined}
@@ -316,7 +349,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onFocus={() => setSearchOpen(true)}
             />
             {!q && (
-              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-400">
+              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-brand-200 dark:border-[#322E25] bg-brand-50 dark:bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-brand-400">
                 ⌘K
               </kbd>
             )}
@@ -334,7 +367,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             )}
 
             {searchOpen && (
-              <div className="absolute left-0 right-0 top-12 z-30 max-h-[60vh] overflow-y-auto rounded-2xl bg-white border border-brand-200 shadow-bento-hover p-2">
+              <div className="absolute left-0 right-0 top-12 z-30 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#201D16] border border-brand-200 dark:border-[#322E25] shadow-bento-hover p-2">
                 {/* Quick actions (command palette) */}
                 {cmdHits.length > 0 && (
                   <div className="mb-1">
@@ -345,7 +378,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       <button
                         key={c.to}
                         onClick={() => go(c.to)}
-                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                       >
                         <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-primary-700">
                           <Command size={13} />
@@ -374,7 +407,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                           <button
                             key={g + i}
                             onClick={() => go(h.to)}
-                            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+                            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                           >
                             <span className="min-w-0">
                               <span className="block truncate text-sm font-semibold text-ink">
@@ -405,7 +438,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <button
                 aria-label="Notifications"
                 onClick={() => setNotifOpen((o) => !o)}
-                className="relative grid h-10 w-10 place-items-center rounded-xl bg-white border border-brand-200 text-brand-500 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer"
+                className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#201D16] border border-brand-200 dark:border-[#322E25] text-brand-500 dark:text-[#A89F8C] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#ECE7DD] transition-colors cursor-pointer"
               >
                 <Bell size={18} />
                 {badge > 0 && (
@@ -416,8 +449,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white border border-brand-200 shadow-bento-hover">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100">
+                <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#201D16] border border-brand-200 dark:border-[#322E25] shadow-bento-hover">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A261E]">
                     <p className="text-sm font-bold text-ink">
                       Notifications
                     </p>
@@ -452,7 +485,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                           }}
                           className={cn(
                             "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors cursor-pointer",
-                            n.read ? "hover:bg-brand-50" : "bg-primary-50/60 hover:bg-primary-100"
+                            n.read ? "hover:bg-brand-50 dark:hover:bg-white/5" : "bg-primary-50/60 hover:bg-primary-100 dark:bg-primary-400/10 dark:hover:bg-primary-400/20"
                           )}
                         >
                           <span
@@ -479,7 +512,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                         <button
                           key={n.id}
                           onClick={() => go(n.to)}
-                          className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+                          className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                         >
                           <span
                             className={cn(
@@ -507,7 +540,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Account menu"
-                  className="flex items-center gap-2.5 h-10 rounded-xl bg-white border border-brand-200 pl-1.5 pr-3 hover:bg-brand-50 transition-colors cursor-pointer"
+                  className="flex items-center gap-2.5 h-10 rounded-xl bg-white dark:bg-[#201D16] border border-brand-200 dark:border-[#322E25] pl-1.5 pr-3 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                 >
                   <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
                     {initials}

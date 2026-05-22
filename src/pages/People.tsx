@@ -167,7 +167,7 @@ export default function People() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${e.name}`}
-                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors duration-200"
+                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#ECE7DD] cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>

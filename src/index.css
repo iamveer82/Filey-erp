@@ -9,7 +9,8 @@
     height: 100%;
   }
   body {
-    @apply bg-canvas text-ink font-sans antialiased;
+    @apply bg-canvas text-ink font-sans antialiased
+           dark:bg-[#17150F] dark:text-[#ECE7DD];
     margin: 0;
   }
   /* Display face (Poppins) for headings & semantic titles; body stays
@@ -69,12 +70,14 @@
   .card,
   .bento-card {
     @apply rounded-2xl bg-white border border-brand-200 shadow-bento p-5
-           transition-[box-shadow,border-color] duration-200;
+           transition-[box-shadow,border-color] duration-200
+           dark:bg-[#201D16] dark:border-[#322E25];
   }
   /* design.md §9: hover = shadow/border lift only, no translate/scale. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-primary-300 cursor-pointer;
+    @apply hover:shadow-bento-hover hover:border-primary-300 cursor-pointer
+           dark:hover:border-primary-500/50;
   }
   .card-dark {
     @apply rounded-2xl bg-ink text-white border border-ink shadow-bento p-5;
@@ -118,7 +121,9 @@
            bg-white/60 select-none transition-colors duration-200
            hover:bg-brand-50 hover:text-ink active:translate-y-px
            outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
+           dark:bg-white/5 dark:text-[#C9C0B0] dark:border-[#322E25]
+           dark:hover:bg-white/10 dark:hover:text-[#ECE7DD];
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
@@ -138,7 +143,9 @@
            hover:border-brand-300 focus:outline-none focus:ring-2
            focus:ring-primary-300 focus:border-primary-400
            disabled:bg-brand-50 disabled:text-brand-400
-           disabled:cursor-not-allowed;
+           disabled:cursor-not-allowed
+           dark:bg-[#1B1812] dark:border-[#322E25] dark:text-[#ECE7DD]
+           dark:disabled:bg-[#201D16];
   }
   .input,
   .select {
@@ -196,13 +203,20 @@
   /* ── Tables — sticky-friendly header, hover rows, aligned cells. ── */
   .th {
     @apply text-left text-xs font-semibold uppercase tracking-wide
-           text-brand-400 px-4 py-3 bg-brand-50/60;
+           text-brand-400 px-4 py-3 bg-brand-50/60
+           dark:bg-white/5 dark:text-[#9C9486];
   }
   .td {
-    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle tabular-nums;
+    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle tabular-nums
+           dark:text-[#C9C0B0] dark:border-[#2A261E];
   }
   .row-hover {
-    @apply transition-colors duration-150 hover:bg-brand-50/70;
+    @apply transition-colors duration-150 hover:bg-brand-50/70
+           dark:hover:bg-white/5;
+  }
+  /* Headings/ink text inside dark surfaces. */
+  .dark .text-ink {
+    color: #ece7dd;
   }
 }
 

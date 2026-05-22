@@ -231,7 +231,7 @@ export default function PurchaseOrders() {
                 )}
                 <button
                   aria-label="Edit"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-lg p-1.5 cursor-pointer"
                   onClick={() => setEditId(r.id)}
                 >
                   <Pencil size={15} />
@@ -394,10 +394,10 @@ function POEditor({
         </Field>
       </div>
 
-      <div className="rounded-xl border border-brand-200 overflow-hidden mb-3">
+      <div className="rounded-xl border border-brand-200 dark:border-[#322E25] overflow-hidden mb-3">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs font-semibold text-brand-400 bg-brand-50/60">
+            <tr className="text-left text-xs font-semibold text-brand-400 bg-brand-50/60 dark:bg-white/5">
               <th className="px-3 py-2">Product / description</th>
               <th className="px-3 py-2 w-24">Qty</th>
               <th className="px-3 py-2 w-32">Unit cost</th>
@@ -407,7 +407,7 @@ function POEditor({
           </thead>
           <tbody>
             {lines.map((l, i) => (
-              <tr key={i} className="border-t border-brand-100">
+              <tr key={i} className="border-t border-brand-100 dark:border-[#2A261E]">
                 <td className="px-3 py-2">
                   <div className="flex flex-col gap-1">
                     {products.length > 0 && (

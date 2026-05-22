@@ -113,7 +113,7 @@ export default function Purchase() {
                     <span className="text-brand-600 font-medium">{c}</span>
                     <span className="font-bold text-ink">{aed(v)}</span>
                   </div>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 overflow-hidden">
+                  <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 dark:bg-white/10 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-primary-400"
                       style={{ width: `${pct}%` }}

@@ -93,7 +93,7 @@ export function MultiDatePicker({
           .map((d) => (
             <span
               key={d.toISOString()}
-              className="pill bg-brand-100 text-ink inline-flex items-center gap-1.5 pr-1"
+              className="pill bg-brand-100 dark:bg-white/10 text-ink inline-flex items-center gap-1.5 pr-1"
             >
               {format(d, "PPP")}
               <button

@@ -17,7 +17,7 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-lg bg-brand-100",
+        "animate-pulse rounded-lg bg-brand-100 dark:bg-white/10",
         className
       )}
     />
@@ -65,7 +65,7 @@ export function ShareToggle({
         "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
         shared
           ? "bg-info/15 text-info hover:bg-info/25"
-          : "bg-brand-100 text-brand-500 hover:bg-brand-200"
+          : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/10 dark:text-[#A89F8C] dark:hover:bg-white/15"
       )}
     >
       {shared ? <Users size={12} /> : <Lock size={12} />}
@@ -244,7 +244,7 @@ export function Badge({
   tone?: "neutral" | "success" | "warn" | "danger" | "info";
 }) {
   const tones = {
-    neutral: "bg-brand-100 text-brand-600",
+    neutral: "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#C9C0B0]",
     success: "bg-success/15 text-success",
     warn: "bg-warning/15 text-warning",
     danger: "bg-danger/15 text-danger",
@@ -395,7 +395,7 @@ export function DataTable<T>({
               <tr>
                 <td className="td py-14" colSpan={colCount}>
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 text-brand-300">
+                    <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5 text-brand-300">
                       <Inbox size={20} />
                     </span>
                     <p className="text-sm font-semibold text-brand-500">
@@ -512,17 +512,17 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white shadow-bento-hover outline-none",
+          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover outline-none",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-brand-100 px-6 py-4">
+        <div className="flex items-center justify-between gap-4 border-b border-brand-100 dark:border-[#2A261E] px-6 py-4">
           <h2 className="text-lg font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors duration-200"
+            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#ECE7DD] cursor-pointer transition-colors duration-200"
           >
             <X size={18} />
           </button>

@@ -207,15 +207,15 @@ export default function Crm() {
             <button className="btn-ghost" onClick={() => setImportOpen(true)}>
               <Upload size={15} /> Import
             </button>
-            <div className="flex rounded-xl bg-brand-100 p-1 gap-1">
+            <div className="flex rounded-xl bg-brand-100 dark:bg-white/5 p-1 gap-1">
               {(["dashboard", "pipeline"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize cursor-pointer transition-colors ${
                     view === v
-                      ? "bg-white text-ink shadow-bento"
-                      : "text-brand-500 hover:text-ink"
+                      ? "bg-white text-ink shadow-bento dark:bg-[#322E25] dark:text-[#ECE7DD]"
+                      : "text-brand-500 hover:text-ink dark:hover:text-[#ECE7DD]"
                   }`}
                 >
                   {v === "pipeline" ? "Pipeline board" : "Dashboard"}
@@ -334,7 +334,7 @@ export default function Crm() {
                       </span>
                       <span className="font-bold text-ink">{f.n}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-brand-100 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-brand-100 dark:bg-white/10 overflow-hidden">
                       <div
                         className={`h-full rounded-full ${f.c}`}
                         style={{ width: `${(f.n / funnelMax) * 100}%` }}
@@ -398,7 +398,7 @@ export default function Crm() {
                     {topCustomers.map(({ c, orders, spent }) => (
                       <tr
                         key={c.id || c.name}
-                        className="border-t border-brand-100"
+                        className="border-t border-brand-100 dark:border-[#2A261E]"
                       >
                         <td className="py-2.5">
                           <p className="font-semibold text-ink">
@@ -581,8 +581,8 @@ function PipelineBoard({
             onDrop={() => drop(s.id)}
             className={`w-72 shrink-0 rounded-2xl border p-3 transition-colors ${
               over === s.id
-                ? "border-primary-300 bg-primary-50"
-                : "border-brand-200 bg-brand-50/60"
+                ? "border-primary-300 bg-primary-50 dark:bg-primary-400/10"
+                : "border-brand-200 bg-brand-50/60 dark:border-[#322E25] dark:bg-white/[0.03]"
             }`}
           >
             <div className="flex items-center justify-between px-1 mb-3">
