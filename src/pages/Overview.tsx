@@ -249,15 +249,15 @@ export default function Overview() {
                     <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E4DAC6" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
                 <XAxis
                   dataKey="name"
-                  tick={{ fontSize: 12, fill: "#A89F8C" }}
+                  tick={{ fontSize: 12, fill: "#A39B8C" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 12, fill: "#A89F8C" }}
+                  tick={{ fontSize: 12, fill: "#A39B8C" }}
                   axisLine={false}
                   tickLine={false}
                   width={40}
@@ -265,7 +265,7 @@ export default function Overview() {
                 <Tooltip
                   contentStyle={{
                     borderRadius: 12,
-                    border: "1px solid #E4DAC6",
+                    border: "1px solid #DEDBD2",
                     fontSize: 13,
                   }}
                 />
