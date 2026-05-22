@@ -63,6 +63,7 @@ import { MODULES } from "../modules/registry";
 type Section =
   | "company"
   | "account"
+  | "account-mgmt"
   | "users"
   | "apps"
   | "preferences"
@@ -77,6 +78,7 @@ type Section =
 const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
+  { id: "account-mgmt", label: "Account Management", icon: KeyRound },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: LayoutGrid },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
@@ -110,29 +112,71 @@ export default function Settings() {
         subtitle="Manage your company details, account preferences and system settings"
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[230px_1fr_320px] gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4 items-start">
         {/* left sub-nav */}
-        <div className="card !p-2">
+        <nav className="card !p-2 space-y-0.5">
           {NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setSection(id)}
-              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-left transition-colors cursor-pointer ${
+              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-left leading-snug transition-colors cursor-pointer ${
                 section === id
                   ? "bg-primary-100 text-primary-700"
                   : "text-brand-500 hover:bg-brand-50 hover:text-ink"
               }`}
             >
-              <Icon size={16} />
-              {label}
+              <Icon size={16} className="shrink-0" />
+              <span className="flex-1 min-w-0 truncate">{label}</span>
             </button>
           ))}
-        </div>
+        </nav>
 
         {/* center */}
         <div className="min-w-0">
           {section === "company" && <CompanyDetails />}
           {section === "account" && <AccountProfile />}
+          {section === "account-mgmt" && (
+            <div className="card">
+              <p className="font-bold text-ink">Account Management</p>
+              <p className="text-sm text-brand-500 mt-0.5 mb-4">
+                Manage your account security and access settings
+              </p>
+              <div className="space-y-2 max-w-xl">
+                <ManageRow
+                  icon={<Lock size={16} />}
+                  title="Change Password"
+                  desc="Update your account password"
+                  onClick={() => setPwOpen(true)}
+                />
+                <ManageRow
+                  icon={<KeyRound size={16} />}
+                  title="Two-Factor Authentication"
+                  desc="Add an extra layer of security"
+                  right={<Badge tone="success">Available</Badge>}
+                  onClick={() => setSection("security")}
+                />
+                <ManageRow
+                  icon={<Monitor size={16} />}
+                  title="Active Sessions"
+                  desc="Manage your active sessions"
+                  onClick={() => setSection("security")}
+                />
+                <ManageRow
+                  icon={<Plug size={16} />}
+                  title="API Access"
+                  desc="Manage API keys and access"
+                  onClick={() => setSection("integrations")}
+                />
+                <ManageRow
+                  icon={<Trash2 size={16} />}
+                  title="Delete Account"
+                  desc="Permanently delete your account"
+                  danger
+                  onClick={() => setSection("security")}
+                />
+              </div>
+            </div>
+          )}
           {section === "users" && <UsersRoles />}
           {section === "apps" && <AppsManager />}
           {section === "activity" && <ActivityLog />}
@@ -145,48 +189,6 @@ export default function Settings() {
           {section === "email" && <EmailPanel />}
           {section === "integrations" && <IntegrationsPanel />}
           {section === "backup" && <BackupPanel />}
-        </div>
-
-        {/* right: account management */}
-        <div className="card">
-          <p className="font-bold text-ink">Account Management</p>
-          <p className="text-sm text-brand-500 mt-0.5 mb-4">
-            Manage your account security and access settings
-          </p>
-          <div className="space-y-2">
-            <ManageRow
-              icon={<Lock size={16} />}
-              title="Change Password"
-              desc="Update your account password"
-              onClick={() => setPwOpen(true)}
-            />
-            <ManageRow
-              icon={<KeyRound size={16} />}
-              title="Two-Factor Authentication"
-              desc="Add an extra layer of security"
-              right={<Badge tone="success">Available</Badge>}
-              onClick={() => setSection("security")}
-            />
-            <ManageRow
-              icon={<Monitor size={16} />}
-              title="Active Sessions"
-              desc="Manage your active sessions"
-              onClick={() => setSection("security")}
-            />
-            <ManageRow
-              icon={<Plug size={16} />}
-              title="API Access"
-              desc="Manage API keys and access"
-              onClick={() => setSection("integrations")}
-            />
-            <ManageRow
-              icon={<Trash2 size={16} />}
-              title="Delete Account"
-              desc="Permanently delete your account"
-              danger
-              onClick={() => setSection("security")}
-            />
-          </div>
         </div>
       </div>
 
