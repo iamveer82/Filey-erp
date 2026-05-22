@@ -29,6 +29,7 @@ import {
   statusTone,
 } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
+import CustomerNotes from "../components/CustomerNotes";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -197,6 +198,8 @@ export default function CustomerDetail() {
           />
         </div>
       </div>
+
+      {id && <CustomerNotes customerId={id} />}
 
       <Section title="Invoices">
         <DataTable<InvoiceDocSummary>
