@@ -241,7 +241,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* ───────────── Sidebar ───────────── */}
       <aside
         className={cn(
-          "shrink-0 bg-white dark:bg-[#201D16] rounded-2xl border border-brand-200 dark:border-[#322E25] shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
+          "shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#322E25] shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
           collapsed ? "w-[76px]" : "w-64"
         )}
       >

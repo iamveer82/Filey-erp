@@ -25,20 +25,19 @@ export default {
           500: "#F5A623",
           600: "#E0900F",
         },
-        // `brand-*` is the warm neutral utility ramp. Light end is calmed
-        // toward a near-neutral warm grey for quiet surfaces & hairlines;
-        // mid/dark tones stay warm for readable text.
+        // `brand-*` is the neutral grey utility ramp (shadcn-style theme):
+        // light end = quiet surfaces / hairlines, mid/dark = readable text.
         brand: {
-          50: "#F2F1EC",
-          100: "#E9E7E0",
-          200: "#DEDBD2",
-          300: "#C7C2B6",
-          400: "#A39B8C",
-          500: "#867F72",
-          600: "#655F54",
-          700: "#46423A",
-          800: "#312D27",
-          900: "#222222",
+          50: "#F5F5F5",
+          100: "#EBEBEB",
+          200: "#E7E7EE",
+          300: "#D4D4D8",
+          400: "#9A9A9A",
+          500: "#6E6E6E",
+          600: "#525252",
+          700: "#3F3F3F",
+          800: "#1F1F1F",
+          900: "#0A0A0A",
         },
         // emerald-* kept as an alias so existing usages render success-green
         emerald: {
@@ -52,18 +51,22 @@ export default {
         warning: "#F59E0B",
         danger: "#E5484D",
         accentpurple: "#7C3AED",
-        ink: "#222222",
-        surface: "#E4E1D8",
-        background: "#F6F5F1",
-        canvas: "#F6F5F1",
-        hairline: "#E6E3DB",
+        ink: "#0A0A0A",
+        surface: "#F5F8FB",
+        background: "#FDFDFD",
+        canvas: "#FDFDFD",
+        hairline: "#E7E7EE",
         chartdark: "#1F1F1F",
+        // shadcn-style aliases so pasted components (Folder, FileCard) work.
+        foreground: "#0A0A0A",
+        border: "#E7E7EE",
       },
       fontFamily: {
-        // Body: humanist sans for dense data + long-form readability.
-        sans: ['"Open Sans"', "system-ui", "-apple-system", "sans-serif"],
-        // Display: geometric Poppins for headings, metrics & UI chrome.
-        display: ['"Poppins"', "system-ui", "sans-serif"],
+        // Single clean geometric sans across the UI (theme: Plus Jakarta Sans).
+        sans: ['"Plus Jakarta Sans"', "system-ui", "-apple-system", "sans-serif"],
+        display: ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
+        mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
+        serif: ['"Lora"', "Georgia", "serif"],
       },
       fontSize: {
         h1: ["32px", { lineHeight: "40px", fontWeight: "700" }],
@@ -73,18 +76,18 @@ export default {
         caption: ["12px", { lineHeight: "18px" }],
       },
       borderRadius: {
-        sm: "8px",
-        DEFAULT: "12px",
-        lg: "12px",
-        xl: "12px",
-        "2xl": "16px",
-        "3xl": "20px",
+        // Rounder, softer scale (theme --radius: 1.4rem).
+        sm: "0.5rem",
+        DEFAULT: "0.75rem",
+        lg: "0.9rem",
+        xl: "0.95rem",
+        "2xl": "1.4rem",
+        "3xl": "1.75rem",
       },
       boxShadow: {
-        // Quiet, flat-leaning elevation — minimal Odoo/Tally feel.
-        bento: "0 1px 2px rgba(34,34,34,0.05)",
-        "bento-hover":
-          "0 2px 4px rgba(34,34,34,0.06), 0 8px 20px rgba(34,34,34,0.07)",
+        // Theme shadow: 2px offset, tight blur, low opacity.
+        bento: "0 2px 3px 0 rgb(0 0 0 / 0.08)",
+        "bento-hover": "0 4px 12px 0 rgb(0 0 0 / 0.12)",
         glow: "0 6px 18px rgba(255,214,0,0.28)",
         "glow-sm": "0 3px 10px rgba(255,214,0,0.20)",
         sheen: "inset 0 1px 0 0 rgba(255,255,255,0.6)",

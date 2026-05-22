@@ -14,12 +14,12 @@
   *,
   ::before,
   ::after {
-    border-color: #dedbd2;
+    border-color: #e7e7ee;
   }
   .dark *,
   .dark ::before,
   .dark ::after {
-    border-color: #322e25;
+    border-color: #33353a;
   }
 }
 @layer utilities {
@@ -42,8 +42,9 @@
   }
   body {
     @apply bg-canvas text-ink font-sans antialiased
-           dark:bg-[#17150F] dark:text-[#ECE7DD];
+           dark:bg-[#1A1B1E] dark:text-[#F0F0F0];
     margin: 0;
+    letter-spacing: -0.025em;
   }
   /* Display face (Poppins) for headings & semantic titles; body stays
      Open Sans for dense data and long-form readability. */
@@ -255,7 +256,7 @@
   }
   /* Headings/ink text inside dark surfaces. */
   .dark .text-ink {
-    color: #ece7dd;
+    color: #f0f0f0;
   }
 }
 
