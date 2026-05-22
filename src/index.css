@@ -1,6 +1,38 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Keep the existing JS design tokens (colors, shadows, gradients,
+   keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
+@config "../tailwind.config.js";
+
+/* v3 → v4 compatibility shims
+   1. v4 dropped the Preflight default border color (now `currentColor`).
+      Restore the warm hairline so any bare `border` reads as before.
+   2. v4 renamed the bottom of the shadow/radius/blur scales and removed
+      the bare aliases; re-add them at their v3 values so existing
+      `rounded` / `shadow` / `blur` usages keep rendering. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: #e4dac6;
+  }
+  .dark *,
+  .dark ::before,
+  .dark ::after {
+    border-color: #322e25;
+  }
+}
+@layer utilities {
+  .rounded {
+    border-radius: 0.25rem;
+  }
+  .shadow {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  }
+  .blur {
+    filter: blur(8px);
+  }
+}
 
 @layer base {
   html,
