@@ -11,6 +11,8 @@ import {
   Eye,
 } from "lucide-react";
 import { PageHeader, InfoCard } from "../components/ui";
+import Folder from "../components/Folder";
+import FileCard from "../components/FileCard";
 import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
 import {
@@ -40,6 +42,15 @@ interface RunLog {
   paths: string[];
   ts: number;
 }
+
+const FOLDER_COLORS = [
+  "yellow",
+  "blue",
+  "orange",
+  "red",
+  "grey",
+  "black",
+] as const;
 
 function mb(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -207,35 +218,50 @@ export default function ToolsPage() {
           </button>
         }
       >
-        <p className="text-xs text-brand-400 -mt-3 mb-4">
+        <p className="text-xs text-brand-400 -mt-3 mb-5">
           Your most used tools — every action runs locally on this device
         </p>
-        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-3">
-          {quick.map((t) => (
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-5 justify-items-center">
+          {quick.map((t, i) => (
             <button
               key={t.id}
               onClick={() => setActive(t)}
-              className="flex flex-col items-center gap-2 rounded-xl p-3 hover:bg-brand-50 transition-colors cursor-pointer"
+              title={t.name}
+              className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
             >
-              <div className="rounded-2xl bg-primary-100 text-primary-700 p-3">
-                <t.icon size={20} />
-              </div>
-              <span className="text-[11px] font-semibold text-brand-600 text-center leading-tight">
+              <Folder
+                size="sm"
+                color={FOLDER_COLORS[i % FOLDER_COLORS.length]}
+              />
+              <span className="text-[11px] font-semibold text-brand-600 text-center leading-tight max-w-[6.5rem] truncate">
                 {t.name}
               </span>
             </button>
           ))}
           <button
             onClick={() => setBrowseOpen(true)}
-            className="flex flex-col items-center gap-2 rounded-xl p-3 hover:bg-brand-50 transition-colors cursor-pointer"
+            title="More tools"
+            className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
           >
-            <div className="rounded-2xl bg-brand-100 text-brand-500 p-3">
-              <MoreHorizontal size={20} />
-            </div>
+            <Folder size="sm" color="grey" label="More" />
             <span className="text-[11px] font-semibold text-brand-600">
               More Tools
             </span>
           </button>
+        </div>
+      </InfoCard>
+
+      {/* Supported formats */}
+      <InfoCard title="Works with your files" className="mb-4">
+        <p className="text-xs text-brand-400 -mt-3 mb-5">
+          Convert, merge, split &amp; export across formats — all on-device
+        </p>
+        <div className="flex flex-wrap gap-x-6 gap-y-4">
+          {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
+            (f) => (
+              <FileCard key={f} formatFile={f} />
+            )
+          )}
         </div>
       </InfoCard>
 

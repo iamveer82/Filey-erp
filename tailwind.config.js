@@ -68,6 +68,14 @@ export default {
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
       },
+      spacing: {
+        // Fractional / large steps used by the Folder & FileCard art.
+        "0.75": "0.1875rem",
+        "3.25": "0.8125rem",
+        "5.5": "1.375rem",
+        "18": "4.5rem",
+        "30": "7.5rem",
+      },
       fontSize: {
         h1: ["32px", { lineHeight: "40px", fontWeight: "700" }],
         h2: ["24px", { lineHeight: "32px", fontWeight: "600" }],
