@@ -219,7 +219,7 @@ export default function CompanyMessages() {
               <li key={m.id}>
                 <Message m={m} />
                 {(replies.length > 0 || replyTo === m.id) && (
-                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2A261E] pl-3">
+                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2A2C33] pl-3">
                     {replies.map((r) => (
                       <Message key={r.id} m={r} isReply />
                     ))}

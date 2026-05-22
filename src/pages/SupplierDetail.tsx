@@ -110,26 +110,26 @@ export default function SupplierDetail() {
           <p className="stat-label mb-3">Contact</p>
           <ul className="space-y-2.5 text-sm">
             {supplier?.contact_person && (
-              <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C9C0B0]">
+              <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C8C8C8]">
                 <User size={15} className="text-brand-400 shrink-0" />
                 <span className="truncate">{supplier.contact_person}</span>
               </li>
             )}
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C9C0B0]">
+            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C8C8C8]">
               <Mail size={15} className="text-brand-400 shrink-0" />
               <span className="truncate">{supplier?.email || "—"}</span>
             </li>
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C9C0B0]">
+            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#C8C8C8]">
               <Phone size={15} className="text-brand-400 shrink-0" />
               <span className="truncate">{supplier?.phone || "—"}</span>
             </li>
-            <li className="flex items-start gap-2.5 text-brand-700 dark:text-[#C9C0B0]">
+            <li className="flex items-start gap-2.5 text-brand-700 dark:text-[#C8C8C8]">
               <MapPin size={15} className="text-brand-400 shrink-0 mt-0.5" />
               <span>{supplier?.address || "—"}</span>
             </li>
           </ul>
           {supplier?.notes && (
-            <p className="text-xs text-brand-500 mt-4 border-t border-brand-100 dark:border-[#2A261E] pt-3">
+            <p className="text-xs text-brand-500 mt-4 border-t border-brand-100 dark:border-[#2A2C33] pt-3">
               {supplier.notes}
             </p>
           )}

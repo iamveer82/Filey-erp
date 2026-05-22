@@ -162,11 +162,11 @@ export default function PreviewModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl h-full bg-white dark:bg-[#201D16] shadow-bento-hover flex flex-col"
+        className="w-full max-w-3xl h-full bg-white dark:bg-[#222327] shadow-bento-hover flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2A261E] shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2A2C33] shrink-0">
           <div className="min-w-0">
             <p className="font-bold text-ink truncate">
               {name || title || "Preview"}
@@ -206,7 +206,7 @@ export default function PreviewModal({
 
         {/* multi-file tabs */}
         {paths.length > 1 && (
-          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2A261E] overflow-x-auto shrink-0">
+          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2A2C33] overflow-x-auto shrink-0">
             {paths.map((p) => (
               <button
                 key={p}
@@ -224,7 +224,7 @@ export default function PreviewModal({
         )}
 
         {/* body */}
-        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#17150F] p-5">
+        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#1A1B1E] p-5">
           {busy && (
             <div className="h-full grid place-items-center text-brand-400">
               <Loader2 size={28} className="animate-spin" />
@@ -264,7 +264,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1B1812] rounded-xl border border-brand-200 dark:border-[#322E25] p-4 text-brand-700 dark:text-[#C9C0B0]">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1A1B1E] rounded-xl border border-brand-200 dark:border-[#33353A] p-4 text-brand-700 dark:text-[#C8C8C8]">
               {text}
             </pre>
           )}

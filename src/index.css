@@ -104,7 +104,7 @@
   .bento-card {
     @apply relative rounded-2xl bg-white border border-brand-200/80 shadow-bento p-5
            transition-[box-shadow,border-color,transform] duration-200
-           dark:bg-[#201D16] dark:border-[#322E25];
+           dark:bg-[#222327] dark:border-[#33353A];
   }
   /* Minimal: hover is a quiet shadow + border shift, no movement. */
   .card-hover,
@@ -152,8 +152,8 @@
            hover:bg-brand-50 hover:text-ink active:translate-y-px
            outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
-           dark:bg-white/5 dark:text-[#C9C0B0] dark:border-[#322E25]
-           dark:hover:bg-white/10 dark:hover:text-[#ECE7DD];
+           dark:bg-white/5 dark:text-[#C8C8C8] dark:border-[#33353A]
+           dark:hover:bg-white/10 dark:hover:text-[#F0F0F0];
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
@@ -174,8 +174,8 @@
            focus:ring-primary-300 focus:border-primary-400
            disabled:bg-brand-50 disabled:text-brand-400
            disabled:cursor-not-allowed
-           dark:bg-[#1B1812] dark:border-[#322E25] dark:text-[#ECE7DD]
-           dark:disabled:bg-[#201D16];
+           dark:bg-[#1A1B1E] dark:border-[#33353A] dark:text-[#F0F0F0]
+           dark:disabled:bg-[#222327];
   }
   .input,
   .select {
@@ -217,7 +217,7 @@
   /* Frosted chrome — sidebar, top bar, sticky surfaces. */
   .glass {
     @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-bento
-           dark:bg-[#201D16]/70 dark:border-white/10;
+           dark:bg-[#222327]/70 dark:border-white/10;
   }
   /* Gradient text for hero metrics / brand emphasis. */
   .text-gradient {
@@ -244,11 +244,11 @@
   .th {
     @apply text-left text-xs font-semibold uppercase tracking-wide
            text-brand-400 px-4 py-3 bg-brand-50/60
-           dark:bg-white/5 dark:text-[#9C9486];
+           dark:bg-white/5 dark:text-[#A0A0A0];
   }
   .td {
     @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle tabular-nums
-           dark:text-[#C9C0B0] dark:border-[#2A261E];
+           dark:text-[#C8C8C8] dark:border-[#2A2C33];
   }
   .row-hover {
     @apply transition-colors duration-150 hover:bg-brand-50/70
@@ -257,6 +257,21 @@
   /* Headings/ink text inside dark surfaces. */
   .dark .text-ink {
     color: #f0f0f0;
+  }
+  /* Dark-mode legibility: lift the neutral brand text ramp to readable
+     light greys. Explicit `dark:text-[…]` utilities still win (utilities
+     layer beats base), so intentional overrides are preserved. */
+  .dark .text-brand-700 {
+    color: #e6e6e6;
+  }
+  .dark .text-brand-600 {
+    color: #cfcfcf;
+  }
+  .dark .text-brand-500 {
+    color: #b0b0b0;
+  }
+  .dark .text-brand-400 {
+    color: #8f8f8f;
   }
 }
 

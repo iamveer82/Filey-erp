@@ -66,7 +66,7 @@ export function ShareToggle({
         "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
         shared
           ? "bg-info/15 text-info hover:bg-info/25"
-          : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/10 dark:text-[#A89F8C] dark:hover:bg-white/15"
+          : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/10 dark:text-[#A0A0A0] dark:hover:bg-white/15"
       )}
     >
       {shared ? <Users size={12} /> : <Lock size={12} />}
@@ -245,7 +245,7 @@ export function Badge({
   tone?: "neutral" | "success" | "warn" | "danger" | "info";
 }) {
   const tones = {
-    neutral: "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#C9C0B0]",
+    neutral: "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#C8C8C8]",
     success: "bg-success/15 text-success",
     warn: "bg-warning/15 text-warning",
     danger: "bg-danger/15 text-danger",
@@ -534,17 +534,17 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover outline-none",
+          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#222327] shadow-bento-hover outline-none",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-brand-100 dark:border-[#2A261E] px-6 py-4">
+        <div className="flex items-center justify-between gap-4 border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
           <h2 className="text-lg font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#ECE7DD] cursor-pointer transition-colors duration-200"
+            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] cursor-pointer transition-colors duration-200"
           >
             <X size={18} />
           </button>

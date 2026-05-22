@@ -121,9 +121,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
   };
 
   const TOAST_STYLE: Record<ToastKind, string> = {
-    success: "text-success bg-white dark:bg-[#201D16] border-success/30",
-    error: "text-danger bg-white dark:bg-[#201D16] border-danger/30",
-    info: "text-brand-700 dark:text-[#C9C0B0] bg-white dark:bg-[#201D16] border-brand-200 dark:border-[#322E25]",
+    success: "text-success bg-white dark:bg-[#222327] border-success/30",
+    error: "text-danger bg-white dark:bg-[#222327] border-danger/30",
+    info: "text-brand-700 dark:text-[#C8C8C8] bg-white dark:bg-[#222327] border-brand-200 dark:border-[#33353A]",
   };
   const TOAST_ICON: Record<ToastKind, ReactNode> = {
     success: <CheckCircle2 size={16} className="text-success" />,
@@ -188,7 +188,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closeConfirm(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover p-6"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#222327] shadow-bento-hover p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="font-bold text-ink text-lg">{confirmState.title}</p>
@@ -219,7 +219,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closePrompt(null)}
         >
           <form
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#201D16] shadow-bento-hover p-6"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#222327] shadow-bento-hover p-6"
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();

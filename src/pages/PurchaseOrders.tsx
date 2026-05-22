@@ -394,7 +394,7 @@ function POEditor({
         </Field>
       </div>
 
-      <div className="rounded-xl border border-brand-200 dark:border-[#322E25] overflow-hidden mb-3">
+      <div className="rounded-xl border border-brand-200 dark:border-[#33353A] overflow-hidden mb-3">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-semibold text-brand-400 bg-brand-50/60 dark:bg-white/5">
@@ -407,7 +407,7 @@ function POEditor({
           </thead>
           <tbody>
             {lines.map((l, i) => (
-              <tr key={i} className="border-t border-brand-100 dark:border-[#2A261E]">
+              <tr key={i} className="border-t border-brand-100 dark:border-[#2A2C33]">
                 <td className="px-3 py-2">
                   <div className="flex flex-col gap-1">
                     {products.length > 0 && (

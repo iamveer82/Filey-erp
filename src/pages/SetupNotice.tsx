@@ -2,7 +2,7 @@ import { CloudOff } from "lucide-react";
 
 export default function SetupNotice() {
   return (
-    <div className="min-h-full grid place-items-center bg-brand-50 dark:bg-[#17150F] p-6">
+    <div className="min-h-full grid place-items-center bg-brand-50 dark:bg-[#1A1B1E] p-6">
       <div className="w-full max-w-lg bento-card">
         <div className="flex items-center gap-3 mb-4">
           <div className="rounded-2xl bg-ink p-3 text-white">
