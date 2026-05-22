@@ -14,7 +14,7 @@
   *,
   ::before,
   ::after {
-    border-color: #e4dac6;
+    border-color: #dedbd2;
   }
   .dark *,
   .dark ::before,
@@ -41,10 +41,9 @@
     height: 100%;
   }
   body {
-    @apply bg-canvas bg-app-light text-ink font-sans antialiased
-           dark:bg-[#17150F] dark:bg-app-dark dark:text-[#ECE7DD];
+    @apply bg-canvas text-ink font-sans antialiased
+           dark:bg-[#17150F] dark:text-[#ECE7DD];
     margin: 0;
-    background-attachment: fixed;
   }
   /* Display face (Poppins) for headings & semantic titles; body stays
      Open Sans for dense data and long-form readability. */
@@ -106,19 +105,17 @@
            transition-[box-shadow,border-color,transform] duration-200
            dark:bg-[#201D16] dark:border-[#322E25];
   }
-  /* Bold evolution: hover lifts with a warm glow + a small translate. */
+  /* Minimal: hover is a quiet shadow + border shift, no movement. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-primary-300 hover:-translate-y-0.5
+    @apply hover:shadow-bento-hover hover:border-brand-300
            cursor-pointer dark:hover:border-primary-500/50;
   }
   .card-dark {
-    @apply relative rounded-2xl text-white shadow-bento ring-1 ring-inset ring-white/10 p-5
-           bg-gradient-to-br from-[#2A2620] via-ink to-[#141109];
+    @apply relative rounded-2xl bg-ink text-white shadow-bento ring-1 ring-inset ring-white/10 p-5;
   }
   .card-accent {
-    @apply relative overflow-hidden rounded-2xl shadow-glow-sm ring-1 ring-inset ring-white/30 p-5 text-ink
-           bg-cta;
+    @apply relative overflow-hidden rounded-2xl bg-primary-300 shadow-bento p-5 text-ink;
   }
   .stat-label {
     @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-brand-400;
@@ -132,15 +129,12 @@
   .btn-primary,
   .btn-cta {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
-           bg-cta bg-[length:100%_100%] px-4 text-sm font-semibold text-ink select-none
-           shadow-glow-sm ring-1 ring-inset ring-white/40
-           transition-[box-shadow,transform,filter] duration-200
-           hover:shadow-glow hover:-translate-y-0.5 hover:brightness-[1.03]
-           active:translate-y-0 active:brightness-100 outline-none
+           bg-primary-400 px-4 text-sm font-semibold text-ink select-none
+           transition-colors duration-200 hover:bg-primary-500
+           active:translate-y-px outline-none
            focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed
-           disabled:hover:shadow-glow-sm disabled:hover:translate-y-0 disabled:hover:brightness-100
-           cursor-pointer;
+           disabled:hover:bg-primary-400 cursor-pointer;
   }
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl

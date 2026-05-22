@@ -25,17 +25,19 @@ export default {
           500: "#F5A623",
           600: "#E0900F",
         },
-        // `brand-*` is the warm neutral utility ramp
+        // `brand-*` is the warm neutral utility ramp. Light end is calmed
+        // toward a near-neutral warm grey for quiet surfaces & hairlines;
+        // mid/dark tones stay warm for readable text.
         brand: {
-          50: "#F8F3E7",
-          100: "#F0E9D9",
-          200: "#E4DAC6",
-          300: "#CBBEAA",
-          400: "#A89F8C",
-          500: "#8C8475",
-          600: "#6B6457",
-          700: "#4A453B",
-          800: "#332F28",
+          50: "#F2F1EC",
+          100: "#E9E7E0",
+          200: "#DEDBD2",
+          300: "#C7C2B6",
+          400: "#A39B8C",
+          500: "#867F72",
+          600: "#655F54",
+          700: "#46423A",
+          800: "#312D27",
           900: "#222222",
         },
         // emerald-* kept as an alias so existing usages render success-green
@@ -51,10 +53,10 @@ export default {
         danger: "#E5484D",
         accentpurple: "#7C3AED",
         ink: "#222222",
-        surface: "#CBBEAA",
-        background: "#F3EBD6",
-        canvas: "#F3EBD6",
-        hairline: "#EAE4D6",
+        surface: "#E4E1D8",
+        background: "#F6F5F1",
+        canvas: "#F6F5F1",
+        hairline: "#E6E3DB",
         chartdark: "#1F1F1F",
       },
       fontFamily: {
@@ -79,14 +81,12 @@ export default {
         "3xl": "20px",
       },
       boxShadow: {
-        // Layered ambient elevation — soft, warm, multi-stop.
-        bento:
-          "0 1px 2px rgba(34,34,34,0.04), 0 2px 6px rgba(34,34,34,0.04), 0 10px 28px rgba(34,34,34,0.06)",
+        // Quiet, flat-leaning elevation — minimal Odoo/Tally feel.
+        bento: "0 1px 2px rgba(34,34,34,0.05)",
         "bento-hover":
-          "0 2px 4px rgba(34,34,34,0.06), 0 14px 36px rgba(34,34,34,0.12), 0 6px 16px rgba(255,182,61,0.12)",
-        glow: "0 10px 30px rgba(255,214,0,0.40)",
-        "glow-sm": "0 4px 14px rgba(255,214,0,0.30)",
-        // Inset top highlight that gives surfaces a lit, glassy edge.
+          "0 2px 4px rgba(34,34,34,0.06), 0 8px 20px rgba(34,34,34,0.07)",
+        glow: "0 6px 18px rgba(255,214,0,0.28)",
+        "glow-sm": "0 3px 10px rgba(255,214,0,0.20)",
         sheen: "inset 0 1px 0 0 rgba(255,255,255,0.6)",
         "sheen-dark": "inset 0 1px 0 0 rgba(255,255,255,0.05)",
       },
