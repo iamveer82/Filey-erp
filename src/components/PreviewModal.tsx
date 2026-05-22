@@ -112,7 +112,7 @@ export default function PreviewModal({
             "mx-auto mb-3 shadow rounded border border-brand-200 max-w-full";
           wrap.appendChild(canvas);
           const ctx = canvas.getContext("2d")!;
-          await page.render({ canvasContext: ctx, viewport }).promise;
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
         }
         if (doc.numPages > pages) {
           const more = document.createElement("p");

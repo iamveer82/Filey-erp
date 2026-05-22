@@ -140,7 +140,7 @@ export async function pdfToImages(
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     const blob: Blob = await new Promise((res) =>
       canvas.toBlob((b) => res(b!), "image/png")
     );
@@ -566,7 +566,7 @@ export async function flattenPdf(
     canvas.width = vp.width;
     canvas.height = vp.height;
     const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
     if (grayscale) {
       const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = id.data;
@@ -1255,7 +1255,7 @@ export async function pdfToImageFormat(
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     const blob: Blob | null = await new Promise((res) =>
       canvas.toBlob((b) => res(b), mime, format === "jpeg" ? 0.92 : undefined)
     );
@@ -1286,7 +1286,7 @@ async function rasterTransform(
     const ctx = canvas.getContext("2d")!;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const px = img.data;
     if (mode === "grey") {
@@ -1344,7 +1344,7 @@ export async function removeBlankPages(file: File): Promise<OutFile> {
     const ctx = canvas.getContext("2d")!;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     const px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     let inked = 0;
     for (let i = 0; i < px.length; i += 4) {

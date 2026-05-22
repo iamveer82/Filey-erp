@@ -12,10 +12,14 @@ export default defineConfig(async () => ({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ["react", "react-dom", "react-router-dom"],
-          charts: ["recharts"],
-          pdf: ["pdf-lib", "pdfjs-dist"],
+        // Vite 8 uses rolldown, which expects `manualChunks` as a function
+        // (the object form is rollup-only). Match on node_modules paths.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id))
+            return "react";
+          if (/[\\/]recharts[\\/]/.test(id)) return "charts";
+          if (/[\\/](pdf-lib|pdfjs-dist)[\\/]/.test(id)) return "pdf";
         },
       },
     },
