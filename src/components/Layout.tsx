@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { NavLink, Link, useNavigate } from "react-router-dom";
+import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
   Search,
@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   Monitor,
+  Plus,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
@@ -62,12 +63,39 @@ const TONE_DOT: Record<string, string> = {
   info: "bg-info",
 };
 
+/** Module id → its "create" deep-link. Pages auto-open the create form on
+ *  the `?new=1` query, so the top-bar New button works everywhere. */
+const NEW_ACTION: Record<string, string> = {
+  inventory: "/inventory?new=1",
+  crm: "/crm?new=1",
+  suppliers: "/suppliers?new=1",
+  orders: "/orders?new=1",
+  invoicing: "/invoicing?new=1",
+  quoting: "/quoting?new=1",
+  purchase: "/purchase?new=1",
+};
+
 export default function Layout({ children }: { children: ReactNode }) {
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const { profile, signOut } = useAuth();
-  const { enabledModules } = useModules();
+  const { modules, enabledModules } = useModules();
   const navModules = enabledModules();
   const name = profile?.name || "User";
+
+  // Current-page context for the top bar (Odoo-style orientation). Match the
+  // longest module path that prefixes the route; detail routes fall back to
+  // their parent module.
+  const pageMeta =
+    modules
+      .filter((m) => pathname === m.to || pathname.startsWith(m.to + "/"))
+      .sort((a, b) => b.to.length - a.to.length)[0] ??
+    (pathname.startsWith("/customers")
+      ? modules.find((m) => m.id === "crm")
+      : pathname.startsWith("/suppliers")
+      ? modules.find((m) => m.id === "suppliers")
+      : undefined);
+  const newTo = pageMeta ? NEW_ACTION[pageMeta.id] : undefined;
 
   // Keep the org's display currency in sync for dashboards/aggregates.
   const syncCurrency = () => {
@@ -330,6 +358,18 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* ───────────── Main ───────────── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <header className="h-14 shrink-0 flex items-center justify-between gap-4 mb-3">
+          {/* Current-page context — keeps users oriented (Odoo/Tally style) */}
+          {pageMeta && (
+            <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+                <pageMeta.icon size={18} />
+              </span>
+              <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
+                {pageMeta.label}
+              </span>
+            </div>
+          )}
+
           {/* Global search */}
           <div ref={searchRef} className="relative flex-1 max-w-md">
             <Search
@@ -433,6 +473,16 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Context-aware quick create (Odoo-style "New") */}
+            {newTo && (
+              <button
+                onClick={() => nav(newTo)}
+                className="btn-primary h-10 hidden sm:inline-flex"
+              >
+                <Plus size={16} /> New
+              </button>
+            )}
+
             {/* Notifications */}
             <div ref={notifRef} className="relative">
               <button
