@@ -11,6 +11,8 @@ import {
   MoreHorizontal,
   Download,
   Upload,
+  Users,
+  Lock,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -36,7 +38,7 @@ import {
 } from "../components/ui";
 
 export default function Inventory() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
@@ -212,6 +214,44 @@ export default function Inventory() {
         rows={filtered}
         loading={loading}
         empty="No products match your filters"
+        rowKey={(p) => p.id}
+        bulkActions={[
+          {
+            label: "Share",
+            icon: <Users size={13} />,
+            run: async (sel) => {
+              for (const p of sel) await shareRecord("products", p.id, true);
+              load();
+              toast.success(`Shared ${sel.length}.`);
+            },
+          },
+          {
+            label: "Make private",
+            icon: <Lock size={13} />,
+            run: async (sel) => {
+              for (const p of sel) await shareRecord("products", p.id, false);
+              load();
+              toast.success(`Set ${sel.length} private.`);
+            },
+          },
+          {
+            label: "Delete",
+            icon: <Trash2 size={13} />,
+            danger: true,
+            run: async (sel) => {
+              const ok = await confirm({
+                title: "Delete products",
+                message: `Delete ${sel.length} product(s)? This cannot be undone.`,
+                confirmLabel: "Delete",
+                danger: true,
+              });
+              if (!ok) return;
+              for (const p of sel) await erp.deleteProduct(p.id);
+              load();
+              toast.success(`Deleted ${sel.length}.`);
+            },
+          },
+        ]}
         columns={[
           {
             key: "sku",

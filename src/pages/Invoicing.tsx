@@ -114,7 +114,7 @@ const totals = (f: Form) =>
   invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
 
 export default function Invoicing() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -269,6 +269,41 @@ export default function Invoicing() {
       <DataTable<InvoiceDocSummary>
         rows={docs}
         empty="No invoices yet — create your first one"
+        rowKey={(d) => d.id}
+        bulkActions={[
+          {
+            label: "Share",
+            run: async (sel) => {
+              for (const d of sel) await billing.shareDoc(d.id, true);
+              loadDocs();
+              toast.success(`Shared ${sel.length}.`);
+            },
+          },
+          {
+            label: "Mark sent",
+            run: async (sel) => {
+              for (const d of sel) await billing.setStatus(d.id, "sent");
+              loadDocs();
+              toast.success(`Updated ${sel.length}.`);
+            },
+          },
+          {
+            label: "Delete",
+            danger: true,
+            run: async (sel) => {
+              const ok = await confirm({
+                title: "Delete invoices",
+                message: `Delete ${sel.length} invoice(s)?`,
+                confirmLabel: "Delete",
+                danger: true,
+              });
+              if (!ok) return;
+              for (const d of sel) await billing.deleteDoc(d.id);
+              loadDocs();
+              toast.success(`Deleted ${sel.length}.`);
+            },
+          },
+        ]}
         columns={[
           {
             key: "no",

@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import {
   X,
   ArrowUpRight,
@@ -272,25 +272,107 @@ export function statusTone(
   return "info";
 }
 
+export interface BulkAction<T> {
+  label: string;
+  icon?: ReactNode;
+  run: (selected: T[]) => Promise<void> | void;
+  danger?: boolean;
+}
+
 export function DataTable<T>({
   columns,
   rows,
   empty = "No records",
   loading = false,
+  rowKey,
+  bulkActions,
 }: {
   columns: { key: string; label: string; render: (row: T) => ReactNode }[];
   rows: T[];
   empty?: string;
   /** Show skeleton rows while the first load is in flight. */
   loading?: boolean;
+  /** Stable id per row — enables multi-select + bulk actions. */
+  rowKey?: (row: T) => string | number;
+  bulkActions?: BulkAction<T>[];
 }) {
   const showSkeleton = loading && rows.length === 0;
+  const selectable = !!rowKey && !!bulkActions?.length;
+  const [sel, setSel] = useState<Set<string | number>>(new Set());
+  const [running, setRunning] = useState(false);
+
+  const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
+  const allChecked =
+    selectable && rows.length > 0 && rows.every((r) => sel.has(keyOf(r)));
+  const toggleAll = () =>
+    setSel(allChecked ? new Set() : new Set(rows.map(keyOf)));
+  const toggle = (k: string | number) =>
+    setSel((s) => {
+      const n = new Set(s);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+  const selectedRows = rows.filter((r) => sel.has(keyOf(r)));
+
+  const runBulk = async (a: BulkAction<T>) => {
+    setRunning(true);
+    try {
+      await a.run(selectedRows);
+      setSel(new Set());
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const colCount = columns.length + (selectable ? 1 : 0);
   return (
     <div className="card overflow-hidden p-0">
+      {selectable && sel.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-primary-100 border-b border-primary-200">
+          <span className="text-sm font-semibold text-primary-700">
+            {sel.size} selected
+          </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {bulkActions!.map((a) => (
+              <button
+                key={a.label}
+                disabled={running}
+                onClick={() => runBulk(a)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
+                  a.danger
+                    ? "text-danger hover:bg-danger/10"
+                    : "text-brand-700 hover:bg-white"
+                )}
+              >
+                {a.icon}
+                {a.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setSel(new Set())}
+            className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr>
+              {selectable && (
+                <th className="th w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all"
+                    checked={allChecked}
+                    onChange={toggleAll}
+                    className="cursor-pointer"
+                  />
+                </th>
+              )}
               {columns.map((c) => (
                 <th key={c.key} className="th">
                   {c.label}
@@ -302,8 +384,8 @@ export function DataTable<T>({
             {showSkeleton ? (
               Array.from({ length: 5 }).map((_, r) => (
                 <tr key={`sk${r}`}>
-                  {columns.map((c) => (
-                    <td key={c.key} className="td">
+                  {Array.from({ length: colCount }).map((_, c) => (
+                    <td key={c} className="td">
                       <Skeleton className="h-4 w-[70%]" />
                     </td>
                   ))}
@@ -311,7 +393,7 @@ export function DataTable<T>({
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td className="td py-14" colSpan={columns.length}>
+                <td className="td py-14" colSpan={colCount}>
                   <div className="flex flex-col items-center gap-2 text-center">
                     <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 text-brand-300">
                       <Inbox size={20} />
@@ -323,15 +405,33 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              rows.map((row, i) => (
-                <tr key={i} className="row-hover">
-                  {columns.map((c) => (
-                    <td key={c.key} className="td">
-                      {c.render(row)}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              rows.map((row, i) => {
+                const k = selectable ? keyOf(row) : i;
+                const checked = selectable && sel.has(k);
+                return (
+                  <tr
+                    key={k}
+                    className={cn("row-hover", checked && "bg-primary-50/40")}
+                  >
+                    {selectable && (
+                      <td className="td w-10">
+                        <input
+                          type="checkbox"
+                          aria-label="Select row"
+                          checked={checked}
+                          onChange={() => toggle(k)}
+                          className="cursor-pointer"
+                        />
+                      </td>
+                    )}
+                    {columns.map((c) => (
+                      <td key={c.key} className="td">
+                        {c.render(row)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
