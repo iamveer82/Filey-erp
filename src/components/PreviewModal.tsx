@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Upload, Loader2, FileText } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -155,7 +156,7 @@ export default function PreviewModal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-sm flex justify-end"
       onClick={onClose}
@@ -269,6 +270,7 @@ export default function PreviewModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

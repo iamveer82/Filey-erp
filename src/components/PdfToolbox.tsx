@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Combine,
   Scissors,
@@ -689,7 +690,7 @@ export function ToolRunner({
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4"
       onClick={onClose}
@@ -1141,7 +1142,8 @@ export function ToolRunner({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
