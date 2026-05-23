@@ -291,7 +291,12 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3">
+    <div
+      className={cn(
+        "flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3",
+        dragging && "cursor-col-resize select-none"
+      )}
+    >
       {/* ───────────── Sidebar ───────────── */}
       <aside
         style={{
