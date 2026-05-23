@@ -36,6 +36,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, numInput } from "../lib/format";
+import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
@@ -1117,15 +1118,13 @@ function Editor({
                       </option>
                     ))}
                   </select>
-                  <label className="flex items-center justify-between text-xs font-semibold text-brand-600 border border-brand-200 rounded-xl px-3 py-2 cursor-pointer">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-600 border border-brand-200 rounded-xl px-3 py-2">
                     Accent color
-                    <input
-                      type="color"
+                    <ColorPicker
                       value={form.accent}
-                      onChange={(e) => set("accent", e.target.value)}
-                      className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
+                      onChange={(hex) => set("accent", hex)}
                     />
-                  </label>
+                  </div>
                 </div>
               </div>
               <div className="rounded-xl border border-brand-200 p-4">
