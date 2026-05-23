@@ -701,7 +701,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-52">
                 <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => nav("/tools")}>
+                <DropdownMenuItem onSelect={() => nav("/settings?section=account")}>
                   <UserRound size={14} /> Account
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => nav("/settings")}>

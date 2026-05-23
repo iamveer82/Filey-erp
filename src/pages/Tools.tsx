@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Building2,
   UserCircle,
@@ -103,7 +104,11 @@ const BUSINESS_TYPES = [
 ];
 
 export default function Settings() {
-  const [section, setSection] = useState<Section>("company");
+  const [params] = useSearchParams();
+  const requested = (params.get("section") ?? "") as Section;
+  const [section, setSection] = useState<Section>(
+    NAV.some((n) => n.id === requested) ? requested : "company"
+  );
   const [pwOpen, setPwOpen] = useState(false);
 
   return (
