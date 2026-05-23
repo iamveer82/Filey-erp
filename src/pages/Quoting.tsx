@@ -650,11 +650,11 @@ export default function Quoting() {
                     <th className="py-2 w-6">#</th>
                     <th className="py-2 px-2">Product</th>
                     <th className="py-2 px-2 w-24">SKU</th>
-                    <th className="py-2 px-2 w-16 text-right">Qty</th>
-                    <th className="py-2 px-2 w-24 text-right">Rate</th>
-                    <th className="py-2 px-2 w-16 text-right">Disc%</th>
+                    <th className="py-2 px-2 w-24 text-right">Qty</th>
+                    <th className="py-2 px-2 w-28 text-right">Rate</th>
+                    <th className="py-2 px-2 w-20 text-right">Disc%</th>
                     {vat && (
-                      <th className="py-2 px-2 w-16 text-right">Tax%</th>
+                      <th className="py-2 px-2 w-20 text-right">Tax%</th>
                     )}
                     <th className="py-2 px-2 w-24 text-right">Total</th>
                     <th className="w-8" />
@@ -686,8 +686,9 @@ export default function Quoting() {
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right"
-                          value={l.qty}
+                          className="input text-right !px-2"
+                          value={l.qty || ""}
+                          placeholder="0"
                           onChange={(e) =>
                             setLine(i, { qty: numInput(e.target.value) })
                           }
@@ -696,7 +697,7 @@ export default function Quoting() {
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right"
+                          className="input text-right !px-2"
                           placeholder="0"
                           value={l.rate || ""}
                           onChange={(e) =>
@@ -707,7 +708,7 @@ export default function Quoting() {
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right"
+                          className="input text-right !px-2"
                           placeholder="0"
                           value={l.discount || ""}
                           onChange={(e) =>
@@ -719,7 +720,7 @@ export default function Quoting() {
                         <td className="py-2 px-2">
                           <input
                             type="number"
-                            className="input text-right"
+                            className="input text-right !px-2"
                             placeholder="0"
                             value={l.tax || ""}
                             onChange={(e) =>

@@ -966,8 +966,8 @@ function Editor({
                   <tr className="text-left text-xs font-semibold text-brand-400">
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Description</th>
-                    <th className="py-2 px-2 w-16 text-right">Qty</th>
-                    <th className="py-2 px-2 w-28 text-right">Unit</th>
+                    <th className="py-2 px-2 w-24 text-right">Qty</th>
+                    <th className="py-2 px-2 w-32 text-right">Unit</th>
                     {(form.tax_rate || 0) > 0 && (
                       <th className="py-2 px-2 w-16 text-right">Tax</th>
                     )}
@@ -992,8 +992,9 @@ function Editor({
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right"
-                          value={it.qty}
+                          className="input text-right !px-2"
+                          value={it.qty || ""}
+                          placeholder="0"
                           onChange={(e) =>
                             setItem(i, { qty: numInput(e.target.value) })
                           }
@@ -1002,7 +1003,7 @@ function Editor({
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right"
+                          className="input text-right !px-2"
                           placeholder="0"
                           value={it.unit_price || ""}
                           onChange={(e) =>
