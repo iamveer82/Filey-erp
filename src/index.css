@@ -168,13 +168,15 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-xl border border-brand-200 bg-white px-3.5 text-sm
-           text-ink placeholder:text-brand-400 transition-colors duration-200
-           hover:border-brand-300 focus:outline-none focus:ring-2
-           focus:ring-primary-300 focus:border-primary-400
+    @apply w-full rounded-lg border border-brand-200 bg-white px-3.5 text-sm
+           text-ink placeholder:text-brand-400 shadow-sm shadow-black/5
+           transition-[box-shadow,border-color] duration-200
+           hover:border-brand-300
+           focus:outline-none focus:border-ink focus:ring-[3px] focus:ring-ink/10
            disabled:bg-brand-50 disabled:text-brand-400
-           disabled:cursor-not-allowed
+           disabled:cursor-not-allowed disabled:opacity-60
            dark:bg-[#1A1B1E] dark:border-[#33353A] dark:text-[#F0F0F0]
+           dark:shadow-black/20 dark:focus:border-[#F0F0F0] dark:focus:ring-white/10
            dark:disabled:bg-[#222327];
   }
   .input,
