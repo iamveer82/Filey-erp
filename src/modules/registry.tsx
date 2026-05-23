@@ -11,6 +11,7 @@ import {
   FileSignature,
   Target,
   Users,
+  UserRound,
   ShoppingCart,
   BarChart3,
   Contact,
@@ -28,6 +29,7 @@ const Orders = lazy(() => import("../pages/Orders"));
 const Invoicing = lazy(() => import("../pages/Invoicing"));
 const Quoting = lazy(() => import("../pages/Quoting"));
 const Crm = lazy(() => import("../pages/Crm"));
+const Customers = lazy(() => import("../pages/Customers"));
 const Suppliers = lazy(() => import("../pages/Suppliers"));
 const Purchase = lazy(() => import("../pages/Purchase"));
 const PurchaseOrders = lazy(() => import("../pages/PurchaseOrders"));
@@ -104,6 +106,15 @@ export const MODULES: AppModule[] = [
     icon: Target,
     to: "/crm",
     Component: Crm,
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    short: "Customers",
+    desc: "Customer directory — names, TRN & addresses for invoicing",
+    icon: UserRound,
+    to: "/customers",
+    Component: Customers,
   },
   {
     id: "suppliers",

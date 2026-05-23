@@ -195,9 +195,11 @@ export default function Quoting() {
       : "#E0AE00";
 
   const saveDraft = async () => {
-    const trn = customer?.segment?.startsWith("TRN:")
-      ? customer.segment.slice(4).trim()
-      : undefined;
+    const trn =
+      customer?.trn ??
+      (customer?.segment?.startsWith("TRN:")
+        ? customer.segment.slice(4).trim()
+        : undefined);
     const input: QuotationInput = {
       id: docId,
       number,

@@ -74,6 +74,7 @@ const TONE_DOT: Record<string, string> = {
 const NEW_ACTION: Record<string, string> = {
   inventory: "/inventory?new=1",
   crm: "/crm?new=1",
+  customers: "/customers?new=1",
   suppliers: "/suppliers?new=1",
   orders: "/orders?new=1",
   invoicing: "/invoicing?new=1",

@@ -649,9 +649,12 @@ function Editor({
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
-      customer_trn: c.segment?.startsWith("TRN:")
-        ? c.segment.slice(4).trim()
-        : form.customer_trn,
+      // Prefer the dedicated TRN field; fall back to the legacy segment hack.
+      customer_trn:
+        c.trn ??
+        (c.segment?.startsWith("TRN:")
+          ? c.segment.slice(4).trim()
+          : form.customer_trn),
     });
 
   const [viewAll, setViewAll] = useState(false);

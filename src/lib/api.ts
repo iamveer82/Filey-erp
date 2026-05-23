@@ -151,6 +151,7 @@ export interface CrmCustomer {
   email?: string;
   phone?: string;
   address?: string;
+  trn?: string;
   segment?: string;
   shared?: boolean;
   created_at: string;
@@ -1110,6 +1111,15 @@ export const crm = {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "crm_customers", row }, () =>
       sInsert("crm_customers", row), -1
+    );
+  },
+  updateCustomer: (
+    id: number,
+    patch: Partial<Omit<CrmCustomer, "id" | "created_at">>
+  ) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write({ k: "update", t: "crm_customers", id, row }, () =>
+      sUpdate("crm_customers", id, row), undefined
     );
   },
   deleteCustomer: (customerId: number) =>
