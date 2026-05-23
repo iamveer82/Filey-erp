@@ -30,6 +30,7 @@ import {
 } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
 import CustomerNotes from "../components/CustomerNotes";
+import FollowUps from "../components/FollowUps";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -123,8 +124,8 @@ export default function CustomerDetail() {
   if (!loading && !customer) {
     return (
       <div className="animate-fade-up">
-        <Link to="/crm" className="btn-ghost h-9 inline-flex mb-6">
-          <ArrowLeft size={15} /> Back to CRM
+        <Link to="/customers" className="btn-ghost h-9 inline-flex mb-6">
+          <ArrowLeft size={15} /> Back to Customers
         </Link>
         <div className="card text-center py-16">
           <p className="text-lg font-bold text-ink">Customer not found</p>
@@ -138,8 +139,8 @@ export default function CustomerDetail() {
 
   return (
     <div className="animate-fade-up">
-      <Link to="/crm" className="btn-ghost h-9 inline-flex mb-4">
-        <ArrowLeft size={15} /> Back to CRM
+      <Link to="/customers" className="btn-ghost h-9 inline-flex mb-4">
+        <ArrowLeft size={15} /> Back to Customers
       </Link>
       <PageHeader
         title={display || "Customer"}
@@ -198,6 +199,12 @@ export default function CustomerDetail() {
           />
         </div>
       </div>
+
+      {id && (
+        <div className="mb-5">
+          <FollowUps customerId={Number(id)} customerName={display} />
+        </div>
+      )}
 
       {id && <CustomerNotes customerId={id} />}
 

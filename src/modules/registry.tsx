@@ -12,6 +12,7 @@ import {
   Target,
   Users,
   UserRound,
+  AlarmClock,
   ShoppingCart,
   BarChart3,
   Contact,
@@ -30,6 +31,7 @@ const Invoicing = lazy(() => import("../pages/Invoicing"));
 const Quoting = lazy(() => import("../pages/Quoting"));
 const Crm = lazy(() => import("../pages/Crm"));
 const Customers = lazy(() => import("../pages/Customers"));
+const FollowUpsPage = lazy(() => import("../pages/FollowUps"));
 const Suppliers = lazy(() => import("../pages/Suppliers"));
 const Purchase = lazy(() => import("../pages/Purchase"));
 const PurchaseOrders = lazy(() => import("../pages/PurchaseOrders"));
@@ -115,6 +117,15 @@ export const MODULES: AppModule[] = [
     icon: UserRound,
     to: "/customers",
     Component: Customers,
+  },
+  {
+    id: "follow-ups",
+    label: "Follow-ups",
+    short: "Follow-ups",
+    desc: "Reminders & to-dos, surfaced when they're due",
+    icon: AlarmClock,
+    to: "/follow-ups",
+    Component: FollowUpsPage,
   },
   {
     id: "suppliers",

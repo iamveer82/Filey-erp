@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Users, Plus, Trash2, Pencil, Mail, Search, BadgeCheck } from "lucide-react";
+import {
+  Users,
+  Plus,
+  Trash2,
+  Pencil,
+  Mail,
+  Search,
+  BadgeCheck,
+  ArrowRight,
+  AlarmClock,
+} from "lucide-react";
 import { crm, type CrmCustomer } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -66,15 +76,20 @@ export default function Customers() {
         title="Customers"
         subtitle="Your customer directory — names, TRN and addresses pulled onto invoices & quotations"
         action={
-          <button
-            className="btn-primary"
-            onClick={() => {
-              setEdit(null);
-              setOpen(true);
-            }}
-          >
-            <Plus size={16} /> New customer
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-ghost" onClick={() => nav("/follow-ups")}>
+              <AlarmClock size={15} /> Follow-ups
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setEdit(null);
+                setOpen(true);
+              }}
+            >
+              <Plus size={16} /> New customer
+            </button>
+          </div>
         }
       />
 
@@ -147,7 +162,7 @@ export default function Customers() {
             key: "act",
             label: "",
             render: (c) => (
-              <div className="flex gap-1">
+              <div className="flex items-center justify-end gap-1">
                 <button
                   aria-label="Edit"
                   className="rounded-lg p-1.5 text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
@@ -175,6 +190,12 @@ export default function Customers() {
                   }}
                 >
                   <Trash2 size={14} />
+                </button>
+                <button
+                  onClick={() => nav(`/customers/${c.id}`)}
+                  className="ml-1 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary-700 hover:bg-primary-100 dark:text-primary-300 dark:hover:bg-primary-400/15 cursor-pointer"
+                >
+                  View <ArrowRight size={14} />
                 </button>
               </div>
             ),

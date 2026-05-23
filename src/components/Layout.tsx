@@ -27,7 +27,12 @@ import { cn, setDisplayCurrency } from "../lib/format";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
-import { billing, notifs as notifsApi, type Notification } from "../lib/api";
+import {
+  billing,
+  followups,
+  notifs as notifsApi,
+  type Notification,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 import { useUI } from "../lib/ui";
@@ -250,6 +255,29 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
   useEffect(loadInbox, []);
   useLiveSync(loadInbox);
+
+  // Surface due / overdue follow-ups as in-app reminders, once per day.
+  useEffect(() => {
+    const key = "reminders.lastShown";
+    const today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(key) === today) return;
+    followups
+      .due()
+      .then((due) => {
+        if (!due.length) return;
+        localStorage.setItem(key, today);
+        due.slice(0, 3).forEach((f) =>
+          toast.notify({
+            title: "Follow-up due",
+            message: `${f.title}${f.customer_name ? ` — ${f.customer_name}` : ""}`,
+            to: "/follow-ups",
+          })
+        );
+        if (due.length > 3) toast.info(`+${due.length - 3} more follow-ups due.`);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const unread = inbox.filter((n) => !n.read).length;
   const badge = unread + alerts.length;
 

@@ -1220,6 +1220,68 @@ export const crm = {
     ),
 };
 
+// ===== Follow-ups / reminders =====
+export interface FollowUp {
+  id: number;
+  customer_id?: number | null;
+  customer_name?: string;
+  title: string;
+  due_date: string; // YYYY-MM-DD
+  done: boolean;
+  created_at: string;
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+export const followups = {
+  list: (customerId?: number) =>
+    readCached<FollowUp[]>(
+      customerId != null ? `follow_ups:${customerId}` : "follow_ups",
+      async () => {
+        let q = sb().from("follow_ups").select("*");
+        if (customerId != null) q = q.eq("customer_id", customerId);
+        const { data, error } = await q
+          .order("done", { ascending: true })
+          .order("due_date", { ascending: true });
+        if (error) throw error;
+        return (data ?? []) as FollowUp[];
+      },
+      []
+    ),
+  /** Open (not done) items due today or overdue — used for reminders. */
+  due: async (): Promise<FollowUp[]> => {
+    if (!isConfigured) return [];
+    const { data } = await sb()
+      .from("follow_ups")
+      .select("*")
+      .eq("done", false)
+      .lte("due_date", todayISO())
+      .order("due_date", { ascending: true });
+    return (data ?? []) as FollowUp[];
+  },
+  create: (input: {
+    title: string;
+    due_date: string;
+    customer_id?: number | null;
+    customer_name?: string;
+  }) => {
+    const row = clean(input as Record<string, unknown>);
+    return write({ k: "insert", t: "follow_ups", row }, () =>
+      sInsert("follow_ups", row), -1
+    );
+  },
+  update: (id: number, patch: Partial<FollowUp>) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write({ k: "update", t: "follow_ups", id, row }, () =>
+      sUpdate("follow_ups", id, row), undefined
+    );
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "follow_ups", id }, () =>
+      sDelete("follow_ups", id), undefined
+    ),
+};
+
 // ===== Billing / Invoicing =====
 function docTotal(
   d: { tax_rate: number; discount: number },
