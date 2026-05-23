@@ -10,10 +10,12 @@ import {
   BadgeCheck,
   ArrowRight,
   AlarmClock,
+  Download,
 } from "lucide-react";
 import { crm, type CrmCustomer } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { downloadCsv } from "../lib/csv";
 import { num, cn } from "../lib/format";
 import {
   PageHeader,
@@ -77,6 +79,25 @@ export default function Customers() {
         subtitle="Your customer directory — names, TRN and addresses pulled onto invoices & quotations"
         action={
           <div className="flex gap-2">
+            <button
+              className="btn-ghost"
+              onClick={() =>
+                downloadCsv(
+                  "filey-customers",
+                  rows as unknown as Record<string, unknown>[],
+                  [
+                    { key: "name", label: "Contact" },
+                    { key: "company", label: "Company" },
+                    { key: "trn", label: "TRN" },
+                    { key: "email", label: "Email" },
+                    { key: "phone", label: "Phone" },
+                    { key: "address", label: "Address" },
+                  ]
+                )
+              }
+            >
+              <Download size={15} /> Export
+            </button>
             <button className="btn-ghost" onClick={() => nav("/follow-ups")}>
               <AlarmClock size={15} /> Follow-ups
             </button>
