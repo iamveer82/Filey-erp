@@ -1,0 +1,16 @@
+{
+  "name": "filey-worker",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Filey heavy-tool worker — processes server tool_jobs (OCR, Office<->PDF, PDF/A, compress) via LibreOffice / OCRmyPDF / Ghostscript.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.1"
+  }
+}

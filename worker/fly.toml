@@ -1,0 +1,12 @@
+# Fly.io config for the Filey worker (no HTTP service — it polls Supabase).
+# `fly launch --no-deploy` will adopt/adjust this; set secrets, then deploy.
+app = "filey-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# LibreOffice + OCRmyPDF are memory-hungry; give it room.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
