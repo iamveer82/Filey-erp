@@ -10,7 +10,6 @@ import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
   Search,
-  ChevronDown,
   LogOut,
   X,
   UserRound,
@@ -671,20 +670,21 @@ export default function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Account menu"
-                  className="flex items-center gap-2.5 h-10 rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] pl-1.5 pr-3 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                  className="flex items-center gap-3 h-12 rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] pl-3.5 pr-1.5 hover:border-brand-300 hover:shadow-bento dark:hover:border-[#454852] transition-all duration-200 cursor-pointer"
                 >
-                  <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
-                    {initials}
-                  </span>
                   <span className="hidden md:block leading-tight text-left">
-                    <span className="block text-xs font-bold text-ink">
+                    <span className="block text-sm font-semibold text-ink tracking-tight">
                       {name}
                     </span>
-                    <span className="block text-[11px] text-brand-400">
-                      {profile?.company ?? "Admin"}
+                    <span className="block max-w-[150px] truncate text-[11px] text-brand-400 tracking-tight">
+                      {profile?.email ?? profile?.company ?? "Admin"}
                     </span>
                   </span>
-                  <ChevronDown size={15} className="text-brand-400" />
+                  <span className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-violet-500 via-pink-500 to-amber-400 p-0.5">
+                    <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#222327] text-ink text-xs font-bold">
+                      {initials}
+                    </span>
+                  </span>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-52">
