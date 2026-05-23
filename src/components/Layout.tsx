@@ -7,11 +7,12 @@ import {
   type KeyboardEvent as RKeyboardEvent,
 } from "react";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Bell,
   Search,
+  Send,
   LogOut,
-  X,
   UserRound,
   Settings,
   GripVertical,
@@ -262,6 +263,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       if (e.key === "Escape") {
         setSearchOpen(false);
         setNotifOpen(false);
+        setQ("");
         inputRef.current?.blur();
       }
     };
@@ -452,15 +454,11 @@ export default function Layout({ children }: { children: ReactNode }) {
 
           {/* Global search */}
           <div ref={searchRef} className="relative flex-1 max-w-md">
-            <Search
-              size={16}
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400 z-10"
-            />
             <input
               ref={inputRef}
               aria-label="Search"
               placeholder="Search products, orders, invoices, customers…"
-              className="input pl-10 pr-14"
+              className="input pl-3.5 pr-10"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
@@ -468,88 +466,102 @@ export default function Layout({ children }: { children: ReactNode }) {
               }}
               onFocus={() => setSearchOpen(true)}
             />
-            {!q && (
-              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-brand-200 dark:border-[#33353A] bg-brand-50 dark:bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-brand-400">
-                ⌘K
-              </kbd>
-            )}
-            {q && (
-              <button
-                aria-label="Clear search"
-                onClick={() => {
-                  setQ("");
-                  inputRef.current?.focus();
-                }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-brand-400 hover:text-ink hover:bg-brand-50 transition-colors"
-              >
-                <X size={14} />
-              </button>
-            )}
+            {/* Morphing search/send indicator */}
+            <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-400">
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.span
+                  key={q ? "send" : "search"}
+                  initial={{ y: -16, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 16, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="absolute inset-0"
+                >
+                  {q ? <Send size={16} /> : <Search size={16} />}
+                </motion.span>
+              </AnimatePresence>
+            </div>
 
-            {searchOpen && (
-              <div className="absolute left-0 right-0 top-12 z-30 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] shadow-bento-hover p-2">
-                {/* Quick actions (command palette) */}
-                {cmdHits.length > 0 && (
-                  <div className="mb-1">
-                    <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-                      Actions
-                    </p>
-                    {cmdHits.map((c) => (
-                      <button
-                        key={c.to}
-                        onClick={() => go(c.to)}
-                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                      >
-                        <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-primary-700">
-                          <Command size={13} />
-                        </span>
-                        <span className="text-sm font-semibold text-ink">
-                          {c.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {q.trim() && hits.length === 0 && cmdHits.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-sm text-brand-400">
-                    No matches for “{q.trim()}”
-                  </p>
-                ) : (
-                  GROUP_ORDER.map((g) => {
-                    const items = hits.filter((h) => h.group === g);
-                    if (items.length === 0) return null;
-                    return (
-                      <div key={g} className="mb-1 last:mb-0">
+            <AnimatePresence>
+              {searchOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: "auto" }}
+                  exit={{ opacity: 0, y: -6, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] shadow-bento-hover"
+                >
+                  <div className="max-h-[52vh] overflow-y-auto p-2">
+                    {/* Quick actions (command palette) */}
+                    {cmdHits.length > 0 && (
+                      <div className="mb-1">
                         <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-                          {g}
+                          Actions
                         </p>
-                        {items.map((h, i) => (
+                        {cmdHits.map((c) => (
                           <button
-                            key={g + i}
-                            onClick={() => go(h.to)}
-                            className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                            key={c.to}
+                            onClick={() => go(c.to)}
+                            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                           >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold text-ink">
-                                {h.label}
-                              </span>
-                              {h.sub && (
-                                <span className="block truncate text-xs text-brand-400">
-                                  {h.sub}
-                                </span>
-                              )}
+                            <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-primary-700">
+                              <Command size={13} />
                             </span>
-                            <span className="shrink-0 text-[10px] font-semibold text-brand-300">
-                              {g}
+                            <span className="text-sm font-semibold text-ink">
+                              {c.label}
                             </span>
                           </button>
                         ))}
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
+                    )}
+                    {q.trim() && hits.length === 0 && cmdHits.length === 0 ? (
+                      <p className="px-3 py-6 text-center text-sm text-brand-400">
+                        No matches for “{q.trim()}”
+                      </p>
+                    ) : (
+                      GROUP_ORDER.map((g) => {
+                        const items = hits.filter((h) => h.group === g);
+                        if (items.length === 0) return null;
+                        return (
+                          <div key={g} className="mb-1 last:mb-0">
+                            <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                              {g}
+                            </p>
+                            {items.map((h, i) => (
+                              <button
+                                key={g + i}
+                                onClick={() => go(h.to)}
+                                className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-ink">
+                                    {h.label}
+                                  </span>
+                                  {h.sub && (
+                                    <span className="block truncate text-xs text-brand-400">
+                                      {h.sub}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="shrink-0 text-[10px] font-semibold text-brand-300">
+                                  {g}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between border-t border-brand-100 dark:border-[#2A2C33] px-3 py-2 text-[11px] text-brand-400">
+                    <span>
+                      Press <b className="font-semibold">⌘K</b> to focus
+                    </span>
+                    <span>ESC to clear</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="flex items-center gap-3">
