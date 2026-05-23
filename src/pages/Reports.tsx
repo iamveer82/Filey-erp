@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { TrendingUp, Wallet, Boxes } from "lucide-react";
+import { TrendingUp, Wallet, Boxes, Download, Printer } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -26,6 +26,7 @@ import {
   Payroll,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { downloadCsv } from "../lib/csv";
 import { aed, num } from "../lib/format";
 import {
   PageHeader,
@@ -149,11 +150,48 @@ export default function Reports() {
     { name: "AR", value: accountsReceivable },
   ];
 
+  const exportCsv = () => {
+    const rows = [
+      { metric: "Paid revenue", amount: invoiceRevenue },
+      { metric: "Accounts receivable", amount: accountsReceivable },
+      { metric: "Total expenses", amount: totalExpenses },
+      { metric: "Payroll cost", amount: payrollCost },
+      { metric: "Gross profit", amount: grossProfit },
+      { metric: "Inventory value", amount: invValue },
+      { metric: "Total assets", amount: report?.total_assets ?? 0 },
+      { metric: "Total liabilities", amount: report?.total_liabilities ?? 0 },
+      { metric: "Total equity", amount: report?.total_equity ?? 0 },
+      ...trend.map((t) => ({ metric: `Revenue (${t.name})`, amount: t.value })),
+      ...catValue.map((c) => ({
+        metric: `Stock value — ${c.name}`,
+        amount: c.value,
+      })),
+    ];
+    downloadCsv(
+      `filey-report-${new Date().toISOString().slice(0, 10)}`,
+      rows,
+      [
+        { key: "metric", label: "Metric" },
+        { key: "amount", label: "Amount" },
+      ]
+    );
+  };
+
   return (
     <div className="animate-fade-up">
       <PageHeader
         title="Reports"
         subtitle="Inventory & financial reporting"
+        action={
+          <div className="flex gap-2 no-print">
+            <button className="btn-ghost" onClick={() => window.print()}>
+              <Printer size={15} /> Print / PDF
+            </button>
+            <button className="btn-primary" onClick={exportCsv}>
+              <Download size={15} /> Export CSV
+            </button>
+          </div>
+        }
       />
 
       {error && (
