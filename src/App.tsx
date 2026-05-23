@@ -1,10 +1,11 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useState } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { UIProvider } from "./lib/ui";
 import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 
@@ -58,9 +59,15 @@ function AppRoutes() {
 
 function Gate() {
   const { loading, configured, user, needsProfile } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
-  if (!user) return <Login />;
+  if (!user)
+    return showLogin ? (
+      <Login />
+    ) : (
+      <Landing onGetStarted={() => setShowLogin(true)} />
+    );
   if (needsProfile) return <ProfileSetup />;
 
   return (
