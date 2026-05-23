@@ -2,6 +2,7 @@ import { Suspense, lazy, useState } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { UIProvider } from "./lib/ui";
+import { LanguageProvider } from "./lib/i18n";
 import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
@@ -83,10 +84,12 @@ function Gate() {
 
 export default function App() {
   return (
-    <UIProvider>
-      <AuthProvider>
-        <Gate />
-      </AuthProvider>
-    </UIProvider>
+    <LanguageProvider>
+      <UIProvider>
+        <AuthProvider>
+          <Gate />
+        </AuthProvider>
+      </UIProvider>
+    </LanguageProvider>
   );
 }

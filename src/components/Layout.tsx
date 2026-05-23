@@ -21,12 +21,14 @@ import {
   Moon,
   Monitor,
   Plus,
+  ChevronDown,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
+import { useLang, LANGS, type Lang } from "../lib/i18n";
 import {
   billing,
   followups,
@@ -94,6 +96,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { modules, enabledModules } = useModules();
   const navModules = enabledModules();
   const name = profile?.name || "User";
+  const { lang, setLang } = useLang();
 
   // Current-page context for the top bar (Odoo-style orientation). Match the
   // longest module path that prefixes the route; detail routes fall back to
@@ -603,6 +606,43 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <Plus size={16} /> New
               </button>
             )}
+
+            {/* Light / dark theme toggle (left of notifications) */}
+            <button
+              onClick={cycleTheme}
+              aria-label={`Theme: ${themeLabel} (click to change)`}
+              title={`Theme: ${themeLabel}`}
+              className="grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] text-brand-500 dark:text-[#A0A0A0] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+            >
+              <ThemeIcon size={18} />
+            </button>
+
+            {/* Language switcher */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Change language"
+                  className="flex h-10 items-center gap-1.5 rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] px-2.5 text-brand-600 dark:text-[#C8C8C8] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <span className={`fi fi-${LANGS[lang].flag} rounded-sm`} />
+                  <span className="hidden text-xs font-semibold sm:block">
+                    {LANGS[lang].short}
+                  </span>
+                  <ChevronDown size={14} className="text-brand-400" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                {(Object.keys(LANGS) as Lang[]).map((code) => (
+                  <DropdownMenuItem key={code} onSelect={() => setLang(code)}>
+                    <span className={`fi fi-${LANGS[code].flag} rounded-sm`} />
+                    <span className="flex-1">{LANGS[code].name}</span>
+                    <span className="text-xs text-brand-400">
+                      {LANGS[code].native}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Notifications */}
             <div ref={notifRef} className="relative">
