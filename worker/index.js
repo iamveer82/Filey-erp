@@ -140,6 +140,14 @@ async function processJob(job) {
     const handler = handlers[job.tool];
     if (!handler) throw new Error(`Unsupported worker tool: ${job.tool}`);
 
+    // Security: this worker uses the service-role key (bypasses storage
+    // RLS), so it MUST only ever read the job owner's own input. The
+    // input_path is a client-set field — reject anything not under the
+    // owner's folder, or a user could read another user's files.
+    if (!job.input_path || !String(job.input_path).startsWith(`${job.user_id}/`)) {
+      throw new Error("input_path does not belong to the job owner.");
+    }
+
     const dl = await sb.storage.from(INPUT_BUCKET).download(job.input_path);
     if (dl.error || !dl.data) throw new Error("Input file not found.");
 

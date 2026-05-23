@@ -59,6 +59,13 @@ serve(async (req) => {
       .single();
     if (jErr || !job) return json({ error: "Job not found" }, 404);
 
+    // Defense in depth: the input must live under the caller's own folder.
+    // (Storage RLS already enforces this for the caller's token, but reject
+    // explicitly so a tampered input_path can never be processed.)
+    if (!String(job.input_path).startsWith(`${user.id}/`)) {
+      return json({ error: "Forbidden: input path mismatch" }, 403);
+    }
+
     await client
       .from("tool_jobs")
       .update({ status: "processing", updated_at: new Date().toISOString() })

@@ -35,7 +35,13 @@ drop policy if exists tool_jobs_own on public.tool_jobs;
 create policy tool_jobs_own on public.tool_jobs for all
   to authenticated
   using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  -- input_path must live under the caller's own storage folder, so a
+  -- tampered path can't make the (service-role) worker read another
+  -- user's files.
+  with check (
+    user_id = auth.uid()
+    and input_path like (auth.uid()::text || '/%')
+  );
 
 create index if not exists idx_tool_jobs_user_created
   on public.tool_jobs (user_id, created_at desc);

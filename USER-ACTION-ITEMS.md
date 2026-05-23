@@ -19,6 +19,11 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 
 - [x] DB migrations applied (2026-05-23): `crm_customers.trn`, `follow_ups`,
       `tool_jobs` table + `tool-inputs` bucket.
+- [x] Security pass (2026-05-23): `npm audit` clean (0 vulns); confirmed RLS
+      on every table; fixed a worker IDOR (input_path could point at another
+      user's file) with app guards + a DB `WITH CHECK` (applied to your DB).
+      No secrets in the repo. NOTE: the worker/edge guards take effect when
+      you (re)deploy them — code already updated.
 
 ## Coming (will be added as features land)
 
