@@ -45,7 +45,10 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - run: npm ci
+      # npm install (not ci): lockfile is Windows-generated and lacks the
+      # linux-only optional native deps, so `npm ci` fails on the linux
+      # runner. install reconciles per-platform.
+      - run: npm install --no-audit --no-fund
 
       - name: Typecheck & unit tests
         run: |
