@@ -1457,14 +1457,32 @@ export const billing = {
     const row = clean(input as unknown as Record<string, unknown>);
     // One profile per org. Update the existing row if present, else insert
     // (org_id/user_id fill from defaults). RLS permits writes for org
-    // admins only, so an invited member's save is rejected by the server.
+    // owners/admins only — so verify the write actually touched a row and
+    // surface a clear reason instead of silently "succeeding".
     const { data, error: selErr } = await sb()
       .from("company_profile")
       .select("id")
       .maybeSingle();
     if (selErr) throw selErr;
-    if (data) await sUpdate("company_profile", (data as any).id, row);
-    else await sInsert("company_profile", row);
+    if (data) {
+      const { data: updated, error } = await sb()
+        .from("company_profile")
+        .update(row)
+        .eq("id", (data as any).id)
+        .select("id");
+      if (error) throw error;
+      if (!updated || updated.length === 0)
+        throw new Error(
+          "You don't have permission to edit company details — only an organization owner or admin can. (Switch to your own workspace, or ask an admin.)"
+        );
+    } else {
+      const { error } = await sb()
+        .from("company_profile")
+        .insert(row)
+        .select("id")
+        .single();
+      if (error) throw error;
+    }
     await cacheSet(`${activeCacheOrg}:company_profile`, input);
   },
 };
