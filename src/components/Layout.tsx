@@ -1,4 +1,11 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import {
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as RPointerEvent,
+  type KeyboardEvent as RKeyboardEvent,
+} from "react";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
@@ -8,8 +15,7 @@ import {
   X,
   UserRound,
   Settings,
-  PanelLeftClose,
-  PanelLeftOpen,
+  GripVertical,
   Command,
   Sun,
   Moon,
@@ -113,15 +119,63 @@ export default function Layout({ children }: { children: ReactNode }) {
     .join("")
     .toUpperCase();
 
+  const SIDEBAR_MIN = 200;
+  const SIDEBAR_MAX = 380;
+  const SIDEBAR_RAIL = 76;
+  const COLLAPSE_AT = 150;
+
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("sidebar.collapsed") === "1"
   );
-  const toggleCollapsed = () =>
-    setCollapsed((c) => {
-      const next = !c;
-      localStorage.setItem("sidebar.collapsed", next ? "1" : "0");
-      return next;
-    });
+  const [width, setWidth] = useState(() => {
+    const w = parseInt(localStorage.getItem("sidebar.width") || "256", 10);
+    return Number.isFinite(w)
+      ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w))
+      : 256;
+  });
+  const [dragging, setDragging] = useState(false);
+  const sidebarWidth = collapsed ? SIDEBAR_RAIL : width;
+
+  useEffect(() => {
+    localStorage.setItem("sidebar.collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
+  useEffect(() => {
+    localStorage.setItem("sidebar.width", String(width));
+  }, [width]);
+
+  // Vertical divider: drag to resize; drag past the threshold snaps to a
+  // collapsed icon rail. Double-click / arrow keys also toggle.
+  const onResizeDown = (e: RPointerEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+  const onResizeMove = (e: RPointerEvent) => {
+    if (!dragging) return;
+    const w = e.clientX - 12; // root has p-3 (12px) left padding
+    if (w < COLLAPSE_AT) {
+      if (!collapsed) setCollapsed(true);
+    } else {
+      if (collapsed) setCollapsed(false);
+      setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w)));
+    }
+  };
+  const onResizeUp = (e: RPointerEvent) => {
+    if (!dragging) return;
+    setDragging(false);
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  };
+  const onResizeKey = (e: RKeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (width <= SIDEBAR_MIN) setCollapsed(true);
+      else setWidth((w) => Math.max(SIDEBAR_MIN, w - 24));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      if (collapsed) setCollapsed(false);
+      else setWidth((w) => Math.min(SIDEBAR_MAX, w + 24));
+    }
+  };
 
   // Theme: cycle light → dark → system.
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
@@ -237,13 +291,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3 gap-3">
+    <div className="flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3">
       {/* ───────────── Sidebar ───────────── */}
       <aside
-        className={cn(
-          "shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#33353A] shadow-bento flex flex-col overflow-hidden transition-[width] duration-200 ease-out",
-          collapsed ? "w-[76px]" : "w-64"
-        )}
+        style={{
+          width: sidebarWidth,
+          transition: dragging ? "none" : "width 200ms ease-out",
+        }}
+        className="shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#33353A] shadow-bento flex flex-col overflow-hidden"
       >
         <div
           className={cn(
@@ -336,24 +391,45 @@ export default function Layout({ children }: { children: ReactNode }) {
             <LogOut size={18} className="shrink-0" />
             {!collapsed && "Sign out"}
           </button>
-          <button
-            onClick={toggleCollapsed}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-400 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer",
-              collapsed ? "justify-center px-0" : "px-3"
-            )}
-          >
-            {collapsed ? (
-              <PanelLeftOpen size={18} className="shrink-0" />
-            ) : (
-              <PanelLeftClose size={18} className="shrink-0" />
-            )}
-            {!collapsed && "Collapse"}
-          </button>
         </div>
       </aside>
+
+      {/* Resizable divider — drag to resize · double-click / ← → to collapse */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuenow={sidebarWidth}
+        aria-valuemin={SIDEBAR_RAIL}
+        aria-valuemax={SIDEBAR_MAX}
+        tabIndex={0}
+        title="Drag to resize · double-click to collapse"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onDoubleClick={() => setCollapsed((c) => !c)}
+        onKeyDown={onResizeKey}
+        className="group relative flex w-3 shrink-0 cursor-col-resize select-none touch-none items-center justify-center self-stretch outline-none"
+      >
+        <span
+          className={cn(
+            "h-10 w-1 rounded-full transition-colors",
+            dragging
+              ? "bg-primary-500"
+              : "bg-brand-200 group-hover:bg-brand-300 group-focus-visible:bg-primary-400 dark:bg-[#33353A]"
+          )}
+        />
+        <span
+          className={cn(
+            "absolute grid h-6 w-4 place-items-center rounded-md border border-brand-200 bg-white text-brand-400 transition-opacity dark:bg-[#222327] dark:border-[#33353A]",
+            dragging
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+          )}
+        >
+          <GripVertical size={12} />
+        </span>
+      </div>
 
       {/* ───────────── Main ───────────── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
