@@ -9,16 +9,13 @@ import Login from "./pages/Login";
 import Landing from "./pages/Landing";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
+import FileyLoader from "./components/FileyLoader";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
 
 function Splash() {
-  return (
-    <div className="min-h-full grid place-items-center bg-background">
-      <p className="text-sm font-semibold text-brand-400">Loading…</p>
-    </div>
-  );
+  return <FileyLoader />;
 }
 
 function ModuleDisabled({ name }: { name: string }) {
