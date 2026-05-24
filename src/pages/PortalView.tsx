@@ -40,6 +40,27 @@ export default function PortalView() {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [doc, setDoc] = useState<Doc | null>(null);
   const [items, setItems] = useState<Item[]>([]);
+  const [paying, setPaying] = useState(false);
+  const [payErr, setPayErr] = useState<string | null>(null);
+  const paid = typeof window !== "undefined" && window.location.hash.includes("paid=1");
+
+  const pay = async () => {
+    if (!supabase) return;
+    setPaying(true);
+    setPayErr(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("stripe", {
+        body: { action: "pay_invoice", token: tokenFromHash() },
+      });
+      const res = data as { url?: string; error?: string } | null;
+      if (error || !res?.url)
+        throw new Error(res?.error || error?.message || "Payment is not available yet.");
+      window.location.href = res.url;
+    } catch (e) {
+      setPayErr(e instanceof Error ? e.message : String(e));
+      setPaying(false);
+    }
+  };
 
   useEffect(() => {
     const token = tokenFromHash();
@@ -92,6 +113,11 @@ export default function PortalView() {
   return (
     <div className="min-h-screen bg-[#F7F3EA] px-4 py-10">
       <div className="mx-auto max-w-3xl rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm text-neutral-900">
+        {(paid || doc.status === "paid") && (
+          <div className="mb-4 rounded-xl bg-green-50 px-4 py-2.5 text-sm font-semibold text-green-700">
+            Payment received — thank you!
+          </div>
+        )}
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold">{doc.seller_name || "Invoice"}</h1>
@@ -154,6 +180,19 @@ export default function PortalView() {
             <span className="tabular-nums">{money(total, ccy)}</span>
           </div>
         </div>
+
+        {doc.status !== "paid" && !paid && (
+          <div className="mt-6 flex flex-col items-end gap-1">
+            <button
+              onClick={pay}
+              disabled={paying}
+              className="rounded-xl bg-[#FFD600] px-5 py-2.5 text-sm font-bold text-[#0A0A0A] transition-[filter] hover:brightness-95 disabled:opacity-60"
+            >
+              {paying ? "Redirecting…" : `Pay ${money(total, ccy)}`}
+            </button>
+            {payErr && <p className="text-xs text-red-600">{payErr}</p>}
+          </div>
+        )}
 
         {(doc.notes || doc.terms) && (
           <div className="mt-6 space-y-2 border-t border-neutral-200 pt-4 text-xs text-neutral-500">

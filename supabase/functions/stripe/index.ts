@@ -77,7 +77,15 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("stripe-signature");
   if (sig) return handleWebhook(req, sig);
 
+  const origin = req.headers.get("origin") || SITE_URL || "";
+  const payload = await req.json().catch(() => ({} as Record<string, unknown>));
+  const action = String(payload.action ?? "");
+
   try {
+    // PUBLIC: a customer paying a shared invoice (no Filey account / JWT).
+    if (action === "pay_invoice") return await payInvoice(String(payload.token ?? ""), origin);
+
+    // AUTHENTICATED actions below (the account owner).
     const supa = admin();
     const jwt = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
     const { data: u } = await supa.auth.getUser(jwt);
@@ -87,8 +95,7 @@ Deno.serve(async (req) => {
     const org = await userOrg(supa, user.id);
     if (!org) return json({ error: "No organization found" }, 400);
 
-    const { action, plan } = await req.json().catch(() => ({}));
-    const origin = req.headers.get("origin") || SITE_URL || "";
+    const plan = payload.plan;
 
     // ensure a Stripe customer for the org
     let customerId = org.stripe_customer_id as string | null;
@@ -131,6 +138,55 @@ Deno.serve(async (req) => {
   }
 });
 
+async function invoiceBalance(supa: ReturnType<typeof admin>, docId: number) {
+  const [{ data: doc }, { data: items }, { data: pays }] = await Promise.all([
+    supa.from("invoice_docs").select("*").eq("id", docId).maybeSingle(),
+    supa.from("invoice_doc_items").select("qty,unit_price").eq("invoice_id", docId),
+    supa.from("invoice_payments").select("amount").eq("invoice_id", docId),
+  ]);
+  if (!doc) return null;
+  const subtotal = (items ?? []).reduce(
+    (s: number, i: { qty: number; unit_price: number }) => s + Number(i.qty) * Number(i.unit_price),
+    0
+  );
+  const taxable = Math.max(0, subtotal - Number(doc.discount || 0));
+  const total = taxable + (taxable * Number(doc.tax_rate || 0)) / 100;
+  const paid = (pays ?? []).reduce((s: number, p: { amount: number }) => s + Number(p.amount), 0);
+  return { doc, total, paid, balance: Math.round((total - paid) * 100) / 100 };
+}
+
+// Public: create a one-off Checkout for the outstanding balance of a shared invoice.
+async function payInvoice(token: string, origin: string): Promise<Response> {
+  if (!token) return json({ error: "Missing token" }, 400);
+  const supa = admin();
+  const { data: doc } = await supa
+    .from("invoice_docs")
+    .select("id, number, currency, shared")
+    .eq("share_token", token)
+    .eq("shared", true)
+    .maybeSingle();
+  if (!doc) return json({ error: "Invoice not found or not shared" }, 404);
+  const bal = await invoiceBalance(supa, doc.id);
+  if (!bal || bal.balance <= 0) return json({ error: "This invoice is already paid." }, 400);
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: String(doc.currency || "AED").toLowerCase(),
+          product_data: { name: `Invoice ${doc.number}` },
+          unit_amount: Math.round(bal.balance * 100),
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${origin}/#/portal/${token}?paid=1`,
+    cancel_url: `${origin}/#/portal/${token}`,
+    metadata: { type: "invoice_payment", invoice_id: String(doc.id) },
+  });
+  return json({ url: session.url });
+}
+
 async function handleWebhook(req: Request, sig: string): Promise<Response> {
   const raw = await req.text();
   let event: Stripe.Event;
@@ -152,6 +208,28 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object as Stripe.Checkout.Session;
+        // A customer paid a shared invoice → record the payment.
+        if (s.metadata?.type === "invoice_payment") {
+          const invId = Number(s.metadata.invoice_id);
+          const { data: doc } = await supa
+            .from("invoice_docs")
+            .select("user_id, org_id")
+            .eq("id", invId)
+            .maybeSingle();
+          await supa.from("invoice_payments").insert({
+            invoice_id: invId,
+            amount: (s.amount_total ?? 0) / 100,
+            method: "card",
+            paid_at: new Date().toISOString(),
+            user_id: doc?.user_id,
+            org_id: doc?.org_id,
+          });
+          const bal = await invoiceBalance(supa, invId);
+          if (bal && bal.balance <= 0)
+            await supa.from("invoice_docs").update({ status: "paid" }).eq("id", invId);
+          break;
+        }
+        // Otherwise it's a subscription checkout → set the org's plan.
         await setPlan(
           { col: "id", val: String(s.metadata?.org_id) },
           {
