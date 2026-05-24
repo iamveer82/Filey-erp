@@ -19,7 +19,6 @@ import {
   Command,
   Sun,
   Moon,
-  Monitor,
   Plus,
   ChevronDown,
 } from "lucide-react";
@@ -186,17 +185,15 @@ export default function Layout({ children }: { children: ReactNode }) {
     }
   };
 
-  // Theme: cycle light → dark → system.
+  // Theme: toggle light <-> dark.
   const [theme, setThemeState] = useState<Theme>(() => getTheme());
   const cycleTheme = () => {
-    const next: Theme =
-      theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+    const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
     setThemeState(next);
   };
-  const ThemeIcon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
-  const themeLabel =
-    theme === "light" ? "Light" : theme === "dark" ? "Dark" : "System";
+  const ThemeIcon = theme === "dark" ? Moon : Sun;
+  const themeLabel = theme === "dark" ? "Dark" : "Light";
 
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -401,23 +398,6 @@ export default function Layout({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A2C33] space-y-1">
-          <button
-            onClick={cycleTheme}
-            title={collapsed ? `Theme: ${themeLabel}` : undefined}
-            aria-label={`Theme: ${themeLabel} (click to change)`}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-400 hover:bg-brand-50 hover:text-ink transition-colors cursor-pointer dark:hover:bg-white/5 dark:hover:text-[#F0F0F0]",
-              collapsed ? "justify-center px-0" : "px-3"
-            )}
-          >
-            <ThemeIcon size={18} className="shrink-0" />
-            {!collapsed && (
-              <span className="flex-1 text-left">Theme</span>
-            )}
-            {!collapsed && (
-              <span className="text-xs text-brand-400">{themeLabel}</span>
-            )}
-          </button>
           <button
             onClick={signOut}
             title={collapsed ? "Sign out" : undefined}

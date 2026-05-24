@@ -1,12 +1,7 @@
-// Light / dark / system theme. Applies a `dark` class on <html>.
-export type Theme = "light" | "dark" | "system";
+// Light / dark theme. Applies a `dark` class on <html>.
+export type Theme = "light" | "dark";
 
 const KEY = "theme";
-
-export function getTheme(): Theme {
-  const v = localStorage.getItem(KEY);
-  return v === "light" || v === "dark" || v === "system" ? v : "system";
-}
 
 function systemDark(): boolean {
   return (
@@ -15,23 +10,19 @@ function systemDark(): boolean {
   );
 }
 
+export function getTheme(): Theme {
+  const v = localStorage.getItem(KEY);
+  if (v === "light" || v === "dark") return v;
+  // First run: default to the OS preference (not persisted until the user
+  // picks). Only ever light or dark afterwards.
+  return systemDark() ? "dark" : "light";
+}
+
 export function applyTheme(t: Theme = getTheme()): void {
-  const dark = t === "dark" || (t === "system" && systemDark());
-  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.classList.toggle("dark", t === "dark");
 }
 
 export function setTheme(t: Theme): void {
   localStorage.setItem(KEY, t);
   applyTheme(t);
-}
-
-/** Wire system-preference changes (only matters when theme === system). */
-export function watchSystemTheme(): () => void {
-  if (typeof matchMedia === "undefined") return () => {};
-  const mq = matchMedia("(prefers-color-scheme: dark)");
-  const h = () => {
-    if (getTheme() === "system") applyTheme("system");
-  };
-  mq.addEventListener("change", h);
-  return () => mq.removeEventListener("change", h);
 }
