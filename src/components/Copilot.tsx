@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Send, X, Trash2 } from "lucide-react";
-import { cn } from "../lib/format";
+import { Send, X, Plus, History, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { cn, fmtDate } from "../lib/format";
 import {
   aiChat,
   aiReady,
@@ -15,45 +15,28 @@ import {
   type AiPersona,
   type AiVibe,
 } from "../lib/ai";
+import {
+  loadChats,
+  saveChats,
+  getActiveId,
+  setActiveId,
+  newChat,
+  deriveTitle,
+  transcript,
+  TURN_CAP,
+  type Chat,
+  type ChatTurn,
+} from "../lib/aiChats";
 import { buildAiContext } from "../lib/aiContext";
 import { useAuth } from "../lib/auth";
+import { useUI } from "../lib/ui";
 import ColorOrb from "./ColorOrb";
 
-/* Floating bottom-right AI copilot (BYOK, see lib/ai). On first run it asks a
- * couple of questions (name, role, vibe) and remembers them permanently. It
- * reads the user's own business data for grounding, keeps a rolling ~30-turn
- * memory, and is barred from passwords/settings by the system guardrails. */
-
 const SYSTEM =
-  "You are Filey, the assistant inside the Filey ERP/CRM web app. Help the user run their business: draft invoice line items, customer emails, product descriptions, summaries, and answer questions. Be concise and practical — prefer short, ready-to-use output over long explanations.";
-
-const MEM_KEY = "filey.ai.history";
-const MEM_CAP = 30;
-
-interface Turn {
-  role: "user" | "assistant";
-  text: string;
-}
-
-function loadTurns(): Turn[] {
-  try {
-    const raw = localStorage.getItem(MEM_KEY);
-    return raw ? (JSON.parse(raw) as Turn[]).slice(-MEM_CAP) : [];
-  } catch {
-    return [];
-  }
-}
-function saveTurns(turns: Turn[]) {
-  try {
-    localStorage.setItem(MEM_KEY, JSON.stringify(turns.slice(-MEM_CAP)));
-  } catch {
-    /* ignore quota */
-  }
-}
+  "You are the AI assistant inside the Filey ERP/CRM web app. Help the user run their business: draft invoice line items, customer emails, product descriptions, summaries, and answer questions. Be concise and practical — prefer short, ready-to-use output over long explanations.";
 
 const ORB_PRESETS = ["#FFD600", "#FF7A00", "#EC4899", "#7C3AED", "#2CADF6", "#3FB984", "#E5484D"];
 
-/** Lighten (amt>0) or darken (amt<0) a hex colour. */
 function shade(hex: string, amt: number): string {
   const c = hex.replace("#", "");
   const full = c.length === 3 ? c.split("").map((x) => x + x).join("") : c;
@@ -66,15 +49,22 @@ function shade(hex: string, amt: number): string {
     Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
   return "#" + (((f(r) << 16) | (f(g) << 8) | f(b)) >>> 0).toString(16).padStart(6, "0");
 }
-
 function orbTones(color: string) {
   return { base: "#1b1d22", accent1: color, accent2: shade(color, 0.28), accent3: shade(color, -0.28) };
 }
 
+type View = "chat" | "history";
+
 export default function Copilot() {
   const { profile } = useAuth();
+  const { toast, confirm, prompt } = useUI();
   const [open, setOpen] = useState(false);
-  const [turns, setTurns] = useState<Turn[]>(loadTurns);
+  const [chats, setChats] = useState<Chat[]>(loadChats);
+  const [activeId, setActiveIdState] = useState<string | null>(
+    () => getActiveId() ?? loadChats()[0]?.id ?? null
+  );
+  const [view, setView] = useState<View>("chat");
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -88,30 +78,35 @@ export default function Copilot() {
 
   const save = (patch: Partial<AiPersona>) => setPersonaState(setPersona(patch));
   const tones = orbTones(persona.orbColor);
+  const persist = (next: Chat[]) => {
+    setChats(next);
+    saveChats(next);
+  };
+  const select = (id: string | null) => {
+    setActiveIdState(id);
+    setActiveId(id);
+  };
 
-  // onboarding form draft
+  const active = chats.find((c) => c.id === activeId) ?? null;
+  const turns = active?.turns ?? [];
+  const needsOnboarding = ready && !persona.onboarded;
+
   const [draft, setDraft] = useState({
     userName: persona.userName || profile?.name?.split(" ")[0] || "",
     role: persona.role || "",
     vibe: persona.vibe as AiVibe,
   });
 
-  const needsOnboarding = ready && !persona.onboarded;
-
   useEffect(() => {
-    if (open && ready && persona.onboarded) setTimeout(() => taRef.current?.focus(), 60);
-  }, [open, ready, persona.onboarded]);
+    if (open && ready && persona.onboarded && view === "chat")
+      setTimeout(() => taRef.current?.focus(), 60);
+  }, [open, ready, persona.onboarded, view]);
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
   useEffect(() => {
-    saveTurns(turns);
-  }, [turns]);
-  // pull a fresh snapshot of the user's data whenever the panel opens
-  useEffect(() => {
-    if (open && ready && persona.onboarded && !ctx) {
+    if (open && ready && persona.onboarded && !ctx)
       buildAiContext(profile?.company).then(setCtx).catch(() => {});
-    }
   }, [open, ready, persona.onboarded, ctx, profile?.company]);
 
   const finishOnboarding = () => {
@@ -122,36 +117,78 @@ export default function Copilot() {
       onboarded: true,
     });
     setPersonaState(p);
-    setTurns((t) => [
-      ...t,
+    const c = newChat();
+    c.title = "Welcome";
+    c.turns = [
       {
         role: "assistant",
         text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm ${p.assistantName || "Filey"}. I can see your customers, invoices, products and more — ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
       },
-    ]);
+    ];
+    persist([c, ...chats]);
+    select(c.id);
+    setView("chat");
+  };
+
+  const startNewChat = () => {
+    const c = newChat();
+    persist([c, ...chats]);
+    select(c.id);
+    setView("chat");
+    setInput("");
+    setErr(null);
   };
 
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text || busy) return;
     setErr(null);
-    const next: Turn[] = [...turns, { role: "user", text }];
-    setTurns(next);
+
+    let id = activeId;
+    let base = chats;
+    if (!id || !chats.find((c) => c.id === id)) {
+      const c = newChat();
+      base = [c, ...chats];
+      id = c.id;
+      select(id);
+    }
+    const userTurn: ChatTurn = { role: "user", text };
+    const afterUser = base.map((c) =>
+      c.id === id
+        ? {
+            ...c,
+            turns: [...c.turns, userTurn],
+            updatedAt: Date.now(),
+            title: c.title === "New chat" || !c.title ? deriveTitle([...c.turns, userTurn]) : c.title,
+          }
+        : c
+    );
+    persist(afterUser);
     setInput("");
     setBusy(true);
+    const convo = afterUser.find((c) => c.id === id)?.turns ?? [];
     try {
       const messages: AiMessage[] = [
         { role: "system", text: buildSystemPrompt(SYSTEM, getPersona(), ctx) },
-        ...next.slice(-MEM_CAP).map((t) => ({ role: t.role, text: t.text })),
+        ...convo.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
       ];
       const reply = await aiChat(messages, { maxTokens: 900 });
-      setTurns((t) => [...t, { role: "assistant", text: reply || "(no response)" }]);
+      setChats((prev) => {
+        const next = prev.map((c) =>
+          c.id === id
+            ? { ...c, turns: [...c.turns, { role: "assistant" as const, text: reply || "(no response)" }], updatedAt: Date.now() }
+            : c
+        );
+        saveChats(next);
+        return next;
+      });
     } catch (e) {
       setErr(e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [input, busy, turns, ctx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, busy, chats, activeId, ctx]);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -161,7 +198,30 @@ export default function Copilot() {
     if (e.key === "Escape") setOpen(false);
   };
 
-  const bubble = (role: Turn["role"]) =>
+  const renameChat = async (c: Chat) => {
+    setMenuFor(null);
+    const name = await prompt({ title: "Rename chat", defaultValue: c.title, confirmLabel: "Save" });
+    if (name != null) persist(chats.map((x) => (x.id === c.id ? { ...x, title: name.trim() || x.title } : x)));
+  };
+  const shareChat = async (c: Chat) => {
+    setMenuFor(null);
+    try {
+      await navigator.clipboard.writeText(transcript(c));
+      toast.success("Conversation copied to clipboard");
+    } catch {
+      toast.error("Couldn't copy");
+    }
+  };
+  const deleteChat = async (c: Chat) => {
+    setMenuFor(null);
+    const ok = await confirm({ title: "Delete this chat?", danger: true, confirmLabel: "Delete" });
+    if (!ok) return;
+    const next = chats.filter((x) => x.id !== c.id);
+    persist(next);
+    if (activeId === c.id) select(next[0]?.id ?? null);
+  };
+
+  const bubble = (role: ChatTurn["role"]) =>
     role === "user"
       ? "ml-auto bg-primary-400 text-[#0A0A0A]"
       : "mr-auto bg-brand-50 text-ink dark:bg-white/5";
@@ -178,7 +238,8 @@ export default function Copilot() {
             transition={{ type: "spring", stiffness: 420, damping: 34 }}
             className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
           >
-            <div className="flex items-center gap-2 border-b border-brand-100 px-4 py-3 dark:border-[#2A2C33]">
+            {/* header */}
+            <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3 dark:border-[#2A2C33]">
               <button
                 onClick={() => setCustomizing((c) => !c)}
                 aria-label="Customize assistant"
@@ -187,34 +248,48 @@ export default function Copilot() {
               >
                 <ColorOrb dimension="22px" tones={tones} />
               </button>
-              <span className="font-display text-sm font-bold text-ink">
-                {persona.assistantName || "Filey"}
+              <span className="truncate font-display text-sm font-bold text-ink">
+                {view === "history" ? "Chats" : persona.assistantName || "Filey"}
               </span>
-              {turns.length > 0 && (
-                <button
-                  onClick={() => {
-                    setTurns([]);
-                    setErr(null);
-                  }}
-                  aria-label="Clear conversation"
-                  title="Clear conversation"
-                  className="ml-auto rounded-lg p-1 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
-                >
-                  <Trash2 size={15} />
-                </button>
+              {ready && persona.onboarded && (
+                <div className="ml-auto flex items-center gap-0.5">
+                  <button
+                    onClick={startNewChat}
+                    aria-label="New chat"
+                    title="New chat"
+                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  >
+                    <Plus size={16} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setView((v) => (v === "history" ? "chat" : "history"));
+                      setMenuFor(null);
+                    }}
+                    aria-label="History"
+                    title="Chat history"
+                    className={cn(
+                      "rounded-lg p-1.5 cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
+                      view === "history" ? "text-ink dark:text-[#F4F5F6]" : "text-brand-400 hover:text-ink dark:hover:text-[#F4F5F6]"
+                    )}
+                  >
+                    <History size={16} />
+                  </button>
+                </div>
               )}
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close"
                 className={cn(
-                  "rounded-lg p-1 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer",
-                  turns.length === 0 && "ml-auto"
+                  "rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer",
+                  !(ready && persona.onboarded) && "ml-auto"
                 )}
               >
                 <X size={16} />
               </button>
             </div>
 
+            {/* customizer */}
             <AnimatePresence>
               {customizing && (
                 <motion.div
@@ -268,6 +343,7 @@ export default function Copilot() {
               )}
             </AnimatePresence>
 
+            {/* body */}
             <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
               {!ready ? (
                 <div className="space-y-3 text-sm text-brand-500">
@@ -327,6 +403,55 @@ export default function Copilot() {
                     Start
                   </button>
                 </div>
+              ) : view === "history" ? (
+                chats.length === 0 ? (
+                  <p className="text-sm text-brand-400">No conversations yet.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {chats.map((c) => (
+                      <div key={c.id} className="relative">
+                        <button
+                          onClick={() => {
+                            select(c.id);
+                            setView("chat");
+                          }}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
+                            c.id === activeId && "bg-brand-50 dark:bg-white/5"
+                          )}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-ink">
+                              {c.title}
+                            </span>
+                            <span className="block text-[11px] text-brand-400">
+                              {fmtDate(new Date(c.updatedAt).toISOString())} · {c.turns.length} msgs
+                            </span>
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label="Chat options"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuFor((m) => (m === c.id ? null : c.id));
+                            }}
+                            className="rounded-lg p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
+                          >
+                            <MoreHorizontal size={16} />
+                          </span>
+                        </button>
+                        {menuFor === c.id && (
+                          <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-xl border border-brand-200 bg-white py-1 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#24262C]">
+                            <MenuItem icon={<Pencil size={14} />} label="Rename" onClick={() => renameChat(c)} />
+                            <MenuItem icon={<Share2 size={14} />} label="Share" onClick={() => shareChat(c)} />
+                            <MenuItem icon={<Trash2 size={14} />} label="Delete" danger onClick={() => deleteChat(c)} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : turns.length === 0 ? (
                 <p className="text-sm text-brand-400">
                   Ask me to draft an invoice line, a customer email, a product
@@ -345,17 +470,18 @@ export default function Copilot() {
                   </div>
                 ))
               )}
-              {busy && (
+              {busy && view === "chat" && (
                 <div className="mr-auto w-fit rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/5">
                   Thinking…
                 </div>
               )}
-              {err && (
+              {err && view === "chat" && (
                 <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{err}</div>
               )}
             </div>
 
-            {ready && persona.onboarded && (
+            {/* input */}
+            {ready && persona.onboarded && view === "chat" && (
               <div className="border-t border-brand-100 p-2.5 dark:border-[#2A2C33]">
                 <div className="flex items-end gap-2">
                   <textarea
@@ -393,5 +519,32 @@ export default function Copilot() {
         <span className="font-display text-sm font-bold text-ink">Ask AI</span>
       </motion.button>
     </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  danger,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer",
+        danger
+          ? "text-danger hover:bg-danger/10"
+          : "text-ink dark:text-[#F4F5F6] hover:bg-brand-50 dark:hover:bg-white/5"
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
