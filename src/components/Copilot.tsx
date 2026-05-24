@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Send, X, Plus, History, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { Send, X, Plus, NotepadText, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { cn, fmtDate } from "../lib/format";
 import {
   aiChat,
@@ -273,7 +273,7 @@ export default function Copilot() {
                       view === "history" ? "text-ink dark:text-[#F4F5F6]" : "text-brand-400 hover:text-ink dark:hover:text-[#F4F5F6]"
                     )}
                   >
-                    <History size={16} />
+                    <NotepadText size={16} />
                   </button>
                 </div>
               )}
