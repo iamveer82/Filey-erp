@@ -71,6 +71,7 @@ export default function Copilot() {
   const [persona, setPersonaState] = useState<AiPersona>(getPersona);
   const [ctx, setCtx] = useState<string>("");
   const [customizing, setCustomizing] = useState(false);
+  const [online, setOnline] = useState(() => navigator.onLine);
   const ready = aiReady();
   const navigate = useNavigate();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -108,6 +109,17 @@ export default function Copilot() {
     if (open && ready && persona.onboarded && !ctx)
       buildAiContext(profile?.company).then(setCtx).catch(() => {});
   }, [open, ready, persona.onboarded, ctx, profile?.company]);
+  // PWA: the app shell works offline, but the AI needs to reach the model.
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
 
   const finishOnboarding = () => {
     const p = setPersona({
@@ -142,6 +154,10 @@ export default function Copilot() {
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text || busy) return;
+    if (!navigator.onLine) {
+      setErr("You're offline — Filey AI needs a connection to reach your model.");
+      return;
+    }
     setErr(null);
 
     let id = activeId;
@@ -483,6 +499,11 @@ export default function Copilot() {
             {/* input */}
             {ready && persona.onboarded && view === "chat" && (
               <div className="border-t border-brand-100 p-2.5 dark:border-[#2A2C33]">
+                {!online && (
+                  <p className="mb-2 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[11px] font-medium text-warning">
+                    You're offline — Filey AI will reconnect automatically.
+                  </p>
+                )}
                 <div className="flex items-end gap-2">
                   <textarea
                     ref={taRef}
@@ -490,12 +511,12 @@ export default function Copilot() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKey}
                     rows={1}
-                    placeholder="Ask Filey AI…  (⌘/Ctrl+Enter)"
+                    placeholder={online ? "Ask Filey AI…  (⌘/Ctrl+Enter)" : "Offline…"}
                     className="textarea max-h-32 min-h-[40px] flex-1 py-2"
                   />
                   <button
                     onClick={() => void send()}
-                    disabled={busy || !input.trim()}
+                    disabled={busy || !input.trim() || !online}
                     aria-label="Send"
                     className="btn-primary h-10 w-10 shrink-0 !px-0"
                   >
