@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-/* Filey loading screen — a 6-scene staged sequence that mirrors the
- * storyboard: wave → run → reach → carry → desk(laptop + ✓) → cheer(confetti).
- * One progress driver advances scene, status text and percentage together.
- * Pure SVG + framer-motion, playful overshoot easing, seamless loop. */
+/* Filey loading screen — a continuously animated 6-scene film:
+ * wave → run → reach → carry → desk(laptop + ✓) → cheer(confetti).
+ *
+ * Motion never stops: an ambient layer streams papers + particles behind
+ * every scene, the mascot stays mounted and *morphs* between poses (limbs
+ * spring from one scene to the next instead of cutting), and the scene props
+ * slide in/out with overlap. One progress clock drives scene, status and %. */
 
 const BODY = "#FFD323";
 const SHADOW = "#F5B700";
@@ -18,7 +21,6 @@ const PURP = "#8B5CF6";
 
 const POP = [0.34, 1.56, 0.64, 1] as const;
 
-// scene boundaries (progress %) + status text — mirrors the storyboard cards
 const STAGES = [
   { at: 0, text: "Getting things ready…" },
   { at: 18, text: "Catching your files…" },
@@ -28,8 +30,7 @@ const STAGES = [
   { at: 93, text: "All set! Let's go!" },
 ];
 
-/* ── mascot parts (drawn directly in stage coordinates, no nested translate
-   so every rotation pivot is unambiguous) ────────────────────────────────── */
+/* ── mascot parts (absolute stage coords → unambiguous rotation pivots) ───── */
 
 function FolderBody() {
   return (
@@ -69,15 +70,17 @@ function Face({ wink }: { wink?: boolean }) {
   );
 }
 
+// looping keyframes pump in place; a single target springs to the new pose
+const limbTransition = (rot: number | number[], dur: number) =>
+  Array.isArray(rot)
+    ? { duration: dur, repeat: Infinity, ease: "easeInOut" as const }
+    : { type: "spring" as const, stiffness: 140, damping: 13 };
+
 function Arm({ side, rot, dur }: { side: "l" | "r"; rot: number | number[]; dur: number }) {
   const origin = side === "l" ? "156px 98px" : "248px 98px";
   const x = side === "l" ? 138 : 248;
   return (
-    <motion.g
-      style={{ transformOrigin: origin }}
-      animate={{ rotate: rot }}
-      transition={{ duration: dur, repeat: Array.isArray(rot) ? Infinity : 0, ease: "easeInOut" }}
-    >
+    <motion.g style={{ transformOrigin: origin }} animate={{ rotate: rot }} transition={limbTransition(rot, dur)}>
       <rect x={x} y={94} width={18} height={9} rx={4.5} fill={BODY} stroke={EDGE} strokeWidth={1.5} />
     </motion.g>
   );
@@ -87,11 +90,7 @@ function Leg({ side, rot, dur }: { side: "l" | "r"; rot: number | number[]; dur:
   const origin = side === "l" ? "188px 139px" : "216px 139px";
   const x = side === "l" ? 182 : 210;
   return (
-    <motion.g
-      style={{ transformOrigin: origin }}
-      animate={{ rotate: rot }}
-      transition={{ duration: dur, repeat: Array.isArray(rot) ? Infinity : 0, ease: "easeInOut" }}
-    >
+    <motion.g style={{ transformOrigin: origin }} animate={{ rotate: rot }} transition={limbTransition(rot, dur)}>
       <rect x={x} y={137} width={12} height={18} rx={6} fill={EDGE} />
     </motion.g>
   );
@@ -110,20 +109,15 @@ type Pose = {
 };
 
 const POSES: Record<string, Pose> = {
-  // standing, one arm waving
   wave: { body: { y: [0, -6, 0] }, dur: 1.3, la: 48, ra: [-120, -95, -120], ll: 0, rl: 0 },
-  // running, limbs pumping, slight bounce
   run: { body: { y: [0, -12, 0] }, dur: 0.6, limbDur: 0.3, la: [-30, 25, -30], ra: [25, -30, 25], ll: [16, -16, 16], rl: [-16, 16, -16] },
-  // mid-air, one arm reaching up
   reach: { body: { y: [0, -26, 0] }, dur: 1.0, la: [55, 70, 55], ra: 60, ll: 28, rl: -16 },
-  // walking, both arms forward hugging a stack
   carry: { body: { y: [0, -5, 0] }, dur: 0.8, limbDur: 0.5, la: -68, ra: 78, ll: [10, -10, 10], rl: [-10, 10, -10] },
-  // seated at a desk, arms down on a laptop
   type: { body: { y: [0, -2, 0] }, dur: 1.6, la: -80, ra: 82, ll: 0, rl: 0, hideLegs: true },
-  // jumping for joy, both arms up, winking
   cheer: { body: { y: [0, -20, 0] }, dur: 0.55, la: [100, 118, 100], ra: [-100, -118, -100], ll: 22, rl: -22, wink: true },
 };
 
+// persistent mascot — only `pose` changes, so limbs/body animate between scenes
 function Filey({ pose }: { pose: keyof typeof POSES }) {
   const c = POSES[pose];
   const ld = c.limbDur ?? c.dur;
@@ -184,176 +178,219 @@ function FloatPaper({ x, y, c, d }: { x: number; y: number; c: string; d: number
   );
 }
 
-/* ── scenes (return SVG children; paint order = depth) ─────────────────────── */
-
-const SCENES: Array<() => React.ReactNode> = [
-  // 1 — waving, papers drifting in along a dotted trail
-  () => (
-    <>
-      <motion.path
-        d="M58 152 C 92 162, 112 120, 138 130"
-        stroke={BODY}
-        strokeWidth="2.5"
-        fill="none"
-        strokeLinecap="round"
-        strokeDasharray="1 7"
-        opacity="0.7"
-        animate={{ strokeDashoffset: [0, -16] }}
-        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-      />
-      <FloatPaper x={44} y={36} c={RED} d={0} />
-      <FloatPaper x={86} y={74} c={GREEN} d={0.5} />
-      <FloatPaper x={56} y={116} c={BLUE} d={1} />
-      <Filey pose="wave" />
-    </>
-  ),
-  // 2 — running, papers swirling in, speed lines trailing
-  () => (
-    <>
-      <motion.path d="M70 56 C 36 92, 64 134, 124 118" stroke={BODY} strokeWidth="2" fill="none" opacity="0.3" strokeLinecap="round" />
+/* always-on background motion — papers streaming across + particles rising.
+   Lives outside <AnimatePresence> so it never resets between scenes. */
+function Ambient() {
+  return (
+    <g opacity="0.55">
       {[
-        { x: 52, y: 44, c: GREEN, d: 0 },
-        { x: 96, y: 74, c: BLUE, d: 0.3 },
-        { x: 130, y: 62, c: RED, d: 0.6 },
+        { c: BLUE, y: 70, d: 0 },
+        { c: GREEN, y: 120, d: 1.7 },
+        { c: RED, y: 40, d: 3.4 },
       ].map((p, i) => (
         <motion.g
           key={i}
-          animate={{ x: [-12, 12, -12], y: [-4, 5, -4], rotate: [-16, 16, -16] }}
-          transition={{ duration: 1.6, repeat: Infinity, delay: p.d, ease: "easeInOut" }}
+          initial={false}
+          animate={{ x: [-50, 200, 430], y: [p.y, p.y - 30, p.y], rotate: [-18, 6, 22], opacity: [0, 0.5, 0] }}
+          transition={{ duration: 5.2, repeat: Infinity, delay: p.d, ease: "easeInOut" }}
         >
-          <g transform={`translate(${p.x} ${p.y})`}>
+          <g transform="scale(0.62)">
             <Paper c={p.c} />
           </g>
         </motion.g>
       ))}
-      {[0, 1, 2].map((i) => (
-        <motion.line
-          key={i}
-          x1="264"
-          y1={92 + i * 12}
-          x2="290"
-          y2={92 + i * 12}
-          stroke={EDGE}
-          strokeWidth="3"
-          strokeLinecap="round"
-          animate={{ opacity: [0, 0.8, 0], pathLength: [0.2, 1, 0.2] }}
-          transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.12, ease: "easeInOut" }}
+      {[40, 110, 190, 270, 330].map((x, i) => (
+        <motion.circle
+          key={`d${i}`}
+          cx={x}
+          r="3"
+          fill={BODY}
+          animate={{ cy: [185, 20], opacity: [0, 0.5, 0] }}
+          transition={{ duration: 4 + (i % 3), repeat: Infinity, delay: i * 0.7, ease: "easeOut" }}
         />
       ))}
-      <Filey pose="run" />
-    </>
-  ),
-  // 3 — leaping to grab a paper, sparkles around
-  () => (
-    <>
-      <FloatPaper x={50} y={66} c={GREEN} d={0} />
-      <FloatPaper x={46} y={114} c={BLUE} d={0.6} />
-      <FloatPaper x={88} y={138} c={RED} d={1.1} />
-      <motion.g
-        animate={{ y: [0, -5, 0], rotate: [-5, 5, -5] }}
-        transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <g transform="translate(108 40)">
-          <Paper c={BODY} />
-        </g>
-      </motion.g>
-      <Sparkle x={300} y={64} d={0} />
-      <Sparkle x={300} y={120} d={0.4} />
-      <Sparkle x={70} y={44} d={0.8} />
-      <Filey pose="reach" />
-    </>
-  ),
-  // 4 — carrying a tidy stack of papers
-  () => (
-    <>
-      <Filey pose="carry" />
-      <g transform="translate(132 98)">
-        {[0, 1, 2, 3].map((i) => (
-          <rect
+    </g>
+  );
+}
+
+/* ── scenes: props split into back (behind Filey) and front (over Filey) ─── */
+
+type Scene = { pose: keyof typeof POSES; back?: () => React.ReactNode; front?: () => React.ReactNode };
+
+const SCENES: Scene[] = [
+  // 1 — waving, papers drift in along a dotted trail
+  {
+    pose: "wave",
+    back: () => (
+      <>
+        <motion.path
+          d="M58 152 C 92 162, 112 120, 138 130"
+          stroke={BODY}
+          strokeWidth="2.5"
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray="1 7"
+          opacity="0.7"
+          animate={{ strokeDashoffset: [0, -16] }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+        />
+        <FloatPaper x={44} y={36} c={RED} d={0} />
+        <FloatPaper x={86} y={74} c={GREEN} d={0.5} />
+        <FloatPaper x={56} y={116} c={BLUE} d={1} />
+      </>
+    ),
+  },
+  // 2 — running, papers swirl in, speed lines trailing
+  {
+    pose: "run",
+    back: () => (
+      <>
+        <motion.path d="M70 56 C 36 92, 64 134, 124 118" stroke={BODY} strokeWidth="2" fill="none" opacity="0.3" strokeLinecap="round" />
+        {[
+          { x: 52, y: 44, c: GREEN, d: 0 },
+          { x: 96, y: 74, c: BLUE, d: 0.3 },
+          { x: 130, y: 62, c: RED, d: 0.6 },
+        ].map((p, i) => (
+          <motion.g
             key={i}
-            x={i * 2}
-            y={-i * 5}
-            width="50"
-            height="12"
-            rx="2"
-            fill="#fff"
-            stroke="#E6E2D8"
-            strokeWidth="1.2"
+            animate={{ x: [-14, 14, -14], y: [-5, 6, -5], rotate: [-18, 18, -18] }}
+            transition={{ duration: 1.4, repeat: Infinity, delay: p.d, ease: "easeInOut" }}
+          >
+            <g transform={`translate(${p.x} ${p.y})`}>
+              <Paper c={p.c} />
+            </g>
+          </motion.g>
+        ))}
+        {[0, 1, 2].map((i) => (
+          <motion.line
+            key={i}
+            y1={92 + i * 12}
+            y2={92 + i * 12}
+            stroke={EDGE}
+            strokeWidth="3"
+            strokeLinecap="round"
+            animate={{ opacity: [0, 0.85, 0], x1: [292, 262], x2: [300, 286] }}
+            transition={{ duration: 0.55, repeat: Infinity, delay: i * 0.12, ease: "easeInOut" }}
           />
         ))}
-        <rect x="4" y="-24" width="22" height="15" rx="2" fill={BODY} stroke={EDGE} strokeWidth="1.2" />
-      </g>
-      <Sparkle x={118} y={66} d={0} />
-      <Sparkle x={272} y={84} d={0.5} />
-    </>
-  ),
-  // 5 — at a desk with a laptop, a green ✓ confirming
-  () => (
-    <>
-      <Filey pose="type" />
-      {/* desk + laptop in front (covers the lower body → seated look) */}
-      <g>
-        <rect x="118" y="150" width="156" height="10" rx="3" fill="#C8895A" />
-        <rect x="128" y="160" width="8" height="24" rx="2" fill="#A86B3F" />
-        <rect x="256" y="160" width="8" height="24" rx="2" fill="#A86B3F" />
-        <g transform="translate(150 120)">
-          <rect x="0" y="22" width="46" height="8" rx="2" fill="#9AA1AC" />
-          <rect x="4" y="0" width="38" height="24" rx="2" fill="#C7CCD4" />
-          <path d="M23 7 c -3 -4 -8 -1 -5 3 l 5 6 l 5 -6 c 3 -4 -2 -7 -5 -3 z" fill="#aab0b9" />
-        </g>
-        <g transform="translate(122 130)">
-          <rect x="0" y="10" width="12" height="11" rx="2" fill="#C8895A" />
-          <path d="M6 10 C 0 4, 1 0, 6 2 C 11 0, 12 4, 6 10 Z" fill={GREEN} />
-        </g>
-      </g>
-      {/* speech bubble with check */}
+      </>
+    ),
+  },
+  // 3 — leaping to grab a paper, sparkles bursting
+  {
+    pose: "reach",
+    back: () => (
+      <>
+        <FloatPaper x={50} y={66} c={GREEN} d={0} />
+        <FloatPaper x={46} y={114} c={BLUE} d={0.6} />
+        <FloatPaper x={88} y={138} c={RED} d={1.1} />
+        <motion.g
+          animate={{ y: [0, -5, 0], rotate: [-5, 5, -5] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <g transform="translate(108 40)">
+            <Paper c={BODY} />
+          </g>
+        </motion.g>
+        <Sparkle x={300} y={64} d={0} />
+        <Sparkle x={300} y={120} d={0.4} />
+        <Sparkle x={70} y={44} d={0.8} />
+      </>
+    ),
+  },
+  // 4 — carrying a tidy stack
+  {
+    pose: "carry",
+    back: () => (
+      <>
+        <Sparkle x={118} y={66} d={0} />
+        <Sparkle x={272} y={84} d={0.5} />
+      </>
+    ),
+    front: () => (
       <motion.g
-        initial={{ scale: 0 }}
-        animate={{ scale: [0, 1.15, 1] }}
-        transition={{ duration: 0.5, delay: 0.2, ease: POP }}
-        style={{ transformBox: "fill-box", transformOrigin: "center" }}
+        initial={{ y: 14, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.5, ease: POP }}
       >
-        <g transform="translate(248 46)">
-          <rect width="42" height="32" rx="11" fill="#fff" stroke="#E6E2D8" strokeWidth="1.2" />
-          <path d="M12 30 L8 42 L22 31 Z" fill="#fff" />
-          <path d="M14 16 l5 6 l9 -12" stroke={GREEN} strokeWidth="3.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <g transform="translate(132 98)">
+          {[0, 1, 2, 3].map((i) => (
+            <rect key={i} x={i * 2} y={-i * 5} width="50" height="12" rx="2" fill="#fff" stroke="#E6E2D8" strokeWidth="1.2" />
+          ))}
+          <rect x="4" y="-24" width="22" height="15" rx="2" fill={BODY} stroke={EDGE} strokeWidth="1.2" />
         </g>
       </motion.g>
-      <Sparkle x={300} y={70} d={0} />
-      <Sparkle x={116} y={70} d={0.5} />
-    </>
-  ),
-  // 6 — celebration, arms up, winking, confetti raining
-  () => (
-    <>
-      {[
-        { x: 80, c: RED, d: 0 },
-        { x: 120, c: BLUE, d: 0.4 },
-        { x: 160, c: GREEN, d: 0.15 },
-        { x: 200, c: PURP, d: 0.6 },
-        { x: 240, c: BODY, d: 0.3 },
-        { x: 280, c: RED, d: 0.5 },
-        { x: 300, c: GREEN, d: 0.1 },
-        { x: 100, c: PURP, d: 0.7 },
-      ].map((p, i) => (
-        <g key={i} transform={`translate(${p.x} 0)`}>
-          <motion.rect
-            width="6"
-            height="11"
-            rx="1.5"
-            fill={p.c}
-            initial={{ y: -12, opacity: 0 }}
-            animate={{ y: [-12, 188], opacity: [0, 1, 1, 0], rotate: [0, 220] }}
-            transition={{ duration: 1.8, repeat: Infinity, delay: p.d, ease: "easeIn" }}
-          />
+    ),
+  },
+  // 5 — at a desk with a laptop, a green ✓ confirming
+  {
+    pose: "type",
+    front: () => (
+      <>
+        <g>
+          <rect x="118" y="150" width="156" height="10" rx="3" fill="#C8895A" />
+          <rect x="128" y="160" width="8" height="24" rx="2" fill="#A86B3F" />
+          <rect x="256" y="160" width="8" height="24" rx="2" fill="#A86B3F" />
+          <g transform="translate(150 120)">
+            <rect x="0" y="22" width="46" height="8" rx="2" fill="#9AA1AC" />
+            <rect x="4" y="0" width="38" height="24" rx="2" fill="#C7CCD4" />
+            <path d="M23 7 c -3 -4 -8 -1 -5 3 l 5 6 l 5 -6 c 3 -4 -2 -7 -5 -3 z" fill="#aab0b9" />
+          </g>
+          <g transform="translate(122 130)">
+            <rect x="0" y="10" width="12" height="11" rx="2" fill="#C8895A" />
+            <path d="M6 10 C 0 4, 1 0, 6 2 C 11 0, 12 4, 6 10 Z" fill={GREEN} />
+          </g>
         </g>
-      ))}
-      <Sparkle x={118} y={58} d={0} />
-      <Sparkle x={292} y={70} d={0.4} />
-      <Sparkle x={284} y={132} d={0.8} />
-      <Filey pose="cheer" />
-    </>
-  ),
+        <motion.g
+          initial={{ scale: 0 }}
+          animate={{ scale: [0, 1.15, 1] }}
+          transition={{ duration: 0.5, delay: 0.2, ease: POP }}
+          style={{ transformBox: "fill-box", transformOrigin: "center" }}
+        >
+          <g transform="translate(248 46)">
+            <rect width="42" height="32" rx="11" fill="#fff" stroke="#E6E2D8" strokeWidth="1.2" />
+            <path d="M12 30 L8 42 L22 31 Z" fill="#fff" />
+            <path d="M14 16 l5 6 l9 -12" stroke={GREEN} strokeWidth="3.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </g>
+        </motion.g>
+        <Sparkle x={300} y={70} d={0} />
+        <Sparkle x={116} y={70} d={0.5} />
+      </>
+    ),
+  },
+  // 6 — celebration, arms up, winking, confetti raining
+  {
+    pose: "cheer",
+    back: () => (
+      <>
+        {[
+          { x: 80, c: RED, d: 0 },
+          { x: 120, c: BLUE, d: 0.4 },
+          { x: 160, c: GREEN, d: 0.15 },
+          { x: 200, c: PURP, d: 0.6 },
+          { x: 240, c: BODY, d: 0.3 },
+          { x: 280, c: RED, d: 0.5 },
+          { x: 300, c: GREEN, d: 0.1 },
+          { x: 100, c: PURP, d: 0.7 },
+        ].map((p, i) => (
+          <g key={i} transform={`translate(${p.x} 0)`}>
+            <motion.rect
+              width="6"
+              height="11"
+              rx="1.5"
+              fill={p.c}
+              initial={{ y: -12, opacity: 0 }}
+              animate={{ y: [-12, 188], opacity: [0, 1, 1, 0], rotate: [0, 220] }}
+              transition={{ duration: 1.8, repeat: Infinity, delay: p.d, ease: "easeIn" }}
+            />
+          </g>
+        ))}
+        <Sparkle x={118} y={58} d={0} />
+        <Sparkle x={292} y={70} d={0.4} />
+        <Sparkle x={284} y={132} d={0.8} />
+      </>
+    ),
+  },
 ];
 
 /* ── loader ────────────────────────────────────────────────────────────── */
@@ -364,10 +401,9 @@ export default function FileyLoader() {
   useEffect(() => {
     let raf = 0;
     const start = performance.now();
-    const CYCLE = 7200; // ms per full storyboard loop
+    const CYCLE = 7600; // ms per full storyboard loop
     const tick = (now: number) => {
       const t = ((now - start) % CYCLE) / CYCLE;
-      // advance to 100% by 90% of the cycle, then hold (celebrate) before looping
       setPct(Math.min(100, Math.round((t / 0.9) * 100)));
       raf = requestAnimationFrame(tick);
     };
@@ -377,6 +413,7 @@ export default function FileyLoader() {
 
   let idx = 0;
   for (let i = 0; i < STAGES.length; i++) if (pct >= STAGES[i].at) idx = i;
+  const scene = SCENES[idx];
   const status = STAGES[idx].text;
 
   return (
@@ -403,19 +440,55 @@ export default function FileyLoader() {
       <div className="relative flex flex-col items-center">
         {/* stage */}
         <svg viewBox="0 0 360 200" width="360" height="200" className="max-w-[88vw]" fill="none">
-          <AnimatePresence mode="wait">
+          {/* never-resetting background motion */}
+          <Ambient />
+
+          {/* scene props behind the mascot */}
+          <AnimatePresence>
             <motion.g
-              key={idx}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.28, ease: "easeInOut" }}
+              key={`b${idx}`}
+              initial={{ opacity: 0, x: 26 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -26 }}
+              transition={{ duration: 0.4, ease: "easeInOut" }}
             >
-              {SCENES[idx]()}
+              {scene.back?.()}
             </motion.g>
           </AnimatePresence>
-          {/* ground shadow */}
-          <ellipse cx="202" cy="172" rx="56" ry="9" fill="#000" opacity="0.07" />
+
+          {/* persistent mascot — sways for life; pose morphs per scene */}
+          <motion.g
+            animate={{ rotate: [-2.5, 2.5, -2.5] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+            style={{ transformOrigin: "202px 150px" }}
+          >
+            <Filey pose={scene.pose} />
+          </motion.g>
+
+          {/* scene props over the mascot (stack, desk, ✓) */}
+          <AnimatePresence>
+            <motion.g
+              key={`f${idx}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              {scene.front?.()}
+            </motion.g>
+          </AnimatePresence>
+
+          {/* ground shadow, breathing with the bounce */}
+          <motion.ellipse
+            cx="202"
+            cy="172"
+            rx="56"
+            ry="9"
+            fill="#000"
+            style={{ transformBox: "fill-box", transformOrigin: "center" }}
+            animate={{ scaleX: [1, 0.86, 1], opacity: [0.08, 0.05, 0.08] }}
+            transition={{ duration: 0.7, repeat: Infinity, ease: "easeInOut" }}
+          />
         </svg>
 
         {/* wordmark */}
