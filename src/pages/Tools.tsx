@@ -29,6 +29,7 @@ import {
   Wifi,
   Mail,
   Send,
+  Sparkles,
 } from "lucide-react";
 import {
   tools,
@@ -61,6 +62,7 @@ import { fmtDate, numInput } from "../lib/format";
 import { PageHeader, DataTable, Badge, Modal, Field } from "../components/ui";
 import { motion, AnimatePresence } from "framer-motion";
 import { MODULES } from "../modules/registry";
+import AiSettings from "../components/AiSettings";
 
 type Section =
   | "company"
@@ -75,11 +77,13 @@ type Section =
   | "email"
   | "integrations"
   | "backup"
-  | "activity";
+  | "activity"
+  | "ai";
 
 const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
+  { id: "ai", label: "AI Assistant", icon: Sparkles },
   { id: "account-mgmt", label: "Account Management", icon: KeyRound },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: LayoutGrid },
@@ -141,6 +145,7 @@ export default function Settings() {
         <div className="min-w-0">
           {section === "company" && <CompanyDetails />}
           {section === "account" && <AccountProfile />}
+          {section === "ai" && <AiSettings />}
           {section === "account-mgmt" && (
             <div className="card">
               <p className="font-bold text-ink">Account Management</p>

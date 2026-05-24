@@ -10,6 +10,7 @@ import Landing from "./pages/Landing";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
+import Copilot from "./components/Copilot";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
@@ -77,6 +78,7 @@ function Gate() {
         <Layout>
           <AppRoutes />
         </Layout>
+        <Copilot />
       </HashRouter>
     </ModulesProvider>
   );
