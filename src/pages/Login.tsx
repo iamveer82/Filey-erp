@@ -1,9 +1,6 @@
 import { useState } from "react";
 import {
   ArrowLeft,
-  ShieldCheck,
-  Zap,
-  BarChart3,
   Mail,
   Phone,
   Lock,
@@ -14,6 +11,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Logo from "../components/Logo";
+import PeekingCharacters from "../components/PeekingCharacters";
 import { useAuth, type Channel } from "../lib/auth";
 
 type Mode = "signin" | "signup";
@@ -84,6 +82,7 @@ export default function Login() {
   const [otpPurpose, setOtpPurpose] = useState<"signup" | "login">("login");
   const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
 
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
@@ -172,12 +171,6 @@ export default function Login() {
     }
   };
 
-  const FEATURES = [
-    { icon: BarChart3, t: "Real-time inventory & sales insights" },
-    { icon: Zap, t: "Local PDF tools & instant invoicing" },
-    { icon: ShieldCheck, t: "FTA-compliant tax invoices, secured" },
-  ];
-
   const Msg = ({
     kind,
     children,
@@ -206,55 +199,39 @@ export default function Login() {
 
   return (
     <div className="min-h-full grid lg:grid-cols-2 bg-background dark:bg-[#1A1B1E]">
-      {/* ── Brand panel ── */}
-      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-gradient-to-br from-primary-300 via-primary-400 to-secondary-400">
-        {/* Fine dot-grid texture — purposeful depth, not floating orbs. */}
+      {/* ── Brand panel with playful characters ── */}
+      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-gradient-to-br from-[#15161A] via-[#201d24] to-[#2a2620] text-white">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.18]"
+          className="pointer-events-none absolute inset-0 opacity-[0.05]"
           style={{
             backgroundImage:
-              "radial-gradient(circle, rgba(34,34,34,0.45) 1px, transparent 1px)",
+              "radial-gradient(circle, rgba(255,255,255,0.7) 1px, transparent 1px)",
             backgroundSize: "22px 22px",
           }}
         />
 
         <div className="relative flex items-center gap-3">
-          <Logo size={88} />
-          <p className="text-2xl font-bold text-ink">Filey</p>
+          <Logo size={56} />
+          <p className="text-2xl font-bold">Filey</p>
         </div>
 
         <div className="relative">
-          <h2 className="text-[34px] leading-[1.15] font-bold text-ink max-w-md">
+          <h2 className="text-[32px] leading-[1.15] font-bold max-w-md">
             Run your whole business from one calm place.
           </h2>
-          <p className="text-ink/70 mt-4 max-w-sm">
-            Inventory, orders, invoicing and CRM — fast, offline-friendly
-            and beautifully simple.
+          <p className="text-white/55 mt-3 max-w-sm">
+            Inventory, orders, invoicing and CRM — fast and beautifully
+            simple. (Mind the password — they're watching.)
           </p>
-
-          <div className="mt-8 space-y-3">
-            {FEATURES.map(({ icon: Icon, t }) => (
-              <div key={t} className="flex items-center gap-3">
-                <div className="rounded-xl bg-white/40 p-2 text-ink">
-                  <Icon size={18} />
-                </div>
-                <span className="text-sm font-semibold text-ink">{t}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
-        <div className="relative rounded-2xl bg-white/30 backdrop-blur p-4 max-w-sm">
-          <div className="flex items-center gap-2 text-ink">
-            <ShieldCheck size={16} />
-            <p className="text-sm font-semibold">Private by design</p>
-          </div>
-          <p className="text-sm text-ink/80 mt-2">
-            Your data stays in your own secured workspace. PDF tools run
-            locally on your device — files are never uploaded unless you
-            choose to save them.
-          </p>
+        <div className="relative flex items-end justify-center">
+          <PeekingCharacters
+            typing={isTyping}
+            passwordLength={password.length}
+            passwordVisible={showPw}
+          />
         </div>
       </div>
 
@@ -319,6 +296,8 @@ export default function Login() {
                     placeholder={idPlaceholder}
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
+                    onFocus={() => setIsTyping(true)}
+                    onBlur={() => setIsTyping(false)}
                     required
                   />
                 </div>
@@ -345,6 +324,8 @@ export default function Login() {
                       }
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setIsTyping(true)}
+                      onBlur={() => setIsTyping(false)}
                       required
                       minLength={6}
                     />
