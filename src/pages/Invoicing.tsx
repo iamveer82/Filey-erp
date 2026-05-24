@@ -23,6 +23,7 @@ import {
   StickyNote,
   Paperclip,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
 import {
   billing,
@@ -41,6 +42,7 @@ import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import AnnotationLayer from "../components/AnnotationLayer";
+import ScanDocModal from "../components/ScanDocModal";
 import {
   PageHeader,
   DataTable,
@@ -120,6 +122,7 @@ export default function Invoicing() {
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
 
@@ -259,6 +262,9 @@ export default function Invoicing() {
               onClick={() => setCompanyOpen(true)}
             >
               <Building2 size={16} /> Company
+            </button>
+            <button className="btn-ghost" onClick={() => setScanOpen(true)}>
+              <Sparkles size={16} /> Scan with AI
             </button>
             <button className="btn-cta" onClick={newInvoice}>
               <Plus size={16} /> New Invoice
@@ -437,6 +443,8 @@ export default function Invoicing() {
           }}
         />
       )}
+
+      <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} />
 
       <PaymentsModal
         doc={payFor}
