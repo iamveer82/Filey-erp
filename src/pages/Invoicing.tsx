@@ -357,6 +357,16 @@ export default function Invoicing() {
             },
           },
           {
+            label: "Copy public link",
+            run: async (sel) => {
+              const token = await billing.publicLink(sel[0].id);
+              const url = `${location.origin}${location.pathname}#/portal/${token}`;
+              await navigator.clipboard.writeText(url);
+              loadDocs();
+              toast.success("Public invoice link copied");
+            },
+          },
+          {
             label: "Delete",
             danger: true,
             run: async (sel) => {

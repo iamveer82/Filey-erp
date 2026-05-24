@@ -15,6 +15,7 @@ import OverdueReminder from "./components/OverdueReminder";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
+const PortalView = lazy(() => import("./pages/PortalView"));
 
 function Splash() {
   return <FileyLoader />;
@@ -87,6 +88,14 @@ function Gate() {
 }
 
 export default function App() {
+  // Public customer portal — shared invoice links open here without auth.
+  if (typeof window !== "undefined" && window.location.hash.startsWith("#/portal/")) {
+    return (
+      <Suspense fallback={<Splash />}>
+        <PortalView />
+      </Suspense>
+    );
+  }
   return (
     <LanguageProvider>
       <UIProvider>

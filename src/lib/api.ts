@@ -1419,6 +1419,24 @@ export const billing = {
         shared
       )
     ),
+  /** Ensure the invoice is shared and return its public portal token. */
+  publicLink: (docId: number) =>
+    online(async () => {
+      await shareWithItems(
+        "invoice_docs",
+        "invoice_doc_items",
+        "invoice_id",
+        docId,
+        true
+      );
+      const { data, error } = await sb()
+        .from("invoice_docs")
+        .select("share_token")
+        .eq("id", docId)
+        .single();
+      if (error) throw error;
+      return (data as { share_token: string }).share_token;
+    }),
   // ----- payments -----
   payments: (invoiceId: number) =>
     online(async () => {
