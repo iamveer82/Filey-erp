@@ -11,6 +11,8 @@
  *  - "anthropic" → Claude Messages API (native).
  */
 
+import { TOOLS, runTool } from "./aiTools";
+
 export type AiProvider = "openai" | "anthropic";
 
 export interface AiConfig {
@@ -248,6 +250,135 @@ async function errText(res: Response): Promise<string> {
   } catch {
     return `AI request failed (${res.status})`;
   }
+}
+
+/* ── Agentic chat: the model can call the read/draft tools in lib/aiTools ──── */
+
+const MAX_TOOL_ROUNDS = 5;
+
+export async function aiAgent(messages: AiMessage[], opts: ChatOpts = {}): Promise<string> {
+  const cfg = getAiConfig();
+  if (!aiReady(cfg))
+    throw new AiError("No AI model connected. Add your key in Settings → AI Assistant.");
+  return cfg.provider === "anthropic"
+    ? anthropicAgent(cfg, messages, opts)
+    : openaiAgent(cfg, messages, opts);
+}
+
+async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: ChatOpts): Promise<string> {
+  const url = `${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const sys = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convo: any[] = [];
+  if (sys) convo.push({ role: "system", content: sys });
+  for (const m of messages.filter((m) => m.role !== "system"))
+    convo.push({ role: m.role, content: m.text });
+  const tools = TOOLS.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }));
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: opts.maxTokens ?? 1024,
+        temperature: opts.temperature ?? 0.3,
+        messages: convo,
+        tools,
+      }),
+      signal: opts.signal,
+    });
+    if (!res.ok) throw new AiError(await errText(res));
+    const data = await res.json();
+    const msg = data?.choices?.[0]?.message;
+    if (!msg) return "";
+    convo.push(msg);
+    const calls = msg.tool_calls;
+    if (Array.isArray(calls) && calls.length) {
+      for (const tc of calls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function?.arguments || "{}");
+        } catch {
+          /* keep {} */
+        }
+        const result = await runTool(tc.function?.name, args);
+        convo.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(result).slice(0, 6000),
+        });
+      }
+      continue;
+    }
+    return (msg.content ?? "").toString().trim();
+  }
+  return "I ran several steps but couldn't finish — try rephrasing.";
+}
+
+async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: ChatOpts): Promise<string> {
+  const base = cfg.baseUrl.includes("anthropic")
+    ? cfg.baseUrl.replace(/\/+$/, "")
+    : "https://api.anthropic.com/v1";
+  const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convo: any[] = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role, content: m.text }));
+  const tools = TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters,
+  }));
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const res = await fetch(`${base}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": cfg.apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: opts.maxTokens ?? 1024,
+        system: system || undefined,
+        messages: convo,
+        tools,
+      }),
+      signal: opts.signal,
+    });
+    if (!res.ok) throw new AiError(await errText(res));
+    const data = await res.json();
+    const content = data?.content ?? [];
+    convo.push({ role: "assistant", content });
+    if (data?.stop_reason === "tool_use") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const results: any[] = [];
+      for (const block of content) {
+        if (block.type === "tool_use") {
+          const result = await runTool(block.name, block.input || {});
+          results.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: JSON.stringify(result).slice(0, 6000),
+          });
+        }
+      }
+      convo.push({ role: "user", content: results });
+      continue;
+    }
+    return (content as { type?: string; text?: string }[])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
+      .join("")
+      .trim();
+  }
+  return "I ran several steps but couldn't finish — try rephrasing.";
 }
 
 /* ── Document extraction (#21): an image of an invoice/receipt → fields ───── */

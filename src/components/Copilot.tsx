@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Send, X, Plus, NotepadText, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { cn, fmtDate } from "../lib/format";
 import {
-  aiChat,
+  aiAgent,
   aiReady,
   AiError,
   getPersona,
@@ -33,7 +33,7 @@ import { useUI } from "../lib/ui";
 import ColorOrb from "./ColorOrb";
 
 const SYSTEM =
-  "You are the AI assistant inside the Filey ERP/CRM web app. Help the user run their business: draft invoice line items, customer emails, product descriptions, summaries, and answer questions. Be concise and practical — prefer short, ready-to-use output over long explanations.";
+  "You are the AI assistant inside the Filey ERP/CRM web app. Help the user run their business: draft invoice line items, customer emails, product descriptions, summaries, and answer questions. You can call tools to look up the user's real data (customers, products, invoices, stats) and to create a DRAFT invoice — use them whenever they help, then summarise the result plainly. Be concise and practical — prefer short, ready-to-use output over long explanations.";
 
 const ORB_PRESETS = ["#FFD600", "#FF7A00", "#EC4899", "#7C3AED", "#2CADF6", "#3FB984", "#E5484D"];
 
@@ -188,7 +188,7 @@ export default function Copilot() {
         { role: "system", text: buildSystemPrompt(SYSTEM, getPersona(), ctx) },
         ...convo.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
       ];
-      const reply = await aiChat(messages, { maxTokens: 900 });
+      const reply = await aiAgent(messages, { maxTokens: 900 });
       setChats((prev) => {
         const next = prev.map((c) =>
           c.id === id
