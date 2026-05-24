@@ -51,6 +51,26 @@ function saveTurns(turns: Turn[]) {
   }
 }
 
+const ORB_PRESETS = ["#FFD600", "#FF7A00", "#EC4899", "#7C3AED", "#2CADF6", "#3FB984", "#E5484D"];
+
+/** Lighten (amt>0) or darken (amt<0) a hex colour. */
+function shade(hex: string, amt: number): string {
+  const c = hex.replace("#", "");
+  const full = c.length === 3 ? c.split("").map((x) => x + x).join("") : c;
+  const num = parseInt(full, 16);
+  if (Number.isNaN(num)) return hex;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  const f = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
+  return "#" + (((f(r) << 16) | (f(g) << 8) | f(b)) >>> 0).toString(16).padStart(6, "0");
+}
+
+function orbTones(color: string) {
+  return { base: "#1b1d22", accent1: color, accent2: shade(color, 0.28), accent3: shade(color, -0.28) };
+}
+
 export default function Copilot() {
   const { profile } = useAuth();
   const [open, setOpen] = useState(false);
@@ -60,10 +80,14 @@ export default function Copilot() {
   const [err, setErr] = useState<string | null>(null);
   const [persona, setPersonaState] = useState<AiPersona>(getPersona);
   const [ctx, setCtx] = useState<string>("");
+  const [customizing, setCustomizing] = useState(false);
   const ready = aiReady();
   const navigate = useNavigate();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const save = (patch: Partial<AiPersona>) => setPersonaState(setPersona(patch));
+  const tones = orbTones(persona.orbColor);
 
   // onboarding form draft
   const [draft, setDraft] = useState({
@@ -102,7 +126,7 @@ export default function Copilot() {
       ...t,
       {
         role: "assistant",
-        text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm Filey. I can see your customers, invoices, products and more — ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
+        text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm ${p.assistantName || "Filey"}. I can see your customers, invoices, products and more — ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
       },
     ]);
   };
@@ -155,8 +179,17 @@ export default function Copilot() {
             className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
           >
             <div className="flex items-center gap-2 border-b border-brand-100 px-4 py-3 dark:border-[#2A2C33]">
-              <ColorOrb dimension="22px" />
-              <span className="font-display text-sm font-bold text-ink">Filey AI</span>
+              <button
+                onClick={() => setCustomizing((c) => !c)}
+                aria-label="Customize assistant"
+                title="Click to rename & recolour"
+                className="shrink-0 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ink"
+              >
+                <ColorOrb dimension="22px" tones={tones} />
+              </button>
+              <span className="font-display text-sm font-bold text-ink">
+                {persona.assistantName || "Filey"}
+              </span>
               {turns.length > 0 && (
                 <button
                   onClick={() => {
@@ -181,6 +214,59 @@ export default function Copilot() {
                 <X size={16} />
               </button>
             </div>
+
+            <AnimatePresence>
+              {customizing && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden border-b border-brand-100 dark:border-[#2A2C33]"
+                >
+                  <div className="space-y-2.5 px-4 py-3">
+                    <div className="field">
+                      <label className="label">Assistant name</label>
+                      <input
+                        className="input h-9"
+                        value={persona.assistantName}
+                        onChange={(e) => save({ assistantName: e.target.value })}
+                        placeholder="Filey"
+                      />
+                    </div>
+                    <div>
+                      <p className="label">Orb colour</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {ORB_PRESETS.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => save({ orbColor: c })}
+                            aria-label={`Colour ${c}`}
+                            className={cn(
+                              "h-6 w-6 cursor-pointer rounded-full border border-black/10",
+                              persona.orbColor.toLowerCase() === c.toLowerCase() &&
+                                "ring-2 ring-ink ring-offset-1 dark:ring-offset-[#1E2025]"
+                            )}
+                            style={{ background: c }}
+                          />
+                        ))}
+                        <input
+                          type="color"
+                          value={persona.orbColor}
+                          onChange={(e) => save({ orbColor: e.target.value })}
+                          aria-label="Custom colour"
+                          title="Custom colour"
+                          className="h-6 w-8 cursor-pointer rounded border border-brand-200 bg-transparent dark:border-[#3A3D45]"
+                        />
+                      </div>
+                    </div>
+                    <button onClick={() => setCustomizing(false)} className="btn-ghost h-8 w-full">
+                      Done
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
               {!ready ? (
@@ -303,7 +389,7 @@ export default function Copilot() {
         aria-label="Filey AI assistant"
         className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
       >
-        <ColorOrb dimension="32px" />
+        <ColorOrb dimension="32px" tones={tones} />
         <span className="font-display text-sm font-bold text-ink">Ask AI</span>
       </motion.button>
     </div>

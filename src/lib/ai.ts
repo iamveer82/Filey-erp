@@ -66,6 +66,10 @@ export interface AiPersona {
   role: string;
   vibe: AiVibe;
   onboarded: boolean;
+  /** What the user named the assistant (default "Filey"). */
+  assistantName: string;
+  /** Accent colour for the orb (hex). */
+  orbColor: string;
 }
 
 const PERSONA_KEY = "filey.ai.persona";
@@ -74,6 +78,8 @@ const PERSONA_DEFAULT: AiPersona = {
   role: "",
   vibe: "Friendly",
   onboarded: false,
+  assistantName: "Filey",
+  orbColor: "#FFD600",
 };
 
 export function getPersona(): AiPersona {
@@ -100,7 +106,7 @@ export const AI_GUARDRAILS =
 /** System prompt assembled from persona + guardrails + (optional) data context. */
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
   const parts = [base, AI_GUARDRAILS];
-  const who: string[] = [];
+  const who: string[] = [`Your name is ${persona.assistantName || "Filey"}.`];
   if (persona.userName) who.push(`The user's name is ${persona.userName}.`);
   if (persona.role) who.push(`Their role is ${persona.role}.`);
   who.push(`Adopt a ${persona.vibe.toLowerCase()} tone.`);
