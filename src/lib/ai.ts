@@ -50,6 +50,65 @@ export function aiReady(cfg: AiConfig = getAiConfig()): boolean {
   return !!cfg.apiKey.trim() && !!cfg.model.trim();
 }
 
+/* ── Persona (set once, remembered permanently in this browser) ───────────── */
+
+export const AI_VIBES = [
+  "Friendly",
+  "Professional",
+  "Concise",
+  "Encouraging",
+  "Playful",
+] as const;
+export type AiVibe = (typeof AI_VIBES)[number];
+
+export interface AiPersona {
+  userName: string;
+  role: string;
+  vibe: AiVibe;
+  onboarded: boolean;
+}
+
+const PERSONA_KEY = "filey.ai.persona";
+const PERSONA_DEFAULT: AiPersona = {
+  userName: "",
+  role: "",
+  vibe: "Friendly",
+  onboarded: false,
+};
+
+export function getPersona(): AiPersona {
+  try {
+    const raw = localStorage.getItem(PERSONA_KEY);
+    if (!raw) return { ...PERSONA_DEFAULT };
+    return { ...PERSONA_DEFAULT, ...(JSON.parse(raw) as Partial<AiPersona>) };
+  } catch {
+    return { ...PERSONA_DEFAULT };
+  }
+}
+
+export function setPersona(patch: Partial<AiPersona>): AiPersona {
+  const next = { ...getPersona(), ...patch };
+  localStorage.setItem(PERSONA_KEY, JSON.stringify(next));
+  return next;
+}
+
+/* Safety guardrail injected into every conversation. Filey may read and help
+ * across the whole app, but must never touch credentials or settings. */
+export const AI_GUARDRAILS =
+  "SAFETY RULES (never break): You may read and help across the whole app, but you must NEVER change the user's password, security settings, or anything in the Settings section. If asked to do any of those, politely refuse and tell the user to do it themselves in Settings. Never reveal API keys or secrets.";
+
+/** System prompt assembled from persona + guardrails + (optional) data context. */
+export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
+  const parts = [base, AI_GUARDRAILS];
+  const who: string[] = [];
+  if (persona.userName) who.push(`The user's name is ${persona.userName}.`);
+  if (persona.role) who.push(`Their role is ${persona.role}.`);
+  who.push(`Adopt a ${persona.vibe.toLowerCase()} tone.`);
+  parts.push(who.join(" "));
+  if (context) parts.push(context);
+  return parts.join("\n\n");
+}
+
 export type AiRole = "system" | "user" | "assistant";
 export interface AiImage {
   /** e.g. "image/png", "image/jpeg" */

@@ -3,18 +3,32 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Send, X, Trash2 } from "lucide-react";
 import { cn } from "../lib/format";
-import { aiChat, aiReady, AiError, type AiMessage } from "../lib/ai";
+import {
+  aiChat,
+  aiReady,
+  AiError,
+  getPersona,
+  setPersona,
+  buildSystemPrompt,
+  AI_VIBES,
+  type AiMessage,
+  type AiPersona,
+  type AiVibe,
+} from "../lib/ai";
+import { buildAiContext } from "../lib/aiContext";
+import { useAuth } from "../lib/auth";
 import ColorOrb from "./ColorOrb";
 
-/* Floating bottom-right AI copilot. Talks to the user's own model (BYOK, see
- * lib/ai). Drafts invoice lines / emails / descriptions and answers questions.
- * Keeps a short rolling memory (last ~30 turns) persisted in this browser. */
+/* Floating bottom-right AI copilot (BYOK, see lib/ai). On first run it asks a
+ * couple of questions (name, role, vibe) and remembers them permanently. It
+ * reads the user's own business data for grounding, keeps a rolling ~30-turn
+ * memory, and is barred from passwords/settings by the system guardrails. */
 
 const SYSTEM =
   "You are Filey, the assistant inside the Filey ERP/CRM web app. Help the user run their business: draft invoice line items, customer emails, product descriptions, summaries, and answer questions. Be concise and practical — prefer short, ready-to-use output over long explanations.";
 
 const MEM_KEY = "filey.ai.history";
-const MEM_CAP = 30; // rolling memory window
+const MEM_CAP = 30;
 
 interface Turn {
   role: "user" | "assistant";
@@ -29,7 +43,6 @@ function loadTurns(): Turn[] {
     return [];
   }
 }
-
 function saveTurns(turns: Turn[]) {
   try {
     localStorage.setItem(MEM_KEY, JSON.stringify(turns.slice(-MEM_CAP)));
@@ -39,25 +52,60 @@ function saveTurns(turns: Turn[]) {
 }
 
 export default function Copilot() {
+  const { profile } = useAuth();
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<Turn[]>(loadTurns);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [persona, setPersonaState] = useState<AiPersona>(getPersona);
+  const [ctx, setCtx] = useState<string>("");
   const ready = aiReady();
   const navigate = useNavigate();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // onboarding form draft
+  const [draft, setDraft] = useState({
+    userName: persona.userName || profile?.name?.split(" ")[0] || "",
+    role: persona.role || "",
+    vibe: persona.vibe as AiVibe,
+  });
+
+  const needsOnboarding = ready && !persona.onboarded;
+
   useEffect(() => {
-    if (open) setTimeout(() => taRef.current?.focus(), 60);
-  }, [open]);
+    if (open && ready && persona.onboarded) setTimeout(() => taRef.current?.focus(), 60);
+  }, [open, ready, persona.onboarded]);
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
   useEffect(() => {
     saveTurns(turns);
   }, [turns]);
+  // pull a fresh snapshot of the user's data whenever the panel opens
+  useEffect(() => {
+    if (open && ready && persona.onboarded && !ctx) {
+      buildAiContext(profile?.company).then(setCtx).catch(() => {});
+    }
+  }, [open, ready, persona.onboarded, ctx, profile?.company]);
+
+  const finishOnboarding = () => {
+    const p = setPersona({
+      userName: draft.userName.trim(),
+      role: draft.role.trim(),
+      vibe: draft.vibe,
+      onboarded: true,
+    });
+    setPersonaState(p);
+    setTurns((t) => [
+      ...t,
+      {
+        role: "assistant",
+        text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm Filey. I can see your customers, invoices, products and more — ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
+      },
+    ]);
+  };
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -69,7 +117,7 @@ export default function Copilot() {
     setBusy(true);
     try {
       const messages: AiMessage[] = [
-        { role: "system", text: SYSTEM },
+        { role: "system", text: buildSystemPrompt(SYSTEM, getPersona(), ctx) },
         ...next.slice(-MEM_CAP).map((t) => ({ role: t.role, text: t.text })),
       ];
       const reply = await aiChat(messages, { maxTokens: 900 });
@@ -79,7 +127,7 @@ export default function Copilot() {
     } finally {
       setBusy(false);
     }
-  }, [input, busy, turns]);
+  }, [input, busy, turns, ctx]);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -88,6 +136,11 @@ export default function Copilot() {
     }
     if (e.key === "Escape") setOpen(false);
   };
+
+  const bubble = (role: Turn["role"]) =>
+    role === "user"
+      ? "ml-auto bg-primary-400 text-[#0A0A0A]"
+      : "mr-auto bg-brand-50 text-ink dark:bg-white/5";
 
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
@@ -146,6 +199,48 @@ export default function Copilot() {
                     Connect a model
                   </button>
                 </div>
+              ) : needsOnboarding ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-brand-500">
+                    Hi! I'm Filey. A couple of quick things so I can help you better —
+                    I'll remember these.
+                  </p>
+                  <div className="field">
+                    <label className="label">What should I call you?</label>
+                    <input
+                      className="input"
+                      value={draft.userName}
+                      onChange={(e) => setDraft((d) => ({ ...d, userName: e.target.value }))}
+                      placeholder="Your name"
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="label">Your role / post</label>
+                    <input
+                      className="input"
+                      value={draft.role}
+                      onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
+                      placeholder="e.g. Owner, Accountant, Sales"
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="label">Pick a vibe</label>
+                    <select
+                      className="select"
+                      value={draft.vibe}
+                      onChange={(e) => setDraft((d) => ({ ...d, vibe: e.target.value as AiVibe }))}
+                    >
+                      {AI_VIBES.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={finishOnboarding} className="btn-primary w-full">
+                    Start
+                  </button>
+                </div>
               ) : turns.length === 0 ? (
                 <p className="text-sm text-brand-400">
                   Ask me to draft an invoice line, a customer email, a product
@@ -156,10 +251,8 @@ export default function Copilot() {
                   <div
                     key={i}
                     className={cn(
-                      "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm",
-                      t.role === "user"
-                        ? "ml-auto bg-primary-400 text-[#0A0A0A]"
-                        : "mr-auto bg-brand-50 text-ink dark:bg-white/5"
+                      "w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm",
+                      bubble(t.role)
                     )}
                   >
                     {t.text}
@@ -167,7 +260,7 @@ export default function Copilot() {
                 ))
               )}
               {busy && (
-                <div className="mr-auto rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/5">
+                <div className="mr-auto w-fit rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/5">
                   Thinking…
                 </div>
               )}
@@ -176,7 +269,7 @@ export default function Copilot() {
               )}
             </div>
 
-            {ready && (
+            {ready && persona.onboarded && (
               <div className="border-t border-brand-100 p-2.5 dark:border-[#2A2C33]">
                 <div className="flex items-end gap-2">
                   <textarea
