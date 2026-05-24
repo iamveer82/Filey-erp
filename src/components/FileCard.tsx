@@ -355,7 +355,7 @@ export const FileCard = ({ formatFile }: FileCardProps) => {
       </div>
       <div
         className={cn(
-          "ring-border relative z-1 space-y-3 rounded-md bg-white p-2 ring-1 dark:bg-[#222327]",
+          "ring-border relative z-1 space-y-3 rounded-md bg-white p-2 ring-1 dark:bg-[#24262C]",
           sizeClass
         )}
       >

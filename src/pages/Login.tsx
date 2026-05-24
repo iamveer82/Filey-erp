@@ -46,7 +46,7 @@ function Segmented<T extends string>({
             className={
               "flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
               (active
-                ? "bg-white text-ink shadow-bento dark:bg-[#33353A] dark:text-[#F0F0F0]"
+                ? "bg-white text-ink shadow-bento dark:bg-[#3A3D45] dark:text-[#F4F5F6]"
                 : "text-brand-500 hover:text-ink")
             }
           >
@@ -192,7 +192,7 @@ export default function Login() {
         "flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold " +
         (kind === "err"
           ? "text-danger bg-danger/10"
-          : "text-brand-700 bg-brand-100 dark:text-[#C8C8C8] dark:bg-white/10")
+          : "text-brand-700 bg-brand-100 dark:text-[#DDE0E4] dark:bg-white/10")
       }
     >
       {kind === "err" ? (
@@ -353,7 +353,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -388,7 +388,7 @@ export default function Login() {
                         showConfirm ? "Hide password" : "Show password"
                       }
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       {showConfirm ? (
                         <EyeOff size={16} />

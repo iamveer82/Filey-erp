@@ -61,7 +61,7 @@ export default function ColorPicker({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Pick a colour"
-        className="flex h-9 items-center gap-2 rounded-lg border border-brand-200 bg-white px-2 text-ink shadow-sm shadow-black/5 transition-colors hover:border-brand-300 cursor-pointer dark:bg-[#1A1B1E] dark:border-[#33353A] dark:text-[#F0F0F0]"
+        className="flex h-9 items-center gap-2 rounded-lg border border-brand-200 bg-white px-2 text-ink shadow-sm shadow-black/5 transition-colors hover:border-brand-300 cursor-pointer dark:bg-[#1A1B1E] dark:border-[#3A3D45] dark:text-[#F4F5F6]"
       >
         <span
           className="h-5 w-5 rounded-md border border-black/10"
@@ -71,7 +71,7 @@ export default function ColorPicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-40 w-[248px] rounded-2xl border border-brand-200 bg-white p-3 shadow-bento-hover dark:bg-[#222327] dark:border-[#33353A]">
+        <div className="absolute right-0 top-11 z-40 w-[248px] rounded-2xl border border-brand-200 bg-white p-3 shadow-bento-hover dark:bg-[#24262C] dark:border-[#3A3D45]">
           <Saturation
             hsva={hsva}
             onChange={(c) => onChange(hsvaToHex(c))}

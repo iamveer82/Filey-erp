@@ -394,7 +394,7 @@ function POEditor({
         </Field>
       </div>
 
-      <div className="rounded-xl border border-brand-200 dark:border-[#33353A] overflow-hidden mb-3">
+      <div className="rounded-xl border border-brand-200 dark:border-[#3A3D45] overflow-hidden mb-3">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-semibold text-brand-400 bg-brand-50/60 dark:bg-white/5">

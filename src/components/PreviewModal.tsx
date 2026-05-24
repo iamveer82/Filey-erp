@@ -162,7 +162,7 @@ export default function PreviewModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl h-full bg-white dark:bg-[#222327] shadow-bento-hover flex flex-col"
+        className="w-full max-w-3xl h-full bg-white dark:bg-[#24262C] shadow-bento-hover flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
@@ -264,7 +264,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1A1B1E] rounded-xl border border-brand-200 dark:border-[#33353A] p-4 text-brand-700 dark:text-[#C8C8C8]">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1A1B1E] rounded-xl border border-brand-200 dark:border-[#3A3D45] p-4 text-brand-700 dark:text-[#DDE0E4]">
               {text}
             </pre>
           )}

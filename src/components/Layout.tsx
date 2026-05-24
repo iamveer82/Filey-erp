@@ -333,7 +333,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           width: sidebarWidth,
           transition: dragging ? "none" : "width 200ms ease-out",
         }}
-        className="shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#33353A] shadow-bento flex flex-col overflow-hidden"
+        className="shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#3A3D45] shadow-bento flex flex-col overflow-hidden"
       >
         <div
           className={cn(
@@ -376,7 +376,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     collapsed ? "justify-center px-0" : "px-3",
                     isActive
                       ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
-                      : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#A0A0A0] dark:hover:bg-white/5 dark:hover:text-[#F0F0F0]"
+                      : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
                   )
                 }
               >
@@ -434,12 +434,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             "h-10 w-1 rounded-full transition-colors",
             dragging
               ? "bg-primary-500"
-              : "bg-brand-200 group-hover:bg-brand-300 group-focus-visible:bg-primary-400 dark:bg-[#33353A]"
+              : "bg-brand-200 group-hover:bg-brand-300 group-focus-visible:bg-primary-400 dark:bg-[#3A3D45]"
           )}
         />
         <span
           className={cn(
-            "absolute grid h-6 w-4 place-items-center rounded-md border border-brand-200 bg-white text-brand-400 transition-opacity dark:bg-[#222327] dark:border-[#33353A]",
+            "absolute grid h-6 w-4 place-items-center rounded-md border border-brand-200 bg-white text-brand-400 transition-opacity dark:bg-[#24262C] dark:border-[#3A3D45]",
             dragging
               ? "opacity-100"
               : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
@@ -501,7 +501,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   animate={{ opacity: 1, y: 0, height: "auto" }}
                   exit={{ opacity: 0, y: -6, height: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] shadow-bento-hover"
+                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover"
                 >
                   <div className="max-h-[52vh] overflow-y-auto p-2">
                     {/* Quick actions (command palette) */}
@@ -592,7 +592,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={cycleTheme}
               aria-label={`Theme: ${themeLabel} (click to change)`}
               title={`Theme: ${themeLabel}`}
-              className="grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] text-brand-500 dark:text-[#A0A0A0] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+              className="grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-brand-500 dark:text-[#B6BAC1] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
             >
               <ThemeIcon size={18} />
             </button>
@@ -602,7 +602,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Change language"
-                  className="flex h-10 items-center gap-1.5 rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] px-2.5 text-brand-600 dark:text-[#C8C8C8] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 transition-colors cursor-pointer"
+                  className="flex h-10 items-center gap-1.5 rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] px-2.5 text-brand-600 dark:text-[#DDE0E4] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 transition-colors cursor-pointer"
                 >
                   <span className={`fi fi-${LANGS[lang].flag} rounded-sm`} />
                   <span className="hidden text-xs font-semibold sm:block">
@@ -629,7 +629,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <button
                 aria-label="Notifications"
                 onClick={() => setNotifOpen((o) => !o)}
-                className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] text-brand-500 dark:text-[#A0A0A0] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-brand-500 dark:text-[#B6BAC1] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
               >
                 <Bell size={18} />
                 {badge > 0 && (
@@ -640,7 +640,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] shadow-bento-hover">
+                <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A2C33]">
                     <p className="text-sm font-bold text-ink">
                       Notifications
@@ -731,7 +731,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Account menu"
-                  className="flex items-center gap-3 h-12 rounded-2xl bg-white dark:bg-[#222327] border border-brand-200 dark:border-[#33353A] pl-3.5 pr-1.5 hover:border-brand-300 hover:shadow-bento dark:hover:border-[#454852] transition-all duration-200 cursor-pointer"
+                  className="flex items-center gap-3 h-12 rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] pl-3.5 pr-1.5 hover:border-brand-300 hover:shadow-bento dark:hover:border-[#454852] transition-all duration-200 cursor-pointer"
                 >
                   <span className="hidden md:block leading-tight text-left">
                     <span className="block text-sm font-semibold text-ink tracking-tight">
@@ -742,7 +742,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     </span>
                   </span>
                   <span className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-violet-500 via-pink-500 to-amber-400 p-0.5">
-                    <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#222327] text-ink text-xs font-bold">
+                    <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#24262C] text-ink text-xs font-bold">
                       {initials}
                     </span>
                   </span>

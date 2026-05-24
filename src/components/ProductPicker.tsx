@@ -96,7 +96,7 @@ export default function ProductPicker({
               transition={{ duration: 0.18 }}
               className={cn(
                 "group flex items-center justify-between gap-3",
-                "p-3 rounded-xl bg-white border border-brand-200 dark:bg-[#222327] dark:border-[#33353A]",
+                "p-3 rounded-xl bg-white border border-brand-200 dark:bg-[#24262C] dark:border-[#3A3D45]",
                 "hover:border-primary-300 transition-colors duration-200"
               )}
             >
@@ -113,7 +113,7 @@ export default function ProductPicker({
                       {p.name}
                     </h3>
                     {p.category && (
-                      <span className="pill bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#C8C8C8]">
+                      <span className="pill bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#DDE0E4]">
                         {p.category}
                       </span>
                     )}
@@ -156,7 +156,7 @@ export default function ProductPicker({
         initial={{ opacity: 0, x: 12 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.2 }}
-        className="w-full lg:w-72 shrink-0 flex flex-col rounded-2xl bg-white border border-brand-200 shadow-bento p-4 dark:bg-[#222327] dark:border-[#33353A]"
+        className="w-full lg:w-72 shrink-0 flex flex-col rounded-2xl bg-white border border-brand-200 shadow-bento p-4 dark:bg-[#24262C] dark:border-[#3A3D45]"
       >
         <div className="flex items-center gap-2 mb-3">
           <ShoppingCart size={16} className="text-brand-500" />
@@ -190,7 +190,7 @@ export default function ProductPicker({
                     <button
                       onClick={() => remove(item.id)}
                       aria-label={`Remove ${item.name}`}
-                      className="p-1 rounded-md text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                      className="p-1 rounded-md text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       <X size={12} />
                     </button>
@@ -200,7 +200,7 @@ export default function ProductPicker({
                       <button
                         onClick={() => update(item.id, -1)}
                         aria-label="Decrease quantity"
-                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                       >
                         <Minus size={12} />
                       </button>
@@ -213,7 +213,7 @@ export default function ProductPicker({
                       <button
                         onClick={() => update(item.id, 1)}
                         aria-label="Increase quantity"
-                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F0F0F0] transition-colors cursor-pointer"
+                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                       >
                         <Plus size={12} />
                       </button>

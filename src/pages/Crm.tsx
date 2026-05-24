@@ -216,8 +216,8 @@ export default function Crm() {
                   onClick={() => setView(v)}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize cursor-pointer transition-colors ${
                     view === v
-                      ? "bg-white text-ink shadow-bento dark:bg-[#33353A] dark:text-[#F0F0F0]"
-                      : "text-brand-500 hover:text-ink dark:hover:text-[#F0F0F0]"
+                      ? "bg-white text-ink shadow-bento dark:bg-[#3A3D45] dark:text-[#F4F5F6]"
+                      : "text-brand-500 hover:text-ink dark:hover:text-[#F4F5F6]"
                   }`}
                 >
                   {v === "pipeline" ? "Pipeline board" : "Dashboard"}
@@ -589,7 +589,7 @@ function PipelineBoard({
             className={`w-72 shrink-0 rounded-2xl border p-3 transition-colors ${
               over === s.id
                 ? "border-primary-300 bg-primary-50 dark:bg-primary-400/10"
-                : "border-brand-200 bg-brand-50/60 dark:border-[#33353A] dark:bg-white/[0.03]"
+                : "border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03]"
             }`}
           >
             <div className="flex items-center justify-between px-1 mb-3">

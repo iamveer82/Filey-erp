@@ -93,7 +93,7 @@ export function emailShell(title: string, bodyHtml: string): string {
     </div>
     <div style="border:1px solid #E4DAC6;border-top:0;border-radius:0 0 12px 12px;padding:24px;background:#fff">
       ${bodyHtml}
-      <p style="color:#A0A0A0;font-size:12px;margin-top:24px">
+      <p style="color:#B6BAC1;font-size:12px;margin-top:24px">
         Sent via Filey ERP
       </p>
     </div>

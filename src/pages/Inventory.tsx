@@ -311,7 +311,7 @@ export default function Inventory() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${p.name}`}
-                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F0F0F0] cursor-pointer transition-colors duration-200"
+                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>
