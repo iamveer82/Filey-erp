@@ -753,6 +753,15 @@ function Editor({
       return;
     }
     const t = invoiceTotals(form.items, form.discount || 0, form.tax_rate || 0);
+    let portalUrl = "";
+    try {
+      if (form.id) {
+        const token = await billing.publicLink(form.id);
+        portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+      }
+    } catch {
+      /* link optional */
+    }
     try {
       await sendEmail({
         to: form.customer_email,
@@ -783,6 +792,11 @@ function Editor({
                t.total
              )}</b></td></tr>
            </table>
+           ${
+             portalUrl
+               ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>`
+               : ""
+           }
            <p>${esc(form.notes ?? "")}</p>`
         ),
       });
