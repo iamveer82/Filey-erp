@@ -29,6 +29,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import CompanyMessages from "../components/CompanyMessages";
 import { num, aed, fmtDate } from "../lib/format";
+import AiSummaryCard from "../components/AiSummaryCard";
 import {
   PageHeader,
   MetricCard,
@@ -164,6 +165,8 @@ export default function Overview() {
         title="Overview"
         subtitle="Inventory at a glance — every card answers one question"
       />
+
+      <AiSummaryCard />
 
       {error && (
         <div className="mb-4">
