@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, TrendingUp, Wallet, Receipt, Banknote } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, numInput, cn } from "../lib/format";
+import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -277,7 +277,7 @@ function AccountModal({
             <p className="text-[11px] text-danger mt-1">Name is required.</p>
           )}
         </Field>
-        <Field label="Opening Balance (AED)">
+        <Field label={`Opening Balance (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"
@@ -370,7 +370,7 @@ function JournalModal({
               <option value="credit">Credit</option>
             </select>
           </Field>
-          <Field label="Amount (AED)">
+          <Field label={`Amount (${getDisplayCurrency()})`}>
             <input
               type="number"
               className="input"

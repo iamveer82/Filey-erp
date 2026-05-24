@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Minus, Plus, ShoppingCart, X, CreditCard, Search } from "lucide-react";
 import NumberFlow from "@number-flow/react";
 import type { Product } from "../lib/api";
-import { aed } from "../lib/format";
+import { aed, getDisplayCurrency } from "../lib/format";
 import { cn } from "../lib/format";
 
 export type CartLine = Product & { quantity: number };
@@ -242,7 +242,7 @@ export default function ProductPicker({
                 value={totalPrice}
                 format={{
                   style: "currency",
-                  currency: "AED",
+                  currency: getDisplayCurrency(),
                   maximumFractionDigits: 2,
                 }}
               />

@@ -35,7 +35,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput } from "../lib/format";
+import { fmtDate, numInput, CURRENCIES } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
@@ -333,7 +333,7 @@ export default function Invoicing() {
             key: "total",
             label: "Total",
             render: (d) => (
-              <span className="font-semibold">{money(d.total, "AED")}</span>
+              <span className="font-semibold">{money(d.total, d.currency || "AED")}</span>
             ),
           },
           {
@@ -353,7 +353,7 @@ export default function Invoicing() {
                   </Badge>
                   {(d.paid ?? 0) > 0 && (d.balance ?? 0) > 0 && (
                     <p className="text-[11px] text-brand-400 mt-0.5 tabular-nums">
-                      {money(d.balance ?? 0, "AED")} due
+                      {money(d.balance ?? 0, d.currency || "AED")} due
                     </p>
                   )}
                 </div>
@@ -504,25 +504,26 @@ function PaymentsModal({
   };
 
   if (!doc) return null;
+  const ccy = doc.currency || "AED";
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Total</p>
           <p className="font-display font-bold text-ink tabular-nums">
-            {money(total, "AED")}
+            {money(total, ccy)}
           </p>
         </div>
         <div className="rounded-xl bg-success/10 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Paid</p>
           <p className="font-display font-bold text-success tabular-nums">
-            {money(paid, "AED")}
+            {money(paid, ccy)}
           </p>
         </div>
         <div className="rounded-xl bg-primary-100 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Balance</p>
           <p className="font-display font-bold text-primary-700 tabular-nums">
-            {money(balance, "AED")}
+            {money(balance, ccy)}
           </p>
         </div>
       </div>
@@ -535,7 +536,7 @@ function PaymentsModal({
               className="flex items-center justify-between rounded-lg bg-white border border-brand-100 px-3 py-2 text-sm"
             >
               <span className="tabular-nums font-semibold text-ink">
-                {money(Number(p.amount), "AED")}
+                {money(Number(p.amount), ccy)}
               </span>
               <span className="text-brand-400 text-xs">
                 {p.method ?? "—"} · {fmtDate(p.paid_at)}
@@ -946,13 +947,17 @@ function Editor({
                   />
                 </Field>
                 <Field label="Currency">
-                  <input
-                    className="input"
-                    value={form.currency}
-                    onChange={(e) =>
-                      set("currency", e.target.value.toUpperCase())
-                    }
-                  />
+                  <select
+                    className="select"
+                    value={form.currency || "AED"}
+                    onChange={(e) => set("currency", e.target.value)}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
               </div>
             </div>

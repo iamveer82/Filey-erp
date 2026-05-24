@@ -11,7 +11,7 @@ import {
 import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput, cn } from "../lib/format";
+import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -335,7 +335,7 @@ function OrderModal({
             </p>
           )}
         </Field>
-        <Field label="Total (AED)">
+        <Field label={`Total (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"

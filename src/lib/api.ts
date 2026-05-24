@@ -198,6 +198,7 @@ export interface InvoiceDocSummary {
   status: string;
   template: string;
   total: number;
+  currency?: string;
   paid?: number;
   balance?: number;
   issue_date?: string;
@@ -1323,6 +1324,7 @@ export const billing = {
             status: d.status,
             template: d.template,
             total,
+            currency: d.currency ?? "AED",
             paid,
             balance: Math.max(0, total - paid),
             issue_date: d.issue_date ?? undefined,

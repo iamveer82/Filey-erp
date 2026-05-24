@@ -27,7 +27,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
-import { aed, num } from "../lib/format";
+import { aed, num, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -355,7 +355,7 @@ export default function Reports() {
           </ResponsiveContainer>
         </div>
         <p className="text-xs text-brand-400 mt-3">
-          {num(products.length)} products tracked · figures in AED
+          {num(products.length)} products tracked · figures in {getDisplayCurrency()}
         </p>
       </InfoCard>
     </div>

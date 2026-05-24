@@ -4,7 +4,7 @@ import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, num, numInput, cn } from "../lib/format";
+import { aed, fmtDate, num, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -234,7 +234,7 @@ function PurchaseModal({
             onChange={(e) => setF({ ...f, description: e.target.value })}
           />
         </Field>
-        <Field label="Amount (AED)">
+        <Field label={`Amount (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"

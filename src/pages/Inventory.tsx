@@ -25,7 +25,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
-import { aed, num, numInput, cn } from "../lib/format";
+import { aed, num, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -444,7 +444,7 @@ function ProductModal({
             onChange={(e) => setF({ ...f, category: e.target.value })}
           />
         </Field>
-        <Field label="Unit Price (AED)">
+        <Field label={`Unit Price (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"
@@ -453,7 +453,7 @@ function ProductModal({
             onChange={(e) => setF({ ...f, unit_price: numInput(e.target.value) })}
           />
         </Field>
-        <Field label="Cost Price (AED)">
+        <Field label={`Cost Price (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"

@@ -17,6 +17,21 @@ export function setDisplayCurrency(c?: string | null): void {
   displayCurrency = c && c.trim() ? c : "AED";
 }
 
+/** The org's current display currency (synced from the company profile). */
+export function getDisplayCurrency(): string {
+  return displayCurrency;
+}
+
+/** Single source of truth for the currency pickers across the app. */
+export const CURRENCIES: { code: string; name: string }[] = [
+  { code: "AED", name: "UAE Dirham" },
+  { code: "USD", name: "US Dollar" },
+  { code: "EUR", name: "Euro" },
+  { code: "GBP", name: "British Pound" },
+  { code: "INR", name: "Indian Rupee" },
+  { code: "SAR", name: "Saudi Riyal" },
+];
+
 /** Format a value in the org's display currency. Name kept for history;
  *  it is no longer AED-only. */
 export function aed(value: number): string {

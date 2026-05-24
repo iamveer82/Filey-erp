@@ -10,7 +10,7 @@ import {
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, num, fmtDate, numInput, cn } from "../lib/format";
+import { aed, num, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -284,7 +284,7 @@ function EmployeeModal({
             onChange={(e) => setF({ ...f, position: e.target.value })}
           />
         </Field>
-        <Field label="Salary (AED)">
+        <Field label={`Salary (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"

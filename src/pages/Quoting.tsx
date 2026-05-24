@@ -29,7 +29,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput } from "../lib/format";
+import { fmtDate, numInput, CURRENCIES } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import { Modal, Field } from "../components/ui";
@@ -592,9 +592,9 @@ export default function Quoting() {
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                 >
-                  {["USD", "AED", "EUR", "GBP", "INR"].map((c) => (
-                    <option key={c} value={c}>
-                      {c} - {c === "AED" ? "UAE Dirham" : c}
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name}
                     </option>
                   ))}
                 </select>
