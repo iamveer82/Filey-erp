@@ -1,0 +1,19 @@
+{
+  "name": "Filey — AI ERP & CRM",
+  "short_name": "Filey",
+  "description": "AI-powered ERP/CRM: inventory, sales, invoicing, finance and document tools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#FFD600",
+  "background_color": "#FFF9F0",
+  "icons": [
+    {
+      "src": "/filey-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
