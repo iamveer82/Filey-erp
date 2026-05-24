@@ -1623,6 +1623,102 @@ export interface ToolRun {
   created_at: string;
 }
 
+// ===== RECURRING INVOICES (#17) =====
+export interface Recurrence {
+  id: number;
+  base_invoice_id: number;
+  interval: "weekly" | "monthly" | "yearly";
+  next_run: string;
+  last_run?: string | null;
+  active: boolean;
+}
+
+function addInterval(dateISO: string, interval: string): string {
+  const d = new Date(dateISO + "T00:00:00");
+  if (interval === "weekly") d.setDate(d.getDate() + 7);
+  else if (interval === "yearly") d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export const recurrences = {
+  list: () =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("invoice_recurrence")
+        .select("*")
+        .order("next_run", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Recurrence[];
+    }),
+  create: (baseInvoiceId: number, interval: Recurrence["interval"]) =>
+    online(() =>
+      sInsert("invoice_recurrence", {
+        base_invoice_id: baseInvoiceId,
+        interval,
+        next_run: addInterval(todayISO(), interval),
+      })
+    ),
+  cancel: (id: number) =>
+    online(async () => {
+      await sUpdate("invoice_recurrence", id, { active: false });
+    }),
+  /** Generate any invoices whose recurrence is due; returns how many were created. */
+  generateDue: () =>
+    online(async () => {
+      const { data } = await sb()
+        .from("invoice_recurrence")
+        .select("*")
+        .eq("active", true);
+      const today = todayISO();
+      const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
+      let made = 0;
+      for (const r of due) {
+        const base = await billing.getDoc(r.base_invoice_id).catch(() => null);
+        if (!base) {
+          await sUpdate("invoice_recurrence", r.id, { active: false });
+          continue;
+        }
+        const input: InvoiceDocInput = {
+          number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
+          status: "draft",
+          template: base.template,
+          accent: base.accent,
+          currency: base.currency,
+          seller_name: base.seller_name,
+          seller_address: base.seller_address,
+          seller_trn: base.seller_trn,
+          seller_email: base.seller_email,
+          seller_phone: base.seller_phone,
+          logo: base.logo,
+          customer_id: base.customer_id,
+          customer_name: base.customer_name,
+          customer_address: base.customer_address,
+          customer_trn: base.customer_trn,
+          customer_email: base.customer_email,
+          issue_date: today,
+          notes: base.notes,
+          terms: base.terms,
+          tax_rate: base.tax_rate,
+          discount: base.discount,
+          items: base.items.map((it) => ({
+            description: it.description,
+            qty: it.qty,
+            unit_price: it.unit_price,
+            product_id: it.product_id,
+          })),
+        };
+        await billing.saveDoc(input);
+        await sUpdate("invoice_recurrence", r.id, {
+          next_run: addInterval(r.next_run, r.interval),
+          last_run: today,
+        });
+        made++;
+      }
+      return made;
+    }),
+};
+
 const quoteTotal = (items: QuotationItem[]) =>
   quotationTotals(items).total;
 

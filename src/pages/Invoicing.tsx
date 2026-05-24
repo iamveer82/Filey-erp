@@ -24,15 +24,18 @@ import {
   Paperclip,
   CreditCard,
   Sparkles,
+  Repeat,
 } from "lucide-react";
 import {
   billing,
   crm,
+  recurrences,
   InvoiceDocSummary,
   InvoiceDocInput,
   InvoicePayment,
   CompanyProfile,
   CrmCustomer,
+  Recurrence,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -125,16 +128,35 @@ export default function Invoicing() {
   const [scanOpen, setScanOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
+  const [recurs, setRecurs] = useState<Recurrence[]>([]);
 
   const loadDocs = () =>
     billing.listDocs().then(setDocs).catch(console.error);
+  const loadRecurs = () =>
+    recurrences.list().then(setRecurs).catch(() => {});
 
   const reload = () => {
     billing.getCompany().then(setCompany).catch(console.error);
     loadDocs();
+    loadRecurs();
   };
   useEffect(reload, []);
   useLiveSync(reload);
+
+  // Generate any due recurring invoices once on load.
+  useEffect(() => {
+    recurrences
+      .generateDue()
+      .then((n) => {
+        if (n > 0) {
+          loadDocs();
+          loadRecurs();
+          toast.info(`${n} recurring invoice${n > 1 ? "s" : ""} generated`);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ⌘K "New invoice" deep-link: open a blank invoice once company loads.
   const [params, setParams] = useSearchParams();
@@ -273,6 +295,38 @@ export default function Invoicing() {
         }
       />
 
+      {recurs.filter((r) => r.active).length > 0 && (
+        <div className="card mb-4">
+          <p className="mb-2 flex items-center gap-2 font-bold text-ink">
+            <Repeat size={15} /> Recurring invoices
+          </p>
+          <ul className="space-y-1.5">
+            {recurs
+              .filter((r) => r.active)
+              .map((r) => {
+                const base = docs.find((d) => d.id === r.base_invoice_id);
+                return (
+                  <li key={r.id} className="flex items-center justify-between text-sm">
+                    <span className="text-brand-600">
+                      {base?.number ?? `#${r.base_invoice_id}`} · {r.interval} · next{" "}
+                      {fmtDate(r.next_run)}
+                    </span>
+                    <button
+                      className="cursor-pointer text-xs font-semibold text-brand-400 hover:text-danger"
+                      onClick={async () => {
+                        await recurrences.cancel(r.id);
+                        loadRecurs();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </li>
+                );
+              })}
+          </ul>
+        </div>
+      )}
+
       <DataTable<InvoiceDocSummary>
         rows={docs}
         empty="No invoices yet — create your first one"
@@ -292,6 +346,14 @@ export default function Invoicing() {
               for (const d of sel) await billing.setStatus(d.id, "sent");
               loadDocs();
               toast.success(`Updated ${sel.length}.`);
+            },
+          },
+          {
+            label: "Repeat monthly",
+            run: async (sel) => {
+              for (const d of sel) await recurrences.create(d.id, "monthly");
+              loadRecurs();
+              toast.success(`${sel.length} set to repeat monthly.`);
             },
           },
           {
