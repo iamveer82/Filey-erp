@@ -17,14 +17,12 @@ import {
   Settings,
   GripVertical,
   Command,
-  Sun,
-  Moon,
   Plus,
   ChevronDown,
 } from "lucide-react";
 import Logo from "./Logo";
 import { cn, setDisplayCurrency } from "../lib/format";
-import { getTheme, setTheme, type Theme } from "../lib/theme";
+import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
 import { useLang, LANGS, type Lang } from "../lib/i18n";
@@ -184,16 +182,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       else setWidth((w) => Math.min(SIDEBAR_MAX, w + 24));
     }
   };
-
-  // Theme: toggle light <-> dark.
-  const [theme, setThemeState] = useState<Theme>(() => getTheme());
-  const cycleTheme = () => {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    setThemeState(next);
-  };
-  const ThemeIcon = theme === "dark" ? Moon : Sun;
-  const themeLabel = theme === "dark" ? "Dark" : "Light";
 
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -588,14 +576,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             )}
 
             {/* Light / dark theme toggle (left of notifications) */}
-            <button
-              onClick={cycleTheme}
-              aria-label={`Theme: ${themeLabel} (click to change)`}
-              title={`Theme: ${themeLabel}`}
-              className="grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-brand-500 dark:text-[#B6BAC1] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
-            >
-              <ThemeIcon size={18} />
-            </button>
+            <AnimatedThemeToggler />
 
             {/* Language switcher */}
             <DropdownMenu>
