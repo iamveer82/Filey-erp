@@ -5,6 +5,16 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 
 ## Outstanding now
 
+- [ ] **Activate Stripe billing** (code is built — `supabase/functions/stripe/`):
+      1. `supabase functions deploy stripe --no-verify-jwt`
+      2. Set secrets: `supabase secrets set STRIPE_SECRET_KEY=… STRIPE_WEBHOOK_SECRET=… STRIPE_PRICE_PRO=price_… STRIPE_PRICE_BUSINESS=price_… SITE_URL=https://your-domain`
+      3. In Stripe → Webhooks, add endpoint
+         `https://voyrjqgaypiylwskkwpr.functions.supabase.co/stripe`
+         for `checkout.session.completed`, `customer.subscription.updated`,
+         `customer.subscription.deleted`; copy its signing secret into
+         `STRIPE_WEBHOOK_SECRET`.
+      Until then the Billing tab shows plans but checkout returns a friendly
+      "not set up yet" message. (DB columns already added to `organizations`.)
 - [ ] **Deploy the `run-tool` edge function** (server PDF tools):
       `supabase functions deploy run-tool`
 - [ ] **Stand up the worker** (heavy tools — OCR/Office/PDF-A):
