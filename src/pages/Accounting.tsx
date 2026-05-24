@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, TrendingUp, Wallet, Receipt, Banknote } from "lucide-react";
+import { Plus, TrendingUp, Wallet, Receipt, Banknote, Sparkles } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import ExpenseScanModal from "../components/ExpenseScanModal";
 import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
@@ -27,6 +28,7 @@ export default function Accounting() {
   const [report, setReport] = useState<FinanceReport | null>(null);
   const [acctOpen, setAcctOpen] = useState(false);
   const [jOpen, setJOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [tab, setTab] = useState<"journal" | "accounts">("journal");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -53,6 +55,9 @@ export default function Accounting() {
         subtitle="Chart of accounts, journal entries & financial position"
         action={
           <div className="flex gap-2">
+            <button className="btn-ghost" onClick={() => setScanOpen(true)}>
+              <Sparkles size={15} /> Scan receipt
+            </button>
             <button
               className="btn-ghost"
               onClick={() => setAcctOpen(true)}
@@ -65,6 +70,8 @@ export default function Accounting() {
           </div>
         }
       />
+
+      <ExpenseScanModal open={scanOpen} onClose={() => setScanOpen(false)} onSaved={load} />
 
       {error && (
         <div className="mb-4">

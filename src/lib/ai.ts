@@ -410,6 +410,29 @@ Rules: use an empty string or empty array when a field is unknown; numbers must 
   return parseJson<ExtractedInvoice>(out);
 }
 
+export interface ExtractedExpense {
+  vendor?: string;
+  description?: string;
+  amount?: number;
+  date?: string;
+  category?: string;
+}
+
+export async function extractExpenseFromImage(
+  image: AiImage,
+  opts: ChatOpts = {}
+): Promise<ExtractedExpense> {
+  const prompt = `Read this receipt / bill and return STRICT JSON of this shape:
+{"vendor":"","description":"","amount":0,"date":"YYYY-MM-DD","category":""}
+amount = the grand total as a plain number. category = one short word (Travel, Meals, Office, Software, Utilities, Rent, Other). Use empty string / 0 when unknown. Return ONLY the JSON — no prose, no fences.`;
+  const out = await aiChat([{ role: "user", text: prompt, images: [image] }], {
+    maxTokens: 600,
+    temperature: 0,
+    ...opts,
+  });
+  return parseJson<ExtractedExpense>(out);
+}
+
 /** Tolerant JSON extraction — strips code fences / surrounding prose. */
 export function parseJson<T>(s: string): T {
   let t = s.trim();
