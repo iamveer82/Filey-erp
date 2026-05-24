@@ -59,7 +59,7 @@ function AppRoutes() {
 }
 
 function Gate() {
-  const { loading, configured, user, needsProfile } = useAuth();
+  const { loading, configured, user, needsProfile, profileLoading } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
@@ -69,6 +69,9 @@ function Gate() {
     ) : (
       <Landing onGetStarted={() => setShowLogin(true)} />
     );
+  // Signed in but still fetching the profile — show the splash, not the
+  // profile-setup form (which would otherwise flash for existing users).
+  if (profileLoading) return <Splash />;
   if (needsProfile) return <ProfileSetup />;
 
   return (

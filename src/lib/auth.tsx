@@ -43,6 +43,8 @@ interface AuthValue {
   session: Session | null;
   profile: Profile | null;
   needsProfile: boolean;
+  /** True while we're still fetching the signed-in user's profile. */
+  profileLoading: boolean;
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
   /** Returns needsOtp=false when Supabase confirmation is disabled (instant session). */
   signUpWithPassword: (
@@ -78,17 +80,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  // Whether we've actually finished checking for a profile for the current
+  // user. Until then we must NOT treat a missing profile as "needs setup"
+  // (that briefly flashes the profile form right after sign-in).
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   const loadProfile = async (u: User) => {
     if (!supabase) return;
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", u.id)
-      .maybeSingle();
-    const prof = (data as Profile) ?? null;
-    setCacheOrg(prof?.org_id);
-    setProfile(prof);
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", u.id)
+        .maybeSingle();
+      const prof = (data as Profile) ?? null;
+      setCacheOrg(prof?.org_id);
+      setProfile(prof);
+    } finally {
+      setProfileLoaded(true);
+    }
   };
 
   useEffect(() => {
@@ -122,12 +132,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(s?.user ?? null);
       if (s?.user) {
         const u = s.user;
+        setProfileLoaded(false);
         setTimeout(() => {
           if (active) void loadProfile(u);
         }, 0);
       } else {
         setCacheOrg(null);
         setProfile(null);
+        setProfileLoaded(false);
       }
     });
     return () => {
@@ -259,7 +271,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     session,
     profile,
-    needsProfile: !!user && !profile,
+    needsProfile: !!user && profileLoaded && !profile,
+    profileLoading: !!user && !profileLoaded,
     signInWithPassword,
     signUpWithPassword,
     sendLoginOtp,
