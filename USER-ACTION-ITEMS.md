@@ -25,8 +25,27 @@ The code is built; these activate it. Ask anytime and I'll point you here.
       No secrets in the repo. NOTE: the worker/edge guards take effect when
       you (re)deploy them — code already updated.
 
+- [x] Multi-currency complete (2026-05-24): invoices/quotes/labels/reports
+      now follow each document's currency and the org display currency
+      (no schema change — the `currency` columns already existed).
+- [x] Dark-mode text readability fixed (2026-05-24): white text on yellow
+      surfaces and dark-on-dark muted text.
+- [x] Filey loading screen (2026-05-24): 6-scene animated mascot splash.
+
 ## Coming (will be added as features land)
 
-- Stripe billing/payments → Stripe secret key + a `stripe` edge function.
-- AI features → Anthropic API key + an `ai` edge function.
-- Customer portal / PWA → a public web deploy (Vercel/Netlify).
+These remaining backlog items are **blocked on you** — I left them rather
+than build them unsupervised because they need secrets, a DB migration
+(your one-time token was revoked), or risky live infra:
+
+- **Recurring invoices + overdue auto-reminders (#17)** → needs a schema
+  migration (recurrence fields) + a scheduled job (cron/edge). The list
+  already flags overdue invoices; the auto-generate/notify half needs the
+  migration applied. Send a fresh token or run the SQL yourself and I'll
+  finish it.
+- **Stripe billing/payments (#20)** → Stripe secret key + a `stripe` edge
+  function.
+- **AI features (#21, #22)** → Anthropic API key + an `ai` edge function.
+- **Customer portal / PWA (#23)** → a public web deploy (Vercel/Netlify).
+  PWA service worker intentionally deferred: a bad cache config can serve
+  a stale app to live users, so I won't add it without you watching.
