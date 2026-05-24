@@ -421,7 +421,7 @@ function RunMenu({
         <MoreHorizontal size={16} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-40 rounded-xl border border-brand-200 bg-white shadow-bento-hover py-1 z-20">
+        <div className="absolute right-0 top-full mt-1 w-40 rounded-xl border border-brand-200 dark:border-[#3A3D45] bg-white dark:bg-[#24262C] shadow-bento-hover py-1 z-20">
           {item(<Pencil size={14} />, "Rename", onRename)}
           {item(<SquarePen size={14} />, "Edit", onEdit)}
           {item(<Share2 size={14} />, "Share", onShare)}

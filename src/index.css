@@ -210,7 +210,9 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border border-brand-200
            bg-white px-3 py-1.5 text-xs font-semibold text-brand-600
-           transition-colors duration-200 hover:bg-brand-50 cursor-pointer;
+           transition-colors duration-200 hover:bg-brand-50 cursor-pointer
+           dark:bg-white/5 dark:text-[#DDE0E4] dark:border-[#3A3D45]
+           dark:hover:bg-white/10;
   }
   .chip-active {
     @apply border-primary-300 bg-primary-100 text-primary-700;
@@ -256,38 +258,68 @@
     @apply transition-colors duration-150 hover:bg-brand-50/70
            dark:hover:bg-white/5;
   }
-  /* Headings/ink text inside dark surfaces. */
-  .dark .text-ink {
-    color: #f7f8f8;
-  }
-  /* Dark-mode legibility: lift the neutral brand text ramp to bright, easily
-     readable greys (near-white for body, light grey for muted). Explicit
-     `dark:text-[…]` utilities still win (utilities layer beats base). */
-  .dark .text-brand-700 {
-    color: #f1f2f3;
-  }
-  .dark .text-brand-600 {
-    color: #e3e5e8;
-  }
-  .dark .text-brand-500 {
-    color: #cdd0d5;
-  }
-  .dark .text-brand-400 {
-    color: #b2b6bd;
-  }
-  .dark .text-brand-300 {
-    color: #9aa0a8;
-  }
-  /* Yellow / light "islands" (primary-yellow surfaces, CTA gradient, accent
-     card) must keep DARK ink in dark mode — the brand/ink lift above is for
-     dark surfaces only. Matching `text-ink` together with the surface class
-     out-specifies `.dark .text-ink`, so white text never lands on yellow. */
-  .dark .text-ink.bg-primary-300,
-  .dark .text-ink.bg-primary-400,
-  .dark .text-ink.bg-cta,
-  .dark .card-accent .text-ink {
-    color: #0a0a0a;
-  }
+}
+
+/* ── Dark-mode text legibility ──────────────────────────────────────────────
+   These live OUTSIDE @layer so they win the cascade. In Tailwind 4 the
+   `utilities` layer beats the `components` layer regardless of specificity, so
+   a `.dark .text-ink` rule in @layer components loses to the base `.text-ink`
+   utility — which left bare headings (PageHeader's `text-ink`) black in dark
+   mode. Unlayered rules out-rank every layered utility, so the lift sticks.
+
+   Scope: only DARK surfaces. The default page background and `.card` are dark
+   in dark mode, but the app also has light/pastel "islands" (yellow CTAs,
+   tinted stat tiles) that must keep dark ink — those are excluded below so the
+   lift never turns text invisible on a light surface. */
+.dark .text-ink {
+  color: #f7f8f8;
+}
+.dark .text-brand-700 {
+  color: #f1f2f3;
+}
+.dark .text-brand-600 {
+  color: #e3e5e8;
+}
+.dark .text-brand-500 {
+  color: #cdd0d5;
+}
+.dark .text-brand-400 {
+  color: #b2b6bd;
+}
+.dark .text-brand-300 {
+  color: #9aa0a8;
+}
+/* "Islands" that stay LIGHT in dark mode (yellow CTAs / accent card) keep dark
+   ink. Listing the surface class alongside `.text-ink` out-specifies the white
+   lift above, so dark text wins back there. Only ALWAYS-light surfaces belong
+   here — pastel tiles that flip to a dark background in dark mode are given a
+   `dark:` background in their component instead, so the white lift is correct. */
+.dark .text-ink.bg-primary-300,
+.dark .text-ink.bg-primary-400,
+.dark .text-ink.bg-cta,
+.dark .card-accent .text-ink {
+  color: #0a0a0a;
+}
+
+/* ── Surface completions ─────────────────────────────────────────────────────
+   With the text lift winning, lifted (now light) text must always sit on a
+   dark surface. `bg-brand-50` is the app's neutral "quiet surface" tint; many
+   spots pair it with an explicit `dark:bg-white/5`, but some are incomplete.
+   Map the whole family (and its hovers) to the same subtle white film centrally
+   so no incomplete spot leaves light text on a light surface. `bg-white` is NOT
+   remapped (the invoice/quote print sheet must stay white paper), and the
+   primary/danger/success tints are left alone — their text colour isn't lifted,
+   so those chips stay readable as-is. */
+.dark .bg-brand-50,
+.dark .bg-brand-50\/40,
+.dark .bg-brand-50\/60,
+.dark .bg-brand-50\/70 {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+.dark .hover\:bg-brand-50:hover,
+.dark .hover\:bg-brand-50\/60:hover,
+.dark .hover\:bg-brand-50\/70:hover {
+  background-color: rgba(255, 255, 255, 0.06);
 }
 
 @media (prefers-reduced-motion: reduce) {

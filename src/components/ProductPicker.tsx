@@ -102,7 +102,7 @@ export default function ProductPicker({
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div
-                  className="w-11 h-11 rounded-lg grid place-items-center text-ink font-bold text-sm shrink-0 bg-primary-100"
+                  className="w-11 h-11 rounded-lg grid place-items-center text-ink font-bold text-sm shrink-0 bg-primary-100 dark:bg-primary-400/20"
                   aria-hidden
                 >
                   {(p.name[0] ?? "•").toUpperCase()}
