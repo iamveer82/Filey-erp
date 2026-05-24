@@ -42,20 +42,32 @@ The code is built; these activate it. Ask anytime and I'll point you here.
       surfaces and dark-on-dark muted text.
 - [x] Filey loading screen (2026-05-24): 6-scene animated mascot splash.
 
-## Coming (will be added as features land)
+- [x] **All 7 backlog tasks done (2026-05-25)** — migrations applied with the
+      7-day token: org billing columns, `invoice_recurrence`, `share_token` +
+      `get_shared_invoice` RPC.
+      - #17 recurring invoices + overdue reminder
+      - #18 multi-currency · #19 export
+      - #20 Stripe billing (edge fn built — activate per "Outstanding")
+      - #21 AI doc scan · #22 AI copilot
+      - #23 customer portal + PWA
+- [x] **AI suite (2026-05-25)** — BYOK copilot (any model), persistent
+      multi-chat, onboarding persona, rename/recolour orb, data grounding,
+      **tool-use agent** (reads your data + creates draft invoices), doc/receipt
+      scanning, daily-briefing card, offline-aware.
+- [x] **Get-paid loop (2026-05-25)** — public "Pay now" on shared invoices +
+      "View & pay" link in invoice emails (activates with Stripe keys).
 
-These remaining backlog items are **blocked on you** — I left them rather
-than build them unsupervised because they need secrets, a DB migration
-(your one-time token was revoked), or risky live infra:
+## Coming — needs infra/secrets (NOT built, on purpose)
 
-- **Recurring invoices + overdue auto-reminders (#17)** → needs a schema
-  migration (recurrence fields) + a scheduled job (cron/edge). The list
-  already flags overdue invoices; the auto-generate/notify half needs the
-  migration applied. Send a fresh token or run the SQL yourself and I'll
-  finish it.
-- **Stripe billing/payments (#20)** → Stripe secret key + a `stripe` edge
-  function.
-- **AI features (#21, #22)** → Anthropic API key + an `ai` edge function.
-- **Customer portal / PWA (#23)** → a public web deploy (Vercel/Netlify).
-  PWA service worker intentionally deferred: a bad cache config can serve
-  a stale app to live users, so I won't add it without you watching.
+- **Overdue auto-EMAIL reminders (server)** → a scheduled edge function (cron)
+  + your email provider creds set as function secrets. (In-app overdue nudge
+  already ships; this is the "email them automatically when the app is closed"
+  half.)
+- **Knowledge graph + storage metering/limits** → bigger feature; needs a
+  storage-usage table + Stripe (to sell more storage). Design + your call on
+  limits.
+- **PWA push notifications** → VAPID keys (you generate) + a push-sender edge
+  function + storing subscriptions.
+- **Launch polish (product tour / sample data)** → low-risk but skipped while
+  you sleep; sample data writes demo rows into your real DB, so I want your ok
+  first.
