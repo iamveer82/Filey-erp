@@ -278,6 +278,16 @@
   .dark .text-brand-300 {
     color: #9aa0a8;
   }
+  /* Yellow / light "islands" (primary-yellow surfaces, CTA gradient, accent
+     card) must keep DARK ink in dark mode — the brand/ink lift above is for
+     dark surfaces only. Matching `text-ink` together with the surface class
+     out-specifies `.dark .text-ink`, so white text never lands on yellow. */
+  .dark .text-ink.bg-primary-300,
+  .dark .text-ink.bg-primary-400,
+  .dark .text-ink.bg-cta,
+  .dark .card-accent .text-ink {
+    color: #0a0a0a;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

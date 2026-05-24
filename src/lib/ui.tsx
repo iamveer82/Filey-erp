@@ -162,7 +162,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
                 {t.title && (
                   <span className="block text-ink font-bold">{t.title}</span>
                 )}
-                <span className="block text-ink/90 font-normal break-words">
+                <span className="block text-ink/90 dark:text-white/80 font-normal break-words">
                   {t.message}
                 </span>
               </span>

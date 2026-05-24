@@ -132,13 +132,13 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
             )}
           >
             {/* drag handle */}
-            <div className="flex items-center justify-between px-2 py-1 cursor-grab active:cursor-grabbing text-ink/40">
+            <div className="flex items-center justify-between px-2 py-1 cursor-grab active:cursor-grabbing text-ink/40 dark:text-white/45">
               <GripHorizontal size={14} />
               <button
                 onClick={() => removeNote(n.id)}
                 onPointerDown={(e) => e.stopPropagation()}
                 aria-label="Delete note"
-                className="rounded p-0.5 text-ink/40 hover:text-danger hover:bg-black/5 cursor-pointer"
+                className="rounded p-0.5 text-ink/40 dark:text-white/45 hover:text-danger hover:bg-black/5 cursor-pointer"
               >
                 <X size={13} />
               </button>
@@ -149,7 +149,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
               onPointerDown={(e) => e.stopPropagation()}
               placeholder="Write a note…"
               rows={4}
-              className="w-full bg-transparent resize-none px-3 pb-3 text-sm text-ink placeholder:text-ink/40 outline-none"
+              className="w-full bg-transparent resize-none px-3 pb-3 text-sm text-ink placeholder:text-ink/40 dark:placeholder:text-white/40 outline-none"
             />
           </motion.div>
         ))}
