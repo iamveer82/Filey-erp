@@ -12,6 +12,7 @@ import {
   Inbox,
 } from "lucide-react";
 import { cn } from "../lib/format";
+import FitText from "./FitText";
 
 /** Design-token skeleton placeholder (no new deps). */
 export function Skeleton({ className }: { className?: string }) {
@@ -160,9 +161,9 @@ export function MetricCard({
         )}
         <div className="min-w-0">
           <p className="text-xs font-semibold text-brand-500">{label}</p>
-          <p className="font-display text-2xl font-bold text-ink mt-1 truncate tabular-nums">
+          <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
             {value}
-          </p>
+          </FitText>
         </div>
       </div>
       {delta !== undefined && (

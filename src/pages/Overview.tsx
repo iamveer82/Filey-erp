@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   Users,
@@ -161,6 +161,30 @@ export default function Overview() {
   const effSpan = (id: string) => layout.spans[id] ?? DEF_SPAN[id] ?? 1;
   const setSpan = (id: string, n: number) =>
     updateLayout({ ...layout, spans: { ...layout.spans, [id]: Math.min(4, Math.max(1, n)) } });
+  const gridRef = useRef<HTMLUListElement>(null);
+
+  // Drag the right edge to resize: snaps width to grid columns (1–4).
+  const startResize = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const startSpan = effSpan(id);
+    const colW = (gridRef.current?.offsetWidth ?? 4) / 4 || 1;
+    let last = startSpan;
+    const move = (ev: PointerEvent) => {
+      const n = Math.min(4, Math.max(1, startSpan + Math.round((ev.clientX - startX) / colW)));
+      if (n !== last) {
+        last = n;
+        setSpan(id, n);
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   const load = () => {
     setError("");
@@ -491,6 +515,7 @@ export default function Overview() {
       )}
 
       <Reorder.Group
+        ref={gridRef}
         values={visible}
         onReorder={(next) => updateLayout({ ...layout, order: [...next, ...layout.hidden] })}
         className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
@@ -538,6 +563,15 @@ export default function Overview() {
                 >
                   <X size={14} />
                 </button>
+              </div>
+            )}
+            {editing && (
+              <div
+                onPointerDown={(e) => startResize(e, id)}
+                title="Drag to resize"
+                className="absolute right-0 top-0 z-20 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-2xl hover:bg-primary-300/40"
+              >
+                <span className="h-8 w-1 rounded-full bg-primary-400/70" />
               </div>
             )}
             {renderWidget(id)}
