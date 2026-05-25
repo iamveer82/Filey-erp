@@ -16,7 +16,21 @@ import {
   LayoutGrid,
   Check,
 } from "lucide-react";
-import { Reorder, useDragControls } from "framer-motion";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useNavigate } from "react-router-dom";
 import {
   AreaChart,
@@ -165,29 +179,31 @@ function WidgetItem({
   onResize: (e: React.PointerEvent, dir: "x" | "y" | "xy") => void;
   children: React.ReactNode;
 }) {
-  const controls = useDragControls();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !editing,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : undefined,
+    ...(heightStyle ?? {}),
+  };
   return (
-    <Reorder.Item
-      value={id}
+    <div
+      ref={setNodeRef}
       data-widget={id}
-      drag={editing}
-      dragListener={false}
-      dragControls={controls}
-      dragMomentum={false}
-      dragElastic={0.08}
-      whileDrag={{ scale: 1.03, zIndex: 50, boxShadow: "0 12px 30px rgba(0,0,0,0.18)" }}
-      transition={{ type: "spring", stiffness: 380, damping: 40 }}
+      style={style}
       onClick={() => {
         if (!editing && linkable) onOpen();
       }}
-      style={heightStyle}
       className={`relative ${spanCls} ${
         editing
           ? "rounded-2xl ring-2 ring-dashed ring-primary-300/70"
           : linkable
           ? "cursor-pointer"
           : ""
-      }`}
+      } ${isDragging ? "opacity-90 shadow-bento-hover" : ""}`}
     >
       {editing && (
         <div className="absolute -top-2.5 right-2 z-40 flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-1.5 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
@@ -207,13 +223,15 @@ function WidgetItem({
             </button>
           ))}
           <span className="mx-0.5 h-4 w-px bg-brand-200 dark:bg-[#3A3D45]" />
-          <span
-            onPointerDown={(e) => controls.start(e)}
+          <button
+            {...attributes}
+            {...listeners}
             title="Drag to move"
-            className="cursor-grab text-brand-400 active:cursor-grabbing"
+            aria-label="Drag to move"
+            className="cursor-grab touch-none text-brand-400 active:cursor-grabbing"
           >
             <GripVertical size={14} />
-          </span>
+          </button>
           <button
             onClick={onRemove}
             aria-label="Remove widget"
@@ -245,7 +263,7 @@ function WidgetItem({
         </>
       )}
       <div className="h-full overflow-auto [&>*]:h-full">{children}</div>
-    </Reorder.Item>
+    </div>
   );
 }
 
@@ -272,7 +290,17 @@ export default function Overview() {
   const effSpan = (id: string) => layout.spans[id] ?? DEF_SPAN[id] ?? 1;
   const setSpan = (id: string, n: number) =>
     updateLayout({ ...layout, spans: { ...layout.spans, [id]: Math.min(4, Math.max(1, n)) } });
-  const gridRef = useRef<HTMLUListElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const vis = layout.order.filter((id) => !layout.hidden.includes(id));
+    const oldI = vis.indexOf(String(active.id));
+    const newI = vis.indexOf(String(over.id));
+    if (oldI < 0 || newI < 0) return;
+    updateLayout({ ...layout, order: [...arrayMove(vis, oldI, newI), ...layout.hidden] });
+  };
   const setHeight = (id: string, h: number) =>
     updateLayout({ ...layout, heights: { ...layout.heights, [id]: Math.max(96, Math.round(h)) } });
 
@@ -641,30 +669,32 @@ export default function Overview() {
         </div>
       )}
 
-      <Reorder.Group
-        ref={gridRef}
-        values={visible}
-        onReorder={(next) => updateLayout({ ...layout, order: [...next, ...layout.hidden] })}
-        className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
-      >
-        {visible.map((id) => (
-          <WidgetItem
-            key={id}
-            id={id}
-            editing={editing}
-            linkable={!!WIDGET_LINK[id]}
-            span={effSpan(id)}
-            spanCls={spanClass(effSpan(id))}
-            heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
-            onOpen={() => nav(WIDGET_LINK[id])}
-            onRemove={() => removeWidget(id)}
-            onSetSpan={(n) => setSpan(id, n)}
-            onResize={(e, dir) => startResize(e, id, dir)}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={visible} strategy={rectSortingStrategy}>
+          <div
+            ref={gridRef}
+            className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
           >
-            {renderWidget(id)}
-          </WidgetItem>
-        ))}
-      </Reorder.Group>
+            {visible.map((id) => (
+              <WidgetItem
+                key={id}
+                id={id}
+                editing={editing}
+                linkable={!!WIDGET_LINK[id]}
+                span={effSpan(id)}
+                spanCls={spanClass(effSpan(id))}
+                heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
+                onOpen={() => nav(WIDGET_LINK[id])}
+                onRemove={() => removeWidget(id)}
+                onSetSpan={(n) => setSpan(id, n)}
+                onResize={(e, dir) => startResize(e, id, dir)}
+              >
+                {renderWidget(id)}
+              </WidgetItem>
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 }
