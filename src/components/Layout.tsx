@@ -723,9 +723,17 @@ export default function Layout({ children }: { children: ReactNode }) {
                     </span>
                   </span>
                   <span className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-violet-500 via-pink-500 to-amber-400 p-0.5">
-                    <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#24262C] text-ink text-xs font-bold">
-                      {initials}
-                    </span>
+                    {profile?.avatar ? (
+                      <img
+                        src={profile.avatar}
+                        alt={name}
+                        className="h-full w-full rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#24262C] text-ink text-xs font-bold">
+                        {initials}
+                      </span>
+                    )}
                   </span>
                 </button>
               </DropdownMenuTrigger>
