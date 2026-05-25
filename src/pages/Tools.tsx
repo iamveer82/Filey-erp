@@ -1960,6 +1960,10 @@ function BillingPanel() {
   };
 
   const current = PLANS.find((p) => p.id === sub.plan) ?? PLANS[0];
+  const used = Object.values(stats).reduce((a, b) => a + b, 0);
+  const LIMITS: Record<Plan, number> = { free: 500, pro: 25000, business: Infinity };
+  const limit = LIMITS[sub.plan] ?? 500;
+  const pctUsed = limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100));
 
   return (
     <div className="space-y-4">
@@ -1979,6 +1983,34 @@ function BillingPanel() {
             {busy === "manage" ? "Opening…" : "Manage billing"}
           </button>
         )}
+      </div>
+
+      <div className="card">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="font-bold text-ink">Storage usage</p>
+          <span className="text-sm text-brand-500">
+            {used.toLocaleString()}
+            {limit !== Infinity ? ` / ${limit.toLocaleString()}` : ""} records
+          </span>
+        </div>
+        {limit !== Infinity && (
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/[0.06]">
+            <div
+              className="h-full rounded-full transition-[width]"
+              style={{
+                width: `${pctUsed}%`,
+                background: pctUsed >= 90 ? "#E5484D" : "linear-gradient(90deg,#F5B700,#FFD600)",
+              }}
+            />
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-brand-400">
+          {limit === Infinity
+            ? "Unlimited on your plan."
+            : pctUsed >= 90
+            ? "You're nearly out of space — upgrade your plan for more."
+            : "Counts customers, products, invoices, orders and quotes."}
+        </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
