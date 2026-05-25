@@ -33,6 +33,7 @@ import { useLiveSync } from "../lib/realtime";
 import CompanyMessages from "../components/CompanyMessages";
 import { num, aed, fmtDate } from "../lib/format";
 import AiSummaryCard from "../components/AiSummaryCard";
+import GettingStarted from "../components/GettingStarted";
 import {
   PageHeader,
   MetricCard,
@@ -169,6 +170,7 @@ export default function Overview() {
         subtitle="Inventory at a glance — every card answers one question"
       />
 
+      <GettingStarted hasProducts={products.length > 0} hasInvoices={invoices.length > 0} />
       <AiSummaryCard />
 
       {error && (
