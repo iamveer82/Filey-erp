@@ -258,6 +258,34 @@ export default function Invoicing() {
     }
   };
 
+  // Save the current invoice with a given status (finalize → "sent" so it
+  // counts as issued; revert → "draft"). Done at the parent so the freshly
+  // saved id is applied to the form without a stale closure.
+  const setDocStatus = async (status: "draft" | "sent") => {
+    if (!form) return;
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        status,
+        issue_date: form.issue_date || undefined,
+        due_date: form.due_date || undefined,
+      };
+      const id = await billing.saveDoc(payload as InvoiceDocInput);
+      setForm({ ...form, id, status });
+      await loadDocs();
+      toast.success(
+        status === "sent"
+          ? "Invoice finalized — it now counts as issued."
+          : "Moved back to draft."
+      );
+    } catch (e) {
+      toast.error(`Could not update: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (form) {
     return (
       <Editor
@@ -268,6 +296,8 @@ export default function Invoicing() {
           loadDocs();
         }}
         onSave={save}
+        onFinalize={() => setDocStatus("sent")}
+        onRevertDraft={() => setDocStatus("draft")}
         saving={saving}
       />
     );
@@ -684,12 +714,16 @@ function Editor({
   setForm,
   onBack,
   onSave,
+  onFinalize,
+  onRevertDraft,
   saving,
 }: {
   form: Form;
   setForm: (f: Form) => void;
   onBack: () => void;
   onSave: () => void;
+  onFinalize: () => void;
+  onRevertDraft: () => void;
   saving: boolean;
 }) {
   const { toast } = useUI();
@@ -829,14 +863,9 @@ function Editor({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {form.id ? (
-            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-success">
-              <CheckCircle2 size={15} /> Saved
-            </span>
-          ) : (
-            <span className="text-sm font-semibold text-brand-400">
-              Unsaved
-            </span>
+          <Badge tone={statusTone(form.status)}>{form.status}</Badge>
+          {!form.id && (
+            <span className="text-xs font-semibold text-brand-400">Unsaved</span>
           )}
           <button
             className="btn-ghost"
@@ -852,6 +881,25 @@ function Editor({
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
+          {form.status === "draft" ? (
+            <button
+              className="btn-primary !bg-success !text-white"
+              onClick={onFinalize}
+              disabled={saving}
+              title="Finalize — counts as issued and shows in reports & the dashboard"
+            >
+              <CheckCircle2 size={15} /> Mark as done
+            </button>
+          ) : (
+            <button
+              className="btn-ghost"
+              onClick={onRevertDraft}
+              disabled={saving}
+              title="Move this invoice back to draft"
+            >
+              <Pencil size={15} /> Move to draft
+            </button>
+          )}
           <button
             className="btn-primary"
             onClick={saveAndSend}
