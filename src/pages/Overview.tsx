@@ -17,6 +17,7 @@ import {
   Check,
 } from "lucide-react";
 import { Reorder } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   AreaChart,
   Area,
@@ -37,7 +38,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import CompanyMessages from "../components/CompanyMessages";
-import { num, aed, fmtDate } from "../lib/format";
+import { num, aed, fmtDate, cn } from "../lib/format";
 import AiSummaryCard from "../components/AiSummaryCard";
 import GettingStarted from "../components/GettingStarted";
 import {
@@ -55,17 +56,59 @@ import {
    The five data sections below are draggable, add/removable widgets; the
    chosen order + hidden set persist per-browser. */
 const DASH_KEY = "filey.dashboard.layout";
-const WIDGET_META: { id: string; label: string }[] = [
-  { id: "kpis", label: "Inventory KPIs" },
-  { id: "invoices", label: "Invoice totals" },
-  { id: "orders", label: "Orders & trend" },
-  { id: "messages", label: "Team messages" },
-  { id: "insights", label: "Insights" },
+const WIDGET_META: { id: string; label: string; span?: number }[] = [
+  { id: "ai-summary", label: "AI briefing", span: 4 },
+  { id: "total-items", label: "Total items" },
+  { id: "categories", label: "Categories" },
+  { id: "low-stock-kpi", label: "Low-stock count" },
+  { id: "inventory-value", label: "Inventory value" },
+  { id: "invoice-revenue", label: "Invoice revenue" },
+  { id: "collected", label: "Collected" },
+  { id: "outstanding", label: "Outstanding" },
+  { id: "orders-stat", label: "Orders status" },
+  { id: "orders-chart", label: "Orders over time", span: 2 },
+  { id: "messages", label: "Team messages", span: 4 },
+  { id: "activity", label: "Recent activity" },
+  { id: "stock", label: "Stock breakdown" },
+  { id: "reorder-spotlight", label: "Reorder spotlight" },
+  { id: "low-stock-list", label: "Top low-stock items" },
 ];
 const ALL_IDS: string[] = WIDGET_META.map((w) => w.id);
+const DEF_SPAN: Record<string, number> = Object.fromEntries(
+  WIDGET_META.map((w) => [w.id, w.span ?? 1])
+);
+// Each widget links to the page its data lives on (opened on click when not editing).
+const WIDGET_LINK: Record<string, string> = {
+  "total-items": "/inventory",
+  categories: "/suppliers",
+  "low-stock-kpi": "/inventory",
+  "inventory-value": "/inventory",
+  "invoice-revenue": "/invoicing",
+  collected: "/invoicing",
+  outstanding: "/invoicing",
+  "orders-stat": "/orders",
+  "orders-chart": "/orders",
+  stock: "/inventory",
+  "reorder-spotlight": "/inventory",
+  "low-stock-list": "/inventory",
+};
+// Literal classes (so Tailwind keeps them). Grid is 2 cols on mobile, 4 on lg.
+function spanClass(n: number): string {
+  switch (Math.min(4, Math.max(1, n))) {
+    case 4:
+      return "col-span-2 lg:col-span-4";
+    case 3:
+      return "col-span-2 lg:col-span-3";
+    case 2:
+      return "col-span-2 lg:col-span-2";
+    default:
+      return "lg:col-span-1";
+  }
+}
 interface Layout {
   order: string[];
   hidden: string[];
+  spans: Record<string, number>;
 }
 function loadLayout(): Layout {
   try {
@@ -76,12 +119,16 @@ function loadLayout(): Layout {
         ...p.order.filter((id) => ALL_IDS.includes(id)),
         ...ALL_IDS.filter((id) => !p.order.includes(id)),
       ];
-      return { order, hidden: (p.hidden ?? []).filter((id) => ALL_IDS.includes(id)) };
+      return {
+        order,
+        hidden: (p.hidden ?? []).filter((id) => ALL_IDS.includes(id)),
+        spans: { ...DEF_SPAN, ...(p.spans ?? {}) },
+      };
     }
   } catch {
     /* ignore */
   }
-  return { order: [...ALL_IDS], hidden: [] };
+  return { order: [...ALL_IDS], hidden: [], spans: { ...DEF_SPAN } };
 }
 function saveLayout(l: Layout) {
   try {
@@ -101,15 +148,19 @@ export default function Overview() {
   const [editing, setEditing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>(loadLayout);
+  const nav = useNavigate();
 
   const updateLayout = (next: Layout) => {
     setLayout(next);
     saveLayout(next);
   };
   const removeWidget = (id: string) =>
-    updateLayout({ order: layout.order, hidden: [...new Set([...layout.hidden, id])] });
+    updateLayout({ ...layout, hidden: [...new Set([...layout.hidden, id])] });
   const addWidget = (id: string) =>
-    updateLayout({ order: layout.order, hidden: layout.hidden.filter((h) => h !== id) });
+    updateLayout({ ...layout, hidden: layout.hidden.filter((h) => h !== id) });
+  const effSpan = (id: string) => layout.spans[id] ?? DEF_SPAN[id] ?? 1;
+  const setSpan = (id: string, n: number) =>
+    updateLayout({ ...layout, spans: { ...layout.spans, [id]: Math.min(4, Math.max(1, n)) } });
 
   const load = () => {
     setError("");
@@ -226,138 +277,145 @@ export default function Overview() {
 
   const renderWidget = (id: string) => {
     switch (id) {
-      case "kpis":
+      case "ai-summary":
+        return <AiSummaryCard />;
+      case "total-items":
+        return <MetricCard label="Total Items" value={num(products.length)} icon={<Boxes size={20} />} iconClass="bg-primary-100 text-primary-700" />;
+      case "categories":
+        return <MetricCard label="Categories" value={num(suppliers)} icon={<Users size={20} />} iconClass="bg-secondary-400/20 text-secondary-600" />;
+      case "low-stock-kpi":
+        return <MetricCard label="Low Stock Items" value={num(lowStock.length)} icon={<AlertTriangle size={20} />} iconClass="bg-danger/15 text-danger" />;
+      case "inventory-value":
+        return <MetricCard label="Inventory Value" value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))} icon={<Wallet size={20} />} iconClass="bg-info/15 text-info" />;
+      case "invoice-revenue":
+        return <MetricCard label="Invoice Revenue" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0))} icon={<Receipt size={20} />} iconClass="bg-primary-100 text-primary-700" />;
+      case "collected":
+        return <MetricCard label="Collected" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0))} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />;
+      case "outstanding":
+        return <MetricCard label="Outstanding" value={aed(invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0))} icon={<Clock size={20} />} iconClass="bg-danger/15 text-danger" />;
+      case "orders-stat":
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <MetricCard label="Total Items" value={num(products.length)} icon={<Boxes size={20} />} iconClass="bg-primary-100 text-primary-700" />
-            <MetricCard label="Categories" value={num(suppliers)} icon={<Users size={20} />} iconClass="bg-secondary-400/20 text-secondary-600" />
-            <MetricCard label="Low Stock Items" value={num(lowStock.length)} icon={<AlertTriangle size={20} />} iconClass="bg-danger/15 text-danger" />
-            <MetricCard label="Inventory Value" value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))} icon={<Wallet size={20} />} iconClass="bg-info/15 text-info" />
-          </div>
+          <OrdersStatCard
+            title="Orders"
+            items={[
+              ["Completed", orderStats.completed],
+              ["In progress", orderStats.progress],
+              ["Returns", orderStats.returns],
+              ["Overdue", orderStats.overdue],
+            ]}
+          />
         );
-      case "invoices":
+      case "orders-chart":
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            <MetricCard label="Invoice Revenue" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0))} icon={<Receipt size={20} />} iconClass="bg-primary-100 text-primary-700" />
-            <MetricCard label="Collected" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0))} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />
-            <MetricCard label="Outstanding" value={aed(invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0))} icon={<Clock size={20} />} iconClass="bg-danger/15 text-danger" />
-          </div>
-        );
-      case "orders":
-        return (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <OrdersStatCard
-              title="Orders"
-              items={[
-                ["Completed", orderStats.completed],
-                ["In progress", orderStats.progress],
-                ["Returns", orderStats.returns],
-                ["Overdue", orderStats.overdue],
-              ]}
-            />
-            <InfoCard title="Orders over time" className="lg:col-span-2">
-              <div className="flex items-center gap-4">
-                <div className="rounded-2xl bg-brand-50 dark:bg-white/5 p-4">
-                  <Truck size={28} className="text-brand-500" />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-ink">
-                    {orderStats.progress} order{orderStats.progress === 1 ? "" : "s"} in progress
-                  </p>
-                  <p className="text-sm text-brand-500 mt-0.5">
-                    {orderStats.completed} completed · {orderStats.overdue} cancelled / overdue
-                  </p>
-                </div>
+          <InfoCard title="Orders over time">
+            <div className="flex items-center gap-4">
+              <div className="rounded-2xl bg-brand-50 dark:bg-white/5 p-4">
+                <Truck size={28} className="text-brand-500" />
               </div>
-              <div className="h-40 mt-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trend}>
-                    <defs>
-                      <linearGradient id="ov" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#FFD600" stopOpacity={0.5} />
-                        <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
-                    <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #DEDBD2", fontSize: 13 }} />
-                    <Area type="monotone" dataKey="items" stroke="#E0AE00" strokeWidth={2.5} fill="url(#ov)" />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div>
+                <p className="text-lg font-bold text-ink">
+                  {orderStats.progress} order{orderStats.progress === 1 ? "" : "s"} in progress
+                </p>
+                <p className="text-sm text-brand-500 mt-0.5">
+                  {orderStats.completed} completed · {orderStats.overdue} cancelled / overdue
+                </p>
               </div>
-            </InfoCard>
-          </div>
+            </div>
+            <div className="h-40 mt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trend}>
+                  <defs>
+                    <linearGradient id="ov" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#FFD600" stopOpacity={0.5} />
+                      <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} width={40} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #DEDBD2", fontSize: 13 }} />
+                  <Area type="monotone" dataKey="items" stroke="#E0AE00" strokeWidth={2.5} fill="url(#ov)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </InfoCard>
         );
       case "messages":
         return <CompanyMessages />;
-      case "insights":
+      case "activity":
         return (
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-            <InfoCard
-              title="Recent activity"
-              action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
-            >
-              <ul className="space-y-3.5">
-                {activity.length === 0 && <li className="text-sm text-brand-400">No activity yet.</li>}
-                {activity.map((a, i) => (
-                  <li key={i} className="flex gap-3">
-                    <span className="mt-1 w-2 h-2 rounded-full bg-primary-400 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm text-ink leading-snug"><span className="font-semibold">{a.who}</span> {a.what}</p>
-                      <p className="text-[11px] text-brand-400 mt-0.5">{a.when}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </InfoCard>
-            <StockBreakdownCard
-              title="Stock"
-              total={stock.total}
-              items={[
-                ["In stock", stock.inStock, "bg-emerald-300"],
-                ["Low stock", stock.low, "bg-primary-400"],
-                ["Out of stock", stock.out, "bg-white"],
-                ["Dead stock", stock.dead, "bg-ink/40"],
-              ]}
-            />
-            <InfoCard
-              title="Reorder spotlight"
-              tone="dark"
-              action={<span className="text-[11px] font-semibold text-primary-300">{lowStock.length} flagged</span>}
-            >
-              {lowStock[0] ? (
-                <div>
-                  <div className="flex items-center gap-2 text-primary-300 text-xs font-semibold"><Star size={13} /> High demand</div>
-                  <p className="text-lg font-bold mt-2">{lowStock[0].name}</p>
-                  <p className="text-sm text-white/60 mt-0.5">{lowStock[0].category ?? "Uncategorised"} · SKU {lowStock[0].sku}</p>
-                  <div className="mt-4 flex items-center justify-between rounded-xl bg-white/10 p-3">
-                    <span className="text-xs text-white/70">In stock</span>
-                    <span className="font-bold">{lowStock[0].quantity} / reorder {lowStock[0].reorder_level}</span>
+          <InfoCard
+            title="Recent activity"
+            action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
+          >
+            <ul className="space-y-3.5">
+              {activity.length === 0 && <li className="text-sm text-brand-400">No activity yet.</li>}
+              {activity.map((a, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="mt-1 w-2 h-2 rounded-full bg-primary-400 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink leading-snug"><span className="font-semibold">{a.who}</span> {a.what}</p>
+                    <p className="text-[11px] text-brand-400 mt-0.5">{a.when}</p>
                   </div>
+                </li>
+              ))}
+            </ul>
+          </InfoCard>
+        );
+      case "stock":
+        return (
+          <StockBreakdownCard
+            title="Stock"
+            total={stock.total}
+            items={[
+              ["In stock", stock.inStock, "bg-emerald-300"],
+              ["Low stock", stock.low, "bg-primary-400"],
+              ["Out of stock", stock.out, "bg-white"],
+              ["Dead stock", stock.dead, "bg-ink/40"],
+            ]}
+          />
+        );
+      case "reorder-spotlight":
+        return (
+          <InfoCard
+            title="Reorder spotlight"
+            tone="dark"
+            action={<span className="text-[11px] font-semibold text-primary-300">{lowStock.length} flagged</span>}
+          >
+            {lowStock[0] ? (
+              <div>
+                <div className="flex items-center gap-2 text-primary-300 text-xs font-semibold"><Star size={13} /> High demand</div>
+                <p className="text-lg font-bold mt-2">{lowStock[0].name}</p>
+                <p className="text-sm text-white/60 mt-0.5">{lowStock[0].category ?? "Uncategorised"} · SKU {lowStock[0].sku}</p>
+                <div className="mt-4 flex items-center justify-between rounded-xl bg-white/10 p-3">
+                  <span className="text-xs text-white/70">In stock</span>
+                  <span className="font-bold">{lowStock[0].quantity} / reorder {lowStock[0].reorder_level}</span>
                 </div>
-              ) : (
-                <p className="text-sm text-white/60">All products above reorder level. Nice.</p>
-              )}
-            </InfoCard>
-            <InfoCard
-              title="Top low-stock items"
-              action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
-            >
-              <ul className="space-y-3">
-                {(lowStock.length ? lowStock : products).slice(0, 4).map((p) => (
-                  <li key={p.id} className="flex items-center justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
-                      <p className="text-[11px] text-brand-400">{p.quantity} in stock · {fmtDate(p.created_at)}</p>
-                    </div>
-                    <Badge tone={p.quantity <= p.reorder_level ? "warn" : "success"}>{p.quantity <= p.reorder_level ? "Low" : "OK"}</Badge>
-                  </li>
-                ))}
-                {products.length === 0 && <li className="text-sm text-brand-400">No products yet.</li>}
-              </ul>
-            </InfoCard>
-          </div>
+              </div>
+            ) : (
+              <p className="text-sm text-white/60">All products above reorder level. Nice.</p>
+            )}
+          </InfoCard>
+        );
+      case "low-stock-list":
+        return (
+          <InfoCard
+            title="Top low-stock items"
+            action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
+          >
+            <ul className="space-y-3">
+              {(lowStock.length ? lowStock : products).slice(0, 4).map((p) => (
+                <li key={p.id} className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
+                    <p className="text-[11px] text-brand-400">{p.quantity} in stock · {fmtDate(p.created_at)}</p>
+                  </div>
+                  <Badge tone={p.quantity <= p.reorder_level ? "warn" : "success"}>{p.quantity <= p.reorder_level ? "Low" : "OK"}</Badge>
+                </li>
+              ))}
+              {products.length === 0 && <li className="text-sm text-brand-400">No products yet.</li>}
+            </ul>
+          </InfoCard>
         );
       default:
         return null;
@@ -420,7 +478,6 @@ export default function Overview() {
       />
 
       <GettingStarted hasProducts={products.length > 0} hasInvoices={invoices.length > 0} />
-      <AiSummaryCard />
 
       {error && (
         <div className="mb-4">
@@ -434,12 +491,9 @@ export default function Overview() {
       )}
 
       <Reorder.Group
-        axis="y"
         values={visible}
-        onReorder={(next) =>
-          updateLayout({ order: [...next, ...layout.hidden], hidden: layout.hidden })
-        }
-        className="space-y-4"
+        onReorder={(next) => updateLayout({ ...layout, order: [...next, ...layout.hidden] })}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
       >
         {visible.map((id) => (
           <Reorder.Item
@@ -447,14 +501,35 @@ export default function Overview() {
             value={id}
             drag={editing}
             dragListener={editing}
-            className={
+            onClick={() => {
+              if (!editing && WIDGET_LINK[id]) nav(WIDGET_LINK[id]);
+            }}
+            className={`relative ${spanClass(effSpan(id))} ${
               editing
-                ? "relative cursor-grab rounded-2xl ring-2 ring-dashed ring-primary-300/70 ring-offset-4 ring-offset-transparent active:cursor-grabbing"
-                : "relative"
-            }
+                ? "cursor-grab rounded-2xl ring-2 ring-dashed ring-primary-300/70 active:cursor-grabbing"
+                : WIDGET_LINK[id]
+                ? "cursor-pointer"
+                : ""
+            }`}
           >
             {editing && (
               <div className="absolute -top-2.5 right-2 z-10 flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-1.5 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
+                {[1, 2, 3, 4].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setSpan(id, n)}
+                    title={`Width ${n}`}
+                    className={cn(
+                      "grid h-5 w-5 place-items-center rounded text-[10px] font-bold",
+                      effSpan(id) === n
+                        ? "bg-primary-400 text-[#0A0A0A]"
+                        : "text-brand-400 hover:bg-brand-50 dark:hover:bg-white/10"
+                    )}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <span className="mx-0.5 h-4 w-px bg-brand-200 dark:bg-[#3A3D45]" />
                 <GripVertical size={14} className="text-brand-400" />
                 <button
                   onClick={() => removeWidget(id)}
