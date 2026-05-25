@@ -173,6 +173,10 @@ function WidgetItem({
       drag={editing}
       dragListener={false}
       dragControls={controls}
+      dragMomentum={false}
+      dragElastic={0.08}
+      whileDrag={{ scale: 1.03, zIndex: 50, boxShadow: "0 12px 30px rgba(0,0,0,0.18)" }}
+      transition={{ type: "spring", stiffness: 380, damping: 40 }}
       onClick={() => {
         if (!editing && linkable) onOpen();
       }}
@@ -240,7 +244,7 @@ function WidgetItem({
           </div>
         </>
       )}
-      <div className="h-full overflow-auto">{children}</div>
+      <div className="h-full overflow-auto [&>*]:h-full">{children}</div>
     </Reorder.Item>
   );
 }
