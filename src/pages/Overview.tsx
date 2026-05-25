@@ -7,6 +7,9 @@ import {
   Truck,
   Star,
   ArrowUpRight,
+  Receipt,
+  Banknote,
+  Clock,
 } from "lucide-react";
 import {
   AreaChart,
@@ -209,6 +212,40 @@ export default function Overview() {
           )}
           icon={<Wallet size={20} />}
           iconClass="bg-info/15 text-info"
+        />
+      </div>
+
+      {/* Invoicing — issued invoices only (drafts excluded) */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+        <MetricCard
+          label="Invoice Revenue"
+          value={aed(
+            invoices
+              .filter((i) => i.status !== "draft")
+              .reduce((s, i) => s + (i.total || 0), 0)
+          )}
+          icon={<Receipt size={20} />}
+          iconClass="bg-primary-100 text-primary-700"
+        />
+        <MetricCard
+          label="Collected"
+          value={aed(
+            invoices
+              .filter((i) => i.status !== "draft")
+              .reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0)
+          )}
+          icon={<Banknote size={20} />}
+          iconClass="bg-success/15 text-success"
+        />
+        <MetricCard
+          label="Outstanding"
+          value={aed(
+            invoices
+              .filter((i) => i.status !== "draft" && i.status !== "paid")
+              .reduce((s, i) => s + (i.balance ?? 0), 0)
+          )}
+          icon={<Clock size={20} />}
+          iconClass="bg-danger/15 text-danger"
         />
       </div>
 
