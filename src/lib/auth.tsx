@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -84,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // user. Until then we must NOT treat a missing profile as "needs setup"
   // (that briefly flashes the profile form right after sign-in).
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // The user id whose profile is currently loaded — lets us ignore token
+  // refreshes (tab focus) that would otherwise re-trigger the loading screen.
+  const loadedFor = useRef<string | null>(null);
 
   const loadProfile = async (u: User) => {
     if (!supabase) return;
@@ -115,7 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(data.session);
         setUser(data.session?.user ?? null);
         // Defer DB read: never block while the auth lock may be held.
-        if (data.session?.user) void loadProfile(data.session.user);
+        if (data.session?.user) {
+          loadedFor.current = data.session.user.id;
+          void loadProfile(data.session.user);
+        }
       })
       .catch((err) => {
         console.error("[auth] getSession failed:", err);
@@ -131,12 +138,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
+        // Only (re)load the profile on a real sign-in / user switch. Token
+        // refreshes fire when the tab regains focus but keep the same user id
+        // — skip them, otherwise the loading screen flashes on every tab change.
+        if (loadedFor.current === s.user.id) return;
+        loadedFor.current = s.user.id;
         const u = s.user;
         setProfileLoaded(false);
         setTimeout(() => {
           if (active) void loadProfile(u);
         }, 0);
       } else {
+        loadedFor.current = null;
         setCacheOrg(null);
         setProfile(null);
         setProfileLoaded(false);
