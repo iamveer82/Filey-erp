@@ -57,17 +57,25 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 - [x] **Get-paid loop (2026-05-25)** — public "Pay now" on shared invoices +
       "View & pay" link in invoice emails (activates with Stripe keys).
 
-## Coming — needs infra/secrets (NOT built, on purpose)
+- [x] **Security: billing columns locked (2026-05-25)** — only the Stripe
+      webhook (service_role) can write the org plan; members can't fake it.
+- [x] **Dashboard invoice revenue / collected / outstanding (2026-05-25)**
+- [x] **AI actions: create orders, add reminders (2026-05-25)** + create
+      customers/products, adjust stock, log expenses, finalize/recur invoices,
+      run PDF/image tools on chat attachments.
+- [x] **Storage usage meter + Get-started checklist (2026-05-25)**
 
-- **Overdue auto-EMAIL reminders (server)** → a scheduled edge function (cron)
-  + your email provider creds set as function secrets. (In-app overdue nudge
-  already ships; this is the "email them automatically when the app is closed"
-  half.)
-- **Knowledge graph + storage metering/limits** → bigger feature; needs a
-  storage-usage table + Stripe (to sell more storage). Design + your call on
-  limits.
-- **PWA push notifications** → VAPID keys (you generate) + a push-sender edge
-  function + storing subscriptions.
-- **Launch polish (product tour / sample data)** → low-risk but skipped while
-  you sleep; sample data writes demo rows into your real DB, so I want your ok
-  first.
+## Coming — needs YOUR keys/deploy (code is built or trivial)
+
+- **Overdue auto-EMAIL reminders** → code built at
+  `supabase/functions/overdue-reminders/`. To activate:
+  1. Get a Resend API key (resend.com) + verify a sender domain.
+  2. `supabase functions deploy overdue-reminders --no-verify-jwt`
+  3. `supabase secrets set RESEND_API_KEY=… REMINDER_FROM="Filey <billing@yourdomain>" SITE_URL=https://your-domain`
+  4. Schedule it (pg_cron snippet in the function header) or point any cron at
+     its URL. (The in-app overdue nudge already ships.)
+- **PWA push notifications** → not built yet; needs a VAPID keypair you
+  generate + a subscriptions table + a sender fn. Say the word and I'll scaffold
+  it (it's the one piece left that's genuinely optional).
+- **Knowledge-graph storage** → the usage *meter* ships; a true per-row graph +
+  hard limits would be a server-side enforcement layer (future).
