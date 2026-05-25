@@ -15,6 +15,7 @@ import {
   X,
   LayoutGrid,
   Check,
+  Pencil,
 } from "lucide-react";
 import {
   DndContext,
@@ -119,11 +120,44 @@ function spanClass(n: number): string {
       return "lg:col-span-1";
   }
 }
+interface WidgetStyle {
+  weight?: number;
+  family?: string;
+  scale?: number;
+  color?: string;
+  bg?: string;
+}
+const FONTS: { label: string; value: string }[] = [
+  { label: "Sans", value: "'Plus Jakarta Sans', system-ui, sans-serif" },
+  { label: "Serif", value: "'Lora', Georgia, serif" },
+  { label: "Mono", value: "'IBM Plex Mono', monospace" },
+];
+const WEIGHTS: { label: string; value: number }[] = [
+  { label: "Normal", value: 400 },
+  { label: "Medium", value: 500 },
+  { label: "Semibold", value: 600 },
+  { label: "Bold", value: 700 },
+];
+// Per-widget overrides as scoped CSS (!important to beat the Tailwind classes).
+function widgetCss(id: string, s: WidgetStyle): string {
+  const sel = `[data-widget="${id}"]`;
+  let css = "";
+  if (s.color)
+    css += `${sel} p,${sel} span,${sel} li,${sel} h1,${sel} h2,${sel} h3,${sel} .text-ink,${sel} [class*="text-brand"]{color:${s.color} !important}`;
+  if (s.family) css += `${sel} *{font-family:${s.family} !important}`;
+  if (s.weight) css += `${sel} *{font-weight:${s.weight} !important}`;
+  if (s.scale && s.scale !== 1) css += `${sel} .h-full{zoom:${s.scale}}`;
+  if (s.bg)
+    css += `${sel} .card,${sel} [class*="rounded-2xl"]{background:${s.bg} !important;background-image:none !important}`;
+  return css;
+}
+
 interface Layout {
   order: string[];
   hidden: string[];
   spans: Record<string, number>;
   heights: Record<string, number>;
+  styles: Record<string, WidgetStyle>;
 }
 function loadLayout(): Layout {
   try {
@@ -139,12 +173,13 @@ function loadLayout(): Layout {
         hidden: (p.hidden ?? []).filter((id) => ALL_IDS.includes(id)),
         spans: { ...DEF_SPAN, ...(p.spans ?? {}) },
         heights: p.heights ?? {},
+        styles: p.styles ?? {},
       };
     }
   } catch {
     /* ignore */
   }
-  return { order: [...ALL_IDS], hidden: [], spans: { ...DEF_SPAN }, heights: {} };
+  return { order: [...ALL_IDS], hidden: [], spans: { ...DEF_SPAN }, heights: {}, styles: {} };
 }
 function saveLayout(l: Layout) {
   try {
@@ -158,24 +193,30 @@ function WidgetItem({
   id,
   editing,
   linkable,
-  span,
   spanCls,
   heightStyle,
+  styleOpen,
+  wstyle,
+  onToggleStyle,
+  onStyleChange,
+  onStyleReset,
   onOpen,
   onRemove,
-  onSetSpan,
   onResize,
   children,
 }: {
   id: string;
   editing: boolean;
   linkable: boolean;
-  span: number;
   spanCls: string;
   heightStyle?: React.CSSProperties;
+  styleOpen: boolean;
+  wstyle: WidgetStyle;
+  onToggleStyle: () => void;
+  onStyleChange: (patch: Partial<WidgetStyle>) => void;
+  onStyleReset: () => void;
   onOpen: () => void;
   onRemove: () => void;
-  onSetSpan: (n: number) => void;
   onResize: (e: React.PointerEvent, dir: "x" | "y" | "xy") => void;
   children: React.ReactNode;
 }) {
@@ -186,7 +227,7 @@ function WidgetItem({
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    zIndex: isDragging ? 50 : undefined,
+    zIndex: isDragging || styleOpen ? 50 : undefined,
     ...(heightStyle ?? {}),
   };
   return (
@@ -206,57 +247,134 @@ function WidgetItem({
       } ${isDragging ? "opacity-90 shadow-bento-hover" : ""}`}
     >
       {editing && (
-        <div className="absolute -top-2.5 right-2 z-40 flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-1.5 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
-          {[1, 2, 3, 4].map((n) => (
-            <button
-              key={n}
-              onClick={() => onSetSpan(n)}
-              title={`Width ${n}`}
-              className={cn(
-                "grid h-5 w-5 place-items-center rounded text-[10px] font-bold",
-                span === n
-                  ? "bg-primary-400 text-[#0A0A0A]"
-                  : "text-brand-400 hover:bg-brand-50 dark:hover:bg-white/10"
-              )}
-            >
-              {n}
-            </button>
-          ))}
-          <span className="mx-0.5 h-4 w-px bg-brand-200 dark:bg-[#3A3D45]" />
+        <div className="absolute -top-2.5 right-2 z-40 flex items-center gap-0.5 rounded-lg border border-brand-200 bg-white px-1 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
+          <button
+            onClick={onToggleStyle}
+            title="Style this widget"
+            aria-label="Style widget"
+            className={cn(
+              "grid h-6 w-6 place-items-center rounded cursor-pointer",
+              styleOpen
+                ? "bg-primary-400 text-[#0A0A0A]"
+                : "text-brand-400 hover:bg-brand-50 dark:hover:bg-white/10"
+            )}
+          >
+            <Pencil size={13} />
+          </button>
           <button
             {...attributes}
             {...listeners}
             title="Drag to move"
             aria-label="Drag to move"
-            className="cursor-grab touch-none text-brand-400 active:cursor-grabbing"
+            className="grid h-6 w-6 cursor-grab touch-none place-items-center text-brand-400 active:cursor-grabbing"
           >
             <GripVertical size={14} />
           </button>
           <button
             onClick={onRemove}
             aria-label="Remove widget"
-            className="cursor-pointer text-brand-400 hover:text-danger"
+            className="grid h-6 w-6 cursor-pointer place-items-center text-brand-400 hover:text-danger"
           >
             <X size={14} />
           </button>
         </div>
       )}
+
+      {editing && styleOpen && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute right-2 top-7 z-50 w-60 rounded-xl border border-brand-200 bg-white p-3 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#24262C]"
+        >
+          <p className="mb-2 text-xs font-bold text-ink">Style widget</p>
+          <label className="mb-1 block text-[11px] font-semibold text-brand-500">Font</label>
+          <select
+            className="select mb-2 h-8 text-xs"
+            value={wstyle.family ?? ""}
+            onChange={(e) => onStyleChange({ family: e.target.value || undefined })}
+          >
+            <option value="">Default</option>
+            {FONTS.map((f) => (
+              <option key={f.label} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <label className="mb-1 block text-[11px] font-semibold text-brand-500">Weight</label>
+          <select
+            className="select mb-2 h-8 text-xs"
+            value={wstyle.weight ?? ""}
+            onChange={(e) => onStyleChange({ weight: e.target.value ? Number(e.target.value) : undefined })}
+          >
+            <option value="">Default</option>
+            {WEIGHTS.map((w) => (
+              <option key={w.value} value={w.value}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+          <label className="mb-1 block text-[11px] font-semibold text-brand-500">
+            Text size · {Math.round((wstyle.scale ?? 1) * 100)}%
+          </label>
+          <input
+            type="range"
+            min={0.8}
+            max={1.6}
+            step={0.1}
+            value={wstyle.scale ?? 1}
+            onChange={(e) => onStyleChange({ scale: Number(e.target.value) })}
+            className="mb-3 w-full accent-primary-500"
+          />
+          <div className="mb-3 flex items-center gap-4">
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-brand-500">
+              Text
+              <input
+                type="color"
+                value={wstyle.color ?? "#0a0a0a"}
+                onChange={(e) => onStyleChange({ color: e.target.value })}
+                className="h-6 w-7 cursor-pointer rounded border border-brand-200 bg-transparent dark:border-[#3A3D45]"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-brand-500">
+              Card
+              <input
+                type="color"
+                value={wstyle.bg ?? "#ffffff"}
+                onChange={(e) => onStyleChange({ bg: e.target.value })}
+                className="h-6 w-7 cursor-pointer rounded border border-brand-200 bg-transparent dark:border-[#3A3D45]"
+              />
+            </label>
+          </div>
+          <div className="flex justify-between">
+            <button
+              onClick={onStyleReset}
+              className="cursor-pointer text-[11px] font-semibold text-brand-400 hover:text-danger"
+            >
+              Reset
+            </button>
+            <button
+              onClick={onToggleStyle}
+              className="cursor-pointer text-[11px] font-semibold text-primary-700"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
       {editing && (
         <>
+          {/* width: drag the right edge */}
           <div
             onPointerDown={(e) => onResize(e, "x")}
-            title="Resize width"
+            title="Drag to resize width"
             className="absolute right-0 top-3 bottom-3 z-30 w-2 cursor-ew-resize rounded-full hover:bg-primary-300/50"
           />
+          {/* height: drag the corner */}
           <div
             onPointerDown={(e) => onResize(e, "y")}
-            title="Resize height"
-            className="absolute bottom-0 left-3 right-3 z-30 h-2 cursor-ns-resize rounded-full hover:bg-primary-300/50"
-          />
-          <div
-            onPointerDown={(e) => onResize(e, "xy")}
-            title="Resize"
-            className="absolute -bottom-0.5 -right-0.5 z-40 grid h-4 w-4 cursor-nwse-resize place-items-center"
+            title="Drag corner to resize height"
+            className="absolute -bottom-0.5 -right-0.5 z-40 grid h-5 w-5 cursor-ns-resize place-items-center"
           >
             <span className="h-2.5 w-2.5 rounded-sm border-b-2 border-r-2 border-primary-500" />
           </div>
@@ -277,6 +395,7 @@ export default function Overview() {
   const [editing, setEditing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>(loadLayout);
+  const [styleOpenId, setStyleOpenId] = useState<string | null>(null);
   const nav = useNavigate();
 
   const updateLayout = (next: Layout) => {
@@ -303,6 +422,16 @@ export default function Overview() {
   };
   const setHeight = (id: string, h: number) =>
     updateLayout({ ...layout, heights: { ...layout.heights, [id]: Math.max(96, Math.round(h)) } });
+  const setStyle = (id: string, patch: Partial<WidgetStyle>) =>
+    updateLayout({
+      ...layout,
+      styles: { ...layout.styles, [id]: { ...(layout.styles[id] ?? {}), ...patch } },
+    });
+  const resetStyle = (id: string) => {
+    const rest = { ...layout.styles };
+    delete rest[id];
+    updateLayout({ ...layout, styles: rest });
+  };
 
   // Drag an edge/corner to resize. Width snaps to grid columns (1–4); height
   // is free pixels. Direction: "x" right edge, "y" bottom edge, "xy" corner.
@@ -669,6 +798,14 @@ export default function Overview() {
         </div>
       )}
 
+      {Object.keys(layout.styles).length > 0 && (
+        <style>
+          {Object.entries(layout.styles)
+            .map(([wid, s]) => widgetCss(wid, s))
+            .join("")}
+        </style>
+      )}
+
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={visible} strategy={rectSortingStrategy}>
           <div
@@ -681,12 +818,15 @@ export default function Overview() {
                 id={id}
                 editing={editing}
                 linkable={!!WIDGET_LINK[id]}
-                span={effSpan(id)}
                 spanCls={spanClass(effSpan(id))}
                 heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
+                styleOpen={styleOpenId === id}
+                wstyle={layout.styles[id] ?? {}}
+                onToggleStyle={() => setStyleOpenId((cur) => (cur === id ? null : id))}
+                onStyleChange={(patch) => setStyle(id, patch)}
+                onStyleReset={() => resetStyle(id)}
                 onOpen={() => nav(WIDGET_LINK[id])}
                 onRemove={() => removeWidget(id)}
-                onSetSpan={(n) => setSpan(id, n)}
                 onResize={(e, dir) => startResize(e, id, dir)}
               >
                 {renderWidget(id)}
