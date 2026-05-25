@@ -1,4 +1,4 @@
-import { crm, erp, fin, billing, recurrences, type InvoiceDocInput } from "./api";
+import { crm, erp, fin, billing, recurrences, followups, type InvoiceDocInput } from "./api";
 import { getDisplayCurrency } from "./format";
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
@@ -256,6 +256,43 @@ export const TOOLS: ToolDef[] = [
       const interval = ["weekly", "monthly", "yearly"].includes(str(a.interval)) ? (str(a.interval) as "weekly" | "monthly" | "yearly") : "monthly";
       await recurrences.create(Number(d.id), interval);
       return { ok: true, message: `${d.number} now repeats ${interval}.` };
+    },
+  },
+  {
+    name: "create_order",
+    description: "Create a sales order for a customer.",
+    parameters: {
+      type: "object",
+      properties: { customer_name: { type: "string" }, total: { type: "number" }, order_number: { type: "string" } },
+      required: ["customer_name"],
+    },
+    run: async (a) => {
+      const number =
+        str(a.order_number) ||
+        `ORD-${today().replace(/-/g, "")}-${Math.floor(Math.random() * 900 + 100)}`;
+      await erp.createOrder(number, str(a.customer_name), numOf(a.total));
+      return { ok: true, message: `Order ${number} created for ${str(a.customer_name)}.` };
+    },
+  },
+  {
+    name: "add_reminder",
+    description: "Add a follow-up reminder (shows in Follow-ups and notifies on the due date).",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        due_date: { type: "string", description: "YYYY-MM-DD" },
+        customer_name: { type: "string" },
+      },
+      required: ["title"],
+    },
+    run: async (a) => {
+      await followups.create({
+        title: str(a.title),
+        due_date: str(a.due_date) || today(),
+        customer_name: str(a.customer_name) || undefined,
+      });
+      return { ok: true, message: `Reminder added: ${str(a.title)}` };
     },
   },
   {
