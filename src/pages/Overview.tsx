@@ -16,7 +16,7 @@ import {
   LayoutGrid,
   Check,
 } from "lucide-react";
-import { Reorder } from "framer-motion";
+import { Reorder, useDragControls } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   AreaChart,
@@ -109,6 +109,7 @@ interface Layout {
   order: string[];
   hidden: string[];
   spans: Record<string, number>;
+  heights: Record<string, number>;
 }
 function loadLayout(): Layout {
   try {
@@ -123,12 +124,13 @@ function loadLayout(): Layout {
         order,
         hidden: (p.hidden ?? []).filter((id) => ALL_IDS.includes(id)),
         spans: { ...DEF_SPAN, ...(p.spans ?? {}) },
+        heights: p.heights ?? {},
       };
     }
   } catch {
     /* ignore */
   }
-  return { order: [...ALL_IDS], hidden: [], spans: { ...DEF_SPAN } };
+  return { order: [...ALL_IDS], hidden: [], spans: { ...DEF_SPAN }, heights: {} };
 }
 function saveLayout(l: Layout) {
   try {
@@ -136,6 +138,111 @@ function saveLayout(l: Layout) {
   } catch {
     /* ignore */
   }
+}
+
+function WidgetItem({
+  id,
+  editing,
+  linkable,
+  span,
+  spanCls,
+  heightStyle,
+  onOpen,
+  onRemove,
+  onSetSpan,
+  onResize,
+  children,
+}: {
+  id: string;
+  editing: boolean;
+  linkable: boolean;
+  span: number;
+  spanCls: string;
+  heightStyle?: React.CSSProperties;
+  onOpen: () => void;
+  onRemove: () => void;
+  onSetSpan: (n: number) => void;
+  onResize: (e: React.PointerEvent, dir: "x" | "y" | "xy") => void;
+  children: React.ReactNode;
+}) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      value={id}
+      data-widget={id}
+      drag={editing}
+      dragListener={false}
+      dragControls={controls}
+      onClick={() => {
+        if (!editing && linkable) onOpen();
+      }}
+      style={heightStyle}
+      className={`relative ${spanCls} ${
+        editing
+          ? "rounded-2xl ring-2 ring-dashed ring-primary-300/70"
+          : linkable
+          ? "cursor-pointer"
+          : ""
+      }`}
+    >
+      {editing && (
+        <div className="absolute -top-2.5 right-2 z-40 flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-1.5 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              onClick={() => onSetSpan(n)}
+              title={`Width ${n}`}
+              className={cn(
+                "grid h-5 w-5 place-items-center rounded text-[10px] font-bold",
+                span === n
+                  ? "bg-primary-400 text-[#0A0A0A]"
+                  : "text-brand-400 hover:bg-brand-50 dark:hover:bg-white/10"
+              )}
+            >
+              {n}
+            </button>
+          ))}
+          <span className="mx-0.5 h-4 w-px bg-brand-200 dark:bg-[#3A3D45]" />
+          <span
+            onPointerDown={(e) => controls.start(e)}
+            title="Drag to move"
+            className="cursor-grab text-brand-400 active:cursor-grabbing"
+          >
+            <GripVertical size={14} />
+          </span>
+          <button
+            onClick={onRemove}
+            aria-label="Remove widget"
+            className="cursor-pointer text-brand-400 hover:text-danger"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {editing && (
+        <>
+          <div
+            onPointerDown={(e) => onResize(e, "x")}
+            title="Resize width"
+            className="absolute right-0 top-3 bottom-3 z-30 w-2 cursor-ew-resize rounded-full hover:bg-primary-300/50"
+          />
+          <div
+            onPointerDown={(e) => onResize(e, "y")}
+            title="Resize height"
+            className="absolute bottom-0 left-3 right-3 z-30 h-2 cursor-ns-resize rounded-full hover:bg-primary-300/50"
+          />
+          <div
+            onPointerDown={(e) => onResize(e, "xy")}
+            title="Resize"
+            className="absolute -bottom-0.5 -right-0.5 z-40 grid h-4 w-4 cursor-nwse-resize place-items-center"
+          >
+            <span className="h-2.5 w-2.5 rounded-sm border-b-2 border-r-2 border-primary-500" />
+          </div>
+        </>
+      )}
+      <div className="h-full overflow-auto">{children}</div>
+    </Reorder.Item>
+  );
 }
 
 export default function Overview() {
@@ -162,20 +269,36 @@ export default function Overview() {
   const setSpan = (id: string, n: number) =>
     updateLayout({ ...layout, spans: { ...layout.spans, [id]: Math.min(4, Math.max(1, n)) } });
   const gridRef = useRef<HTMLUListElement>(null);
+  const setHeight = (id: string, h: number) =>
+    updateLayout({ ...layout, heights: { ...layout.heights, [id]: Math.max(96, Math.round(h)) } });
 
-  // Drag the right edge to resize: snaps width to grid columns (1–4).
-  const startResize = (e: React.PointerEvent, id: string) => {
+  // Drag an edge/corner to resize. Width snaps to grid columns (1–4); height
+  // is free pixels. Direction: "x" right edge, "y" bottom edge, "xy" corner.
+  const startResize = (e: React.PointerEvent, id: string, dir: "x" | "y" | "xy") => {
     e.stopPropagation();
     e.preventDefault();
     const startX = e.clientX;
+    const startY = e.clientY;
     const startSpan = effSpan(id);
     const colW = (gridRef.current?.offsetWidth ?? 4) / 4 || 1;
-    let last = startSpan;
+    const el = (e.currentTarget as HTMLElement).closest("[data-widget]") as HTMLElement | null;
+    const startH = layout.heights[id] ?? el?.offsetHeight ?? 200;
+    let lastSpan = startSpan;
+    let lastH = startH;
     const move = (ev: PointerEvent) => {
-      const n = Math.min(4, Math.max(1, startSpan + Math.round((ev.clientX - startX) / colW)));
-      if (n !== last) {
-        last = n;
-        setSpan(id, n);
+      if (dir === "x" || dir === "xy") {
+        const n = Math.min(4, Math.max(1, startSpan + Math.round((ev.clientX - startX) / colW)));
+        if (n !== lastSpan) {
+          lastSpan = n;
+          setSpan(id, n);
+        }
+      }
+      if (dir === "y" || dir === "xy") {
+        const h = Math.max(96, startH + (ev.clientY - startY));
+        if (Math.abs(h - lastH) > 4) {
+          lastH = h;
+          setHeight(id, h);
+        }
       }
     };
     const up = () => {
@@ -463,7 +586,7 @@ export default function Overview() {
                   <Plus size={15} /> Add widget
                 </button>
                 {addOpen && addable.length > 0 && (
-                  <div className="absolute right-0 top-11 z-20 w-52 rounded-xl border border-brand-200 bg-white p-1 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#24262C]">
+                  <div className="absolute right-0 top-11 z-[60] w-52 rounded-xl border border-brand-200 bg-white p-1 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#24262C]">
                     {addable.map((w) => (
                       <button
                         key={w.id}
@@ -521,61 +644,21 @@ export default function Overview() {
         className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
       >
         {visible.map((id) => (
-          <Reorder.Item
+          <WidgetItem
             key={id}
-            value={id}
-            drag={editing}
-            dragListener={editing}
-            onClick={() => {
-              if (!editing && WIDGET_LINK[id]) nav(WIDGET_LINK[id]);
-            }}
-            className={`relative ${spanClass(effSpan(id))} ${
-              editing
-                ? "cursor-grab rounded-2xl ring-2 ring-dashed ring-primary-300/70 active:cursor-grabbing"
-                : WIDGET_LINK[id]
-                ? "cursor-pointer"
-                : ""
-            }`}
+            id={id}
+            editing={editing}
+            linkable={!!WIDGET_LINK[id]}
+            span={effSpan(id)}
+            spanCls={spanClass(effSpan(id))}
+            heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
+            onOpen={() => nav(WIDGET_LINK[id])}
+            onRemove={() => removeWidget(id)}
+            onSetSpan={(n) => setSpan(id, n)}
+            onResize={(e, dir) => startResize(e, id, dir)}
           >
-            {editing && (
-              <div className="absolute -top-2.5 right-2 z-10 flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-1.5 py-1 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
-                {[1, 2, 3, 4].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setSpan(id, n)}
-                    title={`Width ${n}`}
-                    className={cn(
-                      "grid h-5 w-5 place-items-center rounded text-[10px] font-bold",
-                      effSpan(id) === n
-                        ? "bg-primary-400 text-[#0A0A0A]"
-                        : "text-brand-400 hover:bg-brand-50 dark:hover:bg-white/10"
-                    )}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <span className="mx-0.5 h-4 w-px bg-brand-200 dark:bg-[#3A3D45]" />
-                <GripVertical size={14} className="text-brand-400" />
-                <button
-                  onClick={() => removeWidget(id)}
-                  aria-label="Remove widget"
-                  className="cursor-pointer text-brand-400 hover:text-danger"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-            {editing && (
-              <div
-                onPointerDown={(e) => startResize(e, id)}
-                title="Drag to resize"
-                className="absolute right-0 top-0 z-20 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-2xl hover:bg-primary-300/40"
-              >
-                <span className="h-8 w-1 rounded-full bg-primary-400/70" />
-              </div>
-            )}
             {renderWidget(id)}
-          </Reorder.Item>
+          </WidgetItem>
         ))}
       </Reorder.Group>
     </div>
