@@ -18,6 +18,15 @@ const lc = (v: unknown) => str(v).toLowerCase();
 const numOf = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 const today = () => new Date().toISOString().slice(0, 10);
 
+// The file the user attached to the current chat turn (for run_file_tool).
+let attachment: File | null = null;
+export function setAttachment(f: File | null) {
+  attachment = f;
+}
+export function getAttachment(): File | null {
+  return attachment;
+}
+
 async function findInvoice(numberOrId: unknown) {
   const docs = (await billing.listDocs().catch(() => [])) as Record<string, unknown>[];
   const q = lc(numberOrId);
@@ -247,6 +256,43 @@ export const TOOLS: ToolDef[] = [
       const interval = ["weekly", "monthly", "yearly"].includes(str(a.interval)) ? (str(a.interval) as "weekly" | "monthly" | "yearly") : "monthly";
       await recurrences.create(Number(d.id), interval);
       return { ok: true, message: `${d.number} now repeats ${interval}.` };
+    },
+  },
+  {
+    name: "run_file_tool",
+    description:
+      "Run a PDF/image operation on the file the user attached to this chat; the result downloads to their device. operation ∈ compress_pdf | pdf_to_text | pdf_to_images | image_to_pdf | compress_image | convert_image_png | convert_image_jpeg | convert_image_webp | rotate_pdf | add_page_numbers | remove_metadata | reverse_pdf | pdf_info.",
+    parameters: {
+      type: "object",
+      properties: { operation: { type: "string" }, degrees: { type: "number" } },
+      required: ["operation"],
+    },
+    run: async (a) => {
+      const f = getAttachment();
+      if (!f) return { error: "No file attached — ask the user to attach a PDF or image first." };
+      const op = lc(a.operation);
+      const pt = await import("./pdfTools");
+      type Out = { name: string; bytes: Uint8Array };
+      let out: Out | Out[];
+      switch (op) {
+        case "compress_pdf": out = await pt.compressPdf(f); break;
+        case "pdf_to_text": out = await pt.pdfToText(f); break;
+        case "pdf_to_images": out = await pt.pdfToImages(f); break;
+        case "image_to_pdf": out = await pt.imagesToPdf([f]); break;
+        case "compress_image": out = await pt.compressImage(f); break;
+        case "convert_image_png": out = await pt.compressImage(f, "png"); break;
+        case "convert_image_jpeg": out = await pt.compressImage(f, "jpeg"); break;
+        case "convert_image_webp": out = await pt.compressImage(f, "webp"); break;
+        case "rotate_pdf": out = await pt.rotatePdf(f, numOf(a.degrees) || 90); break;
+        case "add_page_numbers": out = await pt.addPageNumbers(f); break;
+        case "remove_metadata": out = await pt.removeMetadata(f); break;
+        case "reverse_pdf": out = await pt.reversePdf(f); break;
+        case "pdf_info": out = await pt.pdfInfo(f); break;
+        default: return { error: `Unknown operation: ${op}` };
+      }
+      const list = Array.isArray(out) ? out : [out];
+      for (const o of list) pt.downloadFile(o);
+      return { ok: true, downloaded: list.map((o) => o.name), message: `Done — ${list.length} file(s) downloaded.` };
     },
   },
   {

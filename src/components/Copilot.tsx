@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Send, X, Plus, NotepadText, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
+import { Send, X, Plus, NotepadText, MoreHorizontal, Pencil, Share2, Trash2, Paperclip } from "lucide-react";
 import { cn, fmtDate } from "../lib/format";
 import {
   aiAgent,
@@ -28,12 +28,14 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { buildAiContext } from "../lib/aiContext";
+import { setAttachment } from "../lib/aiTools";
+import { fileToImage } from "../lib/docScan";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import ColorOrb from "./ColorOrb";
 
 const SYSTEM =
-  "You are Filey, a personal finance/ERP agent inside the user's business app. You can ACT via tools, not just chat. Available actions: read data (stats, customers, products, invoices); create customers; create products and adjust stock; log expenses; create draft invoices; mark invoices sent/paid; make invoices recurring; and open any app page (use open_page with 'tools' for PDF/image utilities, since file conversion happens there). Call tools whenever the user asks you to do something, confirm what you did in one short line, and never invent data — look it up. For destructive or ambiguous requests, ask first. Be concise and practical.";
+  "You are Filey, a personal finance/ERP agent inside the user's business app. You can ACT via tools, not just chat. Available actions: read data (stats, customers, products, invoices); create customers; create products and adjust stock; log expenses; create draft invoices; mark invoices sent/paid; make invoices recurring; open any app page; and when the user attaches a file, run PDF/image operations on it with run_file_tool (compress, convert, pdf↔images, extract text, rotate… — the result downloads to their device). Call tools whenever the user asks you to do something, confirm what you did in one short line, and never invent data — look it up. For destructive or ambiguous requests, ask first. Be concise and practical.";
 
 const ORB_PRESETS = ["#FFD600", "#FF7A00", "#EC4899", "#7C3AED", "#2CADF6", "#3FB984", "#E5484D"];
 
@@ -72,10 +74,12 @@ export default function Copilot() {
   const [ctx, setCtx] = useState<string>("");
   const [customizing, setCustomizing] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
+  const [file, setFile] = useState<File | null>(null);
   const ready = aiReady();
   const navigate = useNavigate();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const save = (patch: Partial<AiPersona>) => setPersonaState(setPersona(patch));
   const tones = orbTones(persona.orbColor);
@@ -152,7 +156,7 @@ export default function Copilot() {
   };
 
   const send = useCallback(async () => {
-    const text = input.trim();
+    const text = input.trim() || (file ? "Process the attached file." : "");
     if (!text || busy) return;
     if (!navigator.onLine) {
       setErr("You're offline — Filey AI needs a connection to reach your model.");
@@ -168,7 +172,7 @@ export default function Copilot() {
       id = c.id;
       select(id);
     }
-    const userTurn: ChatTurn = { role: "user", text };
+    const userTurn: ChatTurn = { role: "user", text: file ? `📎 ${file.name}\n${text}` : text };
     const afterUser = base.map((c) =>
       c.id === id
         ? {
@@ -182,12 +186,21 @@ export default function Copilot() {
     persist(afterUser);
     setInput("");
     setBusy(true);
+    setAttachment(file); // available to run_file_tool
+    const attached = file;
     const convo = afterUser.find((c) => c.id === id)?.turns ?? [];
     try {
       const messages: AiMessage[] = [
         { role: "system", text: buildSystemPrompt(SYSTEM, getPersona(), ctx) },
         ...convo.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
       ];
+      if (attached && attached.type.startsWith("image/")) {
+        try {
+          messages[messages.length - 1].images = [await fileToImage(attached)];
+        } catch {
+          /* vision optional */
+        }
+      }
       const reply = await aiAgent(messages, { maxTokens: 900 });
       setChats((prev) => {
         const next = prev.map((c) =>
@@ -202,9 +215,11 @@ export default function Copilot() {
       setErr(e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+      setFile(null);
+      setAttachment(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, busy, chats, activeId, ctx]);
+  }, [input, busy, chats, activeId, ctx, file]);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -504,7 +519,35 @@ export default function Copilot() {
                     You're offline — Filey AI will reconnect automatically.
                   </p>
                 )}
+                {file && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs dark:bg-white/5">
+                    <Paperclip size={13} className="shrink-0 text-brand-400" />
+                    <span className="flex-1 truncate text-ink">{file.name}</span>
+                    <button
+                      onClick={() => setFile(null)}
+                      aria-label="Remove file"
+                      className="cursor-pointer text-brand-400 hover:text-danger"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    aria-label="Attach a PDF or image"
+                    title="Attach a PDF or image"
+                    className="grid h-10 w-9 shrink-0 place-items-center rounded-lg text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  >
+                    <Paperclip size={17} />
+                  </button>
                   <textarea
                     ref={taRef}
                     value={input}
@@ -516,7 +559,7 @@ export default function Copilot() {
                   />
                   <button
                     onClick={() => void send()}
-                    disabled={busy || !input.trim() || !online}
+                    disabled={busy || (!input.trim() && !file) || !online}
                     aria-label="Send"
                     className="btn-primary h-10 w-10 shrink-0 !px-0"
                   >

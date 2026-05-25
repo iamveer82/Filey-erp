@@ -272,7 +272,18 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: ChatOpts)
   const convo: any[] = [];
   if (sys) convo.push({ role: "system", content: sys });
   for (const m of messages.filter((m) => m.role !== "system"))
-    convo.push({ role: m.role, content: m.text });
+    convo.push({
+      role: m.role,
+      content: m.images?.length
+        ? [
+            { type: "text", text: m.text },
+            ...m.images.map((im) => ({
+              type: "image_url",
+              image_url: { url: `data:${im.mediaType};base64,${im.dataBase64}` },
+            })),
+          ]
+        : m.text,
+    });
   const tools = TOOLS.map((t) => ({
     type: "function",
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -327,7 +338,18 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: ChatOp
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const convo: any[] = messages
     .filter((m) => m.role !== "system")
-    .map((m) => ({ role: m.role, content: m.text }));
+    .map((m) => ({
+      role: m.role,
+      content: m.images?.length
+        ? [
+            { type: "text", text: m.text },
+            ...m.images.map((im) => ({
+              type: "image",
+              source: { type: "base64", media_type: im.mediaType, data: im.dataBase64 },
+            })),
+          ]
+        : m.text,
+    }));
   const tools = TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
