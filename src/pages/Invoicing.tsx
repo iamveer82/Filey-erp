@@ -14,7 +14,6 @@ import {
   Check,
   CheckCircle2,
   Eye,
-  MoreHorizontal,
   Send,
   Monitor,
   Smartphone,
@@ -849,16 +848,17 @@ function Editor({
             className="btn-ghost"
             onClick={onSave}
             disabled={saving}
-            title="Save draft"
+            title="Save without sending"
           >
-            <MoreHorizontal size={15} /> More
+            <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
           <button
             className="btn-primary"
             onClick={saveAndSend}
             disabled={saving}
+            title="Save and email the invoice to the customer"
           >
-            <Send size={15} /> {saving ? "Saving…" : "Save & Send"}
+            <Send size={15} /> Send
           </button>
         </div>
       </div>
