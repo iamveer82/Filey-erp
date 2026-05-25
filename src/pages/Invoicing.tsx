@@ -93,6 +93,7 @@ function blankForm(c: CompanyProfile): Form {
   return {
     number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
     status: "draft",
+    doc_type: "Tax Invoice",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
     currency: c.currency || "AED",
@@ -177,6 +178,7 @@ export default function Invoicing() {
       id: d.id,
       number: d.number,
       status: d.status,
+      doc_type: d.doc_type,
       template: d.template,
       accent: d.accent,
       currency: d.currency,
@@ -1040,6 +1042,30 @@ function Editor({
                     onChange={(e) => set("due_date", e.target.value)}
                   />
                 </Field>
+                <Field label="Document type">
+                  <input
+                    className="input"
+                    list="filey-doc-types"
+                    value={form.doc_type ?? ""}
+                    onChange={(e) => set("doc_type", e.target.value)}
+                    placeholder="Tax Invoice"
+                  />
+                  <datalist id="filey-doc-types">
+                    {[
+                      "Tax Invoice",
+                      "Proforma Invoice",
+                      "Commercial Invoice",
+                      "Purchase Order",
+                      "Quotation",
+                      "Credit Note",
+                      "Debit Note",
+                      "Receipt",
+                      "Delivery Note",
+                    ].map((o) => (
+                      <option key={o} value={o} />
+                    ))}
+                  </datalist>
+                </Field>
                 <Field label="Currency">
                   <select
                     className="select"
@@ -1867,7 +1893,7 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
-              {(form.tax_rate || 0) > 0 ? "TAX INVOICE" : "INVOICE"}
+              {(form.doc_type || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")).toUpperCase()}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
             {form.seller_trn && (

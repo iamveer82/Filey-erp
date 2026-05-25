@@ -218,6 +218,7 @@ export interface InvoiceDoc {
   id: number;
   number: string;
   status: string;
+  doc_type?: string;
   template: string;
   accent: string;
   currency: string;
