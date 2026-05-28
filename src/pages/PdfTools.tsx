@@ -9,6 +9,7 @@ import {
   Trash2,
   Share2,
   Eye,
+  Signature,
 } from "lucide-react";
 import { PageHeader, InfoCard } from "../components/ui";
 import Folder from "../components/Folder";
@@ -33,6 +34,7 @@ import {
 } from "../components/PdfToolbox";
 import ToolBrowserModal from "../components/ToolBrowserModal";
 import PreviewModal from "../components/PreviewModal";
+import EsignModal from "../components/EsignModal";
 
 interface RunLog {
   id: number;
@@ -70,6 +72,7 @@ export default function ToolsPage() {
   const [active, setActive] = useState<Tool | null>(null);
   const [runs, setRuns] = useState<RunLog[]>([]);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [esignOpen, setEsignOpen] = useState(false);
   const [preview, setPreview] = useState<RunLog | null>(null);
   const [used, setUsed] = useState(0);
   const { toast, confirm, prompt } = useUI();
@@ -239,6 +242,18 @@ export default function ToolsPage() {
             </button>
           ))}
           <button
+            onClick={() => setEsignOpen(true)}
+            title="E-sign PDF"
+            className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
+          >
+            <span className="grid h-[80px] w-[80px] place-items-center rounded-2xl bg-primary-400 text-[#0A0A0A] shadow-bento">
+              <Signature size={30} />
+            </span>
+            <span className="text-[11px] font-semibold text-brand-600 text-center leading-tight max-w-[6.5rem] truncate">
+              E-sign PDF
+            </span>
+          </button>
+          <button
             onClick={() => setBrowseOpen(true)}
             title="More tools"
             className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
@@ -338,6 +353,8 @@ export default function ToolsPage() {
           onComplete={logRun}
         />
       )}
+
+      <EsignModal open={esignOpen} onClose={() => setEsignOpen(false)} />
 
       <ToolBrowserModal
         open={browseOpen}

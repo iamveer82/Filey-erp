@@ -1088,6 +1088,36 @@ export async function addStamp(file: File, kind: StampKind): Promise<OutFile> {
 }
 
 /** Embed a signature image (PNG/JPG data URL) at bottom-right of last page. */
+/** Place a signature image at a precise position (PDF points; origin
+ *  bottom-left) on a specific page. `widthPt` controls the rendered width;
+ *  height keeps the image's aspect ratio. */
+export async function signPdfAt(
+  file: File,
+  signatureDataUrl: string,
+  pageIndex: number,
+  xPt: number,
+  yPt: number,
+  widthPt: number
+): Promise<OutFile> {
+  if (!signatureDataUrl) throw new Error("Provide a signature image.");
+  const doc = await loadDoc(file);
+  const pages = doc.getPages();
+  if (pageIndex < 0 || pageIndex >= pages.length)
+    throw new Error("Page out of range.");
+  const isPng = signatureDataUrl.startsWith("data:image/png");
+  const b64 = signatureDataUrl.split(",")[1] ?? "";
+  const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const img = isPng ? await doc.embedPng(raw) : await doc.embedJpg(raw);
+  const target = pages[pageIndex];
+  const w = Math.max(20, widthPt);
+  const h = (w / img.width) * img.height;
+  target.drawImage(img, { x: xPt, y: yPt, width: w, height: h });
+  return {
+    name: `${base(file.name)}-signed.pdf`,
+    bytes: await doc.save(),
+  };
+}
+
 export async function signPdf(
   file: File,
   signatureDataUrl: string
