@@ -124,6 +124,18 @@ export default function Copilot() {
       window.removeEventListener("offline", down);
     };
   }, []);
+  // Other parts of the app can pop Filey open via a CustomEvent.
+  useEffect(() => {
+    const h = () => setOpen(true);
+    window.addEventListener("filey:copilot:open", h);
+    return () => window.removeEventListener("filey:copilot:open", h);
+  }, []);
+  // Other parts of the app can pop Filey open via a CustomEvent.
+  useEffect(() => {
+    const h = () => setOpen(true);
+    window.addEventListener("filey:copilot:open", h);
+    return () => window.removeEventListener("filey:copilot:open", h);
+  }, []);
 
   const finishOnboarding = () => {
     const p = setPersona({

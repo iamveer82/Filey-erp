@@ -1,24 +1,33 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
-  MoreHorizontal,
   CheckCircle2,
   LayoutGrid,
   Download,
-  Pencil,
   SquarePen,
-  Trash2,
-  Share2,
   Eye,
   Signature,
+  Sparkles,
+  Wand2,
+  Star,
+  ChevronRight,
+  ArrowRight,
+  ArrowLeft,
+  FileText,
+  Upload,
+  Loader2,
 } from "lucide-react";
-import { PageHeader, InfoCard } from "../components/ui";
-import Folder from "../components/Folder";
+import { motion } from "framer-motion";
+import * as pdfjs from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+import { PageHeader, InfoCard, Field } from "../components/ui";
 import FileCard from "../components/FileCard";
+import ColorOrb from "../components/ColorOrb";
 import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
 import {
   uploadOutputs,
-  removePaths,
   downloadBytes,
   fileNameOf,
   ensureRoom,
@@ -26,15 +35,12 @@ import {
   STORAGE_QUOTA_BYTES,
 } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
-import {
-  PDF_TOOLS,
-  ToolRunner,
-  toolById,
-  type Tool,
-} from "../components/PdfToolbox";
+import { PDF_TOOLS, toolById, type Tool } from "../components/PdfToolbox";
 import ToolBrowserModal from "../components/ToolBrowserModal";
 import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
+import PdfEditorModal from "../components/PdfEditorModal";
+import { useAuth } from "../lib/auth";
 
 interface RunLog {
   id: number;
@@ -44,15 +50,6 @@ interface RunLog {
   paths: string[];
   ts: number;
 }
-
-const FOLDER_COLORS = [
-  "yellow",
-  "blue",
-  "orange",
-  "red",
-  "grey",
-  "black",
-] as const;
 
 function mb(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -73,9 +70,30 @@ export default function ToolsPage() {
   const [runs, setRuns] = useState<RunLog[]>([]);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [esignOpen, setEsignOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [cat, setCat] = useState<string>("All Tools");
+  const { profile } = useAuth();
+  const firstName = profile?.name?.split(" ")[0] || "there";
+  const [params, setParams] = useSearchParams();
+  const closeActive = () => setParams({});
+
+  // Each tool gets its own URL (?tool=<id>) so links are shareable and the
+  // browser Back button returns to the dashboard.
+  useEffect(() => {
+    const id = params.get("tool");
+    if (!id) {
+      if (active) setActive(null);
+      return;
+    }
+    if (active?.id !== id) {
+      const t = toolById(id);
+      if (t) setActive(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
   const [preview, setPreview] = useState<RunLog | null>(null);
   const [used, setUsed] = useState(0);
-  const { toast, confirm, prompt } = useUI();
+  const { toast } = useUI();
 
   const refreshRuns = () => {
     toolRuns
@@ -127,8 +145,7 @@ export default function ToolsPage() {
   };
 
   const openTool = (toolId: string) => {
-    const t = toolById(toolId);
-    if (t) setActive(t);
+    setParams({ tool: toolId });
   };
 
   const downloadRun = async (r: RunLog) => {
@@ -148,303 +165,526 @@ export default function ToolsPage() {
     }
   };
 
-  const renameRun = async (r: RunLog) => {
-    const next = await prompt({
-      title: "Rename file",
-      label: "File name",
-      defaultValue: r.file,
-    });
-    if (next == null || !next.trim() || next === r.file) return;
-    try {
-      await toolRuns.rename(r.id, next.trim());
-      refreshRuns();
-      toast.success("File renamed.");
-    } catch (e) {
-      toast.error(
-        `Could not rename: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  };
+  const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
+  const filteredTools =
+    cat === "All Tools"
+      ? PDF_TOOLS.slice(0, 11)
+      : PDF_TOOLS.filter((t) => t.cat === cat).slice(0, 11);
+  const askFiley = () => window.dispatchEvent(new Event("filey:copilot:open"));
 
-  const deleteRun = async (r: RunLog) => {
-    const ok = await confirm({
-      title: "Delete file",
-      message: `Remove "${r.file}" and its stored files? This cannot be undone.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await removePaths(r.paths);
-      await toolRuns.remove(r.id);
-      refreshRuns();
-      toast.success("Removed.");
-    } catch (e) {
-      toast.error(
-        `Could not delete: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  };
-
-  const shareRun = async (r: RunLog) => {
-    const text = `${r.file} — processed with ${r.toolName} (${ago(r.ts)})`;
-    try {
-      if (navigator.share) await navigator.share({ title: r.file, text });
-      else {
-        await navigator.clipboard.writeText(text);
-        toast.info("Copied details to clipboard.");
-      }
-    } catch {
-      /* user dismissed share sheet */
-    }
-  };
-
-  const quick = PDF_TOOLS.slice(0, 8);
+  if (active) {
+    return (
+      <PdfToolWorkspace
+        tool={active}
+        onBack={closeActive}
+        onComplete={(toolId, _toolName, file, outs) => logRun(toolId, [file], outs)}
+      />
+    );
+  }
 
   return (
     <div className="animate-fade-up">
       <PageHeader
         title="Tools"
-        subtitle="Powerful tools to help you manage and process your business documents"
+        subtitle="An AI workspace assistant that helps manage files intelligently"
       />
 
-      {/* Quick access */}
-      <InfoCard
-        title="Quick Access"
-        className="mb-4"
-        action={
-          <button
-            className="btn-primary text-xs"
-            onClick={() => setBrowseOpen(true)}
-          >
-            <LayoutGrid size={14} /> View all
-          </button>
-        }
-      >
-        <p className="text-xs text-brand-400 -mt-3 mb-5">
-          Your most used tools — every action runs locally on this device
-        </p>
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-x-4 gap-y-5 justify-items-center">
-          {quick.map((t, i) => (
-            <button
-              key={t.id}
-              onClick={() => setActive(t)}
-              title={t.name}
-              className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
-            >
-              <Folder
-                size="sm"
-                color={FOLDER_COLORS[i % FOLDER_COLORS.length]}
-              />
-              <span className="text-[11px] font-semibold text-brand-600 text-center leading-tight max-w-[6.5rem] truncate">
-                {t.name}
-              </span>
-            </button>
-          ))}
-          <button
-            onClick={() => setEsignOpen(true)}
-            title="E-sign PDF"
-            className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
-          >
-            <span className="grid h-[80px] w-[80px] place-items-center rounded-2xl bg-primary-400 text-[#0A0A0A] shadow-bento">
-              <Signature size={30} />
-            </span>
-            <span className="text-[11px] font-semibold text-brand-600 text-center leading-tight max-w-[6.5rem] truncate">
-              E-sign PDF
-            </span>
-          </button>
-          <button
-            onClick={() => setBrowseOpen(true)}
-            title="More tools"
-            className="group flex flex-col items-center gap-2 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded-2xl"
-          >
-            <Folder size="sm" color="grey" label="More" />
-            <span className="text-[11px] font-semibold text-brand-600">
-              More Tools
-            </span>
-          </button>
-        </div>
-      </InfoCard>
-
-      {/* Supported formats */}
-      <InfoCard title="Works with your files" className="mb-4">
-        <p className="text-xs text-brand-400 -mt-3 mb-5">
-          Convert, merge, split &amp; export across formats — all on-device
-        </p>
-        <div className="flex flex-wrap gap-x-6 gap-y-4">
-          {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
-            (f) => (
-              <FileCard key={f} formatFile={f} />
-            )
-          )}
-        </div>
-      </InfoCard>
-
-      {/* Recent activity (full width) */}
-      <InfoCard
-        title="Recent Activity"
-        className="mb-4"
-        action={
-          <span
-            className="text-[11px] font-semibold text-brand-400"
-            title="Stored output files count toward your account quota"
-          >
-            {mb(used)} / {mb(STORAGE_QUOTA_BYTES)} used
-          </span>
-        }
-      >
-        {runs.length === 0 ? (
-          <p className="text-sm text-brand-400">
-            No tool runs yet — your processed files will appear here.
-          </p>
-        ) : (
-          <ul className="space-y-2.5">
-            {runs.slice(0, 8).map((r) => (
-              <li
-                key={r.id}
-                className="flex items-center justify-between gap-3"
+      <div className="grid lg:grid-cols-[1fr_340px] gap-5 items-start">
+        {/* ── Main column ─────────────────────────────────────────────────── */}
+        <main className="min-w-0">
+          {/* CATEGORY TABS */}
+          <div className="mb-4 flex gap-1 overflow-x-auto border-b border-brand-200/60 dark:border-[#3A3D45]">
+            {cats.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCat(c)}
+                className={`relative whitespace-nowrap px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
+                  cat === c ? "text-ink" : "text-brand-500 hover:text-ink"
+                }`}
               >
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink truncate">
-                    {r.file}
-                  </p>
-                  <p className="text-[11px] text-brand-400">
-                    {r.toolName} · {ago(r.ts)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    aria-label="Preview"
-                    title="Preview a document"
-                    onClick={() => setPreview(r)}
-                    className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 cursor-pointer"
-                  >
-                    <Eye size={16} />
-                  </button>
-                  <button
-                    aria-label="Download"
-                    title={
-                      r.paths.length
-                        ? "Download stored file"
-                        : "Re-open tool to regenerate"
-                    }
-                    onClick={() => downloadRun(r)}
-                    className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 cursor-pointer"
-                  >
-                    <Download size={16} />
-                  </button>
-                  <RunMenu
-                    onRename={() => renameRun(r)}
-                    onEdit={() => openTool(r.toolId)}
-                    onDelete={() => deleteRun(r)}
-                    onShare={() => shareRun(r)}
+                {c}
+                {cat === c && (
+                  <motion.span
+                    layoutId="tools-tab-underline"
+                    className="absolute -bottom-px left-0 right-0 h-0.5 rounded bg-primary-400"
                   />
-                </div>
-              </li>
+                )}
+              </button>
             ))}
-          </ul>
-        )}
-      </InfoCard>
+          </div>
 
-      {active && (
-        <ToolRunner
-          tool={active}
-          onClose={() => setActive(null)}
-          onComplete={logRun}
-        />
-      )}
+          {/* TOOLS GRID */}
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {cat === "All Tools" && (
+              <>
+                <ToolMiniCard
+                  name="Edit PDF"
+                  desc="Text, draw, crop, rotate, delete pages"
+                  Icon={SquarePen}
+                  badgeBg="bg-ink"
+                  badgeFg="text-white"
+                  onUse={() => setEditorOpen(true)}
+                />
+                <ToolMiniCard
+                  name="E-sign PDF"
+                  desc="Draw, type or upload — place &amp; download"
+                  Icon={Signature}
+                  badgeBg="bg-primary-400"
+                  badgeFg="text-[#0A0A0A]"
+                  onUse={() => setEsignOpen(true)}
+                />
+              </>
+            )}
+            {filteredTools.map((t) => (
+              <ToolMiniCard
+                key={t.id}
+                name={t.name}
+                desc={t.desc}
+                Icon={t.icon}
+                badgeBg="bg-primary-100 dark:bg-primary-400/15"
+                badgeFg="text-primary-700 dark:text-primary-300"
+                onUse={() => openTool(t.id)}
+              />
+            ))}
+          </div>
 
+          <div className="mb-4 flex justify-center">
+            <button onClick={() => setBrowseOpen(true)} className="btn-ghost">
+              <LayoutGrid size={14} /> View all {PDF_TOOLS.length} tools
+            </button>
+          </div>
+
+          {/* Supported formats */}
+          <InfoCard title="Works with your files" className="mb-4">
+            <p className="-mt-3 mb-5 text-xs text-brand-400">
+              Convert, merge, split &amp; export across formats — all on-device
+            </p>
+            <div className="flex flex-wrap gap-x-6 gap-y-4">
+              {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
+                (f) => (
+                  <FileCard key={f} formatFile={f} />
+                )
+              )}
+            </div>
+          </InfoCard>
+
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-400">
+            <CheckCircle2 size={12} className="text-success" />
+            All processing happens locally — files never leave this device.
+          </p>
+        </main>
+
+        {/* ── Right AI panel ──────────────────────────────────────────────── */}
+        <aside className="space-y-4 self-start lg:sticky lg:top-4">
+          {/* Filey Assistant chat */}
+          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
+            <div className="mb-3 flex items-center gap-2">
+              <ColorOrb dimension="22px" />
+              <span className="text-sm font-bold text-ink">Filey Assistant</span>
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-success">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" /> Online
+              </span>
+            </div>
+            <div className="rounded-2xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/5">
+              Hi {firstName} 👋
+              <br />
+              What would you like to do today?
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {[
+                "Merge multiple PDFs",
+                "Extract invoice data",
+                "Organize documents",
+                "Summarize long PDFs",
+              ].map((s) => (
+                <button
+                  key={s}
+                  onClick={askFiley}
+                  className="flex w-full items-center justify-between rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-semibold text-brand-600 transition hover:border-primary-300 hover:text-ink dark:border-[#3A3D45] dark:bg-[#24262C] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
+                >
+                  {s} <ChevronRight size={12} />
+                </button>
+              ))}
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              onClick={askFiley}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-white cursor-pointer"
+              style={{ background: "linear-gradient(135deg,#8B5CF6,#7C4DFF)" }}
+            >
+              Ask Filey Anything <ArrowRight size={14} />
+            </motion.button>
+          </div>
+
+          {/* Smart recommendations */}
+          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
+            <p className="mb-3 text-sm font-bold text-ink">Smart suggestions</p>
+            <div className="space-y-1.5">
+              {[
+                {
+                  Icon: Wand2,
+                  color: "#8B5CF6",
+                  title: "Extract tables from invoices",
+                  desc: "Turn PDF tables into a spreadsheet",
+                  onClick: askFiley,
+                },
+                {
+                  Icon: FileText,
+                  color: "#FFD600",
+                  title: "Compress large reports",
+                  desc: "Shrink heavy PDFs in seconds",
+                  onClick: () => openTool("compress"),
+                },
+                {
+                  Icon: LayoutGrid,
+                  color: "#2CADF6",
+                  title: "Merge multiple PDFs",
+                  desc: "Combine into one document",
+                  onClick: () => openTool("merge"),
+                },
+              ].map((r) => (
+                <button
+                  key={r.title}
+                  onClick={r.onClick}
+                  className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+                >
+                  <span
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                    style={{ background: r.color + "22", color: r.color }}
+                  >
+                    <r.Icon size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-bold text-ink">{r.title}</span>
+                    <span className="block truncate text-[11px] text-brand-400">{r.desc}</span>
+                  </span>
+                  <ChevronRight size={14} className="shrink-0 text-brand-300" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Recent activity */}
+          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-bold text-ink">Recent activity</p>
+              <span className="text-[10px] font-semibold text-brand-400">
+                {mb(used)} / {mb(STORAGE_QUOTA_BYTES)}
+              </span>
+            </div>
+            {runs.length === 0 ? (
+              <p className="text-xs text-brand-400">
+                Nothing yet — processed files will appear here.
+              </p>
+            ) : (
+              <ul className="space-y-2.5">
+                {runs.slice(0, 5).map((r) => (
+                  <li key={r.id} className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-semibold text-ink">
+                        {r.toolName}
+                      </span>
+                      <span className="block truncate text-[10px] text-brand-400">
+                        {r.file} · {ago(r.ts)}
+                      </span>
+                    </span>
+                    <button
+                      onClick={() => setPreview(r)}
+                      aria-label="Preview"
+                      className="cursor-pointer text-brand-400 hover:text-ink"
+                    >
+                      <Eye size={13} />
+                    </button>
+                    <button
+                      onClick={() => downloadRun(r)}
+                      aria-label="Download"
+                      className="cursor-pointer text-brand-400 hover:text-ink"
+                    >
+                      <Download size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Feedback */}
+          <div className="rounded-[28px] border border-black/[0.04] p-4 text-center shadow-bento dark:border-white/[0.06]"
+            style={{ background: "linear-gradient(135deg,#FFF9E6,#FFFDF2)" }}
+          >
+            <p className="text-sm font-bold text-ink">Love Filey Tools?</p>
+            <div className="mt-2 flex justify-center gap-1">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <button
+                  key={i}
+                  aria-label={`${i} star`}
+                  className="cursor-pointer text-primary-500 transition hover:scale-110"
+                >
+                  <Star size={18} fill="currentColor" />
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-brand-400">Tap to rate</p>
+          </div>
+        </aside>
+      </div>
+
+      {/* modals (workspace renders as a full page above when active) */}
       <EsignModal open={esignOpen} onClose={() => setEsignOpen(false)} />
-
+      <PdfEditorModal open={editorOpen} onClose={() => setEditorOpen(false)} />
       <ToolBrowserModal
         open={browseOpen}
         onClose={() => setBrowseOpen(false)}
         onComplete={logRun}
       />
-
       <PreviewModal
         open={!!preview}
         title={preview?.file}
         paths={preview?.paths ?? []}
         onClose={() => setPreview(null)}
       />
-
-      <p className="flex items-center gap-1.5 text-[11px] text-brand-400 mt-4">
-        <CheckCircle2 size={12} className="text-success" />
-        All processing happens locally — files never leave this device.
-      </p>
     </div>
   );
 }
 
-function RunMenu({
-  onRename,
-  onEdit,
-  onDelete,
-  onShare,
+function ToolMiniCard({
+  name,
+  desc,
+  Icon,
+  badgeBg,
+  badgeFg,
+  onUse,
 }: {
-  onRename: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onShare: () => void;
+  name: string;
+  desc: string;
+  Icon: typeof Sparkles;
+  badgeBg: string;
+  badgeFg: string;
+  onUse: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open]);
-
-  const item = (
-    icon: ReactNode,
-    label: string,
-    fn: () => void,
-    danger?: boolean
-  ) => (
-    <button
-      onClick={() => {
-        setOpen(false);
-        fn();
-      }}
-      className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left cursor-pointer transition-colors ${
-        danger
-          ? "text-danger hover:bg-danger/10"
-          : "text-brand-600 hover:bg-brand-50"
-      }`}
+  return (
+    <motion.button
+      onClick={onUse}
+      whileHover={{ y: -3 }}
+      className="group flex flex-col gap-2 rounded-3xl border border-black/[0.04] bg-white p-4 text-left shadow-bento transition-shadow hover:shadow-bento-hover dark:border-white/[0.06] dark:bg-[#1E2025] cursor-pointer"
     >
-      {icon}
-      {label}
-    </button>
+      <span
+        className={`grid h-12 w-12 place-items-center rounded-2xl transition-colors ${badgeBg} ${badgeFg}`}
+      >
+        <Icon size={22} />
+      </span>
+      <p className="mt-1 text-[15px] font-bold leading-tight text-ink">{name}</p>
+      <p className="line-clamp-2 text-xs text-brand-500">{desc}</p>
+      <div className="mt-auto flex items-center justify-between pt-2">
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400">
+          Use tool <ArrowRight size={11} />
+        </span>
+        <Star
+          size={13}
+          className="cursor-pointer text-brand-300 hover:text-primary-500"
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        />
+      </div>
+    </motion.button>
   );
+}
+
+/* ── Per-tool workspace: sticky back nav, tool card, upload, live preview,
+   options panel, run button. Minimal + professional. ───────────────────── */
+function PdfToolWorkspace({
+  tool,
+  onBack,
+  onComplete,
+}: {
+  tool: Tool;
+  onBack: () => void;
+  onComplete: (toolId: string, toolName: string, file: string, outs: OutFile[]) => void;
+}) {
+  const { toast } = useUI();
+  const [files, setFiles] = useState<File[]>([]);
+  const [params, setParams] = useState<Record<string, string>>({});
+  const [running, setRunning] = useState(false);
+  const [outs, setOuts] = useState<OutFile[]>([]);
+  const Icon = tool.icon;
+
+  const pickFiles = (list: FileList | null) => {
+    if (!list) return;
+    setFiles(Array.from(list));
+    setOuts([]);
+  };
+  const run = async () => {
+    if (!files.length) {
+      toast.error("Upload a file first.");
+      return;
+    }
+    setRunning(true);
+    try {
+      const result = await tool.run(files, params);
+      setOuts(result);
+      for (const o of result) downloadFile(o);
+      onComplete(tool.id, tool.name, files[0].name, result);
+      toast.success(`Done — ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        aria-label="More actions"
-        onClick={() => setOpen((v) => !v)}
-        className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 cursor-pointer"
-      >
-        <MoreHorizontal size={16} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-40 rounded-xl border border-brand-200 dark:border-[#3A3D45] bg-white dark:bg-[#24262C] shadow-bento-hover py-1 z-20">
-          {item(<Pencil size={14} />, "Rename", onRename)}
-          {item(<SquarePen size={14} />, "Edit", onEdit)}
-          {item(<Share2 size={14} />, "Share", onShare)}
-          {item(<Trash2 size={14} />, "Delete", onDelete, true)}
+    <div className="animate-fade-up">
+      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-brand-200 bg-white/85 px-4 py-3 backdrop-blur-md dark:border-[#3A3D45] dark:bg-[#15161A]/85">
+        <button onClick={onBack} className="btn-ghost h-9">
+          <ArrowLeft size={14} /> All tools
+        </button>
+        <span className="hidden h-5 w-px bg-brand-200 dark:bg-[#3A3D45] sm:block" />
+        <span className="truncate text-sm font-bold text-ink">{tool.name}</span>
+        <span className="ml-auto hidden text-xs text-brand-400 sm:inline">{tool.cat}</span>
+      </div>
+
+      <div className="card mb-4 flex flex-wrap items-center gap-3">
+        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+          <Icon size={22} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-bold text-ink">{tool.name}</p>
+          <p className="line-clamp-2 text-xs text-brand-500">{tool.desc}</p>
+        </div>
+        <label className="btn-primary cursor-pointer">
+          <Upload size={14} />{" "}
+          {files.length ? `${files.length} file${files.length > 1 ? "s" : ""}` : "Upload"}
+          <input
+            type="file"
+            accept={tool.accept}
+            multiple={tool.multi}
+            className="hidden"
+            onChange={(e) => pickFiles(e.target.files)}
+          />
+        </label>
+      </div>
+
+      {!files.length ? (
+        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#3A3D45] dark:bg-[#1E2025] dark:hover:bg-white/5">
+          <div>
+            <Upload size={22} className="mx-auto mb-1 text-brand-300" />
+            Drop or choose {tool.multi ? "files" : "a file"} to preview here
+            <input
+              type="file"
+              accept={tool.accept}
+              multiple={tool.multi}
+              className="hidden"
+              onChange={(e) => pickFiles(e.target.files)}
+            />
+          </div>
+        </label>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <div className="card min-h-[480px]">
+            <p className="mb-2 text-xs font-semibold text-brand-500">Preview</p>
+            <FilePreview file={files[0]} />
+            {files.length > 1 && (
+              <p className="mt-2 text-[11px] text-brand-400">
+                +{files.length - 1} more file{files.length - 1 > 1 ? "s" : ""}
+              </p>
+            )}
+          </div>
+          <aside className="card space-y-3 self-start lg:sticky lg:top-20">
+            <p className="text-sm font-bold text-ink">Options</p>
+            {tool.params.length === 0 ? (
+              <p className="text-xs text-brand-400">No options for this tool.</p>
+            ) : (
+              tool.params.map((p) => (
+                <Field key={p} label={p.charAt(0).toUpperCase() + p.slice(1)}>
+                  <input
+                    className="input"
+                    value={params[p] ?? ""}
+                    onChange={(e) => setParams({ ...params, [p]: e.target.value })}
+                    placeholder={p}
+                  />
+                </Field>
+              ))
+            )}
+            <button onClick={run} disabled={running} className="btn-primary w-full">
+              {running ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              Run {tool.name}
+            </button>
+            {!!outs.length && (
+              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+                ✓ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
+              </div>
+            )}
+            <button onClick={() => setFiles([])} className="btn-ghost w-full">
+              Choose another file
+            </button>
+          </aside>
         </div>
       )}
     </div>
   );
 }
+
+function FilePreview({ file }: { file: File }) {
+  const [img, setImg] = useState<string>("");
+  const [text, setText] = useState<string>("");
+  useEffect(() => {
+    let dead = false;
+    setImg("");
+    setText("");
+    (async () => {
+      try {
+        if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+          const data = new Uint8Array(await file.arrayBuffer());
+          const pdf = await pdfjs.getDocument({ data }).promise;
+          const p = await pdf.getPage(1);
+          const vp = p.getViewport({ scale: 1.4 });
+          const c = document.createElement("canvas");
+          c.width = vp.width;
+          c.height = vp.height;
+          const ctx = c.getContext("2d");
+          if (!ctx) return;
+          await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
+          if (!dead) setImg(c.toDataURL("image/png"));
+        } else if (file.type.startsWith("image/")) {
+          const r = new FileReader();
+          r.onload = () => !dead && setImg(String(r.result || ""));
+          r.readAsDataURL(file);
+        } else if (file.type.startsWith("text/") || /\.(txt|csv|json|md)$/i.test(file.name)) {
+          const t = await file.text();
+          if (!dead) setText(t.slice(0, 4000));
+        }
+      } catch {
+        /* preview unavailable */
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [file]);
+  if (img)
+    return (
+      <img
+        src={img}
+        alt={file.name}
+        className="mx-auto max-h-[640px] rounded-lg border border-brand-200 dark:border-[#3A3D45]"
+      />
+    );
+  if (text)
+    return (
+      <pre className="max-h-[640px] overflow-auto rounded-lg border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#3A3D45] dark:bg-white/5 dark:text-[#DDE0E4]">
+        {text}
+      </pre>
+    );
+  return (
+    <div className="grid h-64 place-items-center text-sm text-brand-400">
+      <div className="text-center">
+        <FileText size={28} className="mx-auto text-brand-300" />
+        <p className="mt-1 font-semibold text-ink">{file.name}</p>
+        <p className="text-xs">Preview not available for this format — Run will still process it.</p>
+      </div>
+    </div>
+  );
+}
+
