@@ -102,9 +102,15 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 export default function PdfEditorModal({
   open,
   onClose,
+  initialFile,
+  onSaveEdited,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Preload the editor with this file (skip the upload step). */
+  initialFile?: File | null;
+  /** When provided, Save returns the edited File instead of downloading it. */
+  onSaveEdited?: (file: File) => void;
 }) {
   const { toast } = useUI();
   const [file, setFile] = useState<File | null>(null);
@@ -116,6 +122,14 @@ export default function PdfEditorModal({
   const [edits, setEdits] = useState<Edit[]>([]);
   const [ops, setOps] = useState<Record<number, PageOp>>({});
   const [saving, setSaving] = useState(false);
+
+  // When opened from a tool workspace, preload the file the user already picked.
+  useEffect(() => {
+    if (open && initialFile && initialFile !== file) {
+      setFile(initialFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFile]);
 
   // Tool options
   const [textOpt, setTextOpt] = useState<{
@@ -422,8 +436,14 @@ export default function PdfEditorModal({
 
       const name = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
       const bytes = await doc.save();
-      downloadFile({ name, bytes });
-      toast.success("Edited PDF downloaded.");
+      if (onSaveEdited) {
+        const edited = new File([new Uint8Array(bytes)], name, { type: "application/pdf" });
+        onSaveEdited(edited);
+        toast.success("Edits applied.");
+      } else {
+        downloadFile({ name, bytes });
+        toast.success("Edited PDF downloaded.");
+      }
       onClose();
       reset();
     } catch (e) {

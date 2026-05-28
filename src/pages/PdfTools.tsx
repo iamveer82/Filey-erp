@@ -36,7 +36,6 @@ import {
 } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
 import { PDF_TOOLS, toolById, type Tool } from "../components/PdfToolbox";
-import ToolBrowserModal from "../components/ToolBrowserModal";
 import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
 import PdfEditorModal from "../components/PdfEditorModal";
@@ -68,9 +67,9 @@ function ago(ts: number): string {
 export default function ToolsPage() {
   const [active, setActive] = useState<Tool | null>(null);
   const [runs, setRuns] = useState<RunLog[]>([]);
-  const [browseOpen, setBrowseOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  // Reset to 8-tool view when switching category tabs.
   const [esignOpen, setEsignOpen] = useState(false);
-  const [editorOpen, setEditorOpen] = useState(false);
   const [cat, setCat] = useState<string>("All Tools");
   const { profile } = useAuth();
   const firstName = profile?.name?.split(" ")[0] || "there";
@@ -197,7 +196,10 @@ export default function ToolsPage() {
             {cats.map((c) => (
               <button
                 key={c}
-                onClick={() => setCat(c)}
+                onClick={() => {
+                  setCat(c);
+                  setShowAll(false);
+                }}
                 className={`relative whitespace-nowrap px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
                   cat === c ? "text-ink" : "text-brand-500 hover:text-ink"
                 }`}
@@ -216,26 +218,16 @@ export default function ToolsPage() {
           {/* TOOLS GRID */}
           <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {cat === "All Tools" && (
-              <>
-                <ToolMiniCard
-                  name="Edit PDF"
-                  desc="Text, draw, crop, rotate, delete pages"
-                  Icon={SquarePen}
-                  badgeBg="bg-ink"
-                  badgeFg="text-white"
-                  onUse={() => setEditorOpen(true)}
-                />
-                <ToolMiniCard
-                  name="E-sign PDF"
-                  desc="Draw, type or upload — place &amp; download"
-                  Icon={Signature}
-                  badgeBg="bg-primary-400"
-                  badgeFg="text-[#0A0A0A]"
-                  onUse={() => setEsignOpen(true)}
-                />
-              </>
+              <ToolMiniCard
+                name="E-sign PDF"
+                desc="Draw, type or upload — place &amp; download"
+                Icon={Signature}
+                badgeBg="bg-primary-400"
+                badgeFg="text-[#0A0A0A]"
+                onUse={() => setEsignOpen(true)}
+              />
             )}
-            {filteredTools.map((t) => (
+            {(showAll ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
               <ToolMiniCard
                 key={t.id}
                 name={t.name}
@@ -248,11 +240,13 @@ export default function ToolsPage() {
             ))}
           </div>
 
-          <div className="mb-4 flex justify-center">
-            <button onClick={() => setBrowseOpen(true)} className="btn-ghost">
-              <LayoutGrid size={14} /> View all {PDF_TOOLS.length} tools
-            </button>
-          </div>
+          {filteredTools.length > 8 && !showAll && (
+            <div className="mb-4 flex justify-center">
+              <button onClick={() => setShowAll(true)} className="btn-ghost">
+                <LayoutGrid size={14} /> View all {filteredTools.length} tools
+              </button>
+            </div>
+          )}
 
           {/* Supported formats */}
           <InfoCard title="Works with your files" className="mb-4">
@@ -432,12 +426,6 @@ export default function ToolsPage() {
 
       {/* modals (workspace renders as a full page above when active) */}
       <EsignModal open={esignOpen} onClose={() => setEsignOpen(false)} />
-      <PdfEditorModal open={editorOpen} onClose={() => setEditorOpen(false)} />
-      <ToolBrowserModal
-        open={browseOpen}
-        onClose={() => setBrowseOpen(false)}
-        onComplete={logRun}
-      />
       <PreviewModal
         open={!!preview}
         title={preview?.file}
@@ -508,7 +496,12 @@ function PdfToolWorkspace({
   const [params, setParams] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
   const Icon = tool.icon;
+  const first = files[0];
+  const firstIsPdf = !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
+  const replaceFirstFile = (f: File) =>
+    setFiles((prev) => (prev.length ? [f, ...prev.slice(1)] : [f]));
 
   const pickFiles = (list: FileList | null) => {
     if (!list) return;
@@ -583,7 +576,18 @@ function PdfToolWorkspace({
       ) : (
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="card min-h-[480px]">
-            <p className="mb-2 text-xs font-semibold text-brand-500">Preview</p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-brand-500">Preview</p>
+              {firstIsPdf && (
+                <button
+                  onClick={() => setEditorOpen(true)}
+                  className="btn-ghost h-8 text-xs"
+                  title="Add text, highlight, draw, crop, rotate or delete pages before running the tool"
+                >
+                  <SquarePen size={13} /> Edit PDF
+                </button>
+              )}
+            </div>
             <FilePreview file={files[0]} />
             {files.length > 1 && (
               <p className="mt-2 text-[11px] text-brand-400">
@@ -622,6 +626,18 @@ function PdfToolWorkspace({
           </aside>
         </div>
       )}
+
+      {/* Inline PDF editor — reusable across every tool. Edits replace the
+         first file so the tool runs against the annotated PDF. */}
+      <PdfEditorModal
+        open={editorOpen}
+        initialFile={first ?? null}
+        onClose={() => setEditorOpen(false)}
+        onSaveEdited={(f) => {
+          replaceFirstFile(f);
+          setOuts([]);
+        }}
+      />
     </div>
   );
 }
