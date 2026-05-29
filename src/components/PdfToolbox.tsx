@@ -1357,6 +1357,29 @@ export const PDF_TOOLS: Tool[] = [
     fields: [],
     run: async (f) => [await pdf.deskewPdf(f[0])],
   },
+  {
+    id: "pdf-to-pdfa",
+    name: "PDF to PDF/A",
+    desc: "Tag for archiving (best-effort; not validator-certified)",
+    icon: FileArchive,
+    cat: "Optimize",
+    accept: "application/pdf",
+    fields: [
+      {
+        key: "part",
+        label: "PDF/A part",
+        type: "select",
+        default: "2",
+        options: [
+          { value: "1", label: "PDF/A-1b" },
+          { value: "2", label: "PDF/A-2b" },
+          { value: "3", label: "PDF/A-3b" },
+        ],
+        hint: "Writes PDF/A XMP metadata + MarkInfo. For certified conformance use a server-side pass.",
+      },
+    ],
+    run: async (f, p) => [await pdf.toPdfA(f[0], p.part || "2")],
+  },
 ];
 
 export const PDF_CATS = [

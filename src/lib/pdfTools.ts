@@ -12,6 +12,7 @@ import {
   PDFString,
   PDFNumber,
   PDFRef,
+  PDFRawStream,
   PDFTextField,
   PDFCheckBox,
   PDFDropdown,
@@ -3064,4 +3065,57 @@ export async function deskewPdf(file: File): Promise<OutFile> {
     page.drawImage(img, { x: 0, y: 0, width: base1.width, height: base1.height });
   }
   return { name: `${base(file.name)}-deskewed.pdf`, bytes: await out.save() };
+}
+
+/* ═══════════════════════════════ PDF/A ═════════════════════════════════════
+   Best-effort archival tagging: writes a PDF/A XMP identification packet,
+   document metadata, MarkInfo and disables object/xref streams. This nudges a
+   file toward PDF/A-1b/2b but is NOT a certified conversion — fonts and colour
+   are not re-encoded, so strict validators may still reject it. Use a
+   server-side ghostscript pass when guaranteed conformance is required. ───── */
+
+const escapeXml = (s: string) =>
+  s.replace(/[<>&'"]/g, (c) =>
+    c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : c === "'" ? "&apos;" : "&quot;"
+  );
+
+/** Tag a PDF as PDF/A (best-effort, `part` = "1" | "2" | "3", conformance B). */
+export async function toPdfA(file: File, part = "2"): Promise<OutFile> {
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const ctx = doc.context;
+  const title = nameStem(file.name);
+  const now = new Date();
+  doc.setTitle(title);
+  doc.setProducer("Filey ERP");
+  doc.setCreator("Filey ERP");
+  doc.setCreationDate(now);
+  doc.setModificationDate(now);
+  doc.catalog.set(PDFName.of("Lang"), PDFString.of("en-US"));
+  doc.catalog.set(PDFName.of("MarkInfo"), ctx.obj({ Marked: true }));
+
+  const xmp = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
+   <pdfaid:part>${part}</pdfaid:part>
+   <pdfaid:conformance>B</pdfaid:conformance>
+  </rdf:Description>
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${escapeXml(title)}</rdf:li></rdf:Alt></dc:title>
+  </rdf:Description>
+  <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
+   <xmp:CreatorTool>Filey ERP</xmp:CreatorTool>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+  const dict = ctx.obj({}) as PDFDict;
+  dict.set(PDFName.of("Type"), PDFName.of("Metadata"));
+  dict.set(PDFName.of("Subtype"), PDFName.of("XML"));
+  const stream = PDFRawStream.of(dict, new TextEncoder().encode(xmp));
+  doc.catalog.set(PDFName.of("Metadata"), ctx.register(stream));
+
+  // PDF/A forbids object & cross-reference streams.
+  const bytes = await doc.save({ useObjectStreams: false });
+  return { name: `${nameStem(file.name)}-pdfa.pdf`, bytes: new Uint8Array(bytes) };
 }
