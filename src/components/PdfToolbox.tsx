@@ -125,7 +125,7 @@ export interface Tool {
   fields: FieldSpec[];
   /** Tools with their own interactive workspace (live preview, drag, etc.)
    *  instead of the standard options-panel + Run flow. */
-  interactive?: "stamp" | "text-stamp";
+  interactive?: "stamp" | "text-stamp" | "image-watermark";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -545,35 +545,15 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "img-watermark",
     name: "Image Watermark",
-    desc: "Stamp a logo or image onto every page",
+    desc: "Upload or pick a saved logo, drag to place at any opacity",
     icon: ImagePlus,
     cat: "Edit",
     accept: "application/pdf",
-    fields: [
-      { key: "wmImage", label: "Watermark image", type: "image", accept: "image/png,image/jpeg" },
-      {
-        key: "iwLayout",
-        label: "Layout",
-        type: "select",
-        default: "center",
-        options: [
-          { value: "center", label: "Centre" },
-          { value: "corner", label: "Corner" },
-          { value: "tile", label: "Tiled (repeat)" },
-        ],
-      },
-      { key: "iwPos", label: "Corner position", type: "select", default: "br", options: POS_6 },
-      { key: "iwScale", label: "Size (% of page width)", type: "range", default: "0.4", min: 0.05, max: 1, step: 0.05 },
-      { key: "iwOpacity", label: "Opacity", type: "range", default: "0.25", min: 0.02, max: 1, step: 0.02 },
-    ],
-    run: async (f, p) => [
-      await pdf.addImageWatermark(f[0], p.wmImage || "", {
-        layout: (p.iwLayout as pdf.ImgWmLayout) || "center",
-        position: (p.iwPos as pdf.Anchor) || "br",
-        scale: flt(p.iwScale, 0.4),
-        opacity: flt(p.iwOpacity, 0.25),
-      }),
-    ],
+    interactive: "image-watermark",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Image Watermark” to place your image on the live preview.");
+    },
   },
   {
     id: "compress",

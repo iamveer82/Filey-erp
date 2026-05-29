@@ -7,11 +7,14 @@ import {
   ChevronRight,
   Stamp,
   Trash2,
+  Save,
+  X,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { placeStamp, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
+import { useAssets } from "../lib/assets";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -76,15 +79,20 @@ export default function StampStudio({
   file,
   onApply,
   mode = "image",
+  variant = "stamp",
 }: {
   file: File;
   onApply: (out: OutFile) => void;
   mode?: "image" | "text";
+  /** Tunes defaults: a watermark sits big, faint and on every page. */
+  variant?: "stamp" | "watermark";
 }) {
-  const { toast } = useUI();
+  const { toast, prompt } = useUI();
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const pwdRef = useRef<string | undefined>(undefined);
+  const { assets, save, remove } = useAssets();
+  const isWatermark = variant === "watermark";
 
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(0);
@@ -92,10 +100,16 @@ export default function StampStudio({
   const [aspect, setAspect] = useState<{ w: number; h: number } | null>(null);
 
   const [stamp, setStamp] = useState<StampImg | null>(null);
-  const [pos, setPos] = useState({ x: 0.32, y: 0.4 }); // top-left fractions
-  const [wFrac, setWFrac] = useState(mode === "text" ? 0.38 : 0.25);
-  const [opacity, setOpacity] = useState(mode === "text" ? 0.6 : 1);
-  const [allPages, setAllPages] = useState(false);
+  const [pos, setPos] = useState(
+    isWatermark ? { x: 0.22, y: 0.4 } : { x: 0.32, y: 0.4 }
+  ); // top-left fractions
+  const [wFrac, setWFrac] = useState(
+    mode === "text" ? 0.38 : isWatermark ? 0.55 : 0.25
+  );
+  const [opacity, setOpacity] = useState(
+    mode === "text" ? 0.6 : isWatermark ? 0.3 : 1
+  );
+  const [allPages, setAllPages] = useState(isWatermark);
   const [saving, setSaving] = useState(false);
 
   // Text-badge mode controls.
@@ -114,7 +128,6 @@ export default function StampStudio({
   }, [mode, kind, badgeColor]);
 
   // Render the chosen page (handles encrypted PDFs via a password prompt).
-  const { prompt } = useUI();
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -190,6 +203,19 @@ export default function StampStudio({
       toastRef.current.error("Could not read that image.");
     };
     im.src = url;
+  };
+
+  // Save the current image to the reusable library.
+  const saveCurrent = async () => {
+    if (!stamp) return;
+    const name = await prompt({
+      title: "Save to your library",
+      label: "Name it so you can reuse it across tools later.",
+      placeholder: isWatermark ? "My watermark" : "My signature",
+    });
+    if (name == null) return;
+    save(name, stamp.src, stamp.ratio);
+    toastRef.current.success("Saved to your library.");
   };
 
   // ── Drag / resize ─────────────────────────────────────────────────────────
@@ -289,7 +315,7 @@ export default function StampStudio({
         ) : (
           <>
             <label className="btn-ghost h-8 cursor-pointer text-xs">
-              <Upload size={13} /> {stamp ? "Change stamp" : "Upload stamp"}
+              <Upload size={13} /> {stamp ? "Change" : isWatermark ? "Upload watermark" : "Upload stamp"}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"
@@ -301,7 +327,12 @@ export default function StampStudio({
               />
             </label>
             {stamp && (
-              <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove stamp">
+              <button className="btn-ghost h-8 text-xs" onClick={saveCurrent} title="Save to your library">
+                <Save size={13} /> Save
+              </button>
+            )}
+            {stamp && (
+              <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove from canvas">
                 <Trash2 size={13} /> Remove
               </button>
             )}
@@ -355,6 +386,31 @@ export default function StampStudio({
         </button>
       </div>
 
+      {/* ── Saved-asset library strip ─────────────────────────────────────── */}
+      {mode === "image" && assets.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-1">
+          <span className="shrink-0 text-[11px] font-semibold text-brand-500">Saved</span>
+          {assets.map((a) => (
+            <div key={a.id} className="group relative shrink-0">
+              <button
+                onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}
+                title={a.name}
+                className="grid h-12 w-12 place-items-center overflow-hidden rounded-lg border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400 dark:border-[#3A3D45] dark:bg-[#1E2025]"
+              >
+                <img src={a.dataUrl} alt={a.name} className="max-h-full max-w-full object-contain" />
+              </button>
+              <button
+                onClick={() => remove(a.id)}
+                title={`Delete “${a.name}”`}
+                className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-danger text-white shadow group-hover:grid"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Stage ─────────────────────────────────────────────────────────── */}
       <div
         ref={stageRef}
@@ -399,8 +455,8 @@ export default function StampStudio({
         <Stamp size={12} />{" "}
         {mode === "text"
           ? "Pick a badge, drag to place and resize, then "
-          : "Upload a stamp, drag to place and resize, then "}
-        <strong>Apply</strong>. Toggle “All pages” to stamp the whole document.
+          : `Upload or pick a saved ${isWatermark ? "watermark" : "stamp"}, drag to place and resize, then `}
+        <strong>Apply</strong>. Toggle “All pages” to apply to the whole document.
       </p>
     </div>
   );

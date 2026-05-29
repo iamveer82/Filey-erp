@@ -603,6 +603,7 @@ function PdfToolWorkspace({
           <StampStudio
             file={files[0]}
             mode={tool.interactive === "text-stamp" ? "text" : "image"}
+            variant={tool.interactive === "image-watermark" ? "watermark" : "stamp"}
             onApply={(out) => {
               setOuts([out]);
               downloadFile(out);
