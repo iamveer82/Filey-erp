@@ -2924,3 +2924,144 @@ export async function flattenForm(file: File): Promise<OutFile> {
   const bytes = await doc.save();
   return { name: `${base(file.name)}-flattened.pdf`, bytes: new Uint8Array(bytes) };
 }
+
+/* ═══════════════════════ Image engines → PDF ═══════════════════════════════
+   HEIC/HEIF (Apple photos) and PSD (Photoshop) decode in-browser and are
+   placed full-bleed on a PDF page matched to the image dimensions. ────────── */
+
+/** Wrap a single decoded raster image (PNG/JPEG bytes) in a one-page PDF. */
+async function imageBytesToPdf(
+  bytes: Uint8Array,
+  isPng: boolean,
+  outName: string
+): Promise<OutFile> {
+  const doc = await PDFDocument.create();
+  const img = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  const page = doc.addPage([img.width, img.height]);
+  page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+  return { name: outName, bytes: await doc.save() };
+}
+
+/** HEIC / HEIF → PDF (decodes the primary image via libheif-wasm). */
+export async function heicToPdf(file: File): Promise<OutFile> {
+  const { heicTo } = await import("heic-to");
+  let blob: Blob;
+  try {
+    blob = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
+  } catch {
+    throw new Error("Could not decode this HEIC/HEIF image.");
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return imageBytesToPdf(bytes, false, `${nameStem(file.name)}.pdf`);
+}
+
+/** Photoshop PSD/PSB → PDF (flattened composite image). */
+export async function psdToPdf(file: File): Promise<OutFile> {
+  const { readPsd } = await import("ag-psd");
+  const psd = readPsd(await readBuf(file), {
+    skipLayerImageData: true,
+    skipThumbnail: true,
+  });
+  const canvas = psd.canvas;
+  if (!canvas) throw new Error("This PSD has no composite image to convert.");
+  const dataUrl = canvas.toDataURL("image/png");
+  const raw = Uint8Array.from(atob(dataUrl.split(",")[1] ?? ""), (c) => c.charCodeAt(0));
+  return imageBytesToPdf(raw, true, `${nameStem(file.name)}.pdf`);
+}
+
+/* ═══════════════════════════════ Deskew ════════════════════════════════════
+   Straightens skewed scans. Each page is rendered, its skew angle estimated
+   with a projection-profile search, then re-emitted rotated. Pages become
+   raster images (vector text is lost) — this is the standard trade-off for
+   deskewing scans. ─────────────────────────────────────────────────────────*/
+
+/** Estimate the skew of a rendered page in degrees via projection variance. */
+function detectSkewDeg(source: HTMLCanvasElement): number {
+  const sw = Math.min(source.width, 600);
+  const sh = Math.max(1, Math.round((source.height * sw) / source.width));
+  const tmp = document.createElement("canvas");
+  tmp.width = sw;
+  tmp.height = sh;
+  const tctx = tmp.getContext("2d");
+  if (!tctx) return 0;
+  tctx.drawImage(source, 0, 0, sw, sh);
+  const { data } = tctx.getImageData(0, 0, sw, sh);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const cx = sw / 2;
+  const cy = sh / 2;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const o = (y * sw + x) * 4;
+      const lum = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
+      if (lum < 128) {
+        xs.push(x - cx);
+        ys.push(y - cy);
+      }
+    }
+  }
+  if (xs.length < 50) return 0; // too little ink to judge
+  const span = sh * 2 + 2;
+  let bestAngle = 0;
+  let bestScore = -1;
+  for (let deg = -8; deg <= 8; deg += 0.5) {
+    const r = (deg * Math.PI) / 180;
+    const s = Math.sin(r);
+    const c = Math.cos(r);
+    const counts = new Float64Array(span);
+    for (let k = 0; k < xs.length; k++) {
+      const row = Math.round(xs[k] * s + ys[k] * c) + sh;
+      if (row >= 0 && row < span) counts[row]++;
+    }
+    let score = 0;
+    for (let r2 = 1; r2 < span; r2++) {
+      const d = counts[r2] - counts[r2 - 1];
+      score += d * d;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = deg;
+    }
+  }
+  return bestAngle;
+}
+
+/** Auto-straighten every page of a scanned PDF. */
+export async function deskewPdf(file: File): Promise<OutFile> {
+  const data = new Uint8Array(await readBuf(file));
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const out = await PDFDocument.create();
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const p = await pdf.getPage(i);
+    const base1 = p.getViewport({ scale: 1 });
+    const scale = Math.min(2, 1600 / base1.width);
+    const vp = p.getViewport({ scale });
+    const cv = document.createElement("canvas");
+    cv.width = vp.width;
+    cv.height = vp.height;
+    const ctx = cv.getContext("2d");
+    if (!ctx) continue;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    await p.render({ canvas: cv, canvasContext: ctx, viewport: vp }).promise;
+
+    const angle = detectSkewDeg(cv);
+    const rot = document.createElement("canvas");
+    rot.width = cv.width;
+    rot.height = cv.height;
+    const rctx = rot.getContext("2d");
+    if (!rctx) continue;
+    rctx.fillStyle = "#fff";
+    rctx.fillRect(0, 0, rot.width, rot.height);
+    rctx.translate(rot.width / 2, rot.height / 2);
+    rctx.rotate((-angle * Math.PI) / 180);
+    rctx.drawImage(cv, -cv.width / 2, -cv.height / 2);
+
+    const jpg = rot.toDataURL("image/jpeg", 0.9);
+    const raw = Uint8Array.from(atob(jpg.split(",")[1] ?? ""), (c) => c.charCodeAt(0));
+    const img = await out.embedJpg(raw);
+    const page = out.addPage([base1.width, base1.height]);
+    page.drawImage(img, { x: 0, y: 0, width: base1.width, height: base1.height });
+  }
+  return { name: `${base(file.name)}-deskewed.pdf`, bytes: await out.save() };
+}

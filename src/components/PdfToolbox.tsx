@@ -1325,6 +1325,38 @@ export const PDF_TOOLS: Tool[] = [
       throw new Error("Open “Stamp & Sign” to place your stamp on the live preview.");
     },
   },
+  // ===== To PDF: image engines =====
+  {
+    id: "heic-to-pdf",
+    name: "HEIC to PDF",
+    desc: "Convert Apple HEIC/HEIF photos to PDF (decoded in-browser)",
+    icon: FileImage,
+    cat: "To PDF",
+    accept: "image/heic,image/heif,.heic,.heif",
+    fields: [],
+    run: async (f) => [await pdf.heicToPdf(f[0])],
+  },
+  {
+    id: "psd-to-pdf",
+    name: "PSD to PDF",
+    desc: "Convert a Photoshop PSD/PSB to PDF (flattened composite)",
+    icon: Images,
+    cat: "To PDF",
+    accept: "image/vnd.adobe.photoshop,.psd,.psb",
+    fields: [],
+    run: async (f) => [await pdf.psdToPdf(f[0])],
+  },
+  // ===== Optimize: deskew scans =====
+  {
+    id: "deskew",
+    name: "Deskew Scan",
+    desc: "Auto-straighten crooked scans (pages become images)",
+    icon: ScanLine,
+    cat: "Optimize",
+    accept: "application/pdf",
+    fields: [],
+    run: async (f) => [await pdf.deskewPdf(f[0])],
+  },
 ];
 
 export const PDF_CATS = [
