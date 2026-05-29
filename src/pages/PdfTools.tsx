@@ -46,6 +46,7 @@ import {
 import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
+import StampStudio from "../components/StampStudio";
 import { useAuth } from "../lib/auth";
 
 interface RunLog {
@@ -583,6 +584,23 @@ function PdfToolWorkspace({
             />
           </div>
         </label>
+      ) : tool.interactive === "stamp" && firstIsPdf ? (
+        <div className="card min-h-[480px]">
+          <StampStudio
+            file={files[0]}
+            onApply={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0].name, [out]);
+              toast.success("Stamped PDF downloaded.");
+            }}
+          />
+          {!!outs.length && (
+            <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+              ✓ Stamped PDF downloaded.
+            </div>
+          )}
+        </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="card min-h-[480px]">

@@ -1658,6 +1658,51 @@ export async function addImageWatermark(
   return { name: `${base(file.name)}-stamped.pdf`, bytes: await doc.save() };
 }
 
+export interface PlaceStampOpts {
+  /** Left edge of the stamp as a fraction of page width (top-left origin). */
+  xFrac: number;
+  /** Top edge of the stamp as a fraction of page height (top-left origin). */
+  yFrac: number;
+  /** Stamp width as a fraction of page width; height follows image aspect. */
+  wFrac: number;
+  opacity: number;
+  /** Page to stamp (0-based). Omit to stamp every page. */
+  pageIndex?: number;
+}
+/** Place an uploaded stamp/signature at an exact position chosen in the UI. */
+export async function placeStamp(
+  file: File,
+  imageDataUrl: string,
+  opts: PlaceStampOpts
+): Promise<OutFile> {
+  if (!imageDataUrl) throw new Error("Upload a stamp image first.");
+  const b64 = imageDataUrl.split(",")[1] ?? "";
+  if (!b64) throw new Error("That image could not be read.");
+  const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const doc = await loadDoc(file);
+  const img = imageDataUrl.startsWith("data:image/png")
+    ? await doc.embedPng(raw)
+    : await doc.embedJpg(raw);
+  const opacity = clamp(opts.opacity ?? 1, 0.02, 1);
+  const wFrac = clamp(opts.wFrac ?? 0.3, 0.02, 1);
+  const pages = doc.getPages();
+  const targets =
+    opts.pageIndex == null
+      ? pages.map((_, i) => i)
+      : [Math.min(Math.max(0, opts.pageIndex), pages.length - 1)];
+  for (const i of targets) {
+    const p = pages[i];
+    const w = p.getWidth();
+    const h = p.getHeight();
+    const dw = w * wFrac;
+    const dh = (dw / img.width) * img.height;
+    const x = w * clamp(opts.xFrac ?? 0, 0, 1);
+    const y = h - h * clamp(opts.yFrac ?? 0, 0, 1) - dh; // top-left → bottom-left
+    p.drawImage(img, { x, y, width: dw, height: dh, opacity });
+  }
+  return { name: `${base(file.name)}-stamped.pdf`, bytes: await doc.save() };
+}
+
 /** Rebuild a PDF in an arbitrary page order, e.g. "3,1,2,5-7". */
 export async function reorderPages(
   file: File,
