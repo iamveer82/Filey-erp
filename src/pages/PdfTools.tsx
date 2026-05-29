@@ -47,7 +47,21 @@ import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
+import LivePreview from "../components/LivePreview";
 import { useAuth } from "../lib/auth";
+
+/** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
+const LIVE_PREVIEW_TOOLS = new Set([
+  "rotate",
+  "numbers",
+  "watermark",
+  "img-watermark",
+  "nup",
+  "crop",
+  "remove-annots",
+  "header-footer",
+  "greyscale",
+]);
 
 interface RunLog {
   id: number;
@@ -640,6 +654,8 @@ function PdfToolWorkspace({
                   setEditing(false);
                 }}
               />
+            ) : LIVE_PREVIEW_TOOLS.has(tool.id) && firstIsPdf ? (
+              <LivePreview tool={tool} file={files[0]} params={params} />
             ) : (
               <>
                 <FilePreview file={files[0]} />
