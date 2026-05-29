@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -11,9 +11,9 @@ import {
 } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
-import { PDF_TOOLS, type Tool } from "./PdfToolbox";
+import { PDF_TOOLS, type Tool, ToolFields, defaultParams } from "./PdfToolbox";
 
-/** Searchable tool browser — left list with smart suggestions, right
+/** Searchable tool browser â€” left list with smart suggestions, right
  *  pane with the selected tool's upload form + params + run. */
 export default function ToolBrowserModal({
   open,
@@ -84,7 +84,7 @@ export default function ToolBrowserModal({
           <div>
             <p className="font-bold text-ink">All tools</p>
             <p className="text-xs text-brand-400">
-              {PDF_TOOLS.length} local tools — files never leave this device
+              {PDF_TOOLS.length} local tools â€” files never leave this device
             </p>
           </div>
           <button
@@ -109,7 +109,7 @@ export default function ToolBrowserModal({
                 <input
                   autoFocus
                   className="input pl-9"
-                  placeholder="Search or describe what you need…"
+                  placeholder="Search or describe what you needâ€¦"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
@@ -188,7 +188,7 @@ export default function ToolBrowserModal({
                   />
                   <p className="font-semibold text-ink">Pick a tool</p>
                   <p className="text-xs mt-1">
-                    Use the search on the left or type what you need —
+                    Use the search on the left or type what you need â€”
                     the best match is highlighted automatically.
                   </p>
                 </div>
@@ -202,37 +202,6 @@ export default function ToolBrowserModal({
   );
 }
 
-function defaultsFor(toolId: string): Record<string, string> {
-  switch (toolId) {
-    case "rotate":
-      return { rotate: "90" };
-    case "split":
-      return { chunk: "1" };
-    case "svg2img":
-      return { svgFormat: "png", svgScale: "2" };
-    case "img2svg":
-      return { tracePreset: "photo" };
-    case "img-compress":
-      return { imgFormat: "keep", imgQuality: "80", imgMaxW: "0" };
-    case "pdf-flatten":
-      return { rasterScale: "2", rasterGray: "no" };
-    case "nup":
-      return { n: "2" };
-    case "divide":
-      return { axis: "h" };
-    case "crop":
-      return { marginPct: "5" };
-    case "stamp":
-      return { stampKind: "approved" };
-    case "posterize":
-      return { tiles: "2" };
-    case "pdf2img":
-      return { imgOutFmt: "png" };
-    default:
-      return {};
-  }
-}
-
 function ToolPane({
   tool,
   onComplete,
@@ -242,7 +211,7 @@ function ToolPane({
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [params, setParams] = useState<Record<string, string>>(
-    defaultsFor(tool.id)
+    defaultParams(tool)
   );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -251,7 +220,7 @@ function ToolPane({
 
   useEffect(() => {
     setFiles([]);
-    setParams(defaultsFor(tool.id));
+    setParams(defaultParams(tool));
     setResults([]);
     setErr("");
   }, [tool.id]);
@@ -323,7 +292,9 @@ function ToolPane({
         </ul>
       )}
 
-      <ParamFields tool={tool} params={params} setParams={setParams} />
+      <div className="mb-4">
+        <ToolFields tool={tool} params={params} setParams={setParams} />
+      </div>
 
       {err && (
         <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 mb-3">
@@ -368,318 +339,13 @@ function ToolPane({
         >
           {busy ? (
             <>
-              <Loader2 size={15} className="animate-spin" /> Working…
+              <Loader2 size={15} className="animate-spin" /> Workingâ€¦
             </>
           ) : (
             "Run tool"
           )}
         </button>
       </div>
-    </div>
-  );
-}
-
-function ParamFields({
-  tool,
-  params,
-  setParams,
-}: {
-  tool: Tool;
-  params: Record<string, string>;
-  setParams: (p: Record<string, string>) => void;
-}) {
-  const set = (k: string, v: string) => setParams({ ...params, [k]: v });
-  return (
-    <div className="space-y-3 mb-4">
-      {tool.params.includes("ranges") && (
-        <div>
-          <label className="label">
-            Pages {tool.id === "rotate" && "(optional)"}
-          </label>
-          <input
-            className="input"
-            placeholder="e.g. 1-3,5,8-"
-            value={params.ranges ?? ""}
-            onChange={(e) => set("ranges", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("chunk") && (
-        <div>
-          <label className="label">Pages per file</label>
-          <input
-            type="number"
-            min={1}
-            className="input"
-            value={params.chunk ?? "1"}
-            onChange={(e) => set("chunk", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("rotate") && (
-        <div>
-          <label className="label">Rotation</label>
-          <select
-            className="select"
-            value={params.rotate ?? "90"}
-            onChange={(e) => set("rotate", e.target.value)}
-          >
-            <option value="90">90° clockwise</option>
-            <option value="180">180°</option>
-            <option value="270">90° counter-clockwise</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("text") && (
-        <div>
-          <label className="label">Watermark text</label>
-          <input
-            className="input"
-            placeholder="DRAFT"
-            value={params.text ?? ""}
-            onChange={(e) => set("text", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("svgFormat") && (
-        <div>
-          <label className="label">Output format</label>
-          <select
-            className="select"
-            value={params.svgFormat ?? "png"}
-            onChange={(e) => set("svgFormat", e.target.value)}
-          >
-            <option value="png">PNG — transparent</option>
-            <option value="jpeg">JPG — white background</option>
-            <option value="webp">WebP</option>
-            <option value="pdf">PDF</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("svgScale") && (
-        <div>
-          <label className="label">Scale (×) — higher = sharper</label>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            step={1}
-            className="input"
-            value={params.svgScale ?? "2"}
-            onChange={(e) => set("svgScale", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("tracePreset") && (
-        <div>
-          <label className="label">Vectorize style</label>
-          <select
-            className="select"
-            value={params.tracePreset ?? "detailed"}
-            onChange={(e) => set("tracePreset", e.target.value)}
-          >
-            <option value="photo">Photo / detailed — full color</option>
-            <option value="logo">Logo / flat art — clean</option>
-            <option value="bw">Black &amp; white — line art</option>
-            <option value="pixel">Sharp — pixel-precise</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("imgFormat") && (
-        <div>
-          <label className="label">Output format</label>
-          <select
-            className="select"
-            value={params.imgFormat ?? "keep"}
-            onChange={(e) => set("imgFormat", e.target.value)}
-          >
-            <option value="keep">Keep original</option>
-            <option value="jpeg">JPG (smallest)</option>
-            <option value="webp">WebP</option>
-            <option value="png">PNG (lossless)</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("imgQuality") && (
-        <div>
-          <label className="label">Quality (1–100)</label>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            className="input"
-            value={params.imgQuality ?? "80"}
-            onChange={(e) => set("imgQuality", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("imgMaxW") && (
-        <div>
-          <label className="label">Max width px (0 = keep)</label>
-          <input
-            type="number"
-            min={0}
-            className="input"
-            value={params.imgMaxW ?? "0"}
-            onChange={(e) => set("imgMaxW", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("rasterScale") && (
-        <div>
-          <label className="label">Quality (× DPI) — 1–4</label>
-          <input
-            type="number"
-            min={1}
-            max={4}
-            step={1}
-            className="input"
-            value={params.rasterScale ?? "2"}
-            onChange={(e) => set("rasterScale", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("rasterGray") && (
-        <div>
-          <label className="label">Grayscale</label>
-          <select
-            className="select"
-            value={params.rasterGray ?? "no"}
-            onChange={(e) => set("rasterGray", e.target.value)}
-          >
-            <option value="no">No — keep colour</option>
-            <option value="yes">Yes — smaller, ink-saving</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("metaTitle") && (
-        <div>
-          <label className="label">Title</label>
-          <input
-            className="input"
-            placeholder="Document title"
-            value={params.metaTitle ?? ""}
-            onChange={(e) => set("metaTitle", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("metaAuthor") && (
-        <div>
-          <label className="label">Author</label>
-          <input
-            className="input"
-            placeholder="Author name"
-            value={params.metaAuthor ?? ""}
-            onChange={(e) => set("metaAuthor", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("n") && (
-        <div>
-          <label className="label">Pages per sheet</label>
-          <select
-            className="select"
-            value={params.n ?? "2"}
-            onChange={(e) => set("n", e.target.value)}
-          >
-            <option value="2">2-up (booklet)</option>
-            <option value="4">4-up (handout)</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("axis") && (
-        <div>
-          <label className="label">Split direction</label>
-          <select
-            className="select"
-            value={params.axis ?? "h"}
-            onChange={(e) => set("axis", e.target.value)}
-          >
-            <option value="h">Horizontal (top / bottom)</option>
-            <option value="v">Vertical (left / right)</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("marginPct") && (
-        <div>
-          <label className="label">Trim percent (0–40)</label>
-          <input
-            type="number"
-            min={0}
-            max={40}
-            className="input"
-            value={params.marginPct ?? "5"}
-            onChange={(e) => set("marginPct", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("header") && (
-        <div>
-          <label className="label">Header text</label>
-          <input
-            className="input"
-            placeholder="Top of each page"
-            value={params.header ?? ""}
-            onChange={(e) => set("header", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("footer") && (
-        <div>
-          <label className="label">Footer text</label>
-          <input
-            className="input"
-            placeholder="Bottom of each page"
-            value={params.footer ?? ""}
-            onChange={(e) => set("footer", e.target.value)}
-          />
-        </div>
-      )}
-      {tool.params.includes("stampKind") && (
-        <div>
-          <label className="label">Stamp</label>
-          <select
-            className="select"
-            value={params.stampKind ?? "approved"}
-            onChange={(e) => set("stampKind", e.target.value)}
-          >
-            <option value="approved">APPROVED — green</option>
-            <option value="rejected">REJECTED — red</option>
-            <option value="draft">DRAFT — grey</option>
-            <option value="confidential">CONFIDENTIAL — red</option>
-            <option value="paid">PAID — green</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("tiles") && (
-        <div>
-          <label className="label">Tiles per side</label>
-          <select
-            className="select"
-            value={params.tiles ?? "2"}
-            onChange={(e) => set("tiles", e.target.value)}
-          >
-            <option value="2">2 × 2 (4 sheets)</option>
-            <option value="3">3 × 3 (9 sheets)</option>
-            <option value="4">4 × 4 (16 sheets)</option>
-          </select>
-        </div>
-      )}
-      {tool.params.includes("imgOutFmt") && (
-        <div>
-          <label className="label">Image format</label>
-          <select
-            className="select"
-            value={params.imgOutFmt ?? "png"}
-            onChange={(e) => set("imgOutFmt", e.target.value)}
-          >
-            <option value="png">PNG (lossless, transparent)</option>
-            <option value="jpeg">JPG (smallest, white bg)</option>
-            <option value="webp">WebP</option>
-            <option value="bmp">BMP</option>
-          </select>
-        </div>
-      )}
     </div>
   );
 }

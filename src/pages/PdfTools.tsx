@@ -21,7 +21,7 @@ import { motion } from "framer-motion";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-import { PageHeader, InfoCard, Field } from "../components/ui";
+import { PageHeader, InfoCard } from "../components/ui";
 import FileCard from "../components/FileCard";
 import ColorOrb from "../components/ColorOrb";
 import { toolRuns } from "../lib/api";
@@ -35,7 +35,13 @@ import {
   STORAGE_QUOTA_BYTES,
 } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
-import { PDF_TOOLS, toolById, type Tool } from "../components/PdfToolbox";
+import {
+  PDF_TOOLS,
+  toolById,
+  type Tool,
+  ToolFields,
+  defaultParams,
+} from "../components/PdfToolbox";
 import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
 import PdfEditorModal from "../components/PdfEditorModal";
@@ -493,7 +499,9 @@ function PdfToolWorkspace({
 }) {
   const { toast } = useUI();
   const [files, setFiles] = useState<File[]>([]);
-  const [params, setParams] = useState<Record<string, string>>({});
+  const [params, setParams] = useState<Record<string, string>>(() =>
+    defaultParams(tool)
+  );
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -597,20 +605,7 @@ function PdfToolWorkspace({
           </div>
           <aside className="card space-y-3 self-start lg:sticky lg:top-20">
             <p className="text-sm font-bold text-ink">Options</p>
-            {tool.params.length === 0 ? (
-              <p className="text-xs text-brand-400">No options for this tool.</p>
-            ) : (
-              tool.params.map((p) => (
-                <Field key={p} label={p.charAt(0).toUpperCase() + p.slice(1)}>
-                  <input
-                    className="input"
-                    value={params[p] ?? ""}
-                    onChange={(e) => setParams({ ...params, [p]: e.target.value })}
-                    placeholder={p}
-                  />
-                </Field>
-              ))
-            )}
+            <ToolFields tool={tool} params={params} setParams={setParams} />
             <button onClick={run} disabled={running} className="btn-primary w-full">
               {running ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               Run {tool.name}
