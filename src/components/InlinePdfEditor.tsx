@@ -73,7 +73,15 @@ export default function InlinePdfEditor({
   /** Called with the baked PDF when the user applies edits. */
   onApply: (file: File) => void;
 }) {
-  const { toast } = useUI();
+  const { toast, prompt } = useUI();
+  // toast is recreated on every UIProvider render, so it must NOT sit in the
+  // render effect's deps — doing so turned a single error toast into an
+  // infinite loop. Read it through a ref instead.
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  // Password for encrypted PDFs, persisted across page changes so we only
+  // prompt once. Reset when the file changes.
+  const pwdRef = useRef<string | undefined>(undefined);
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(0);
   const [pageImg, setPageImg] = useState("");
@@ -99,13 +107,39 @@ export default function InlinePdfEditor({
   const [, force] = useState(0);
   const reflect = () => force((n) => n + 1);
 
-  // Render the chosen page on file/page change.
+  // Forget any cached password when a new file is loaded.
+  useEffect(() => {
+    pwdRef.current = undefined;
+  }, [file]);
+
+  // Render the chosen page on file/page change. Encrypted PDFs are handled by
+  // prompting for a password (via pdfjs onPassword) rather than erroring.
   useEffect(() => {
     let dead = false;
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        const task = pdfjs.getDocument({ data, password: pwdRef.current });
+        task.onPassword = (
+          updatePassword: (pw: string) => void,
+          reason: number
+        ) => {
+          // reason 2 = previous password was wrong, 1 = none supplied yet.
+          prompt({
+            title: reason === 2 ? "Incorrect password" : "Password required",
+            label: "This PDF is encrypted. Enter its password to edit it.",
+            placeholder: "Password",
+          }).then((pw) => {
+            if (dead) return;
+            if (pw == null) {
+              task.destroy();
+              return;
+            }
+            pwdRef.current = pw;
+            updatePassword(pw);
+          });
+        };
+        const pdf = await task.promise;
         if (dead) return;
         setPages(pdf.numPages);
         const idx = Math.min(Math.max(0, page), pdf.numPages - 1);
@@ -124,13 +158,15 @@ export default function InlinePdfEditor({
         if (dead) return;
         setPageImg(canvas.toDataURL("image/png"));
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e));
+        // A cancelled password prompt destroys the task — stay silent for that.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/destroy|password/i.test(msg)) toastRef.current.error(msg);
       }
     })();
     return () => {
       dead = true;
     };
-  }, [file, page, toast]);
+  }, [file, page, prompt]);
 
   const stage = useRef<HTMLDivElement>(null);
   const local = (e: React.PointerEvent) => {
