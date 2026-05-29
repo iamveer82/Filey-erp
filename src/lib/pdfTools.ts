@@ -1,6 +1,23 @@
 // Fully local PDF toolkit — runs entirely in the Tauri webview.
 // No network, no external service. pdf-lib (MIT) + pdfjs-dist (Apache-2.0).
-import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib";
+import {
+  PDFDocument,
+  degrees,
+  rgb,
+  StandardFonts,
+  PDFName,
+  PDFDict,
+  PDFArray,
+  PDFHexString,
+  PDFString,
+  PDFNumber,
+  PDFRef,
+  PDFTextField,
+  PDFCheckBox,
+  PDFDropdown,
+  PDFRadioGroup,
+  PDFOptionList,
+} from "pdf-lib";
 import initVtracer, { to_svg as vtracerToSvg } from "vtracer-wasm";
 import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
 import * as pdfjs from "pdfjs-dist";
@@ -2659,4 +2676,206 @@ export function downloadFile(f: OutFile) {
   a.download = f.name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ═══════════════════════════ Bookmarks / TOC ═══════════════════════════════
+   pdf-lib has no high-level outline API, so we build the /Outlines object tree
+   by hand with the low-level context. Indentation in the spec defines nesting;
+   `Title | page` sets the 1-based target page (defaults to 1). ─────────────── */
+
+interface OutlineNode {
+  title: string;
+  page: number; // 0-based, clamped at save time
+  children: OutlineNode[];
+}
+
+/** Parse an indented `Title | page` outline spec into a nested tree. */
+function parseOutlineSpec(spec: string): OutlineNode[] {
+  const roots: OutlineNode[] = [];
+  // Stack of [indentWidth, node] to resolve nesting by leading whitespace.
+  const stack: { indent: number; node: OutlineNode }[] = [];
+  for (const raw of spec.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const indent = raw.length - raw.replace(/^[\t ]+/, "").length;
+    const body = raw.trim();
+    const m = body.match(/^(.*?)(?:\s*\|\s*(\d+))?$/);
+    const title = (m?.[1] ?? body).trim();
+    if (!title) continue;
+    const page = Math.max(0, (parseInt(m?.[2] ?? "1", 10) || 1) - 1);
+    const node: OutlineNode = { title, page, children: [] };
+    while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+    if (stack.length) stack[stack.length - 1].node.children.push(node);
+    else roots.push(node);
+    stack.push({ indent, node });
+  }
+  return roots;
+}
+
+/** Apply a bookmark/TOC tree to a PDF, replacing any existing outline. */
+export async function setBookmarks(file: File, spec: string): Promise<OutFile> {
+  const roots = parseOutlineSpec(spec);
+  if (!roots.length)
+    throw new Error('No bookmarks parsed. Use lines like "Chapter 1 | 1".');
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const ctx = doc.context;
+  const pages = doc.getPages();
+  const pageRef = (i: number) => pages[Math.min(Math.max(0, i), pages.length - 1)].ref;
+  const pageTop = (i: number) =>
+    pages[Math.min(Math.max(0, i), pages.length - 1)].getHeight();
+
+  // Reserve a ref per node so siblings/children can cross-reference.
+  type Reserved = { node: OutlineNode; ref: PDFRef; kids: Reserved[] };
+  const reserve = (nodes: OutlineNode[]): Reserved[] =>
+    nodes.map((node) => ({ node, ref: ctx.nextRef(), kids: reserve(node.children) }));
+  const descendants = (nodes: Reserved[]): number =>
+    nodes.reduce((c, n) => c + 1 + descendants(n.kids), 0);
+
+  const build = (nodes: Reserved[], parent: PDFRef) => {
+    nodes.forEach((n, i) => {
+      const dict = ctx.obj({}) as PDFDict;
+      dict.set(PDFName.of("Title"), PDFHexString.fromText(n.node.title));
+      dict.set(PDFName.of("Parent"), parent);
+      if (i > 0) dict.set(PDFName.of("Prev"), nodes[i - 1].ref);
+      if (i < nodes.length - 1) dict.set(PDFName.of("Next"), nodes[i + 1].ref);
+      dict.set(
+        PDFName.of("Dest"),
+        ctx.obj([pageRef(n.node.page), PDFName.of("XYZ"), null, pageTop(n.node.page), null])
+      );
+      if (n.kids.length) {
+        dict.set(PDFName.of("First"), n.kids[0].ref);
+        dict.set(PDFName.of("Last"), n.kids[n.kids.length - 1].ref);
+        // Negative count = collapsed by default.
+        dict.set(PDFName.of("Count"), PDFNumber.of(-descendants(n.kids)));
+        build(n.kids, n.ref);
+      }
+      ctx.assign(n.ref, dict);
+    });
+  };
+
+  const tree = reserve(roots);
+  const outlinesRef = ctx.nextRef();
+  build(tree, outlinesRef);
+  const outlines = ctx.obj({}) as PDFDict;
+  outlines.set(PDFName.of("Type"), PDFName.of("Outlines"));
+  outlines.set(PDFName.of("First"), tree[0].ref);
+  outlines.set(PDFName.of("Last"), tree[tree.length - 1].ref);
+  outlines.set(PDFName.of("Count"), PDFNumber.of(descendants(tree)));
+  ctx.assign(outlinesRef, outlines);
+  doc.catalog.set(PDFName.of("Outlines"), outlinesRef);
+  doc.catalog.set(PDFName.of("PageMode"), PDFName.of("UseOutlines"));
+
+  const bytes = await doc.save();
+  return { name: `${base(file.name)}-bookmarked.pdf`, bytes: new Uint8Array(bytes) };
+}
+
+/** Extract an existing outline to an indented `Title | page` text file. */
+export async function extractBookmarks(file: File): Promise<OutFile> {
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const pages = doc.getPages();
+  const refIndex = (ref: PDFRef | undefined) =>
+    !ref
+      ? -1
+      : pages.findIndex(
+          (p) =>
+            p.ref.objectNumber === ref.objectNumber &&
+            p.ref.generationNumber === ref.generationNumber
+        );
+
+  const out: string[] = [];
+  const walk = (node: PDFDict | undefined, depth: number) => {
+    let cur = node?.lookupMaybe(PDFName.of("First"), PDFDict);
+    while (cur) {
+      const titleObj = cur.lookup(PDFName.of("Title"));
+      const title =
+        titleObj instanceof PDFHexString || titleObj instanceof PDFString
+          ? titleObj.decodeText()
+          : "";
+      let pageNo = "";
+      const dest = cur.lookupMaybe(PDFName.of("Dest"), PDFArray);
+      const first = dest?.get(0);
+      if (first instanceof PDFRef) {
+        const idx = refIndex(first);
+        if (idx >= 0) pageNo = String(idx + 1);
+      }
+      out.push(`${"  ".repeat(depth)}${title}${pageNo ? ` | ${pageNo}` : ""}`);
+      walk(cur.lookupMaybe(PDFName.of("First"), PDFDict), depth + 1);
+      cur = cur.lookupMaybe(PDFName.of("Next"), PDFDict);
+    }
+  };
+  const root = doc.catalog.lookupMaybe(PDFName.of("Outlines"), PDFDict);
+  walk(root, 0);
+  const txt = out.length ? out.join("\n") : "(this PDF has no bookmarks)";
+  return { name: `${base(file.name)}-bookmarks.txt`, bytes: new TextEncoder().encode(txt) };
+}
+
+/* ═══════════════════════════ Forms ═════════════════════════════════════════
+   List, fill and flatten AcroForm fields with pdf-lib's form API. ─────────── */
+
+function fieldKind(f: unknown): string {
+  if (f instanceof PDFTextField) return "Text";
+  if (f instanceof PDFCheckBox) return "CheckBox";
+  if (f instanceof PDFDropdown) return "Dropdown";
+  if (f instanceof PDFRadioGroup) return "RadioGroup";
+  if (f instanceof PDFOptionList) return "OptionList";
+  return "Field";
+}
+
+/** List every form field as `name <tab> type [<tab> options]` text. */
+export async function listFormFields(file: File): Promise<OutFile> {
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const fields = doc.getForm().getFields();
+  const lines = fields.map((f) => {
+    let extra = "";
+    if (f instanceof PDFDropdown || f instanceof PDFOptionList || f instanceof PDFRadioGroup)
+      extra = `\t[${f.getOptions().join(", ")}]`;
+    return `${f.getName()}\t${fieldKind(f)}${extra}`;
+  });
+  const txt = lines.length
+    ? `# name\ttype\t[options]\n${lines.join("\n")}`
+    : "(this PDF has no form fields)";
+  return { name: `${base(file.name)}-fields.txt`, bytes: new TextEncoder().encode(txt) };
+}
+
+const TRUTHY = new Set(["true", "yes", "on", "1", "checked", "x"]);
+
+/** Fill form fields from a JSON object of `{ "Field Name": value }`. */
+export async function fillForm(file: File, dataJson: string): Promise<OutFile> {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(dataJson || "{}");
+  } catch {
+    throw new Error('Field data must be valid JSON, e.g. {"Name": "Ada", "Agree": true}.');
+  }
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const form = doc.getForm();
+  let filled = 0;
+  for (const [key, value] of Object.entries(data)) {
+    let field;
+    try {
+      field = form.getField(key);
+    } catch {
+      continue; // unknown field name — skip rather than abort
+    }
+    const v = String(value);
+    if (field instanceof PDFTextField) field.setText(v);
+    else if (field instanceof PDFCheckBox)
+      TRUTHY.has(v.toLowerCase()) ? field.check() : field.uncheck();
+    else if (field instanceof PDFDropdown || field instanceof PDFOptionList) field.select(v);
+    else if (field instanceof PDFRadioGroup) field.select(v);
+    else continue;
+    filled++;
+  }
+  if (!filled) throw new Error("No matching fields filled. Run “List form fields” first.");
+  const bytes = await doc.save();
+  return { name: `${base(file.name)}-filled.pdf`, bytes: new Uint8Array(bytes) };
+}
+
+/** Flatten form fields into static page content (no longer editable). */
+export async function flattenForm(file: File): Promise<OutFile> {
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const form = doc.getForm();
+  if (!form.getFields().length) throw new Error("This PDF has no form fields to flatten.");
+  form.flatten();
+  const bytes = await doc.save();
+  return { name: `${base(file.name)}-flattened.pdf`, bytes: new Uint8Array(bytes) };
 }

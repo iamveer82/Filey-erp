@@ -81,6 +81,7 @@ import type { OutFile } from "../lib/pdfTools";
    upload) everywhere — workspace, modal runner and tool browser. ─────────── */
 export type FieldType =
   | "text"
+  | "textarea"
   | "number"
   | "select"
   | "color"
@@ -1239,6 +1240,74 @@ export const PDF_TOOLS: Tool[] = [
       }),
     ],
   },
+  // ===== Edit: bookmarks / outline =====
+  {
+    id: "bookmarks",
+    name: "Add Bookmarks",
+    desc: "Build a clickable outline / table of contents",
+    icon: ListOrdered,
+    cat: "Edit",
+    accept: "application/pdf",
+    fields: [
+      {
+        key: "spec",
+        label: "Outline",
+        type: "textarea",
+        default: "Cover | 1\nChapter 1 | 2\n  Section 1.1 | 3\nChapter 2 | 5",
+        hint: "One bookmark per line as “Title | page”. Indent with spaces to nest.",
+      },
+    ],
+    run: async (f, p) => [await pdf.setBookmarks(f[0], p.spec || "")],
+  },
+  {
+    id: "extract-bookmarks",
+    name: "Extract Bookmarks",
+    desc: "Export an existing PDF outline to editable text",
+    icon: BookOpen,
+    cat: "From PDF",
+    accept: "application/pdf",
+    fields: [],
+    run: async (f) => [await pdf.extractBookmarks(f[0])],
+  },
+  // ===== Data: AcroForm fields =====
+  {
+    id: "list-fields",
+    name: "List Form Fields",
+    desc: "Dump every form field name, type and options to text",
+    icon: TableProperties,
+    cat: "Data",
+    accept: "application/pdf",
+    fields: [],
+    run: async (f) => [await pdf.listFormFields(f[0])],
+  },
+  {
+    id: "fill-form",
+    name: "Fill Form",
+    desc: "Fill text fields, checkboxes & dropdowns from JSON",
+    icon: FileType2,
+    cat: "Data",
+    accept: "application/pdf",
+    fields: [
+      {
+        key: "data",
+        label: "Field data (JSON)",
+        type: "textarea",
+        default: '{\n  "Name": "Ada Lovelace",\n  "Agree": true\n}',
+        hint: 'Object of { "Field Name": value }. Run “List Form Fields” to get names.',
+      },
+    ],
+    run: async (f, p) => [await pdf.fillForm(f[0], p.data || "{}")],
+  },
+  {
+    id: "flatten-form",
+    name: "Flatten Form",
+    desc: "Bake form fields into the page so they can’t be edited",
+    icon: Layers,
+    cat: "Data",
+    accept: "application/pdf",
+    fields: [],
+    run: async (f) => [await pdf.flattenForm(f[0])],
+  },
 ];
 
 export const PDF_CATS = [
@@ -1346,6 +1415,17 @@ function FieldControl({
         value={value}
         placeholder={f.placeholder}
         autoComplete="new-password"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  if (f.type === "textarea") {
+    return (
+      <textarea
+        className="input min-h-[120px] resize-y font-mono text-xs leading-relaxed"
+        value={value}
+        placeholder={f.placeholder}
+        spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
       />
     );
