@@ -2441,9 +2441,32 @@ export async function wordToPdf(file: File): Promise<OutFile> {
   return textToPdf(stub);
 }
 
+/* SheetJS is loaded from the official CDN rather than npm: the npm `xlsx`
+ * package carries a known high-severity prototype-pollution / ReDoS advisory,
+ * and SheetJS ships fixes only through their CDN. The module is cached after
+ * first load so each tool fetches it at most once. */
+const XLSX_CDN_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
+interface XlsxLib {
+  read(data: Uint8Array, opts: { type: string }): {
+    SheetNames: string[];
+    Sheets: Record<string, unknown>;
+  };
+  utils: {
+    sheet_to_csv(ws: unknown): string;
+    book_new(): unknown;
+    aoa_to_sheet(rows: unknown[][]): unknown;
+    book_append_sheet(wb: unknown, ws: unknown, name: string): void;
+  };
+  write(wb: unknown, opts: { type: string; bookType: string }): ArrayBuffer;
+}
+let xlsxPromise: Promise<XlsxLib> | null = null;
+function loadXlsx(): Promise<XlsxLib> {
+  return (xlsxPromise ??= import(/* @vite-ignore */ XLSX_CDN_URL) as Promise<XlsxLib>);
+}
+
 /** Excel (.xlsx/.xls) → PDF table (one section per sheet). */
 export async function excelToPdf(file: File): Promise<OutFile> {
-  const XLSX = await import("xlsx");
+  const XLSX = await loadXlsx();
   const wb = XLSX.read(new Uint8Array(await readBuf(file)), { type: "array" });
   let csv = "";
   for (const name of wb.SheetNames)
@@ -2498,7 +2521,7 @@ export async function pdfToDocx(file: File): Promise<OutFile> {
 
 /** PDF → Excel (.xlsx): one sheet per page from reconstructed tables. */
 export async function pdfToExcel(file: File): Promise<OutFile> {
-  const XLSX = await import("xlsx");
+  const XLSX = await loadXlsx();
   const tables = await pdfTables(file);
   if (!tables.length) throw new Error("No extractable text found.");
   const wb = XLSX.utils.book_new();
