@@ -3119,3 +3119,50 @@ export async function toPdfA(file: File, part = "2"): Promise<OutFile> {
   const bytes = await doc.save({ useObjectStreams: false });
   return { name: `${nameStem(file.name)}-pdfa.pdf`, bytes: new Uint8Array(bytes) };
 }
+
+/* ═══════════════════════ Visual page organisation ══════════════════════════
+   Backs the interactive page-grid studio: build one PDF from an explicit
+   ordered list of source pages (with optional per-page rotation), or split a
+   document at chosen page boundaries into several files. ──────────────────── */
+
+/** Rebuild a PDF from an ordered list of source pages + per-page rotation. */
+export async function organizePages(
+  file: File,
+  pages: { index: number; rotate?: number }[]
+): Promise<OutFile> {
+  if (!pages.length) throw new Error("Select at least one page to keep.");
+  const src = await loadDoc(file);
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(
+    src,
+    pages.map((p) => p.index)
+  );
+  copied.forEach((pg, i) => {
+    const rot = pages[i].rotate ?? 0;
+    if (rot) pg.setRotation(degrees((((pg.getRotation().angle + rot) % 360) + 360) % 360));
+    out.addPage(pg);
+  });
+  return { name: `${base(file.name)}-organized.pdf`, bytes: await out.save() };
+}
+
+/** Split a PDF into parts after each given 0-based page index. */
+export async function splitAtPoints(file: File, cutAfter: number[]): Promise<OutFile[]> {
+  const src = await loadDoc(file);
+  const total = src.getPageCount();
+  const cuts = [...new Set(cutAfter.filter((i) => i >= 0 && i < total - 1))].sort(
+    (a, b) => a - b
+  );
+  if (!cuts.length) throw new Error("Add at least one split point.");
+  const bounds = [0, ...cuts.map((c) => c + 1), total];
+  const results: OutFile[] = [];
+  for (let s = 0, part = 1; s < bounds.length - 1; s++) {
+    const seg: number[] = [];
+    for (let i = bounds[s]; i < bounds[s + 1]; i++) seg.push(i);
+    if (!seg.length) continue;
+    const out = await PDFDocument.create();
+    const cp = await out.copyPages(src, seg);
+    cp.forEach((p) => out.addPage(p));
+    results.push({ name: `${base(file.name)}-part${part++}.pdf`, bytes: await out.save() });
+  }
+  return results;
+}

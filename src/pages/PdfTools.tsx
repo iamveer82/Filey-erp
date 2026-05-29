@@ -48,6 +48,8 @@ import EsignModal from "../components/EsignModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import LivePreview from "../components/LivePreview";
+import MergeStudio from "../components/MergeStudio";
+import OrganizeStudio from "../components/OrganizeStudio";
 import { useAuth } from "../lib/auth";
 
 /** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
@@ -598,7 +600,35 @@ function PdfToolWorkspace({
             />
           </div>
         </label>
-      ) : tool.interactive && firstIsPdf ? (
+      ) : tool.interactive === "merge" ? (
+        <div className="card min-h-[480px]">
+          <MergeStudio
+            files={files}
+            onApply={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0]?.name ?? "merge", [out]);
+              toast.success("Merged PDF downloaded.");
+            }}
+          />
+        </div>
+      ) : tool.interactive === "organize" && firstIsPdf ? (
+        <div className="card min-h-[480px]">
+          <OrganizeStudio
+            file={files[0]}
+            action={tool.id === "split" ? "split" : tool.id === "extract" ? "extract" : "organize"}
+            onApply={(outsList) => {
+              setOuts(outsList);
+              outsList.forEach(downloadFile);
+              onComplete(tool.id, tool.name, files[0].name, outsList);
+              toast.success(`${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`);
+            }}
+          />
+        </div>
+      ) : (tool.interactive === "stamp" ||
+          tool.interactive === "text-stamp" ||
+          tool.interactive === "image-watermark") &&
+        firstIsPdf ? (
         <div className="card min-h-[480px]">
           <StampStudio
             file={files[0]}

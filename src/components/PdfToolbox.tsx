@@ -125,7 +125,7 @@ export interface Tool {
   fields: FieldSpec[];
   /** Tools with their own interactive workspace (live preview, drag, etc.)
    *  instead of the standard options-panel + Run flow. */
-  interactive?: "stamp" | "text-stamp" | "image-watermark";
+  interactive?: "stamp" | "text-stamp" | "image-watermark" | "merge" | "organize";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -151,25 +151,27 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "merge",
     name: "Merge PDF",
-    desc: "Combine multiple PDFs into one document",
+    desc: "Combine PDFs — drag the pages into the order you want",
     icon: Combine,
     cat: "Organize",
     multi: true,
     accept: "application/pdf",
+    interactive: "merge",
     fields: [],
     run: async (f) => [await pdf.mergePdfs(f)],
   },
   {
     id: "split",
     name: "Split PDF",
-    desc: "Break a PDF into parts of N pages each",
+    desc: "Click the scissors between pages to cut into separate files",
     icon: Scissors,
     cat: "Organize",
     accept: "application/pdf",
-    fields: [
-      { key: "chunk", label: "Pages per file", type: "number", default: "1", min: 1 },
-    ],
-    run: (f, p) => pdf.splitEvery(f[0], num(p.chunk, 1)),
+    interactive: "organize",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Split PDF” to choose split points on the live pages.");
+    },
   },
   {
     id: "split-at",
@@ -192,44 +194,41 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "extract",
     name: "Extract Pages",
-    desc: "Pull selected pages into a new PDF",
+    desc: "Click the pages you want, pull them into a new PDF",
     icon: FileOutput,
     cat: "Organize",
     accept: "application/pdf",
-    fields: [
-      { key: "ranges", label: "Pages", type: "text", placeholder: "e.g. 1-3,5,8-" },
-    ],
-    run: async (f, p) => [await pdf.extractPages(f[0], p.ranges || "")],
+    interactive: "organize",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Extract Pages” to select pages on the live preview.");
+    },
   },
   {
     id: "delete",
     name: "Delete Pages",
-    desc: "Remove pages by range, e.g. 2-4,7",
+    desc: "Drag, rotate and delete pages visually",
     icon: Trash2,
     cat: "Organize",
     accept: "application/pdf",
-    fields: [
-      { key: "ranges", label: "Pages to remove", type: "text", placeholder: "e.g. 2-4,7" },
-    ],
-    run: async (f, p) => [await pdf.deletePages(f[0], p.ranges || "")],
+    interactive: "organize",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Delete Pages” to remove pages on the live preview.");
+    },
   },
   {
     id: "reorder",
     name: "Reorder Pages",
-    desc: "Rebuild the PDF in any page order you choose",
+    desc: "Drag pages into any order, rotate or delete them",
     icon: ListOrdered,
     cat: "Organize",
     accept: "application/pdf",
-    fields: [
-      {
-        key: "order",
-        label: "New page order",
-        type: "text",
-        placeholder: "e.g. 3,1,2,5-7",
-        hint: "List every page once, in the order you want",
-      },
-    ],
-    run: async (f, p) => [await pdf.reorderPages(f[0], p.order || "")],
+    interactive: "organize",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Reorder Pages” to drag pages on the live preview.");
+    },
   },
   {
     id: "rotate",
