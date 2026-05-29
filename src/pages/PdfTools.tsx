@@ -16,6 +16,7 @@ import {
   FileText,
   Upload,
   Loader2,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import * as pdfjs from "pdfjs-dist";
@@ -44,7 +45,7 @@ import {
 } from "../components/PdfToolbox";
 import PreviewModal from "../components/PreviewModal";
 import EsignModal from "../components/EsignModal";
-import PdfEditorModal from "../components/PdfEditorModal";
+import InlinePdfEditor from "../components/InlinePdfEditor";
 import { useAuth } from "../lib/auth";
 
 interface RunLog {
@@ -504,7 +505,7 @@ function PdfToolWorkspace({
   );
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const Icon = tool.icon;
   const first = files[0];
   const firstIsPdf = !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
@@ -515,6 +516,7 @@ function PdfToolWorkspace({
     if (!list) return;
     setFiles(Array.from(list));
     setOuts([]);
+    setEditing(false);
   };
   const run = async () => {
     if (!files.length) {
@@ -585,22 +587,49 @@ function PdfToolWorkspace({
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="card min-h-[480px]">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-brand-500">Preview</p>
+              <p className="text-xs font-semibold text-brand-500">
+                {editing ? "Editing" : "Preview"}
+              </p>
               {firstIsPdf && (
                 <button
-                  onClick={() => setEditorOpen(true)}
+                  onClick={() => setEditing((v) => !v)}
                   className="btn-ghost h-8 text-xs"
-                  title="Add text, highlight, draw, crop, rotate or delete pages before running the tool"
+                  title={
+                    editing
+                      ? "Exit edit mode"
+                      : "Add text, highlight, draw, crop, rotate or delete pages before running the tool"
+                  }
                 >
-                  <SquarePen size={13} /> Edit PDF
+                  {editing ? (
+                    <>
+                      <X size={13} /> Close
+                    </>
+                  ) : (
+                    <>
+                      <SquarePen size={13} /> Edit PDF
+                    </>
+                  )}
                 </button>
               )}
             </div>
-            <FilePreview file={files[0]} />
-            {files.length > 1 && (
-              <p className="mt-2 text-[11px] text-brand-400">
-                +{files.length - 1} more file{files.length - 1 > 1 ? "s" : ""}
-              </p>
+            {editing && firstIsPdf ? (
+              <InlinePdfEditor
+                file={files[0]}
+                onApply={(f) => {
+                  replaceFirstFile(f);
+                  setOuts([]);
+                  setEditing(false);
+                }}
+              />
+            ) : (
+              <>
+                <FilePreview file={files[0]} />
+                {files.length > 1 && (
+                  <p className="mt-2 text-[11px] text-brand-400">
+                    +{files.length - 1} more file{files.length - 1 > 1 ? "s" : ""}
+                  </p>
+                )}
+              </>
             )}
           </div>
           <aside className="card space-y-3 self-start lg:sticky lg:top-20">
@@ -622,17 +651,6 @@ function PdfToolWorkspace({
         </div>
       )}
 
-      {/* Inline PDF editor — reusable across every tool. Edits replace the
-         first file so the tool runs against the annotated PDF. */}
-      <PdfEditorModal
-        open={editorOpen}
-        initialFile={first ?? null}
-        onClose={() => setEditorOpen(false)}
-        onSaveEdited={(f) => {
-          replaceFirstFile(f);
-          setOuts([]);
-        }}
-      />
     </div>
   );
 }
