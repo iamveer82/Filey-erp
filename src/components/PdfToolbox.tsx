@@ -125,7 +125,7 @@ export interface Tool {
   fields: FieldSpec[];
   /** Tools with their own interactive workspace (live preview, drag, etc.)
    *  instead of the standard options-panel + Run flow. */
-  interactive?: "stamp";
+  interactive?: "stamp" | "text-stamp";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -775,45 +775,15 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "stamp",
     name: "Add Stamp",
-    desc: "Apply Approved / Rejected / Paid / Draft / Confidential",
+    desc: "Drag an APPROVED / REJECTED / PAID / DRAFT badge onto the page",
     icon: CheckCircle,
     cat: "Edit",
     accept: "application/pdf",
-    fields: [
-      {
-        key: "stampKind",
-        label: "Stamp",
-        type: "select",
-        default: "approved",
-        options: [
-          { value: "approved", label: "APPROVED — green" },
-          { value: "rejected", label: "REJECTED — red" },
-          { value: "draft", label: "DRAFT — grey" },
-          { value: "confidential", label: "CONFIDENTIAL — red" },
-          { value: "paid", label: "PAID — green" },
-        ],
-      },
-      {
-        key: "stampPos",
-        label: "Position",
-        type: "select",
-        default: "mc",
-        options: [
-          { value: "mc", label: "Diagonal (centre)" },
-          { value: "tr", label: "Top right" },
-          { value: "tl", label: "Top left" },
-          { value: "br", label: "Bottom right" },
-          { value: "bl", label: "Bottom left" },
-        ],
-      },
-      { key: "stampOpacity", label: "Opacity", type: "range", default: "0.45", min: 0.05, max: 1, step: 0.05 },
-    ],
-    run: async (f, p) => [
-      await pdf.addStamp(f[0], (p.stampKind as pdf.StampKind) || "approved", {
-        position: (p.stampPos as pdf.Anchor) || "mc",
-        opacity: flt(p.stampOpacity, 0.45),
-      }),
-    ],
+    interactive: "text-stamp",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Add Stamp” to place the badge on the live preview.");
+    },
   },
   {
     id: "remove-annots",

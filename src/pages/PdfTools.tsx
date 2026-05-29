@@ -584,10 +584,11 @@ function PdfToolWorkspace({
             />
           </div>
         </label>
-      ) : tool.interactive === "stamp" && firstIsPdf ? (
+      ) : tool.interactive && firstIsPdf ? (
         <div className="card min-h-[480px]">
           <StampStudio
             file={files[0]}
+            mode={tool.interactive === "text-stamp" ? "text" : "image"}
             onApply={(out) => {
               setOuts([out]);
               downloadFile(out);

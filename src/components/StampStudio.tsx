@@ -30,12 +30,56 @@ interface StampImg {
   ratio: number; // natural height / width
 }
 
+/** Preset text badges for the "Add Stamp" tool (label + colour). */
+const BADGES: { value: string; label: string; color: string }[] = [
+  { value: "approved", label: "APPROVED", color: "#2E9E2E" },
+  { value: "rejected", label: "REJECTED", color: "#D92E2E" },
+  { value: "paid", label: "PAID", color: "#2E8C66" },
+  { value: "draft", label: "DRAFT", color: "#737373" },
+  { value: "confidential", label: "CONFIDENTIAL", color: "#D92E2E" },
+];
+
+/** Render a bordered, bold text badge to a transparent PNG data URL. */
+function makeBadge(label: string, color: string): StampImg {
+  const fs = 120;
+  const measure = document.createElement("canvas").getContext("2d")!;
+  measure.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+  const tw = measure.measureText(label).width;
+  const border = fs * 0.1;
+  const padX = fs * 0.45;
+  const padY = fs * 0.3;
+  const c = document.createElement("canvas");
+  c.width = Math.ceil(tw + padX * 2 + border * 2);
+  c.height = Math.ceil(fs + padY * 2 + border * 2);
+  const ctx = c.getContext("2d")!;
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = border;
+  const r = border * 1.5;
+  const x = border / 2;
+  const y = border / 2;
+  const w = c.width - border;
+  const h = c.height - border;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+  ctx.stroke();
+  ctx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, c.width / 2, c.height / 2 + fs * 0.04);
+  return { src: c.toDataURL("image/png"), ratio: c.height / c.width };
+}
+
 export default function StampStudio({
   file,
   onApply,
+  mode = "image",
 }: {
   file: File;
   onApply: (out: OutFile) => void;
+  mode?: "image" | "text";
 }) {
   const { toast } = useUI();
   const toastRef = useRef(toast);
@@ -48,15 +92,26 @@ export default function StampStudio({
   const [aspect, setAspect] = useState<{ w: number; h: number } | null>(null);
 
   const [stamp, setStamp] = useState<StampImg | null>(null);
-  const [pos, setPos] = useState({ x: 0.4, y: 0.4 }); // top-left fractions
-  const [wFrac, setWFrac] = useState(0.25);
-  const [opacity, setOpacity] = useState(1);
+  const [pos, setPos] = useState({ x: 0.32, y: 0.4 }); // top-left fractions
+  const [wFrac, setWFrac] = useState(mode === "text" ? 0.38 : 0.25);
+  const [opacity, setOpacity] = useState(mode === "text" ? 0.6 : 1);
   const [allPages, setAllPages] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Text-badge mode controls.
+  const [kind, setKind] = useState(BADGES[0].value);
+  const [badgeColor, setBadgeColor] = useState(BADGES[0].color);
 
   useEffect(() => {
     pwdRef.current = undefined;
   }, [file]);
+
+  // In text mode, (re)build the badge image whenever the label or colour change.
+  useEffect(() => {
+    if (mode !== "text") return;
+    const b = BADGES.find((x) => x.value === kind) ?? BADGES[0];
+    setStamp(makeBadge(b.label, badgeColor));
+  }, [mode, kind, badgeColor]);
 
   // Render the chosen page (handles encrypted PDFs via a password prompt).
   const { prompt } = useUI();
@@ -206,22 +261,51 @@ export default function StampStudio({
     <div>
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#3A3D45] dark:bg-[#1E2025]">
-        <label className="btn-ghost h-8 cursor-pointer text-xs">
-          <Upload size={13} /> {stamp ? "Change stamp" : "Upload stamp"}
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"
-            className="hidden"
-            onChange={(e) => {
-              pickStamp(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {stamp && (
-          <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove stamp">
-            <Trash2 size={13} /> Remove
-          </button>
+        {mode === "text" ? (
+          <>
+            <select
+              className="select h-8 !py-0 text-xs"
+              value={kind}
+              onChange={(e) => {
+                const b = BADGES.find((x) => x.value === e.target.value) ?? BADGES[0];
+                setKind(b.value);
+                setBadgeColor(b.color);
+              }}
+            >
+              {BADGES.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="color"
+              value={badgeColor}
+              onChange={(e) => setBadgeColor(e.target.value)}
+              className="h-7 w-7 cursor-pointer rounded border border-brand-200 dark:border-[#3A3D45]"
+              title="Badge colour"
+            />
+          </>
+        ) : (
+          <>
+            <label className="btn-ghost h-8 cursor-pointer text-xs">
+              <Upload size={13} /> {stamp ? "Change stamp" : "Upload stamp"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  pickStamp(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {stamp && (
+              <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove stamp">
+                <Trash2 size={13} /> Remove
+              </button>
+            )}
+          </>
         )}
 
         <span className="mx-1 h-5 w-px bg-brand-200 dark:bg-[#3A3D45]" />
@@ -312,8 +396,11 @@ export default function StampStudio({
       </div>
 
       <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] text-brand-400">
-        <Stamp size={12} /> Upload a stamp, drag to place and resize, then <strong>Apply</strong>.
-        Toggle “All pages” to stamp the whole document.
+        <Stamp size={12} />{" "}
+        {mode === "text"
+          ? "Pick a badge, drag to place and resize, then "
+          : "Upload a stamp, drag to place and resize, then "}
+        <strong>Apply</strong>. Toggle “All pages” to stamp the whole document.
       </p>
     </div>
   );
