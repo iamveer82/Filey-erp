@@ -125,7 +125,13 @@ export interface Tool {
   fields: FieldSpec[];
   /** Tools with their own interactive workspace (live preview, drag, etc.)
    *  instead of the standard options-panel + Run flow. */
-  interactive?: "stamp" | "text-stamp" | "image-watermark" | "merge" | "organize";
+  interactive?:
+    | "stamp"
+    | "text-stamp"
+    | "image-watermark"
+    | "merge"
+    | "organize"
+    | "esign";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -1259,6 +1265,20 @@ export const PDF_TOOLS: Tool[] = [
     accept: "application/pdf",
     fields: [],
     run: async (f) => [await pdf.flattenForm(f[0])],
+  },
+  // ===== Edit: e-sign (draw / upload / saved signature) =====
+  {
+    id: "esign",
+    name: "E-Sign PDF",
+    desc: "Draw, upload or pick a saved signature, drag onto the page",
+    icon: PenTool,
+    cat: "Edit",
+    accept: "application/pdf",
+    interactive: "esign",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “E-Sign PDF” to sign on the live preview.");
+    },
   },
   // ===== Edit: interactive stamp / signature placer =====
   {

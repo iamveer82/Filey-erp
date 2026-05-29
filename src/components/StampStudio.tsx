@@ -9,6 +9,7 @@ import {
   Trash2,
   Save,
   X,
+  PenLine,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -80,12 +81,15 @@ export default function StampStudio({
   onApply,
   mode = "image",
   variant = "stamp",
+  allowDraw = false,
 }: {
   file: File;
   onApply: (out: OutFile) => void;
   mode?: "image" | "text";
   /** Tunes defaults: a watermark sits big, faint and on every page. */
   variant?: "stamp" | "watermark";
+  /** Show a draw-your-signature pad (e-sign). */
+  allowDraw?: boolean;
 }) {
   const { toast, prompt } = useUI();
   const toastRef = useRef(toast);
@@ -205,6 +209,60 @@ export default function StampStudio({
     im.src = url;
   };
 
+  // ── Draw-your-signature pad ─────────────────────────────────────────────
+  const [padOpen, setPadOpen] = useState(false);
+  const padRef = useRef<HTMLCanvasElement>(null);
+  const inkRef = useRef(false);
+  const lastRef = useRef<{ x: number; y: number } | null>(null);
+  const padXY = (e: React.PointerEvent) => {
+    const c = padRef.current!;
+    const r = c.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * c.width, y: ((e.clientY - r.top) / r.height) * c.height };
+  };
+  const padDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    inkRef.current = true;
+    lastRef.current = padXY(e);
+  };
+  const padMove = (e: React.PointerEvent) => {
+    if (!inkRef.current) return;
+    const ctx = padRef.current?.getContext("2d");
+    const p = padXY(e);
+    if (ctx && lastRef.current) {
+      ctx.strokeStyle = "#0A0A0A";
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(lastRef.current.x, lastRef.current.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    lastRef.current = p;
+  };
+  const padUp = () => {
+    inkRef.current = false;
+    lastRef.current = null;
+  };
+  const clearPad = () => {
+    const c = padRef.current;
+    c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  };
+  const usePad = () => {
+    const c = padRef.current;
+    if (!c) return;
+    // Detect whether anything was drawn.
+    const data = c.getContext("2d")?.getImageData(0, 0, c.width, c.height).data;
+    if (!data || !data.some((_, i) => i % 4 === 3 && data[i] > 0)) {
+      toastRef.current.error("Draw your signature first.");
+      return;
+    }
+    setStamp({ src: c.toDataURL("image/png"), ratio: c.height / c.width });
+    setPadOpen(false);
+    setPos({ x: 0.3, y: 0.55 });
+    setWFrac(0.3);
+  };
+
   // Save the current image to the reusable library.
   const saveCurrent = async () => {
     if (!stamp) return;
@@ -314,6 +372,15 @@ export default function StampStudio({
           </>
         ) : (
           <>
+            {allowDraw && (
+              <button
+                className="btn-ghost h-8 text-xs"
+                onClick={() => setPadOpen((v) => !v)}
+                title="Draw your signature"
+              >
+                <PenLine size={13} /> Draw
+              </button>
+            )}
             <label className="btn-ghost h-8 cursor-pointer text-xs">
               <Upload size={13} /> {stamp ? "Change" : isWatermark ? "Upload watermark" : "Upload stamp"}
               <input
@@ -385,6 +452,32 @@ export default function StampStudio({
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply
         </button>
       </div>
+
+      {/* ── Signature draw pad ─────────────────────────────────────────────── */}
+      {padOpen && (
+        <div className="mb-2 rounded-xl border border-brand-200 bg-white p-2 dark:border-[#3A3D45] dark:bg-[#1E2025]">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-brand-500">Draw your signature</span>
+            <div className="flex gap-1.5">
+              <button className="btn-ghost h-7 text-xs" onClick={clearPad}>Clear</button>
+              <button className="btn-primary h-7 text-xs" onClick={usePad}>
+                <Check size={12} /> Use
+              </button>
+            </div>
+          </div>
+          <canvas
+            ref={padRef}
+            width={600}
+            height={200}
+            onPointerDown={padDown}
+            onPointerMove={padMove}
+            onPointerUp={padUp}
+            onPointerLeave={padUp}
+            className="w-full cursor-crosshair rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] dark:border-[#3A3D45]"
+            style={{ touchAction: "none", aspectRatio: "3 / 1" }}
+          />
+        </div>
+      )}
 
       {/* ── Saved-asset library strip ─────────────────────────────────────── */}
       {mode === "image" && assets.length > 0 && (

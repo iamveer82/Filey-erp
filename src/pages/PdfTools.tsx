@@ -627,13 +627,15 @@ function PdfToolWorkspace({
         </div>
       ) : (tool.interactive === "stamp" ||
           tool.interactive === "text-stamp" ||
-          tool.interactive === "image-watermark") &&
+          tool.interactive === "image-watermark" ||
+          tool.interactive === "esign") &&
         firstIsPdf ? (
         <div className="card min-h-[480px]">
           <StampStudio
             file={files[0]}
             mode={tool.interactive === "text-stamp" ? "text" : "image"}
             variant={tool.interactive === "image-watermark" ? "watermark" : "stamp"}
+            allowDraw={tool.interactive === "esign"}
             onApply={(out) => {
               setOuts([out]);
               downloadFile(out);
