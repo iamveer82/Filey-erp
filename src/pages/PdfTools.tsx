@@ -51,11 +51,11 @@ import LivePreview from "../components/LivePreview";
 import MergeStudio from "../components/MergeStudio";
 import OrganizeStudio from "../components/OrganizeStudio";
 import RedactStudio from "../components/RedactStudio";
+import RotateStudio from "../components/RotateStudio";
 import { useAuth } from "../lib/auth";
 
 /** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
 const LIVE_PREVIEW_TOOLS = new Set([
-  "rotate",
   "numbers",
   "watermark",
   "img-watermark",
@@ -623,6 +623,18 @@ function PdfToolWorkspace({
               outsList.forEach(downloadFile);
               onComplete(tool.id, tool.name, files[0].name, outsList);
               toast.success(`${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`);
+            }}
+          />
+        </div>
+      ) : tool.interactive === "rotate" && firstIsPdf ? (
+        <div className="card min-h-[480px]">
+          <RotateStudio
+            file={files[0]}
+            onApply={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0].name, [out]);
+              toast.success("Rotated PDF downloaded.");
             }}
           />
         </div>

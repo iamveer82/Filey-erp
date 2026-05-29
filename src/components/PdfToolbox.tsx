@@ -134,7 +134,8 @@ export interface Tool {
     | "esign"
     | "logo"
     | "background"
-    | "redact";
+    | "redact"
+    | "rotate";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -242,27 +243,15 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "rotate",
     name: "Rotate PDF",
-    desc: "Rotate all or selected pages",
+    desc: "Tap the round arrows to rotate, then download",
     icon: RotateCw,
     cat: "Edit",
     accept: "application/pdf",
-    fields: [
-      {
-        key: "rotate",
-        label: "Rotation",
-        type: "select",
-        default: "90",
-        options: [
-          { value: "90", label: "90° clockwise" },
-          { value: "180", label: "180°" },
-          { value: "270", label: "90° counter-clockwise" },
-        ],
-      },
-      { key: "ranges", label: "Pages (optional)", type: "text", placeholder: "all pages" },
-    ],
-    run: async (f, p) => [
-      await pdf.rotatePdf(f[0], num(p.rotate, 90), p.ranges || undefined),
-    ],
+    interactive: "rotate",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Rotate PDF” to spin the pages on the live preview.");
+    },
   },
   {
     id: "img2pdf",
