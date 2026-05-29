@@ -50,6 +50,7 @@ import StampStudio from "../components/StampStudio";
 import LivePreview from "../components/LivePreview";
 import MergeStudio from "../components/MergeStudio";
 import OrganizeStudio from "../components/OrganizeStudio";
+import RedactStudio from "../components/RedactStudio";
 import { useAuth } from "../lib/auth";
 
 /** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
@@ -625,16 +626,38 @@ function PdfToolWorkspace({
             }}
           />
         </div>
+      ) : tool.interactive === "redact" && firstIsPdf ? (
+        <div className="card min-h-[480px]">
+          <RedactStudio
+            file={files[0]}
+            onApply={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0].name, [out]);
+              toast.success("Redacted PDF downloaded.");
+            }}
+          />
+        </div>
       ) : (tool.interactive === "stamp" ||
           tool.interactive === "text-stamp" ||
           tool.interactive === "image-watermark" ||
-          tool.interactive === "esign") &&
+          tool.interactive === "esign" ||
+          tool.interactive === "logo" ||
+          tool.interactive === "background") &&
         firstIsPdf ? (
         <div className="card min-h-[480px]">
           <StampStudio
             file={files[0]}
             mode={tool.interactive === "text-stamp" ? "text" : "image"}
-            variant={tool.interactive === "image-watermark" ? "watermark" : "stamp"}
+            variant={
+              tool.interactive === "image-watermark"
+                ? "watermark"
+                : tool.interactive === "logo"
+                ? "logo"
+                : tool.interactive === "background"
+                ? "background"
+                : "stamp"
+            }
             allowDraw={tool.interactive === "esign"}
             onApply={(out) => {
               setOuts([out]);

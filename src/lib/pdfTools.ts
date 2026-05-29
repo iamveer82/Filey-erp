@@ -1669,6 +1669,8 @@ export interface PlaceStampOpts {
   opacity: number;
   /** Page to stamp (0-based). Omit to stamp every page. */
   pageIndex?: number;
+  /** Draw the image behind the page content (letterhead / background). */
+  behind?: boolean;
 }
 /** Place an uploaded stamp/signature at an exact position chosen in the UI. */
 export async function placeStamp(
@@ -1686,21 +1688,50 @@ export async function placeStamp(
     : await doc.embedJpg(raw);
   const opacity = clamp(opts.opacity ?? 1, 0.02, 1);
   const wFrac = clamp(opts.wFrac ?? 0.3, 0.02, 1);
-  const pages = doc.getPages();
-  const targets =
-    opts.pageIndex == null
-      ? pages.map((_, i) => i)
-      : [Math.min(Math.max(0, opts.pageIndex), pages.length - 1)];
-  for (const i of targets) {
-    const p = pages[i];
-    const w = p.getWidth();
-    const h = p.getHeight();
+  const isTarget = (i: number, n: number) =>
+    opts.pageIndex == null || Math.min(Math.max(0, opts.pageIndex), n - 1) === i;
+  const placeOn = (
+    page: ReturnType<typeof doc.getPages>[number],
+    w: number,
+    h: number
+  ) => {
     const dw = w * wFrac;
     const dh = (dw / img.width) * img.height;
     const x = w * clamp(opts.xFrac ?? 0, 0, 1);
     const y = h - h * clamp(opts.yFrac ?? 0, 0, 1) - dh; // top-left → bottom-left
-    p.drawImage(img, { x, y, width: dw, height: dh, opacity });
+    page.drawImage(img, { x, y, width: dw, height: dh, opacity });
+  };
+
+  if (opts.behind) {
+    // Rebuild each page with the image drawn first, then the original page
+    // content embedded on top — so the image sits behind (letterhead).
+    const out = await PDFDocument.create();
+    const srcPages = doc.getPages();
+    const bg = imageDataUrl.startsWith("data:image/png")
+      ? await out.embedPng(raw)
+      : await out.embedJpg(raw);
+    for (let i = 0; i < srcPages.length; i++) {
+      const sp = srcPages[i];
+      const w = sp.getWidth();
+      const h = sp.getHeight();
+      const embedded = await out.embedPage(sp);
+      const np = out.addPage([w, h]);
+      if (isTarget(i, srcPages.length)) {
+        const dw = w * wFrac;
+        const dh = (dw / bg.width) * bg.height;
+        const x = w * clamp(opts.xFrac ?? 0, 0, 1);
+        const y = h - h * clamp(opts.yFrac ?? 0, 0, 1) - dh;
+        np.drawImage(bg, { x, y, width: dw, height: dh, opacity });
+      }
+      np.drawPage(embedded, { x: 0, y: 0, width: w, height: h });
+    }
+    return { name: `${base(file.name)}-letterhead.pdf`, bytes: await out.save() };
   }
+
+  const pages = doc.getPages();
+  pages.forEach((p, i) => {
+    if (isTarget(i, pages.length)) placeOn(p, p.getWidth(), p.getHeight());
+  });
   return { name: `${base(file.name)}-stamped.pdf`, bytes: await doc.save() };
 }
 
@@ -3165,4 +3196,34 @@ export async function splitAtPoints(file: File, cutAfter: number[]): Promise<Out
     results.push({ name: `${base(file.name)}-part${part++}.pdf`, bytes: await out.save() });
   }
   return results;
+}
+
+export interface RedactBox {
+  page: number; // 0-based
+  xFrac: number;
+  yFrac: number; // top-left origin
+  wFrac: number;
+  hFrac: number;
+}
+/** Cover regions with opaque boxes. Note: this hides content visually; for
+ *  guaranteed text removal a server-side sanitise pass is still recommended. */
+export async function redactBoxes(file: File, boxes: RedactBox[]): Promise<OutFile> {
+  if (!boxes.length) throw new Error("Draw at least one redaction box.");
+  const doc = await loadDoc(file);
+  const pages = doc.getPages();
+  for (const b of boxes) {
+    const p = pages[b.page];
+    if (!p) continue;
+    const w = p.getWidth();
+    const h = p.getHeight();
+    p.drawRectangle({
+      x: w * b.xFrac,
+      y: h - (b.yFrac + b.hFrac) * h,
+      width: w * b.wFrac,
+      height: h * b.hFrac,
+      color: rgb(0, 0, 0),
+      opacity: 1,
+    });
+  }
+  return { name: `${base(file.name)}-redacted.pdf`, bytes: await doc.save() };
 }

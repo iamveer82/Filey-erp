@@ -131,7 +131,10 @@ export interface Tool {
     | "image-watermark"
     | "merge"
     | "organize"
-    | "esign";
+    | "esign"
+    | "logo"
+    | "background"
+    | "redact";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
 }
 
@@ -1278,6 +1281,46 @@ export const PDF_TOOLS: Tool[] = [
     fields: [],
     run: async () => {
       throw new Error("Open “E-Sign PDF” to sign on the live preview.");
+    },
+  },
+  // ===== Edit: logo / letterhead / redaction (StampStudio + asset library) =====
+  {
+    id: "logo",
+    name: "Add Logo / Header",
+    desc: "Upload or pick a saved logo, drag to a header/footer spot, all pages",
+    icon: ImagePlus,
+    cat: "Edit",
+    accept: "application/pdf",
+    interactive: "logo",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Add Logo / Header” to place your logo on the live preview.");
+    },
+  },
+  {
+    id: "letterhead",
+    name: "Letterhead / Background",
+    desc: "Place an image behind the page content (letterhead / watermark sheet)",
+    icon: Layers,
+    cat: "Edit",
+    accept: "application/pdf",
+    interactive: "background",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Letterhead / Background” to place your image on the live preview.");
+    },
+  },
+  {
+    id: "redact",
+    name: "Redact PDF",
+    desc: "Draw black boxes over anything to hide before sharing",
+    icon: Eraser,
+    cat: "Secure",
+    accept: "application/pdf",
+    interactive: "redact",
+    fields: [],
+    run: async () => {
+      throw new Error("Open “Redact PDF” to draw redaction boxes on the live preview.");
     },
   },
   // ===== Edit: interactive stamp / signature placer =====

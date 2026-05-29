@@ -86,8 +86,9 @@ export default function StampStudio({
   file: File;
   onApply: (out: OutFile) => void;
   mode?: "image" | "text";
-  /** Tunes defaults: a watermark sits big, faint and on every page. */
-  variant?: "stamp" | "watermark";
+  /** Tunes defaults & rendering: watermark = faint/all-pages, logo = small
+   *  top corner/all-pages, background = full-bleed behind content. */
+  variant?: "stamp" | "watermark" | "logo" | "background";
   /** Show a draw-your-signature pad (e-sign). */
   allowDraw?: boolean;
 }) {
@@ -97,6 +98,10 @@ export default function StampStudio({
   const pwdRef = useRef<string | undefined>(undefined);
   const { assets, save, remove } = useAssets();
   const isWatermark = variant === "watermark";
+  const isBackground = variant === "background";
+  const isLogo = variant === "logo";
+  const allPagesDefault = isWatermark || isBackground || isLogo;
+  const noun = isBackground ? "letterhead" : isLogo ? "logo" : isWatermark ? "watermark" : "stamp";
 
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(0);
@@ -105,15 +110,21 @@ export default function StampStudio({
 
   const [stamp, setStamp] = useState<StampImg | null>(null);
   const [pos, setPos] = useState(
-    isWatermark ? { x: 0.22, y: 0.4 } : { x: 0.32, y: 0.4 }
+    isBackground
+      ? { x: 0.05, y: 0.05 }
+      : isLogo
+      ? { x: 0.06, y: 0.04 }
+      : isWatermark
+      ? { x: 0.22, y: 0.4 }
+      : { x: 0.32, y: 0.4 }
   ); // top-left fractions
   const [wFrac, setWFrac] = useState(
-    mode === "text" ? 0.38 : isWatermark ? 0.55 : 0.25
+    mode === "text" ? 0.38 : isBackground ? 0.9 : isLogo ? 0.18 : isWatermark ? 0.55 : 0.25
   );
   const [opacity, setOpacity] = useState(
     mode === "text" ? 0.6 : isWatermark ? 0.3 : 1
   );
-  const [allPages, setAllPages] = useState(isWatermark);
+  const [allPages, setAllPages] = useState(allPagesDefault);
   const [saving, setSaving] = useState(false);
 
   // Text-badge mode controls.
@@ -329,6 +340,7 @@ export default function StampStudio({
         wFrac,
         opacity,
         pageIndex: allPages ? undefined : page,
+        behind: isBackground,
       });
       onApply(out);
       toastRef.current.success(
@@ -382,7 +394,7 @@ export default function StampStudio({
               </button>
             )}
             <label className="btn-ghost h-8 cursor-pointer text-xs">
-              <Upload size={13} /> {stamp ? "Change" : isWatermark ? "Upload watermark" : "Upload stamp"}
+              <Upload size={13} /> {stamp ? "Change" : `Upload ${noun}`}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"
@@ -548,7 +560,7 @@ export default function StampStudio({
         <Stamp size={12} />{" "}
         {mode === "text"
           ? "Pick a badge, drag to place and resize, then "
-          : `Upload or pick a saved ${isWatermark ? "watermark" : "stamp"}, drag to place and resize, then `}
+          : `Upload or pick a saved ${noun}, drag to place and resize, then `}
         <strong>Apply</strong>. Toggle “All pages” to apply to the whole document.
       </p>
     </div>
