@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -290,7 +290,13 @@ export function DataTable<T>({
   bulkActions,
   onRowClick,
 }: {
-  columns: { key: string; label: string; render: (row: T) => ReactNode }[];
+  columns: {
+    key: string;
+    label: string;
+    render: (row: T) => ReactNode;
+    /** Provide to make the column header sortable. */
+    sortValue?: (row: T) => string | number;
+  }[];
   rows: T[];
   empty?: string;
   /** Show skeleton rows while the first load is in flight. */
@@ -306,6 +312,23 @@ export function DataTable<T>({
   const selectable = !!rowKey && !!bulkActions?.length;
   const [sel, setSel] = useState<Set<string | number>>(new Set());
   const [running, setRunning] = useState(false);
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+
+  const sortFn = sort && columns.find((c) => c.key === sort.key)?.sortValue;
+  const sorted = useMemo(() => {
+    if (!sortFn || !sort) return rows;
+    return [...rows].sort((a, b) => {
+      const av = sortFn(a);
+      const bv = sortFn(b);
+      if (av < bv) return -sort.dir;
+      if (av > bv) return sort.dir;
+      return 0;
+    });
+  }, [rows, sortFn, sort]);
+  const toggleSort = (key: string) =>
+    setSort((s) =>
+      s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
+    );
 
   const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
   const allChecked =
@@ -379,11 +402,25 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((c) => (
-                <th key={c.key} className="th">
-                  {c.label}
-                </th>
-              ))}
+              {columns.map((c) =>
+                c.sortValue ? (
+                  <th key={c.key} className="th">
+                    <button
+                      onClick={() => toggleSort(c.key)}
+                      className="inline-flex items-center gap-1 cursor-pointer hover:text-ink"
+                    >
+                      {c.label}
+                      <span className="text-[10px] text-brand-400">
+                        {sort?.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                ) : (
+                  <th key={c.key} className="th">
+                    {c.label}
+                  </th>
+                )
+              )}
             </tr>
           </thead>
           <tbody>
@@ -411,7 +448,7 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              rows.map((row, i) => {
+              sorted.map((row, i) => {
                 const k = selectable ? keyOf(row) : i;
                 const checked = selectable && sel.has(k);
                 return (

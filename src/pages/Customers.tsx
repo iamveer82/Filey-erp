@@ -158,6 +158,7 @@ export default function Customers() {
           {
             key: "name",
             label: "Customer",
+            sortValue: (c) => (c.company || c.name || "").toLowerCase(),
             render: (c) => (
               <div className="min-w-0">
                 <p className="truncate font-semibold text-ink">
@@ -170,6 +171,7 @@ export default function Customers() {
           {
             key: "trn",
             label: "TRN",
+            sortValue: (c) => c.trn ?? "",
             render: (c) =>
               c.trn ? (
                 <span className="font-mono text-xs">{c.trn}</span>
@@ -177,8 +179,8 @@ export default function Customers() {
                 "—"
               ),
           },
-          { key: "email", label: "Email", render: (c) => c.email ?? "—" },
-          { key: "phone", label: "Phone", render: (c) => c.phone ?? "—" },
+          { key: "email", label: "Email", sortValue: (c) => c.email ?? "", render: (c) => c.email ?? "—" },
+          { key: "phone", label: "Phone", sortValue: (c) => c.phone ?? "", render: (c) => c.phone ?? "—" },
           {
             key: "act",
             label: "",
