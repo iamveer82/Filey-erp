@@ -32,6 +32,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
+import DealDrawer from "../components/DealDrawer";
 import { aed, num, fmtDate, cn } from "../lib/format";
 import {
   PageHeader,
@@ -62,6 +63,7 @@ const STAGE_PROB: Record<string, number> = {
 export default function Crm() {
   const nav = useNavigate();
   const [view, setView] = useState<"dashboard" | "pipeline">("dashboard");
+  const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -243,7 +245,7 @@ export default function Crm() {
         )}
 
       {view === "pipeline" ? (
-        <PipelineBoard opps={opps} setOpps={setOpps} reload={load} />
+        <PipelineBoard opps={opps} setOpps={setOpps} reload={load} onOpen={setSelectedOpp} />
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
@@ -526,6 +528,8 @@ export default function Crm() {
           { key: "segment", label: "Segment" },
         ]}
       />
+
+      <DealDrawer opp={selectedOpp} onClose={() => setSelectedOpp(null)} onChange={load} />
     </div>
   );
 }
@@ -536,13 +540,39 @@ function PipelineBoard({
   opps,
   setOpps,
   reload,
+  onOpen,
 }: {
   opps: Opportunity[];
   setOpps: React.Dispatch<React.SetStateAction<Opportunity[]>>;
   reload: () => void;
+  onOpen: (o: Opportunity) => void;
 }) {
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [addStage, setAddStage] = useState<string | null>(null);
+  const [addTitle, setAddTitle] = useState("");
+
+  const quickAdd = async (stage: string) => {
+    const title = addTitle.trim();
+    if (!title) {
+      setAddStage(null);
+      return;
+    }
+    setAddStage(null);
+    setAddTitle("");
+    try {
+      await crm.createOpportunity({
+        title,
+        customer_name: "",
+        stage,
+        value: 0,
+        probability: STAGE_PROB[stage] ?? 20,
+      });
+      reload();
+    } catch {
+      reload();
+    }
+  };
 
   const byStage = useMemo(() => {
     const m: Record<string, Opportunity[]> = {};
@@ -613,7 +643,8 @@ function PipelineBoard({
                     setDragId(null);
                     setOver(null);
                   }}
-                  className={`card !p-3 cursor-grab active:cursor-grabbing select-none ${
+                  onClick={() => onOpen(o)}
+                  className={`card !p-3 cursor-grab select-none transition-shadow hover:shadow-bento-hover active:cursor-grabbing ${
                     dragId === o.id ? "opacity-50" : ""
                   }`}
                 >
@@ -645,6 +676,35 @@ function PipelineBoard({
                 <p className="text-center text-xs text-brand-300 py-6">
                   Drop deals here
                 </p>
+              )}
+            </div>
+            <div className="mt-2">
+              {addStage === s.id ? (
+                <input
+                  autoFocus
+                  className="input h-8 w-full text-sm"
+                  placeholder="Deal name…"
+                  value={addTitle}
+                  onChange={(e) => setAddTitle(e.target.value)}
+                  onBlur={() => quickAdd(s.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") quickAdd(s.id);
+                    if (e.key === "Escape") {
+                      setAddStage(null);
+                      setAddTitle("");
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => {
+                    setAddStage(s.id);
+                    setAddTitle("");
+                  }}
+                  className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-brand-300 py-1.5 text-xs font-semibold text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-[#3A3D45]"
+                >
+                  <Plus size={13} /> Add deal
+                </button>
               )}
             </div>
           </div>
