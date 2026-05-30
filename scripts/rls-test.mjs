@@ -91,6 +91,20 @@ async function main() {
   const nm = (await call(`/rest/v1/products?id=eq.${pidA}&select=name`, { headers: U(ta) })).data[0].name;
   check("Shared = read-only: B cannot edit A's shared product", nm !== "HACKED");
 
+  // user_assets — personal saved stamps/signatures, owner-only
+  await call("/rest/v1/user_assets", { method: "POST", headers: { ...U(ta), Prefer: "return=representation" }, body: { owner: ua.id, name: `asset_${ts}`, ratio: 1, data_url: `data:secret_${ts}` } });
+  const aAsset = (await call(`/rest/v1/user_assets?name=eq.asset_${ts}`, { headers: U(ta) })).data;
+  check("A sees own saved asset", Array.isArray(aAsset) && aAsset.length === 1);
+  const bAsset = (await call(`/rest/v1/user_assets?name=eq.asset_${ts}`, { headers: U(tb) })).data;
+  check("Isolation: B cannot see A's saved asset", Array.isArray(bAsset) && bAsset.length === 0);
+
+  // user_files — saved tool outputs, owner-only
+  await call("/rest/v1/user_files", { method: "POST", headers: { ...U(ta), Prefer: "return=representation" }, body: { owner: ua.id, name: `file_${ts}.pdf`, storage_path: `${ua.id}/x/file_${ts}.pdf` } });
+  const aFile = (await call(`/rest/v1/user_files?name=eq.file_${ts}.pdf`, { headers: U(ta) })).data;
+  check("A sees own saved file", Array.isArray(aFile) && aFile.length === 1);
+  const bFile = (await call(`/rest/v1/user_files?name=eq.file_${ts}.pdf`, { headers: U(tb) })).data;
+  check("Isolation: B cannot see A's saved file", Array.isArray(bFile) && bFile.length === 0);
+
   // cleanup
   await call(`/rest/v1/products?id=eq.${pidA}`, { method: "DELETE", headers: { ...U(ta), Prefer: "return=representation" } });
   await call(`/auth/v1/admin/users/${ua.id}`, { method: "DELETE", headers: admin });
