@@ -20,6 +20,7 @@ import {
   Wrench,
   Settings2,
   PackageCheck,
+  FolderOpen,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
@@ -39,6 +40,7 @@ const Reports = lazy(() => import("../pages/Reports"));
 const People = lazy(() => import("../pages/People"));
 const Accounting = lazy(() => import("../pages/Accounting"));
 const ToolsPage = lazy(() => import("../pages/PdfTools"));
+const MyFilesPage = lazy(() => import("../pages/MyFiles"));
 const Settings = lazy(() => import("../pages/Tools"));
 
 export interface AppModule {
@@ -189,6 +191,15 @@ export const MODULES: AppModule[] = [
     icon: Wrench,
     to: "/tools",
     Component: ToolsPage,
+  },
+  {
+    id: "files",
+    label: "My Files",
+    short: "Files",
+    desc: "Tool outputs saved to your account",
+    icon: FolderOpen,
+    to: "/files",
+    Component: MyFilesPage,
   },
   {
     id: "settings",

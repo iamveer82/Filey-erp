@@ -17,6 +17,7 @@ import {
   Upload,
   Loader2,
   X,
+  FolderPlus,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import * as pdfjs from "pdfjs-dist";
@@ -53,6 +54,8 @@ import OrganizeStudio from "../components/OrganizeStudio";
 import RedactStudio from "../components/RedactStudio";
 import RotateStudio from "../components/RotateStudio";
 import { useAuth } from "../lib/auth";
+import { saveOutput } from "../lib/files";
+import { isConfigured } from "../lib/supabase";
 
 /** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
 const LIVE_PREVIEW_TOOLS = new Set([
@@ -517,13 +520,28 @@ function PdfToolWorkspace({
   onComplete: (toolId: string, toolName: string, file: string, outs: OutFile[]) => void;
 }) {
   const { toast } = useUI();
+  const { user } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [params, setParams] = useState<Record<string, string>>(() =>
     defaultParams(tool)
   );
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
+  const [savingFiles, setSavingFiles] = useState(false);
   const [editing, setEditing] = useState(false);
+  const canSave = isConfigured && !!user && outs.length > 0;
+
+  const saveToMyFiles = async () => {
+    setSavingFiles(true);
+    try {
+      for (const o of outs) await saveOutput(o, tool.name);
+      toast.success(`Saved ${outs.length} file${outs.length > 1 ? "s" : ""} to My Files.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingFiles(false);
+    }
+  };
   const Icon = tool.icon;
   const first = files[0];
   const firstIsPdf = !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
@@ -563,7 +581,13 @@ function PdfToolWorkspace({
         </button>
         <span className="hidden h-5 w-px bg-brand-200 dark:bg-[#3A3D45] sm:block" />
         <span className="truncate text-sm font-bold text-ink">{tool.name}</span>
-        <span className="ml-auto hidden text-xs text-brand-400 sm:inline">{tool.cat}</span>
+        {canSave && (
+          <button onClick={saveToMyFiles} disabled={savingFiles} className="btn-ghost ml-auto h-9 text-xs">
+            {savingFiles ? <Loader2 size={14} className="animate-spin" /> : <FolderPlus size={14} />}
+            Save to My Files
+          </button>
+        )}
+        <span className={`hidden text-xs text-brand-400 sm:inline ${canSave ? "" : "ml-auto"}`}>{tool.cat}</span>
       </div>
 
       <div className="card mb-4 flex flex-wrap items-center gap-3">

@@ -1156,3 +1156,36 @@ alter table user_assets enable row level security;
 drop policy if exists user_assets_self on user_assets;
 create policy user_assets_self on user_assets for all
   using (owner = auth.uid()) with check (owner = auth.uid());
+
+-- ---------- USER FILES (saved tool outputs → "My Files") ----------
+-- Tool outputs the user chooses to keep. Bytes live in a private Storage
+-- bucket; this table holds the metadata. Per-user (owner = auth.uid()).
+insert into storage.buckets (id, name, public)
+  values ('files', 'files', false)
+  on conflict (id) do nothing;
+
+drop policy if exists files_own_read on storage.objects;
+drop policy if exists files_own_insert on storage.objects;
+drop policy if exists files_own_delete on storage.objects;
+create policy files_own_read on storage.objects for select
+  using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy files_own_insert on storage.objects for insert
+  with check (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy files_own_delete on storage.objects for delete
+  using (bucket_id = 'files' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create table if not exists user_files (
+  id           uuid primary key default gen_random_uuid(),
+  owner        uuid not null references auth.users(id) on delete cascade,
+  name         text not null,
+  mime         text not null default 'application/octet-stream',
+  size         bigint not null default 0,
+  storage_path text not null,
+  tool         text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists user_files_owner_idx on user_files(owner, created_at desc);
+alter table user_files enable row level security;
+drop policy if exists user_files_self on user_files;
+create policy user_files_self on user_files for all
+  using (owner = auth.uid()) with check (owner = auth.uid());
