@@ -1139,3 +1139,20 @@ begin
 end $$;
 
 -- Done. Tables are row-level-secured to the signed-in user.
+
+-- ---------- USER ASSETS (saved stamps / signatures / logos) ----------
+-- Personal, reusable images for the PDF tools. Per-user (not org-shared);
+-- the small PNG data URL is stored inline so the client can render instantly.
+create table if not exists user_assets (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users(id) on delete cascade,
+  name        text not null default 'Untitled',
+  ratio       real not null default 1,
+  data_url    text not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists user_assets_owner_idx on user_assets(owner, created_at desc);
+alter table user_assets enable row level security;
+drop policy if exists user_assets_self on user_assets;
+create policy user_assets_self on user_assets for all
+  using (owner = auth.uid()) with check (owner = auth.uid());
