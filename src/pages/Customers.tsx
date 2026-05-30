@@ -179,8 +179,32 @@ export default function Customers() {
                 "—"
               ),
           },
-          { key: "email", label: "Email", sortValue: (c) => c.email ?? "", render: (c) => c.email ?? "—" },
-          { key: "phone", label: "Phone", sortValue: (c) => c.phone ?? "", render: (c) => c.phone ?? "—" },
+          {
+            key: "email",
+            label: "Email",
+            sortValue: (c) => c.email ?? "",
+            render: (c) => c.email ?? "—",
+            editable: {
+              value: (c) => c.email ?? "",
+              onSave: async (c, v) => {
+                await crm.updateCustomer(c.id, { email: v.trim() || undefined });
+                load();
+              },
+            },
+          },
+          {
+            key: "phone",
+            label: "Phone",
+            sortValue: (c) => c.phone ?? "",
+            render: (c) => c.phone ?? "—",
+            editable: {
+              value: (c) => c.phone ?? "",
+              onSave: async (c, v) => {
+                await crm.updateCustomer(c.id, { phone: v.trim() || undefined });
+                load();
+              },
+            },
+          },
           {
             key: "act",
             label: "",

@@ -296,6 +296,12 @@ export function DataTable<T>({
     render: (row: T) => ReactNode;
     /** Provide to make the column header sortable. */
     sortValue?: (row: T) => string | number;
+    /** Provide to make cells click-to-edit (inline). */
+    editable?: {
+      value: (row: T) => string;
+      onSave: (row: T, value: string) => void | Promise<void>;
+      type?: string;
+    };
   }[];
   rows: T[];
   empty?: string;
@@ -313,6 +319,9 @@ export function DataTable<T>({
   const [sel, setSel] = useState<Set<string | number>>(new Set());
   const [running, setRunning] = useState(false);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(null);
+  const [editVal, setEditVal] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   const sortFn = sort && columns.find((c) => c.key === sort.key)?.sortValue;
   const sorted = useMemo(() => {
@@ -484,11 +493,56 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map((c) => (
-                      <td key={c.key} className="td">
-                        {c.render(row)}
-                      </td>
-                    ))}
+                    {columns.map((c) => {
+                      const isEditing =
+                        !!c.editable && editing?.row === k && editing?.col === c.key;
+                      const startEdit = (e: React.MouseEvent) => {
+                        if (!c.editable) return;
+                        e.stopPropagation();
+                        setEditVal(c.editable.value(row));
+                        setEditing({ row: k, col: c.key });
+                      };
+                      const commit = async () => {
+                        if (!c.editable || editSaving) return;
+                        setEditSaving(true);
+                        try {
+                          await c.editable.onSave(row, editVal);
+                        } finally {
+                          setEditSaving(false);
+                          setEditing(null);
+                        }
+                      };
+                      return (
+                        <td key={c.key} className="td">
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              type={c.editable?.type ?? "text"}
+                              value={editVal}
+                              disabled={editSaving}
+                              onChange={(e) => setEditVal(e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={commit}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commit();
+                                else if (e.key === "Escape") setEditing(null);
+                              }}
+                              className="input h-8 w-full text-sm"
+                            />
+                          ) : c.editable ? (
+                            <span
+                              onClick={startEdit}
+                              title="Click to edit"
+                              className="-mx-1 block cursor-text rounded px-1 hover:bg-brand-100/70 dark:hover:bg-white/5"
+                            >
+                              {c.render(row)}
+                            </span>
+                          ) : (
+                            c.render(row)
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })
