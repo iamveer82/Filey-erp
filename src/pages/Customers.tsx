@@ -60,14 +60,36 @@ export default function Customers() {
   }, []);
   useLiveSync(load);
 
+  // Persisted "saved view": the active filter set survives reloads.
+  const [vw, setVw] = useState<{ seg: string; email: boolean; trn: boolean }>(() => {
+    try {
+      return { seg: "", email: false, trn: false, ...JSON.parse(localStorage.getItem("crm.customers.view") || "{}") };
+    } catch {
+      return { seg: "", email: false, trn: false };
+    }
+  });
+  useEffect(() => {
+    localStorage.setItem("crm.customers.view", JSON.stringify(vw));
+  }, [vw]);
+  const segments = useMemo(
+    () => [...new Set(rows.map((c) => c.segment).filter(Boolean))] as string[],
+    [rows]
+  );
+  const hasFilter = !!vw.seg || vw.email || vw.trn;
+
   const filtered = useMemo(
     () =>
-      rows.filter((c) =>
-        [c.name, c.company, c.email, c.trn].some((v) =>
+      rows.filter((c) => {
+        const text = [c.name, c.company, c.email, c.trn].some((v) =>
           (v || "").toLowerCase().includes(q.toLowerCase())
-        )
-      ),
-    [rows, q]
+        );
+        if (!text) return false;
+        if (vw.seg && c.segment !== vw.seg) return false;
+        if (vw.email && !c.email) return false;
+        if (vw.trn && !c.trn) return false;
+        return true;
+      }),
+    [rows, q, vw]
   );
 
   const withTrn = rows.filter((c) => c.trn).length;
@@ -136,17 +158,51 @@ export default function Customers() {
         />
       </div>
 
-      <div className="relative mb-4 w-full max-w-xs">
-        <Search
-          size={16}
-          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
-        />
-        <input
-          className="input pl-10"
-          placeholder="Search name, company, TRN…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative w-full max-w-xs">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
+          />
+          <input
+            className="input pl-10"
+            placeholder="Search name, company, TRN…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+
+        {segments.length > 0 && (
+          <select
+            className="select h-10 w-auto"
+            value={vw.seg}
+            onChange={(e) => setVw((v) => ({ ...v, seg: e.target.value }))}
+          >
+            <option value="">All segments</option>
+            {segments.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <FilterChip active={vw.email} onClick={() => setVw((v) => ({ ...v, email: !v.email }))}>
+          Has email
+        </FilterChip>
+        <FilterChip active={vw.trn} onClick={() => setVw((v) => ({ ...v, trn: !v.trn }))}>
+          Has TRN
+        </FilterChip>
+
+        {hasFilter && (
+          <button
+            onClick={() => setVw({ seg: "", email: false, trn: false })}
+            className="text-xs font-semibold text-brand-500 hover:text-ink"
+          >
+            Clear filters
+          </button>
+        )}
+        <span className="ml-auto text-xs text-brand-400">{filtered.length} shown</span>
       </div>
 
       <DataTable<CrmCustomer>
@@ -394,5 +450,28 @@ function CustomerModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`h-10 rounded-full px-3 text-xs font-semibold transition-colors ${
+        active
+          ? "bg-primary-500 text-[#0A0A0A]"
+          : "bg-brand-100 text-brand-600 hover:bg-brand-200 dark:bg-white/5 dark:text-[#C9CDD3] dark:hover:bg-white/10"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
