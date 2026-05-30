@@ -11,6 +11,7 @@ import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
 import Copilot from "./components/Copilot";
+import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
@@ -81,6 +82,7 @@ function Gate() {
           <AppRoutes />
         </Layout>
         <Copilot />
+        <CommandPalette />
         <OverdueReminder />
       </HashRouter>
     </ModulesProvider>
