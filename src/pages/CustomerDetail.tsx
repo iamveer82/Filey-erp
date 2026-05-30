@@ -30,6 +30,7 @@ import {
 } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
 import CustomerNotes from "../components/CustomerNotes";
+import ActivityTimeline from "../components/ActivityTimeline";
 import FollowUps from "../components/FollowUps";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -204,6 +205,14 @@ export default function CustomerDetail() {
         <div className="mb-5">
           <FollowUps customerId={Number(id)} customerName={display} />
         </div>
+      )}
+
+      {customer && (
+        <Section title="Activity timeline">
+          <div className="flex h-[440px] flex-col">
+            <ActivityTimeline relatedTo={display} />
+          </div>
+        </Section>
       )}
 
       {id && <CustomerNotes customerId={id} />}
