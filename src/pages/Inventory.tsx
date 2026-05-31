@@ -101,10 +101,13 @@ export default function Inventory() {
   );
 
   const lowStock = products.filter((p) => p.quantity <= p.reorder_level);
+  const outOfStock = products.filter((p) => p.quantity === 0);
   const invValue = products.reduce(
     (s, p) => s + p.quantity * p.cost_price,
     0
   );
+
+  const showAlerts = lowStock.length > 0;
 
   return (
     <div className="animate-fade-up">
@@ -207,6 +210,58 @@ export default function Inventory() {
       {error && (
         <div className="mb-4">
           <ErrorBanner message={error} />
+        </div>
+      )}
+
+      {showAlerts && (
+        <div className="card mb-4 border-danger/30 bg-danger/5 dark:bg-danger/5">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle size={18} className="text-danger" />
+            <h3 className="text-sm font-bold text-ink">Stock Alerts</h3>
+            <Badge tone="danger">{outOfStock.length} out</Badge>
+            <Badge tone="warn">{lowStock.length - outOfStock.length} low</Badge>
+            <button
+              className="ml-auto text-xs font-semibold text-primary-600 hover:underline"
+              onClick={() => {
+                setCat("all");
+                setQ("");
+              }}
+            >
+              View all inventory
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {lowStock.slice(0, 6).map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-ink truncate">
+                    {p.name}
+                  </p>
+                  <p className="text-[11px] text-brand-500 font-mono">
+                    {p.sku}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-sm font-bold text-ink">
+                    {p.quantity}
+                  </span>
+                  {p.quantity === 0 ? (
+                    <Badge tone="danger">Out</Badge>
+                  ) : (
+                    <Badge tone="warn">Low</Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {lowStock.length > 6 && (
+            <p className="text-xs text-brand-400 mt-2">
+              +{lowStock.length - 6} more items need attention
+            </p>
+          )}
         </div>
       )}
 
