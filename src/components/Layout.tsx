@@ -18,6 +18,7 @@ import {
   GripVertical,
   Command,
   Plus,
+  Menu,
   ChevronDown,
 } from "lucide-react";
 import Logo from "./Logo";
@@ -140,7 +141,25 @@ export default function Layout({ children }: { children: ReactNode }) {
       : 256;
   });
   const [dragging, setDragging] = useState(false);
+  // Mobile off-canvas drawer (the resizable sidebar is desktop-only).
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width:1024px)").matches
+  );
+  useEffect(() => {
+    const m = window.matchMedia("(min-width:1024px)");
+    const h = () => setIsDesktop(m.matches);
+    m.addEventListener("change", h);
+    return () => m.removeEventListener("change", h);
+  }, []);
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
   const sidebarWidth = collapsed ? SIDEBAR_RAIL : width;
+  // On mobile the sidebar is a fixed-width off-canvas drawer.
+  const effectiveWidth = isDesktop ? sidebarWidth : 264;
+  // The icon-only "rail" is a desktop-only collapse; the mobile drawer is full.
+  const railMode = collapsed && isDesktop;
 
   useEffect(() => {
     localStorage.setItem("sidebar.collapsed", collapsed ? "1" : "0");
@@ -319,18 +338,32 @@ export default function Layout({ children }: { children: ReactNode }) {
         dragging && "cursor-col-resize select-none"
       )}
     >
+      {/* Mobile drawer backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ───────────── Sidebar ───────────── */}
       <aside
         style={{
-          width: sidebarWidth,
-          transition: dragging ? "none" : "width 200ms ease-out",
+          width: effectiveWidth,
+          transition: dragging ? "none" : "width 200ms ease-out, transform 200ms ease-out",
         }}
-        className="shrink-0 bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#3A3D45] shadow-bento flex flex-col overflow-hidden"
+        className={cn(
+          "bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#3A3D45] shadow-bento flex flex-col overflow-hidden",
+          // Desktop: in-flow resizable column. Mobile: fixed off-canvas drawer.
+          "max-lg:fixed max-lg:inset-y-3 max-lg:left-3 max-lg:z-50 lg:shrink-0",
+          mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-[120%]"
+        )}
       >
         <div
           className={cn(
             "border-b border-brand-100 dark:border-[#2A2C33] flex items-center",
-            collapsed ? "px-2 py-4 justify-center" : "px-5 py-5"
+            railMode ? "px-2 py-4 justify-center" : "px-5 py-5"
           )}
         >
           <Link
@@ -338,8 +371,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             className="flex items-center gap-2.5 cursor-pointer min-w-0"
             title="Filey"
           >
-            <Logo size={collapsed ? 40 : 72} />
-            {!collapsed && (
+            <Logo size={railMode ? 40 : 72} />
+            {!railMode && (
               <span className="leading-tight">
                 <span className="block font-bold text-ink text-lg">Filey</span>
                 <span className="block text-[11px] font-semibold text-brand-400">
@@ -351,7 +384,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
-          {!collapsed && (
+          {!railMode && (
             <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
               Menu
             </p>
@@ -361,11 +394,11 @@ export default function Layout({ children }: { children: ReactNode }) {
               <NavLink
                 key={to}
                 to={to}
-                title={collapsed ? label : undefined}
+                title={railMode ? label : undefined}
                 className={({ isActive }) =>
                   cn(
                     "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
-                    collapsed ? "justify-center px-0" : "px-3",
+                    railMode ? "justify-center px-0" : "px-3",
                     isActive
                       ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
                       : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
@@ -381,7 +414,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       )}
                     />
                     <Icon size={18} className="shrink-0" />
-                    {!collapsed && <span className="truncate">{label}</span>}
+                    {!railMode && <span className="truncate">{label}</span>}
                   </>
                 )}
               </NavLink>
@@ -392,14 +425,14 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A2C33] space-y-1">
           <button
             onClick={signOut}
-            title={collapsed ? "Sign out" : undefined}
+            title={railMode ? "Sign out" : undefined}
             className={cn(
               "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer",
-              collapsed ? "justify-center px-0" : "px-3"
+              railMode ? "justify-center px-0" : "px-3"
             )}
           >
             <LogOut size={18} className="shrink-0" />
-            {!collapsed && "Sign out"}
+            {!railMode && "Sign out"}
           </button>
         </div>
       </aside>
@@ -419,7 +452,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         onPointerUp={onResizeUp}
         onDoubleClick={() => setCollapsed((c) => !c)}
         onKeyDown={onResizeKey}
-        className="group relative flex w-3 shrink-0 cursor-col-resize select-none touch-none items-center justify-center self-stretch outline-none"
+        className="group relative hidden w-3 shrink-0 cursor-col-resize select-none touch-none items-center justify-center self-stretch outline-none lg:flex"
       >
         <span
           className={cn(
@@ -444,6 +477,15 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* ───────────── Main ───────────── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <header className="h-14 shrink-0 flex items-center justify-between gap-4 mb-3">
+          {/* Mobile menu toggle */}
+          <button
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-200 bg-surface text-brand-600 dark:border-[#3A3D45] dark:bg-[#161618] lg:hidden"
+          >
+            <Menu size={18} />
+          </button>
+
           {/* Current-page context — keeps users oriented (Odoo/Tally style) */}
           {pageMeta && (
             <div className="flex items-center gap-2.5 min-w-0 shrink-0">
