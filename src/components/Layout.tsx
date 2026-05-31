@@ -269,10 +269,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   const unread = inbox.filter((n) => !n.read).length;
   const badge = unread + alerts.length;
 
-  // ⌘K / Ctrl+K focuses search; Escape closes overlays.
+  // "/" focuses the in-app search; Escape closes overlays. (⌘K is owned by the
+  // global command palette.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el && (/^(input|textarea|select)$/i.test(el.tagName) || el.isContentEditable);
+      if (e.key === "/" && !typing) {
         e.preventDefault();
         inputRef.current?.focus();
         setSearchOpen(true);
