@@ -131,11 +131,11 @@ export default function RedactStudio({
           Clear page
         </button>
         <span className="flex-1" />
-        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}>
+        <button aria-label="Previous page" className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}>
           <ChevronLeft size={14} />
         </button>
         <span className="whitespace-nowrap text-xs font-semibold text-brand-500">{page + 1}/{pages || "…"}</span>
-        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}>
+        <button aria-label="Next page" className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}>
           <ChevronRight size={14} />
         </button>
         <button onClick={apply} disabled={saving || !boxes.length} className="btn-primary h-7 text-xs">

@@ -69,6 +69,9 @@ export default function DealDrawer({
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-ink/40 backdrop-blur-sm" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Deal: ${opp.title}`}
         className="flex h-full w-full max-w-md flex-col bg-white shadow-bento-hover dark:bg-[#1E2025] animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
