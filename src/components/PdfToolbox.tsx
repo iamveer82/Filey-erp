@@ -1255,11 +1255,12 @@ export const PDF_TOOLS: Tool[] = [
   // ===== Edit: e-sign (draw / upload / saved signature) =====
   {
     id: "esign",
-    name: "E-Sign PDF",
-    desc: "Draw, upload or pick a saved signature, drag onto the page",
+    name: "E-Sign Document",
+    desc: "Sign any file — PDF, image, scan or Office doc",
     icon: PenTool,
     cat: "Edit",
-    accept: "application/pdf",
+    accept:
+      "application/pdf,image/*,.heic,.heif,.psd,.tif,.tiff,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rtf,.txt,.csv",
     interactive: "esign",
     fields: [],
     run: async () => {

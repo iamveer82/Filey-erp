@@ -3227,3 +3227,29 @@ export async function redactBoxes(file: File, boxes: RedactBox[]): Promise<OutFi
   }
   return { name: `${base(file.name)}-redacted.pdf`, bytes: await doc.save() };
 }
+
+/* Normalise any supported document to a PDF File so PDF-only flows (e-sign,
+ * stamping) can accept images, scans and Office files too. Dispatches to the
+ * existing converters; throws for genuinely unsupported types. */
+export async function ensurePdf(file: File): Promise<File> {
+  const name = file.name.toLowerCase();
+  const type = file.type;
+  if (type === "application/pdf" || name.endsWith(".pdf")) return file;
+
+  let out: OutFile;
+  if (type.startsWith("image/heic") || type.startsWith("image/heif") || /\.(heic|heif)$/.test(name))
+    out = await heicToPdf(file);
+  else if (type === "image/vnd.adobe.photoshop" || /\.psb?$/.test(name) || name.endsWith(".psd"))
+    out = await psdToPdf(file);
+  else if (type === "image/tiff" || /\.tiff?$/.test(name)) out = await tiffToPdf(file);
+  else if (type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/.test(name))
+    out = await imagesToPdfAny([file]);
+  else if (type.includes("word") || /\.docx?$/.test(name)) out = await wordToPdf(file);
+  else if (type.includes("sheet") || /\.xlsx?$/.test(name)) out = await excelToPdf(file);
+  else if (type.includes("presentation") || /\.pptx?$/.test(name)) out = await pptToPdf(file);
+  else if (/\.rtf$/.test(name)) out = await rtfToPdf(file);
+  else if (type.startsWith("text/") || /\.(txt|csv|md)$/.test(name)) out = await textToPdf(file);
+  else throw new Error("Unsupported file type. Try a PDF, image, or Office document.");
+
+  return new File([out.bytes.slice()], out.name, { type: "application/pdf" });
+}

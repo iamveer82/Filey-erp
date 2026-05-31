@@ -10,6 +10,7 @@ import {
   Save,
   X,
   PenLine,
+  Eraser,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -222,9 +223,13 @@ export default function StampStudio({
 
   // ── Draw-your-signature pad ─────────────────────────────────────────────
   const [padOpen, setPadOpen] = useState(false);
+  const [penMode, setPenMode] = useState<"draw" | "erase">("draw");
+  const [penWidth, setPenWidth] = useState(3);
+  const [penColor, setPenColor] = useState("#0A0A0A");
   const padRef = useRef<HTMLCanvasElement>(null);
   const inkRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
+  const padSeedRef = useRef<string | null>(null); // existing sign to re-edit
   const padXY = (e: React.PointerEvent) => {
     const c = padRef.current!;
     const r = c.getBoundingClientRect();
@@ -240,14 +245,22 @@ export default function StampStudio({
     const ctx = padRef.current?.getContext("2d");
     const p = padXY(e);
     if (ctx && lastRef.current) {
-      ctx.strokeStyle = "#0A0A0A";
-      ctx.lineWidth = 2.6;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
+      if (penMode === "erase") {
+        // Erase to transparent so it lifts ink (and seeded image) cleanly.
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = penWidth * 4;
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = penWidth;
+      }
       ctx.beginPath();
       ctx.moveTo(lastRef.current.x, lastRef.current.y);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
     }
     lastRef.current = p;
   };
@@ -259,6 +272,32 @@ export default function StampStudio({
     const c = padRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   };
+  // Re-open the pad to edit the current signature (seeds it onto the canvas).
+  const editSign = () => {
+    if (!stamp) return;
+    padSeedRef.current = stamp.src;
+    setPenMode("draw");
+    setPadOpen(true);
+  };
+  // When the pad opens, paint any seeded signature so it can be edited.
+  useEffect(() => {
+    if (!padOpen) return;
+    const seed = padSeedRef.current;
+    padSeedRef.current = null;
+    const c = padRef.current;
+    const ctx = c?.getContext("2d");
+    if (!c || !ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (!seed) return;
+    const im = new Image();
+    im.onload = () => {
+      const r = Math.min(c.width / im.width, c.height / im.height);
+      const w = im.width * r;
+      const h = im.height * r;
+      ctx.drawImage(im, (c.width - w) / 2, (c.height - h) / 2, w, h);
+    };
+    im.src = seed;
+  }, [padOpen]);
   const usePad = () => {
     const c = padRef.current;
     if (!c) return;
@@ -469,14 +508,53 @@ export default function StampStudio({
       {/* ── Signature draw pad ─────────────────────────────────────────────── */}
       {padOpen && (
         <div className="mb-2 rounded-xl border border-brand-200 bg-white p-2 dark:border-[#3A3D45] dark:bg-[#1E2025]">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-brand-500">Draw your signature</span>
-            <div className="flex gap-1.5">
-              <button className="btn-ghost h-7 text-xs" onClick={clearPad}>Clear</button>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold text-brand-500">Signature</span>
+            {/* Pen / eraser */}
+            <div className="flex overflow-hidden rounded-lg border border-brand-200 dark:border-[#3A3D45]">
+              <button
+                onClick={() => setPenMode("draw")}
+                title="Pen"
+                className={`grid h-7 w-8 place-items-center ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+              >
+                <PenLine size={13} />
+              </button>
+              <button
+                onClick={() => setPenMode("erase")}
+                title="Eraser"
+                className={`grid h-7 w-8 place-items-center ${penMode === "erase" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+              >
+                <Eraser size={13} />
+              </button>
+            </div>
+            {penMode === "draw" && (
+              <input
+                type="color"
+                value={penColor}
+                onChange={(e) => setPenColor(e.target.value)}
+                title="Ink colour"
+                className="h-7 w-7 cursor-pointer rounded border border-brand-200 dark:border-[#3A3D45]"
+              />
+            )}
+            <span className="text-[11px] text-brand-400">{penMode === "erase" ? "Erase" : "Thickness"}</span>
+            <input
+              type="range"
+              min={1}
+              max={14}
+              step={1}
+              value={penWidth}
+              onChange={(e) => setPenWidth(Number(e.target.value))}
+              className="w-24 accent-primary-500"
+              title={`${penWidth}px`}
+            />
+            <span className="ml-auto flex gap-1.5">
+              <button className="btn-ghost h-7 text-xs" onClick={clearPad}>
+                Clear
+              </button>
               <button className="btn-primary h-7 text-xs" onClick={usePad}>
                 <Check size={12} /> Use
               </button>
-            </div>
+            </span>
           </div>
           <canvas
             ref={padRef}
@@ -486,7 +564,7 @@ export default function StampStudio({
             onPointerMove={padMove}
             onPointerUp={padUp}
             onPointerLeave={padUp}
-            className="w-full cursor-crosshair rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] dark:border-[#3A3D45]"
+            className={`w-full rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] dark:border-[#3A3D45] ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
             style={{ touchAction: "none", aspectRatio: "3 / 1" }}
           />
         </div>
@@ -548,6 +626,20 @@ export default function StampStudio({
             className="absolute cursor-move ring-1 ring-primary-500/70 ring-offset-1"
           >
             <img src={stamp.src} alt="stamp" className="block w-full select-none" draggable={false} />
+            {allowDraw && (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  editSign();
+                }}
+                title="Edit signature"
+                aria-label="Edit signature"
+                className="absolute -left-2 -top-2 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-primary-500 text-[#0A0A0A] shadow"
+              >
+                <PenLine size={12} />
+              </button>
+            )}
             <span
               onPointerDown={startResize}
               className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-white bg-primary-500 shadow"
