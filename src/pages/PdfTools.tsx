@@ -45,7 +45,6 @@ import {
   defaultParams,
 } from "../components/PdfToolbox";
 import PreviewModal from "../components/PreviewModal";
-import EsignModal from "../components/EsignModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import LivePreview from "../components/LivePreview";
@@ -97,7 +96,6 @@ export default function ToolsPage() {
   const [runs, setRuns] = useState<RunLog[]>([]);
   const [showAll, setShowAll] = useState(false);
   // Reset to 8-tool view when switching category tabs.
-  const [esignOpen, setEsignOpen] = useState(false);
   const [cat, setCat] = useState<string>("All Tools");
   const { profile } = useAuth();
   const firstName = profile?.name?.split(" ")[0] || "there";
@@ -252,7 +250,7 @@ export default function ToolsPage() {
                 Icon={Signature}
                 badgeBg="bg-primary-400"
                 badgeFg="text-[#0A0A0A]"
-                onUse={() => setEsignOpen(true)}
+                onUse={() => setParams({ tool: "esign" })}
               />
             )}
             {(showAll ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
@@ -453,7 +451,6 @@ export default function ToolsPage() {
       </div>
 
       {/* modals (workspace renders as a full page above when active) */}
-      <EsignModal open={esignOpen} onClose={() => setEsignOpen(false)} />
       <PreviewModal
         open={!!preview}
         title={preview?.file}
