@@ -6,9 +6,7 @@ import {
   UserPlus,
   Target,
   TrendingUp,
-  GripVertical,
   Plus,
-  Trophy,
   CalendarDays,
   Download,
   Upload,
@@ -33,6 +31,7 @@ import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import DealDrawer from "../components/DealDrawer";
+import PipelineBoard from "../components/PipelineBoard";
 import { aed, num, fmtDate, cn } from "../lib/format";
 import {
   PageHeader,
@@ -44,21 +43,6 @@ import {
   Spinner,
   ErrorBanner,
 } from "../components/ui";
-
-const STAGES = [
-  { id: "qualification", label: "Qualification", tone: "info" as const },
-  { id: "proposal", label: "Proposal", tone: "info" as const },
-  { id: "negotiation", label: "Negotiation", tone: "warn" as const },
-  { id: "won", label: "Won", tone: "success" as const },
-  { id: "lost", label: "Lost", tone: "danger" as const },
-];
-const STAGE_PROB: Record<string, number> = {
-  qualification: 20,
-  proposal: 45,
-  negotiation: 70,
-  won: 100,
-  lost: 0,
-};
 
 export default function Crm() {
   const nav = useNavigate();
@@ -535,190 +519,6 @@ export default function Crm() {
 }
 
 /* ---------------- Pipeline board (drag & drop) ---------------- */
-
-function PipelineBoard({
-  opps,
-  setOpps,
-  reload,
-  onOpen,
-}: {
-  opps: Opportunity[];
-  setOpps: React.Dispatch<React.SetStateAction<Opportunity[]>>;
-  reload: () => void;
-  onOpen: (o: Opportunity) => void;
-}) {
-  const [dragId, setDragId] = useState<number | null>(null);
-  const [over, setOver] = useState<string | null>(null);
-  const [addStage, setAddStage] = useState<string | null>(null);
-  const [addTitle, setAddTitle] = useState("");
-
-  const quickAdd = async (stage: string) => {
-    const title = addTitle.trim();
-    if (!title) {
-      setAddStage(null);
-      return;
-    }
-    setAddStage(null);
-    setAddTitle("");
-    try {
-      await crm.createOpportunity({
-        title,
-        customer_name: "",
-        stage,
-        value: 0,
-        probability: STAGE_PROB[stage] ?? 20,
-      });
-      reload();
-    } catch {
-      reload();
-    }
-  };
-
-  const byStage = useMemo(() => {
-    const m: Record<string, Opportunity[]> = {};
-    for (const s of STAGES) m[s.id] = [];
-    for (const o of opps) (m[o.stage] ??= []).push(o);
-    return m;
-  }, [opps]);
-
-  const drop = async (stage: string) => {
-    setOver(null);
-    const id = dragId;
-    setDragId(null);
-    if (id == null) return;
-    const opp = opps.find((o) => o.id === id);
-    if (!opp || opp.stage === stage) return;
-    setOpps((prev) =>
-      prev.map((o) =>
-        o.id === id
-          ? { ...o, stage, probability: STAGE_PROB[stage] ?? o.probability }
-          : o
-      )
-    );
-    try {
-      await crm.setOppStage(id, stage);
-    } catch {
-      reload();
-    }
-  };
-
-  return (
-    <div className="flex gap-4 overflow-x-auto pb-3">
-      {STAGES.map((s) => {
-        const list = byStage[s.id] ?? [];
-        const total = list.reduce((a, o) => a + o.value, 0);
-        return (
-          <div
-            key={s.id}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(s.id);
-            }}
-            onDragLeave={() => setOver((v) => (v === s.id ? null : v))}
-            onDrop={() => drop(s.id)}
-            className={`w-72 shrink-0 rounded-2xl border p-3 transition-colors ${
-              over === s.id
-                ? "border-primary-300 bg-primary-50 dark:bg-primary-400/10"
-                : "border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03]"
-            }`}
-          >
-            <div className="flex items-center justify-between px-1 mb-3">
-              <div className="flex items-center gap-2">
-                <Badge tone={s.tone}>{s.label}</Badge>
-                <span className="text-xs font-semibold text-brand-400">
-                  {list.length}
-                </span>
-              </div>
-              <span className="text-xs font-bold text-ink">
-                {aed(total)}
-              </span>
-            </div>
-            <div className="space-y-2 min-h-[120px]">
-              {list.map((o) => (
-                <div
-                  key={o.id}
-                  draggable
-                  onDragStart={() => setDragId(o.id)}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setOver(null);
-                  }}
-                  onClick={() => onOpen(o)}
-                  className={`card !p-3 cursor-grab select-none transition-shadow hover:shadow-bento-hover active:cursor-grabbing ${
-                    dragId === o.id ? "opacity-50" : ""
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <GripVertical
-                      size={15}
-                      className="text-brand-300 mt-0.5 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-ink truncate">
-                        {o.title}
-                      </p>
-                      <p className="text-xs text-brand-500 truncate">
-                        {o.customer_name}
-                      </p>
-                      <div className="flex items-center justify-between mt-2">
-                        <span className="text-sm font-bold text-ink">
-                          {aed(o.value)}
-                        </span>
-                        <span className="text-[11px] font-semibold text-brand-400">
-                          {o.probability}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {list.length === 0 && (
-                <p className="text-center text-xs text-brand-300 py-6">
-                  Drop deals here
-                </p>
-              )}
-            </div>
-            <div className="mt-2">
-              {addStage === s.id ? (
-                <input
-                  autoFocus
-                  className="input h-8 w-full text-sm"
-                  placeholder="Deal name…"
-                  value={addTitle}
-                  onChange={(e) => setAddTitle(e.target.value)}
-                  onBlur={() => quickAdd(s.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") quickAdd(s.id);
-                    if (e.key === "Escape") {
-                      setAddStage(null);
-                      setAddTitle("");
-                    }
-                  }}
-                />
-              ) : (
-                <button
-                  onClick={() => {
-                    setAddStage(s.id);
-                    setAddTitle("");
-                  }}
-                  className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-brand-300 py-1.5 text-xs font-semibold text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-[#3A3D45]"
-                >
-                  <Plus size={13} /> Add deal
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      {opps.length === 0 && (
-        <div className="grid place-items-center w-full py-12 text-sm text-brand-400">
-          <Trophy size={20} className="mb-2 text-brand-300" />
-          No opportunities yet.
-        </div>
-      )}
-    </div>
-  );
-}
 
 function TaskModal({
   open,
