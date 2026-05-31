@@ -1,0 +1,27 @@
+[
+  {
+    "name": "card",
+    "sourceType": "direct_name",
+    "addedByCLI": true
+  },
+  {
+    "name": "button",
+    "sourceType": "direct_name",
+    "addedByCLI": true
+  },
+  {
+    "name": "badge",
+    "sourceType": "direct_name",
+    "addedByCLI": true
+  },
+  {
+    "name": "separator",
+    "sourceType": "direct_name",
+    "addedByCLI": true
+  },
+  {
+    "name": "avatar",
+    "sourceType": "direct_name",
+    "addedByCLI": true
+  }
+]

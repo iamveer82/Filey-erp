@@ -32,12 +32,20 @@ export default class ErrorBoundary extends Component<
           <pre className="text-[11px] text-brand-400 bg-brand-50 rounded-lg p-3 mt-3 overflow-x-auto text-left">
             {this.state.error.message}
           </pre>
-          <button
-            className="btn-primary mt-4 mx-auto"
-            onClick={() => window.location.reload()}
-          >
-            Reload app
-          </button>
+          <div className="flex gap-2 justify-center mt-4">
+            <button
+              className="btn-ghost"
+              onClick={() => this.setState({ error: null })}
+            >
+              Try again
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => window.location.reload()}
+            >
+              Reload app
+            </button>
+          </div>
         </div>
       </div>
     );

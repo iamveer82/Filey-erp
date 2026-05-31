@@ -118,6 +118,62 @@
   .card-accent {
     @apply relative overflow-hidden rounded-2xl bg-primary-300 shadow-bento p-5 text-ink;
   }
+
+  /* ── 21st.dev-style glow & bento enhancements ── */
+  .glow-border {
+    position: relative;
+  }
+  .glow-border::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.4), rgba(168,85,247,0.2), rgba(99,102,241,0.4));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .glow-border:hover::before {
+    opacity: 1;
+  }
+  .ambient-glow {
+    box-shadow: 0 0 40px -10px rgba(99,102,241,0.15);
+  }
+  .text-glow {
+    text-shadow: 0 0 20px rgba(99,102,241,0.3);
+  }
+  .lift-hover {
+    @apply transition-transform duration-200;
+  }
+  .lift-hover:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Shimmer animation for buttons */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+/* Dot pattern background */
+.dot-pattern {
+  background-image: radial-gradient(circle, #e7e7ee 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.dark .dot-pattern {
+  background-image: radial-gradient(circle, #3A3D45 1px, transparent 1px);
+}
+
+@layer components {
   .stat-label {
     @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-brand-400;
   }

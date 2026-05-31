@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { motion } from "framer-motion";
 import {
   X,
   ArrowUpRight,
@@ -13,6 +14,9 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/format";
 import FitText from "./FitText";
+import { SpotlightCard } from "./SpotlightCard";
+import { MagicCard } from "./MagicCard";
+import { ShimmerButton } from "./ShimmerButton";
 
 /** Design-token skeleton placeholder (no new deps). */
 export function Skeleton({ className }: { className?: string }) {
@@ -86,7 +90,12 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 100, damping: 20 }}
+      className="flex items-end justify-between mb-6 gap-4 flex-wrap"
+    >
       <div>
         <h1 className="text-[28px] leading-9 font-bold text-ink">{title}</h1>
         {subtitle && (
@@ -94,7 +103,7 @@ export function PageHeader({
         )}
       </div>
       {action}
-    </div>
+    </motion.div>
   );
 }
 
@@ -102,7 +111,6 @@ export function PageHeader({
 export function Card({
   children,
   className,
-  tone = "default",
   hover,
 }: {
   children: ReactNode;
@@ -110,14 +118,10 @@ export function Card({
   tone?: "default" | "accent" | "dark";
   hover?: boolean;
 }) {
-  const base =
-    tone === "accent"
-      ? "card-accent"
-      : tone === "dark"
-      ? "card-dark"
-      : "card";
   return (
-    <div className={cn(base, hover && "card-hover", className)}>{children}</div>
+    <MagicCard className={cn(hover && "cursor-pointer", className)}>
+      <div className="p-5">{children}</div>
+    </MagicCard>
   );
 }
 
@@ -152,26 +156,32 @@ export function MetricCard({
   iconClass?: string;
 }) {
   return (
-    <div className="card card-hover">
-      <div className="flex items-start gap-3">
-        {icon && (
-          <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>
-            {icon}
+    <SpotlightCard>
+      <div className="p-5">
+        <div className="flex items-start gap-3">
+          {icon && (
+            <motion.div
+              whileHover={{ scale: 1.08, rotate: 3 }}
+              transition={{ type: "spring", stiffness: 300 }}
+              className={cn("rounded-xl p-2.5 shrink-0", iconClass)}
+            >
+              {icon}
+            </motion.div>
+          )}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-brand-500">{label}</p>
+            <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
+              {value}
+            </FitText>
+          </div>
+        </div>
+        {delta !== undefined && (
+          <div className="mt-3">
+            <Delta value={delta} />
           </div>
         )}
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-brand-500">{label}</p>
-          <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
-            {value}
-          </FitText>
-        </div>
       </div>
-      {delta !== undefined && (
-        <div className="mt-3">
-          <Delta value={delta} />
-        </div>
-      )}
-    </div>
+    </SpotlightCard>
   );
 }
 
@@ -190,20 +200,17 @@ export function InfoCard({
   tone?: "default" | "accent" | "dark";
 }) {
   return (
-    <Card tone={tone} className={className}>
-      <div className="flex items-center justify-between mb-4">
-        <p
-          className={cn(
-            "font-display font-bold",
-            tone === "dark" ? "text-white" : "text-ink"
-          )}
-        >
-          {title}
-        </p>
-        {action}
+    <SpotlightCard className={className}>
+      <div className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <p className={cn("font-display font-bold", tone === "dark" ? "text-white" : "text-ink")}>
+            {title}
+          </p>
+          {action}
+        </div>
+        {children}
       </div>
-      {children}
-    </Card>
+    </SpotlightCard>
   );
 }
 
@@ -758,3 +765,5 @@ export function StockBreakdownCard({
     </div>
   );
 }
+
+export { MagicCard, ShimmerButton, SpotlightCard };

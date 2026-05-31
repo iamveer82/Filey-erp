@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /settings
+
+Sitemap: https://filey.app/sitemap.xml

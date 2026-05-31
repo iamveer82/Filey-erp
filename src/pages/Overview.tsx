@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
   Boxes,
   Users,
@@ -812,25 +813,32 @@ export default function Overview() {
             ref={gridRef}
             className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
           >
-            {visible.map((id) => (
-              <WidgetItem
+            {visible.map((id, i) => (
+              <motion.div
                 key={id}
-                id={id}
-                editing={editing}
-                linkable={!!WIDGET_LINK[id]}
-                spanCls={spanClass(effSpan(id))}
-                heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
-                styleOpen={styleOpenId === id}
-                wstyle={layout.styles[id] ?? {}}
-                onToggleStyle={() => setStyleOpenId((cur) => (cur === id ? null : id))}
-                onStyleChange={(patch) => setStyle(id, patch)}
-                onStyleReset={() => resetStyle(id)}
-                onOpen={() => nav(WIDGET_LINK[id])}
-                onRemove={() => removeWidget(id)}
-                onResize={(e, dir) => startResize(e, id, dir)}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 100, damping: 20, delay: i * 0.04 }}
+                className={spanClass(effSpan(id))}
               >
-                {renderWidget(id)}
-              </WidgetItem>
+                <WidgetItem
+                  id={id}
+                  editing={editing}
+                  linkable={!!WIDGET_LINK[id]}
+                  spanCls=""
+                  heightStyle={layout.heights[id] ? { height: layout.heights[id] } : undefined}
+                  styleOpen={styleOpenId === id}
+                  wstyle={layout.styles[id] ?? {}}
+                  onToggleStyle={() => setStyleOpenId((cur) => (cur === id ? null : id))}
+                  onStyleChange={(patch) => setStyle(id, patch)}
+                  onStyleReset={() => resetStyle(id)}
+                  onOpen={() => nav(WIDGET_LINK[id])}
+                  onRemove={() => removeWidget(id)}
+                  onResize={(e, dir) => startResize(e, id, dir)}
+                >
+                  {renderWidget(id)}
+                </WidgetItem>
+              </motion.div>
             ))}
           </div>
         </SortableContext>
