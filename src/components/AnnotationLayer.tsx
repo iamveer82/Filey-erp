@@ -3,6 +3,8 @@ import {
   Pencil,
   Eraser,
   Type as TypeIcon,
+  Highlighter,
+  Square,
   Trash2,
   Undo2,
   Redo2,
@@ -14,29 +16,30 @@ import { cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 
 type Point = { x: number; y: number };
-type Stroke = { color: string; size: number; pts: Point[] };
+type Stroke = { color: string; size: number; pts: Point[]; highlight?: boolean };
 type TextNote = { id: string; x: number; y: number; color: string; size: number; text: string };
+type Rect = { x: number; y: number; w: number; h: number; color: string; size: number };
 
-type Tool = "select" | "pen" | "eraser" | "text";
+type Tool = "select" | "pen" | "highlight" | "eraser" | "rect" | "text";
 
-type Annotations = { strokes: Stroke[]; texts: TextNote[] };
+type Annotations = { strokes: Stroke[]; texts: TextNote[]; shapes: Rect[] };
 
-const EMPTY: Annotations = { strokes: [], texts: [] };
-const COLORS = ["#222222", "#FFD600", "#E5484D", "#3FB984", "#0EA5E9", "#FFFFFF"];
+const COLORS =["#222222", "#FFD600", "#E5484D", "#3FB984", "#0EA5E9", "#FFFFFF"];
 
 const storageKey = (id: string) => `filey:annot:${id}`;
 
 function load(id: string): Annotations {
   try {
     const raw = localStorage.getItem(storageKey(id));
-    if (!raw) return { ...EMPTY, strokes: [], texts: [] };
+    if (!raw) return { strokes: [], texts: [], shapes: [] };
     const v = JSON.parse(raw);
     return {
       strokes: Array.isArray(v.strokes) ? v.strokes : [],
       texts: Array.isArray(v.texts) ? v.texts : [],
+      shapes: Array.isArray(v.shapes) ? v.shapes : [],
     };
   } catch {
-    return { ...EMPTY, strokes: [], texts: [] };
+    return { strokes: [], texts: [], shapes: [] };
   }
 }
 
@@ -59,7 +62,8 @@ function save(id: string, a: Annotations) {
  *  prints), no toolbar, no pointer capture. */
 type Op =
   | { kind: "stroke"; item: Stroke }
-  | { kind: "text"; item: TextNote };
+  | { kind: "text"; item: TextNote }
+  | { kind: "shape"; item: Rect };
 
 export default function AnnotationLayer({
   id,
@@ -81,6 +85,8 @@ export default function AnnotationLayer({
   const [color, setColor] = useState("#222222");
   const [size, setSize] = useState(3);
   const drawing = useRef<Stroke | null>(null);
+  const dragRect = useRef<Rect | null>(null);
+  const rectStart = useRef<Point | null>(null);
   const draggingText = useRef<{ id: string; dx: number; dy: number } | null>(
     null
   );
@@ -95,6 +101,7 @@ export default function AnnotationLayer({
     opsRef.current = [
       ...stateRef.current.strokes.map((): Op["kind"] => "stroke"),
       ...stateRef.current.texts.map((): Op["kind"] => "text"),
+      ...stateRef.current.shapes.map((): Op["kind"] => "shape"),
     ];
     undoneRef.current = [];
     redraw();
@@ -152,16 +159,29 @@ export default function AnnotationLayer({
     ctx.scale(dpr, dpr);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    for (const s of stateRef.current.strokes) {
-      if (s.pts.length === 0) continue;
+    const paintStroke = (s: Stroke) => {
+      if (s.pts.length === 0) return;
+      ctx.save();
+      ctx.globalAlpha = s.highlight ? 0.35 : 1;
       ctx.strokeStyle = s.color;
-      ctx.lineWidth = s.size;
+      ctx.lineWidth = s.highlight ? s.size * 5 : s.size;
       ctx.beginPath();
       ctx.moveTo(s.pts[0].x, s.pts[0].y);
-      for (let i = 1; i < s.pts.length; i++)
-        ctx.lineTo(s.pts[i].x, s.pts[i].y);
+      for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i].x, s.pts[i].y);
       ctx.stroke();
-    }
+      ctx.restore();
+    };
+    const paintRect = (r: Rect) => {
+      ctx.save();
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = r.size;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.restore();
+    };
+    for (const s of stateRef.current.strokes) paintStroke(s);
+    for (const r of stateRef.current.shapes) paintRect(r);
+    if (drawing.current) paintStroke(drawing.current);
+    if (dragRect.current) paintRect(dragRect.current);
     ctx.restore();
   }
 
@@ -178,12 +198,16 @@ export default function AnnotationLayer({
     if (tool === "select") return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = localPoint(e);
-    if (tool === "pen" || tool === "eraser") {
+    if (tool === "pen" || tool === "eraser" || tool === "highlight") {
       drawing.current = {
         color: tool === "eraser" ? "#FFFFFF" : color,
         size: tool === "eraser" ? size * 3 : size,
         pts: [p],
+        highlight: tool === "highlight",
       };
+    } else if (tool === "rect") {
+      rectStart.current = p;
+      dragRect.current = { x: p.x, y: p.y, w: 0, h: 0, color, size: Math.max(1, size) };
     } else if (tool === "text") {
       void prompt({ title: "Add text", label: "Text", confirmLabel: "Add" }).then(
         (text) => {
@@ -208,21 +232,21 @@ export default function AnnotationLayer({
   }
 
   function onPointerMove(e: PointerEvent<HTMLDivElement>) {
-    if (!drawing.current) return;
     const p = localPoint(e);
-    drawing.current.pts.push(p);
-    const ctx = canvasRef.current?.getContext("2d");
-    if (ctx && drawing.current.pts.length >= 2) {
-      ctx.strokeStyle = drawing.current.color;
-      ctx.lineWidth = drawing.current.size;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      const a = drawing.current.pts[drawing.current.pts.length - 2];
-      const b = drawing.current.pts[drawing.current.pts.length - 1];
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
+    if (drawing.current) {
+      drawing.current.pts.push(p);
+      redraw();
+    } else if (dragRect.current && rectStart.current) {
+      const s = rectStart.current;
+      dragRect.current = {
+        x: Math.min(s.x, p.x),
+        y: Math.min(s.y, p.y),
+        w: Math.abs(p.x - s.x),
+        h: Math.abs(p.y - s.y),
+        color: dragRect.current.color,
+        size: dragRect.current.size,
+      };
+      redraw();
     }
   }
 
@@ -235,6 +259,18 @@ export default function AnnotationLayer({
       persist();
       redraw();
       rerender();
+    } else if (dragRect.current) {
+      const r = dragRect.current;
+      dragRect.current = null;
+      rectStart.current = null;
+      if (r.w > 4 && r.h > 4) {
+        stateRef.current.shapes.push(r);
+        opsRef.current.push("shape");
+        undoneRef.current = [];
+        persist();
+      }
+      redraw();
+      rerender();
     }
   }
 
@@ -244,6 +280,9 @@ export default function AnnotationLayer({
     if (op === "stroke") {
       const removed = stateRef.current.strokes.pop();
       if (removed) undoneRef.current.push({ kind: "stroke", item: removed });
+    } else if (op === "shape") {
+      const removed = stateRef.current.shapes.pop();
+      if (removed) undoneRef.current.push({ kind: "shape", item: removed });
     } else {
       const removed = stateRef.current.texts.pop();
       if (removed) undoneRef.current.push({ kind: "text", item: removed });
@@ -259,6 +298,9 @@ export default function AnnotationLayer({
     if (op.kind === "stroke") {
       stateRef.current.strokes.push(op.item);
       opsRef.current.push("stroke");
+    } else if (op.kind === "shape") {
+      stateRef.current.shapes.push(op.item);
+      opsRef.current.push("shape");
     } else {
       stateRef.current.texts.push(op.item);
       opsRef.current.push("text");
@@ -276,7 +318,7 @@ export default function AnnotationLayer({
       danger: true,
     }).then((ok) => {
       if (!ok) return;
-      stateRef.current = { strokes: [], texts: [] };
+      stateRef.current = { strokes: [], texts: [], shapes: [] };
       opsRef.current = [];
       undoneRef.current = [];
       persist();
@@ -321,10 +363,13 @@ export default function AnnotationLayer({
   }
 
   const hasContent =
-    stateRef.current.strokes.length + stateRef.current.texts.length > 0;
+    stateRef.current.strokes.length +
+      stateRef.current.texts.length +
+      stateRef.current.shapes.length >
+    0;
 
   const cursor =
-    tool === "pen" || tool === "eraser"
+    tool === "pen" || tool === "eraser" || tool === "highlight" || tool === "rect"
       ? "crosshair"
       : tool === "text"
       ? "text"
@@ -408,6 +453,8 @@ export default function AnnotationLayer({
           [
             { t: "select", icon: MousePointer, label: "Select" },
             { t: "pen", icon: Pencil, label: "Pen" },
+            { t: "highlight", icon: Highlighter, label: "Highlight" },
+            { t: "rect", icon: Square, label: "Rectangle" },
             { t: "eraser", icon: Eraser, label: "Eraser" },
             { t: "text", icon: TypeIcon, label: "Text" },
           ] as { t: Tool; icon: typeof Pencil; label: string }[]
