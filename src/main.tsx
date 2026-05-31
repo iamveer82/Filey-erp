@@ -3,10 +3,12 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { applyTheme } from "./lib/theme";
+import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
 import "./index.css";
 
 applyTheme();
+initMonitoring();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
