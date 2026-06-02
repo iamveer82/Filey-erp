@@ -30,15 +30,16 @@ export default function CommandPalette() {
   const [opps, setOpps] = useState<Opportunity[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Global open shortcut.
+  // Global toggle (dispatched from Layout's Ctrl+K handler).
+  useEffect(() => {
+    const h = () => setOpen((v) => !v);
+    window.addEventListener("toggle-command-palette", h);
+    return () => window.removeEventListener("toggle-command-palette", h);
+  }, []);
+  // Escape closes the palette.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen((v) => !v);
-      } else if (e.key === "Escape") {
-        setOpen(false);
-      }
+      if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);

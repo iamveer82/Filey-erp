@@ -26,8 +26,8 @@ export default function UsersRoles() {
   const [inviteOpen, setInviteOpen] = useState(false);
 
   const load = () => {
-    org.get().then(setO).catch(() => {});
-    org.members().then(setMembers).catch(() => {});
+    org.get().then(setO).catch((e) => toast.error("Failed to load organization: " + (e instanceof Error ? e.message : e)));
+    org.members().then(setMembers).catch((e) => toast.error("Failed to load members: " + (e instanceof Error ? e.message : e)));
     org.invites().then(setInvites).catch(() => setInvites([]));
     org.myInvites().then(setMyInvites).catch(() => setMyInvites([]));
   };

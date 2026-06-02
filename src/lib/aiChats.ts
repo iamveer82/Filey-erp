@@ -56,6 +56,7 @@ export function loadChats(): Chat[] {
     }
     return [];
   } catch {
+    console.error("Failed to load chats from localStorage");
     return [];
   }
 }
@@ -64,7 +65,7 @@ export function saveChats(chats: Chat[]): void {
   try {
     localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
   } catch {
-    /* ignore quota */
+    console.error("Failed to save chats to localStorage");
   }
 }
 
@@ -72,6 +73,7 @@ export function getActiveId(): string | null {
   try {
     return localStorage.getItem(ACTIVE_KEY);
   } catch {
+    console.error("Failed to get active chat ID from localStorage");
     return null;
   }
 }
@@ -80,7 +82,7 @@ export function setActiveId(id: string | null): void {
     if (id) localStorage.setItem(ACTIVE_KEY, id);
     else localStorage.removeItem(ACTIVE_KEY);
   } catch {
-    /* ignore */
+    console.error("Failed to set active chat ID in localStorage");
   }
 }
 

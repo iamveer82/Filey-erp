@@ -704,7 +704,7 @@ export const PDF_TOOLS: Tool[] = [
       },
     ],
     run: async (f, p) => [
-      await pdf.posterizePdf(f[0], (num(p.tiles, 2) as 2 | 3 | 4) || 2),
+      await pdf.posterizePdf(f[0], (([2,3,4].includes(num(p.tiles, 2)) ? num(p.tiles, 2) : 2) as 2 | 3 | 4)),
     ],
   },
   {
@@ -1516,7 +1516,7 @@ function FieldControl({
           }}
         />
         {value && (
-          <img src={value} alt="" className="ml-2 h-6 w-6 rounded object-contain" />
+          <img src={value} alt="Signature preview" className="ml-2 h-6 w-6 rounded object-contain" />
         )}
       </label>
     );

@@ -22,6 +22,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import Logo from "./Logo";
+import ErrorBoundary from "./ErrorBoundary";
+import Breadcrumbs from "./Breadcrumbs";
 import { cn, setDisplayCurrency } from "../lib/format";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
@@ -96,6 +98,19 @@ export default function Layout({ children }: { children: ReactNode }) {
   const name = profile?.name || "User";
   const { lang, setLang } = useLang();
 
+  // Online/offline state for connectivity indicator
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const go = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", go);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", go);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
   // Current-page context for the top bar (Odoo-style orientation). Match the
   // longest module path that prefixes the route; detail routes fall back to
   // their parent module.
@@ -115,7 +130,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     billing
       .getCompany()
       .then((c) => setDisplayCurrency(c.currency))
-      .catch(() => {});
+      .catch((e) => console.error("Failed to sync display currency:", e));
   };
   useEffect(syncCurrency, []);
   useLiveSync(syncCurrency);
@@ -258,7 +273,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           }
         }
       })
-      .catch(() => {});
+      .catch((e) => console.error("Failed to load inbox:", e));
   };
   useEffect(loadInbox, []);
   useLiveSync(loadInbox);
@@ -282,14 +297,13 @@ export default function Layout({ children }: { children: ReactNode }) {
         );
         if (due.length > 3) toast.info(`+${due.length - 3} more follow-ups due.`);
       })
-      .catch(() => {});
+      .catch((e) => console.error("Failed to check follow-up reminders:", e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const unread = inbox.filter((n) => !n.read).length;
   const badge = unread + alerts.length;
 
-  // "/" focuses the in-app search; Escape closes overlays. (⌘K is owned by the
-  // global command palette.)
+  // "/" focuses the in-app search; Ctrl+K opens the command palette; Escape closes overlays.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
@@ -299,6 +313,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         e.preventDefault();
         inputRef.current?.focus();
         setSearchOpen(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("toggle-command-palette"));
+        return;
       }
       if (e.key === "Escape") {
         setSearchOpen(false);
@@ -338,6 +357,12 @@ export default function Layout({ children }: { children: ReactNode }) {
         dragging && "cursor-col-resize select-none"
       )}
     >
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
+          You are offline — changes will sync when reconnected
+        </div>
+      )}
       {/* Mobile drawer backdrop */}
       {mobileOpen && (
         <div
@@ -801,7 +826,20 @@ export default function Layout({ children }: { children: ReactNode }) {
         </header>
 
         <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
-          <div className="pb-4 pr-1">{children}</div>
+          <Breadcrumbs />
+          <div className="pb-4 pr-1">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2, ease: [0.2, 0, 0.2, 1] }}
+              >
+                <ErrorBoundary>{children}</ErrorBoundary>
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </main>
       </div>
     </div>

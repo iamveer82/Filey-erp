@@ -97,6 +97,7 @@ export default function Suppliers() {
         action={
           <button
             className="btn-primary"
+            aria-label="New supplier"
             onClick={() => {
               setEdit(null);
               setOpen(true);

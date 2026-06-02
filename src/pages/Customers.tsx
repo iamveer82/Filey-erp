@@ -103,6 +103,7 @@ export default function Customers() {
           <div className="flex gap-2">
             <button
               className="btn-ghost"
+              aria-label="Export"
               onClick={() =>
                 downloadCsv(
                   "filey-customers",
@@ -120,7 +121,7 @@ export default function Customers() {
             >
               <Download size={15} /> Export
             </button>
-            <button className="btn-ghost" onClick={() => nav("/follow-ups")}>
+            <button className="btn-ghost" aria-label="Follow-ups" onClick={() => nav("/follow-ups")}>
               <AlarmClock size={15} /> Follow-ups
             </button>
             <button
@@ -196,6 +197,7 @@ export default function Customers() {
 
         {hasFilter && (
           <button
+            aria-label="Clear filters"
             onClick={() => setVw({ seg: "", email: false, trn: false })}
             className="text-xs font-semibold text-brand-500 hover:text-ink"
           >
@@ -243,8 +245,12 @@ export default function Customers() {
             editable: {
               value: (c) => c.email ?? "",
               onSave: async (c, v) => {
-                await crm.updateCustomer(c.id, { email: v.trim() || undefined });
-                load();
+                try {
+                  await crm.updateCustomer(c.id, { email: v.trim() || undefined });
+                  load();
+                } catch (e: any) {
+                  toast.error(e?.message || "Failed to update email");
+                }
               },
             },
           },
@@ -256,8 +262,12 @@ export default function Customers() {
             editable: {
               value: (c) => c.phone ?? "",
               onSave: async (c, v) => {
-                await crm.updateCustomer(c.id, { phone: v.trim() || undefined });
-                load();
+                try {
+                  await crm.updateCustomer(c.id, { phone: v.trim() || undefined });
+                  load();
+                } catch (e: any) {
+                  toast.error(e?.message || "Failed to update phone");
+                }
               },
             },
           },

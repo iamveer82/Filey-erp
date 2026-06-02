@@ -1,10 +1,12 @@
 import { Field } from "../../components/ui";
 import { tools, billing, CompanyProfile } from "../../lib/api";
+import { useUI } from "../../lib/ui";
 import { useEffect, useState } from "react";
 
 /* ---------------- Preferences / Notifications (persisted) ------- */
 
 export function useSettings() {
+  const { toast } = useUI();
   const [map, setMap] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -15,7 +17,7 @@ export function useSettings() {
         rows.forEach((r) => (m[r.key] = r.value));
         setMap(m);
       })
-      .catch(() => {})
+      .catch((e) => toast.error("Failed to load settings: " + (e instanceof Error ? e.message : e)))
       .finally(() => setReady(true));
   }, []);
   const get = (k: string, d = "") => map[k] ?? d;
@@ -56,10 +58,11 @@ export function Toggle({
 }
 
 export default function PreferencesPanel() {
+  const { toast } = useUI();
   const { get, set, ready } = useSettings();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   useEffect(() => {
-    billing.getCompany().then(setCompany).catch(() => {});
+    billing.getCompany().then(setCompany).catch((e) => toast.error("Failed to load company profile: " + (e instanceof Error ? e.message : e)));
   }, []);
   if (!ready)
     return <div className="card text-sm text-brand-400">Loading…</div>;

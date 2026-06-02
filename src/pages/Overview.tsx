@@ -47,12 +47,15 @@ import {
   erp,
   billing,
   fin,
+  crm,
+  quotes,
   Product,
   Order,
   InvoiceDocSummary,
   Expense,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
 import CompanyMessages from "../components/CompanyMessages";
 import { num, aed, fmtDate, cn } from "../lib/format";
 import AiSummaryCard from "../components/AiSummaryCard";
@@ -64,7 +67,7 @@ import {
   Badge,
   OrdersStatCard,
   StockBreakdownCard,
-  Spinner,
+  Skeleton,
   ErrorBanner,
 } from "../components/ui";
 
@@ -141,7 +144,7 @@ const WEIGHTS: { label: string; value: number }[] = [
 ];
 // Per-widget overrides as scoped CSS (!important to beat the Tailwind classes).
 function widgetCss(id: string, s: WidgetStyle): string {
-  const sel = `[data-widget="${id}"]`;
+  const sel = `[data-widget="${id}"] .widget-content`;
   let css = "";
   if (s.color)
     css += `${sel} p,${sel} span,${sel} li,${sel} h1,${sel} h2,${sel} h3,${sel} .text-ink,${sel} [class*="text-brand"]{color:${s.color} !important}`;
@@ -381,7 +384,7 @@ function WidgetItem({
           </div>
         </>
       )}
-      <div className="h-full overflow-auto [&>*]:h-full">{children}</div>
+      <div className="h-full overflow-auto [&>*]:h-full widget-content">{children}</div>
     </div>
   );
 }
@@ -391,13 +394,17 @@ export default function Overview() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [quotations, setQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [layout, setLayout] = useState<Layout>(loadLayout);
   const [styleOpenId, setStyleOpenId] = useState<string | null>(null);
+  const [ordersPeriod, setOrdersPeriod] = useState<"today" | "week" | "month" | "quarter" | "year">("month");
   const nav = useNavigate();
+  const { toast } = useUI();
 
   const updateLayout = (next: Layout) => {
     setLayout(next);
@@ -478,6 +485,8 @@ export default function Overview() {
       erp.orders().then(setOrders),
       billing.listDocs().then(setInvoices),
       fin.expenses().then(setExpenses),
+      crm.customers().then(setCustomers).catch((e) => toast.error("Failed to load customers: " + (e instanceof Error ? e.message : e))),
+      quotes.listDocs().then(setQuotations).catch((e) => toast.error("Failed to load quotations: " + (e instanceof Error ? e.message : e))),
     ])
       .catch((e) =>
         setError(`Could not load overview: ${e instanceof Error ? e.message : e}`)
@@ -520,26 +529,66 @@ export default function Overview() {
     };
   }, [orders]);
 
-  // Real trend: orders created per month over the last 6 months.
+  // Real trend: orders created per time bucket based on selected period.
   const trend = useMemo(() => {
     const now = new Date();
     const buckets: { name: string; key: string; items: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.push({
-        name: d.toLocaleString("en", { month: "short" }),
-        key: `${d.getFullYear()}-${d.getMonth()}`,
-        items: 0,
-      });
+    const periodMs: Record<string, number> = {
+      today: 24 * 3600_000,
+      week: 7 * 24 * 3600_000,
+      month: 30 * 24 * 3600_000,
+      quarter: 91 * 24 * 3600_000,
+      year: 365 * 24 * 3600_000,
+    };
+    const windowMs = periodMs[ordersPeriod] ?? periodMs.month;
+    let numBuckets = 6;
+    let bucketMs = windowMs / numBuckets;
+    let labelFn: (d: Date) => string;
+    let keyFn: (d: Date) => string;
+
+    if (ordersPeriod === "today") {
+      numBuckets = 24;
+      bucketMs = 3600_000;
+      labelFn = (d: Date) => `${d.getHours()}:00`;
+      keyFn = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+    } else if (ordersPeriod === "week") {
+      numBuckets = 7;
+      bucketMs = 24 * 3600_000;
+      labelFn = (d: Date) => d.toLocaleString("en", { weekday: "short" });
+      keyFn = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    } else if (ordersPeriod === "month") {
+      numBuckets = Math.round(30 / 7);
+      bucketMs = 7 * 24 * 3600_000;
+      labelFn = (d: Date) => `W${Math.ceil(d.getDate() / 7)}`;
+      keyFn = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-W${Math.ceil(d.getDate() / 7)}`;
+    } else if (ordersPeriod === "quarter") {
+      numBuckets = 6;
+      bucketMs = Math.round(windowMs / numBuckets);
+      labelFn = (d: Date) => d.toLocaleString("en", { month: "short" });
+      keyFn = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
+    } else {
+      // year
+      numBuckets = 12;
+      bucketMs = Math.round(windowMs / numBuckets);
+      labelFn = (d: Date) => d.toLocaleString("en", { month: "short" });
+      keyFn = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
+    }
+
+    const cutoff = now.getTime() - bucketMs * numBuckets;
+    // Pre-fill buckets
+    for (let i = 0; i < numBuckets; i++) {
+      const d = new Date(cutoff + i * bucketMs + bucketMs / 2);
+      buckets.push({ name: labelFn(d), key: keyFn(d), items: 0 });
     }
     const byKey = new Map(buckets.map((b) => [b.key, b]));
     for (const o of orders) {
       const d = new Date(o.created_at);
-      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
+      const k = keyFn(d);
+      const b = byKey.get(k);
       if (b) b.items += 1;
     }
     return buckets.map(({ name, items }) => ({ name, items }));
-  }, [orders]);
+  }, [orders, ordersPeriod]);
 
   const activity = useMemo(() => {
     const items: { who: string; what: string; ts: number }[] = [];
@@ -589,19 +638,19 @@ export default function Overview() {
       case "ai-summary":
         return <AiSummaryCard />;
       case "total-items":
-        return <MetricCard label="Total Items" value={num(products.length)} icon={<Boxes size={20} />} iconClass="bg-primary-100 text-primary-700" />;
+        return <MetricCard label="Total Items" value={num(products.length)} rawValue={products.length} formatValue={num} icon={<Boxes size={20} />} iconClass="bg-primary-100 text-primary-700" />;
       case "categories":
-        return <MetricCard label="Categories" value={num(suppliers)} icon={<Users size={20} />} iconClass="bg-secondary-400/20 text-secondary-600" />;
+        return <MetricCard label="Categories" value={num(suppliers)} rawValue={suppliers} formatValue={num} icon={<Users size={20} />} iconClass="bg-secondary-400/20 text-secondary-600" />;
       case "low-stock-kpi":
-        return <MetricCard label="Low Stock Items" value={num(lowStock.length)} icon={<AlertTriangle size={20} />} iconClass="bg-danger/15 text-danger" />;
+        return <MetricCard label="Low Stock Items" value={num(lowStock.length)} rawValue={lowStock.length} formatValue={num} icon={<AlertTriangle size={20} />} iconClass="bg-danger/15 text-danger" />;
       case "inventory-value":
-        return <MetricCard label="Inventory Value" value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))} icon={<Wallet size={20} />} iconClass="bg-info/15 text-info" />;
+        return <MetricCard label="Inventory Value" value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))} rawValue={products.reduce((s, p) => s + p.quantity * p.cost_price, 0)} formatValue={aed} icon={<Wallet size={20} />} iconClass="bg-info/15 text-info" />;
       case "invoice-revenue":
-        return <MetricCard label="Invoice Revenue" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0))} icon={<Receipt size={20} />} iconClass="bg-primary-100 text-primary-700" />;
+        return <MetricCard label="Invoice Revenue" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0))} rawValue={invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0)} formatValue={aed} icon={<Receipt size={20} />} iconClass="bg-primary-100 text-primary-700" />;
       case "collected":
-        return <MetricCard label="Collected" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0))} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />;
+        return <MetricCard label="Collected" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0))} rawValue={invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0)} formatValue={aed} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />;
       case "outstanding":
-        return <MetricCard label="Outstanding" value={aed(invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0))} icon={<Clock size={20} />} iconClass="bg-danger/15 text-danger" />;
+        return <MetricCard label="Outstanding" value={aed(invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0))} rawValue={invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0)} formatValue={aed} icon={<Clock size={20} />} iconClass="bg-danger/15 text-danger" />;
       case "orders-stat":
         return (
           <OrdersStatCard
@@ -617,6 +666,23 @@ export default function Overview() {
       case "orders-chart":
         return (
           <InfoCard title="Orders over time">
+            {/* Period selector pill bar */}
+            <div className="flex items-center gap-1 mb-3 p-0.5 rounded-xl bg-brand-100 dark:bg-white/10 inline-flex">
+              {(["today", "week", "month", "quarter", "year"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setOrdersPeriod(p)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-semibold rounded-[10px] transition-all cursor-pointer",
+                    ordersPeriod === p
+                      ? "bg-white text-ink shadow-sm dark:bg-[#3A3D45]"
+                      : "text-brand-500 hover:text-ink"
+                  )}
+                >
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-4">
               <div className="rounded-2xl bg-brand-50 dark:bg-white/5 p-4">
                 <Truck size={28} className="text-brand-500" />
@@ -786,7 +852,12 @@ export default function Overview() {
         }
       />
 
-      <GettingStarted hasProducts={products.length > 0} hasInvoices={invoices.length > 0} />
+      <GettingStarted
+        hasProducts={products.length > 0}
+        hasInvoices={invoices.length > 0}
+        hasCustomers={customers.length > 0}
+        hasQuotations={quotations.length > 0}
+      />
 
       {error && (
         <div className="mb-4">
@@ -794,8 +865,32 @@ export default function Overview() {
         </div>
       )}
       {loading && products.length === 0 && orders.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading overview…" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+          {visible.map((id, i) => (
+              <motion.div
+                key={id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                className={spanClass(effSpan(id))}
+              >
+                <div className="card overflow-hidden">
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-9 w-9 rounded-xl" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3 w-20" />
+                        <Skeleton className="h-5 w-28" />
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-end pt-2 border-t border-brand-100 dark:border-white/5">
+                      <Skeleton className="h-3 w-16" />
+                      <Skeleton className="h-3 w-12" />
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
         </div>
       )}
 

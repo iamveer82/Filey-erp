@@ -33,7 +33,8 @@ async function toItem(file: File): Promise<Item> {
     const ctx = c.getContext("2d");
     if (ctx) await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
     return { id: uid(), file, thumb: ctx ? c.toDataURL("image/png") : "", pages: pdf.numPages };
-  } catch {
+  } catch (e) {
+    console.warn('Failed to load PDF:', e);
     return { id: uid(), file, thumb: "", pages: 0 };
   }
 }
@@ -114,7 +115,7 @@ export default function MergeStudio({
           {items.length} file{items.length === 1 ? "" : "s"} · {totalPages} page
           {totalPages === 1 ? "" : "s"} — drag to reorder
         </p>
-        <label className="btn-ghost h-8 cursor-pointer text-xs">
+        <label className="btn-ghost h-8 cursor-pointer text-xs" aria-label="Add PDFs">
           <Upload size={13} /> Add PDFs
           <input
             type="file"
@@ -122,7 +123,13 @@ export default function MergeStudio({
             multiple
             className="hidden"
             onChange={(e) => {
-              addMore(e.target.files);
+              (async () => {
+                try {
+                  await addMore(e.target.files);
+                } catch (e) {
+                  console.warn('Failed to add PDF:', e);
+                }
+              })();
               e.target.value = "";
             }}
           />
@@ -133,6 +140,8 @@ export default function MergeStudio({
         {items.map((it, i) => (
           <div
             key={it.id}
+            role="listitem"
+            aria-label="PDF page"
             draggable
             onDragStart={() => (dragId.current = it.id)}
             onDragOver={(e) => {
@@ -155,6 +164,7 @@ export default function MergeStudio({
               {i + 1}
             </span>
             <button
+              aria-label="Remove"
               onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
               title="Remove"
               className="absolute right-1.5 top-1.5 z-10 hidden h-5 w-5 place-items-center rounded-full bg-danger text-white group-hover:grid"
@@ -163,7 +173,7 @@ export default function MergeStudio({
             </button>
             <div className="grid h-32 place-items-center overflow-hidden rounded-lg bg-brand-50 dark:bg-black/20">
               {it.thumb ? (
-                <img src={it.thumb} alt="" className="max-h-full max-w-full object-contain" />
+                <img src={it.thumb} alt={`Page thumbnail`} className="max-h-full max-w-full object-contain" />
               ) : (
                 <Loader2 size={16} className="animate-spin text-brand-400" />
               )}
@@ -200,6 +210,7 @@ export default function MergeStudio({
         onClick={merge}
         disabled={busy || items.length < 1}
         className="btn-primary mt-4 w-full"
+        aria-label="Merge and download PDF"
       >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Combine size={15} />}
         Merge {items.length} file{items.length === 1 ? "" : "s"} & download

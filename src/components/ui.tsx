@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence, useInView, animate } from "framer-motion";
 import {
   X,
   ArrowUpRight,
@@ -10,7 +10,6 @@ import {
   Lock,
   Loader2,
   AlertCircle,
-  Inbox,
 } from "lucide-react";
 import { cn } from "../lib/format";
 import FitText from "./FitText";
@@ -18,15 +17,17 @@ import { SpotlightCard } from "./SpotlightCard";
 import { MagicCard } from "./MagicCard";
 import { ShimmerButton } from "./ShimmerButton";
 
-/** Design-token skeleton placeholder (no new deps). */
+/** Design-token skeleton placeholder with shimmer animation. */
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-lg bg-brand-100 dark:bg-white/10",
+        "relative overflow-hidden rounded-lg bg-brand-100 dark:bg-white/10",
         className
       )}
-    />
+    >
+      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/8" />
+    </div>
   );
 }
 
@@ -141,20 +142,45 @@ export function Delta({ value, suffix = "vs last month" }: { value: number; suff
   );
 }
 
-/** Glanceable KPI card — icon chip, metric, delta. */
+/** Glanceable KPI card — icon chip, metric, delta.
+ *  Pass rawValue + formatValue for a live count-up animation when the card
+ *  scrolls into view. */
 export function MetricCard({
   label,
   value,
   delta,
   icon,
   iconClass = "bg-primary-100 text-primary-700",
+  rawValue,
+  formatValue,
 }: {
   label: string;
   value: string;
   delta?: number;
   icon?: ReactNode;
   iconClass?: string;
+  rawValue?: number;
+  formatValue?: (n: number) => string;
 }) {
+  const nodeRef = useRef<HTMLSpanElement>(null);
+  const inView = useInView(nodeRef, { once: true, margin: "-40px" });
+
+  useEffect(() => {
+    if (!inView || rawValue === undefined || !formatValue) return;
+    const controls = animate(0, rawValue, {
+      duration: 1.0,
+      ease: [0.2, 0, 0.2, 1],
+      onUpdate(v) {
+        if (nodeRef.current) {
+          nodeRef.current.textContent = formatValue(Math.round(v));
+        }
+      },
+    });
+    return () => controls.stop();
+  }, [inView, rawValue, formatValue]);
+
+  const animated = rawValue !== undefined && formatValue !== undefined;
+
   return (
     <SpotlightCard>
       <div className="p-5">
@@ -170,9 +196,19 @@ export function MetricCard({
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold text-brand-500">{label}</p>
-            <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
-              {value}
-            </FitText>
+            {animated ? (
+              <span
+                ref={nodeRef}
+                className="font-display text-ink mt-1 tabular-nums block"
+                style={{ fontSize: 24, lineHeight: 1.15, whiteSpace: "nowrap", fontWeight: 700 }}
+              >
+                {value}
+              </span>
+            ) : (
+              <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
+                {value}
+              </FitText>
+            )}
           </div>
         </div>
         {delta !== undefined && (
@@ -329,6 +365,8 @@ export function DataTable<T>({
   const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
 
   const sortFn = sort && columns.find((c) => c.key === sort.key)?.sortValue;
   const sorted = useMemo(() => {
@@ -345,6 +383,15 @@ export function DataTable<T>({
     setSort((s) =>
       s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
     );
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => setScrolled(el.scrollTop > 0);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
   const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
   const allChecked =
@@ -372,40 +419,67 @@ export function DataTable<T>({
   const colCount = columns.length + (selectable ? 1 : 0);
   return (
     <div className="card overflow-hidden p-0">
-      {selectable && sel.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-primary-100 border-b border-primary-200">
-          <span className="text-sm font-semibold text-primary-700">
-            {sel.size} selected
-          </span>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {bulkActions!.map((a) => (
-              <button
-                key={a.label}
-                disabled={running}
-                onClick={() => runBulk(a)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
-                  a.danger
-                    ? "text-danger hover:bg-danger/10"
-                    : "text-brand-700 hover:bg-white"
-                )}
-              >
-                {a.icon}
-                {a.label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setSel(new Set())}
-            className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
+      <AnimatePresence>
+        {selectable && sel.size > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 350, damping: 32 }}
+            className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-primary-100 border-b border-primary-200 shadow-md overflow-hidden"
           >
-            Clear
-          </button>
-        </div>
-      )}
-      <div className="overflow-x-auto">
+            <motion.span
+              initial={{ x: -12, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.05 }}
+              className="text-sm font-semibold text-primary-700"
+            >
+              {sel.size} selected
+            </motion.span>
+            <motion.div
+              initial={{ x: -12, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="flex items-center gap-1.5 flex-wrap"
+            >
+              {bulkActions!.map((a) => (
+                <button
+                  key={a.label}
+                  disabled={running}
+                  onClick={() => runBulk(a)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
+                    a.danger
+                      ? "text-danger hover:bg-danger/10"
+                      : "text-brand-700 hover:bg-white"
+                  )}
+                >
+                  {a.icon}
+                  {a.label}
+                </button>
+              ))}
+            </motion.div>
+            <motion.button
+              initial={{ x: -12, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ delay: 0.15 }}
+              onClick={() => setSel(new Set())}
+              className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
+            >
+              Clear
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div
+        ref={scrollRef}
+        className={cn(
+          "overflow-x-auto",
+          scrolled && "shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        )}
+      >
         <table className="w-full">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E] backdrop-blur-sm">          
             <tr>
               {selectable && (
                 <th className="th w-10">
@@ -426,8 +500,16 @@ export function DataTable<T>({
                       className="inline-flex items-center gap-1 cursor-pointer hover:text-ink"
                     >
                       {c.label}
-                      <span className="text-[10px] text-brand-400">
-                        {sort?.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : "↕"}
+                      <span
+                        className={cn(
+                          "text-[10px] transition-all duration-200 inline-block",
+                          sort?.key === c.key
+                            ? "text-ink dark:text-[#F4F5F6]"
+                            : "text-brand-400",
+                          sort?.key === c.key && sort.dir === -1 && "rotate-180"
+                        )}
+                      >
+                        {sort?.key === c.key ? "▲" : "↕"}
                       </span>
                     </button>
                   </th>
@@ -453,13 +535,32 @@ export function DataTable<T>({
             ) : rows.length === 0 ? (
               <tr>
                 <td className="td py-14" colSpan={colCount}>
-                  <div className="flex flex-col items-center gap-2 text-center">
-                    <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5 text-brand-300">
-                      <Inbox size={20} />
-                    </span>
-                    <p className="text-sm font-semibold text-brand-500">
-                      {empty ?? "Nothing here yet"}
-                    </p>
+                  <div className="flex flex-col items-center gap-3 text-center px-4">
+                    <svg
+                      width="120"
+                      height="90"
+                      viewBox="0 0 120 90"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="opacity-70"
+                    >
+                      <rect x="18" y="4" width="84" height="58" rx="6" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+                      <rect x="28" y="14" width="48" height="4" rx="2" fill="#E0AE00" opacity="0.5" />
+                      <rect x="28" y="24" width="64" height="3" rx="1.5" fill="#D4D4D8" />
+                      <rect x="28" y="32" width="52" height="3" rx="1.5" fill="#D4D4D8" />
+                      <rect x="28" y="40" width="40" height="3" rx="1.5" fill="#D4D4D8" />
+                      <rect x="28" y="48" width="56" height="3" rx="1.5" fill="#D4D4D8" />
+                      <circle cx="60" cy="78" r="8" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
+                      <path d="M57 78l2 2 4-4" stroke="#B88C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-bold text-brand-600">
+                        {empty ?? "Nothing here yet"}
+                      </p>
+                      <p className="text-xs text-brand-400 mt-1 max-w-xs">
+                        When you have records, they'll show up right here.
+                      </p>
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -572,7 +673,7 @@ export function Modal({
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: "md" | "lg" | "xl" | "2xl" | "3xl";
+  size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full";
 }) {
   const widthClass = {
     md: "max-w-lg",
@@ -580,6 +681,7 @@ export function Modal({
     xl: "max-w-3xl",
     "2xl": "max-w-4xl",
     "3xl": "max-w-5xl",
+    full: "max-w-[95vw]",
   }[size];
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -638,7 +740,14 @@ export function Modal({
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
+        <div className="flex items-center justify-between gap-4 px-6 py-4 relative">
+          {/* Gradient border along the top of the modal header */}
+          <div
+            className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl"
+            style={{
+              background: "linear-gradient(90deg, #FFD600 0%, #FFBA3D 40%, #E0AE00 70%, #B88C00 100%)",
+            }}
+          />
           <h2 className="text-lg font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
@@ -666,6 +775,58 @@ export function Field({
     <div>
       <label className="label">{label}</label>
       {children}
+    </div>
+  );
+}
+
+/** Reusable form field with label, inline validation error (animated slide-in),
+ *  and optional hint text. Drop-in replacement for raw label+input pairs. */
+export function FormField({
+  label,
+  error,
+  hint,
+  children,
+  className,
+  required,
+}: {
+  label: string;
+  error?: string;
+  hint?: string;
+  children: ReactNode;
+  className?: string;
+  required?: boolean;
+}) {
+  return (
+    <div className={cn("flex flex-col", className)}>
+      <label className="label">
+        {label}
+        {required && <span className="text-danger ml-0.5">*</span>}
+      </label>
+      {children}
+      <AnimatePresence mode="wait">
+        {error ? (
+          <motion.p
+            key="err"
+            initial={{ height: 0, opacity: 0, y: -4 }}
+            animate={{ height: "auto", opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -4 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="text-xs font-medium text-danger mt-1.5 flex items-center gap-1"
+          >
+            <AlertCircle size={12} className="shrink-0" />
+            {error}
+          </motion.p>
+        ) : hint ? (
+          <motion.p
+            key="hint"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-xs text-brand-400 mt-1.5"
+          >
+            {hint}
+          </motion.p>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

@@ -248,6 +248,7 @@ export default function InlinePdfEditor({
   const rotatePage = (deg: number) =>
     setPageOp(page, { rotate: ((ops[page]?.rotate ?? 0) + deg + 360) % 360 });
   const deletePage = () => {
+    if (!confirm('Delete this page?')) return;
     if (pages <= 1) return toast.error("A PDF must have at least one page.");
     setPageOp(page, { deleted: true });
     setPage((p) => Math.min(p + 1, pages - 1));
@@ -339,6 +340,7 @@ export default function InlinePdfEditor({
     <button
       onClick={() => setTool(id)}
       title={label}
+      aria-label={label}
       className={cn(
         "grid h-8 w-8 place-items-center rounded-lg cursor-pointer transition-colors",
         tool === id ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"
@@ -393,14 +395,14 @@ export default function InlinePdfEditor({
         <span className="flex-1" />
 
         {/* page nav + page ops */}
-        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}><ChevronLeft size={14} /></button>
+        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0} aria-label="Previous page"><ChevronLeft size={14} /></button>
         <span className="whitespace-nowrap text-xs font-semibold text-brand-500">{page + 1}/{pages || "…"}{pageOps.deleted ? " ✕" : ""}</span>
-        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}><ChevronRight size={14} /></button>
-        <button className="btn-ghost h-7 !px-1.5" title="Rotate left" onClick={() => rotatePage(-90)}><RotateCw size={13} className="-scale-x-100" /></button>
-        <button className="btn-ghost h-7 !px-1.5" title="Rotate right" onClick={() => rotatePage(90)}><RotateCw size={13} /></button>
-        <button className="btn-ghost h-7 !px-1.5" title="Delete page" onClick={deletePage}><Trash2 size={13} /></button>
-        <button className="btn-ghost h-7 text-xs" onClick={clearPageEdits}>Clear</button>
-        <button onClick={apply} disabled={saving || !dirty} className="btn-primary h-7 text-xs">
+        <button className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1} aria-label="Next page"><ChevronRight size={14} /></button>
+        <button className="btn-ghost h-7 !px-1.5" title="Rotate left" aria-label="Rotate page left" onClick={() => rotatePage(-90)}><RotateCw size={13} className="-scale-x-100" /></button>
+        <button className="btn-ghost h-7 !px-1.5" title="Rotate right" aria-label="Rotate page right" onClick={() => rotatePage(90)}><RotateCw size={13} /></button>
+        <button className="btn-ghost h-7 !px-1.5" title="Delete page" aria-label="Delete current page" onClick={deletePage}><Trash2 size={13} /></button>
+        <button className="btn-ghost h-7 text-xs" onClick={clearPageEdits} aria-label="Clear all annotations">Clear</button>
+        <button onClick={apply} disabled={saving || !dirty} className="btn-primary h-7 text-xs" aria-label="Apply edits and download">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply
         </button>
       </div>

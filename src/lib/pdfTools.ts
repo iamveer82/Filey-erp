@@ -194,10 +194,11 @@ export async function pdfToImages(
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("pdfToImages: failed to get 2d canvas context");
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     const blob: Blob = await new Promise((res) =>
-      canvas.toBlob((b) => res(b!), "image/png")
+      canvas.toBlob((b) => { if (!b) throw new Error("pdfToImages: toBlob callback received null"); res(b); }, "image/png")
     );
     out.push({
       name: `${base(file.name)}-p${n}.png`,
@@ -669,7 +670,8 @@ export async function flattenPdf(
     const canvas = document.createElement("canvas");
     canvas.width = vp.width;
     canvas.height = vp.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
     if (grayscale) {
       const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -708,8 +710,8 @@ export async function setPdfMeta(
   author: string
 ): Promise<OutFile> {
   const doc = await loadDoc(file);
-  if (title.trim()) doc.setTitle(title.trim());
-  if (author.trim()) doc.setAuthor(author.trim());
+  if (title?.trim()) doc.setTitle(title.trim());
+  if (author?.trim()) doc.setAuthor(author.trim());
   doc.setModificationDate(new Date());
   return { name: `${base(file.name)}-info.pdf`, bytes: await doc.save() };
 }
@@ -1024,8 +1026,9 @@ export async function jsonToCsv(file: File): Promise<OutFile> {
 /** Split each page horizontally or vertically into two pages. */
 export async function dividePages(
   file: File,
-  axis: "h" | "v"
+  axis: "h" | "v" = "h"
 ): Promise<OutFile> {
+  if (axis !== "h" && axis !== "v") axis = "h";
   const src = await loadDoc(file);
   const out = await PDFDocument.create();
   const embedded = await out.embedPages(src.getPages());
@@ -1133,7 +1136,7 @@ export async function addHeaderFooter(
   doc.getPages().forEach((p) => {
     const w = p.getWidth();
     const h = p.getHeight();
-    if (header.trim()) {
+    if (header?.trim()) {
       const tw = font.widthOfTextAtSize(header, size);
       p.drawText(header, {
         x: w / 2 - tw / 2,
@@ -1143,7 +1146,7 @@ export async function addHeaderFooter(
         color: rgb(0.35, 0.35, 0.35),
       });
     }
-    if (footer.trim()) {
+    if (footer?.trim()) {
       const tw = font.widthOfTextAtSize(footer, size);
       p.drawText(footer, {
         x: w / 2 - tw / 2,
@@ -1408,7 +1411,8 @@ export async function pdfToImageFormat(
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     if (format === "jpeg" || format === "bmp") {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1441,7 +1445,8 @@ async function rasterTransform(
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
@@ -1499,7 +1504,8 @@ export async function removeBlankPages(file: File): Promise<OutFile> {
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
@@ -2334,7 +2340,8 @@ export async function decryptPdf(
     const canvas = document.createElement("canvas");
     canvas.width = vp.width;
     canvas.height = vp.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
     const blob: Blob = await new Promise((res, rej) =>
       canvas.toBlob((b) => (b ? res(b) : rej(new Error("Render failed."))), "image/png")
@@ -2387,7 +2394,8 @@ async function ocrPages(
       const canvas = document.createElement("canvas");
       canvas.width = vp.width;
       canvas.height = vp.height;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2433,7 +2441,8 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
       const canvas = document.createElement("canvas");
       canvas.width = vp.width;
       canvas.height = vp.height;
-      const ctx = canvas.getContext("2d")!;
+      const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2726,7 +2735,8 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
     const canvas = document.createElement("canvas");
     canvas.width = vp.width;
     canvas.height = vp.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2753,6 +2763,26 @@ export function downloadFile(f: OutFile) {
   a.download = f.name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/** Capture a DOM element as a PDF and download it.
+ *  Uses html-to-image to render the element to PNG, then pdf-lib to
+ *  wrap it in a proper PDF file. Falls back to window.print() on error. */
+export async function downloadElementAsPdf(el: HTMLElement, name: string) {
+  try {
+    const { toPng } = await import("html-to-image");
+    const { PDFDocument } = await import("pdf-lib");
+    const imgData = await toPng(el, { quality: 0.95, pixelRatio: 2 });
+    const pdfDoc = await PDFDocument.create();
+    const img = await pdfDoc.embedPng(imgData);
+    const { width, height } = img.scale(1);
+    const page = pdfDoc.addPage([width, height]);
+    page.drawImage(img, { x: 0, y: 0, width, height });
+    const bytes = await pdfDoc.save();
+    downloadFile({ name: `${name}.pdf`, bytes });
+  } catch (e) {
+    window.print();
+  }
 }
 
 /* ═══════════════════════════ Bookmarks / TOC ═══════════════════════════════

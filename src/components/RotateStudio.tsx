@@ -86,11 +86,11 @@ export default function RotateStudio({
   return (
     <div>
       <div className="mb-3 flex items-center justify-center gap-2">
-        <button onClick={() => spin(-90)} className="btn-ghost h-10 w-12" title="Rotate left">
+        <button onClick={() => spin(-90)} className="btn-ghost h-10 w-12" title="Rotate left" aria-label="Rotate page left">
           <RotateCcw size={18} />
         </button>
         <span className="w-16 text-center text-sm font-bold tabular-nums text-ink">{angle}°</span>
-        <button onClick={() => spin(90)} className="btn-ghost h-10 w-12" title="Rotate right">
+        <button onClick={() => spin(90)} className="btn-ghost h-10 w-12" title="Rotate right" aria-label="Rotate page right">
           <RotateCw size={18} />
         </button>
       </div>
@@ -117,7 +117,7 @@ export default function RotateStudio({
         )}
       </div>
 
-      <button onClick={apply} disabled={saving || angle === 0} className="btn-primary mt-4 w-full">
+      <button onClick={apply} disabled={saving || angle === 0} className="btn-primary mt-4 w-full" aria-label="Apply rotation and download">
         {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
         Apply rotation to all pages & download
       </button>

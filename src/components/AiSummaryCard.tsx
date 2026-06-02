@@ -77,8 +77,10 @@ export default function AiSummaryCard() {
   }
 
   return (
-    <div className="card mb-4">
-      <div className="mb-2 flex items-center gap-2">
+    <div className="card mb-4 relative overflow-hidden">
+      {/* Subtle pulse ring on the AI card to draw attention */}
+      <div className="absolute inset-0 rounded-2xl pointer-events-none animate-pulse-gold" />
+      <div className="mb-2 flex items-center gap-2 relative z-10">
         <ColorOrb dimension="22px" />
         <p className="flex-1 text-sm font-bold text-ink">AI daily briefing</p>
         <button className="btn-ghost h-8" onClick={generate} disabled={busy}>
@@ -86,12 +88,12 @@ export default function AiSummaryCard() {
           {text ? "Refresh" : "Generate"}
         </button>
       </div>
-      {err && <p className="text-xs text-danger">{err}</p>}
+      {err && <p className="text-xs text-danger relative z-10">{err}</p>}
       {text ? (
-        <div className="whitespace-pre-wrap text-sm leading-relaxed text-brand-600">{text}</div>
+        <div className="whitespace-pre-wrap text-sm leading-relaxed text-brand-600 relative z-10">{text}</div>
       ) : (
         !busy && (
-          <p className="text-xs text-brand-400">
+          <p className="text-xs text-brand-400 relative z-10">
             Click Generate for a quick, data-grounded summary of today.
           </p>
         )

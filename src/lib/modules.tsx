@@ -43,7 +43,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
           }
         }
       })
-      .catch(() => {})
+      .catch((e) => { console.error("Failed to load module settings:", e); return []; })
       .finally(() => setLoading(false));
   }, []);
 
@@ -80,7 +80,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 
   const persist = (next: string[]) => {
     setDisabled(next);
-    tools.setSetting(KEY, JSON.stringify(next)).catch(() => {});
+    tools.setSetting(KEY, JSON.stringify(next)).catch((e) => console.error("Failed to persist module settings:", e));
   };
 
   const toggle = (id: string) => {

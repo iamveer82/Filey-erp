@@ -32,7 +32,7 @@ export default function FitPreview({
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  });
+  }, []);
 
   const scale = Math.max(0.2, zoom / 100);
 

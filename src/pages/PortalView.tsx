@@ -80,6 +80,7 @@ export default function PortalView() {
         setItems(payload.items ?? []);
         setState("ok");
       } catch {
+        console.error("Failed to load shared invoice");
         setState("error");
       }
     })();
@@ -87,14 +88,14 @@ export default function PortalView() {
 
   if (state === "loading")
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] text-sm font-semibold text-brand-500">
+      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] dark:bg-[#15161A] text-sm font-semibold text-brand-500">
         Loading invoice…
       </div>
     );
 
   if (state === "error" || !doc)
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] px-6 text-center">
+      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] dark:bg-[#15161A] px-6 text-center">
         <div>
           <p className="text-lg font-bold text-ink">Invoice not available</p>
           <p className="mt-1 text-sm text-brand-500">
@@ -111,10 +112,10 @@ export default function PortalView() {
   const total = taxable + tax;
 
   return (
-    <div className="min-h-screen bg-[#F7F3EA] px-4 py-10">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm text-neutral-900">
+    <div className="min-h-screen bg-[#F7F3EA] dark:bg-[#15161A] px-4 py-10">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-neutral-200 dark:border-[#3A3D45] bg-white dark:bg-[#24262C] p-8 shadow-sm text-neutral-900 dark:text-[#F4F5F6]">
         {(paid || doc.status === "paid") && (
-          <div className="mb-4 rounded-xl bg-green-50 px-4 py-2.5 text-sm font-semibold text-green-700">
+          <div className="mb-4 rounded-xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-semibold text-green-700 dark:text-green-400">
             Payment received — thank you!
           </div>
         )}
@@ -122,14 +123,14 @@ export default function PortalView() {
           <div>
             <h1 className="text-2xl font-bold">{doc.seller_name || "Invoice"}</h1>
             {doc.seller_address && (
-              <p className="mt-1 whitespace-pre-line text-xs text-neutral-500">{doc.seller_address}</p>
+              <p className="mt-1 whitespace-pre-line text-xs text-neutral-500 dark:text-[#B6BAC1]">{doc.seller_address}</p>
             )}
-            {doc.seller_trn && <p className="text-xs text-neutral-500">TRN: {doc.seller_trn}</p>}
+            {doc.seller_trn && <p className="text-xs text-neutral-500 dark:text-[#B6BAC1]">TRN: {doc.seller_trn}</p>}
           </div>
           <div className="text-right">
-            <p className="text-xs uppercase tracking-wider text-neutral-400">Invoice</p>
+            <p className="text-xs uppercase tracking-wider text-neutral-400 dark:text-[#9AA0A8]">Invoice</p>
             <p className="text-lg font-bold">{doc.number}</p>
-            <span className="mt-1 inline-block rounded-full bg-neutral-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-neutral-600">
+            <span className="mt-1 inline-block rounded-full bg-neutral-100 dark:bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-neutral-600 dark:text-[#DDE0E4]">
               {doc.status}
             </span>
           </div>
@@ -137,14 +138,14 @@ export default function PortalView() {
 
         <div className="mt-6 grid grid-cols-2 gap-6 text-sm">
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-neutral-400">Bill to</p>
+            <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-[#9AA0A8]">Bill to</p>
             <p className="font-semibold">{doc.customer_name}</p>
             {doc.customer_address && (
-              <p className="whitespace-pre-line text-xs text-neutral-500">{doc.customer_address}</p>
+              <p className="whitespace-pre-line text-xs text-neutral-500 dark:text-[#B6BAC1]">{doc.customer_address}</p>
             )}
-            {doc.customer_trn && <p className="text-xs text-neutral-500">TRN: {doc.customer_trn}</p>}
+            {doc.customer_trn && <p className="text-xs text-neutral-500 dark:text-[#B6BAC1]">TRN: {doc.customer_trn}</p>}
           </div>
-          <div className="text-right text-xs text-neutral-500">
+          <div className="text-right text-xs text-neutral-500 dark:text-[#B6BAC1]">
             {doc.issue_date && <p>Issued: {fmtDate(doc.issue_date)}</p>}
             {doc.due_date && <p>Due: {fmtDate(doc.due_date)}</p>}
           </div>
@@ -152,7 +153,7 @@ export default function PortalView() {
 
         <table className="mt-6 w-full text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-left text-[11px] uppercase tracking-wider text-neutral-400">
+            <tr className="border-b border-neutral-200 dark:border-[#3A3D45] text-left text-[11px] uppercase tracking-wider text-neutral-400 dark:text-[#9AA0A8]">
               <th className="py-2">Description</th>
               <th className="py-2 text-right">Qty</th>
               <th className="py-2 text-right">Price</th>
@@ -161,7 +162,7 @@ export default function PortalView() {
           </thead>
           <tbody>
             {items.map((it, i) => (
-              <tr key={i} className="border-b border-neutral-100">
+              <tr key={i} className="border-b border-neutral-100 dark:border-[#2A2C33]">
                 <td className="py-2">{it.description}</td>
                 <td className="py-2 text-right tabular-nums">{it.qty}</td>
                 <td className="py-2 text-right tabular-nums">{money(it.unit_price, ccy)}</td>
@@ -175,7 +176,7 @@ export default function PortalView() {
           <Row k="Subtotal" v={money(subtotal, ccy)} />
           {doc.discount > 0 && <Row k="Discount" v={`- ${money(doc.discount, ccy)}`} />}
           <Row k={`Tax (${doc.tax_rate}%)`} v={money(tax, ccy)} />
-          <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-bold">
+          <div className="flex justify-between border-t border-neutral-200 dark:border-[#3A3D45] pt-2 text-base font-bold">
             <span>Total</span>
             <span className="tabular-nums">{money(total, ccy)}</span>
           </div>
@@ -190,18 +191,18 @@ export default function PortalView() {
             >
               {paying ? "Redirecting…" : `Pay ${money(total, ccy)}`}
             </button>
-            {payErr && <p className="text-xs text-red-600">{payErr}</p>}
+            {payErr && <p className="text-xs text-red-600 dark:text-red-400">{payErr}</p>}
           </div>
         )}
 
         {(doc.notes || doc.terms) && (
-          <div className="mt-6 space-y-2 border-t border-neutral-200 pt-4 text-xs text-neutral-500">
+          <div className="mt-6 space-y-2 border-t border-neutral-200 dark:border-[#3A3D45] pt-4 text-xs text-neutral-500 dark:text-[#B6BAC1]">
             {doc.notes && <p className="whitespace-pre-line">{doc.notes}</p>}
             {doc.terms && <p className="whitespace-pre-line">{doc.terms}</p>}
           </div>
         )}
 
-        <p className="mt-8 text-center text-[11px] text-neutral-400">Powered by Filey</p>
+        <p className="mt-8 text-center text-[11px] text-neutral-400 dark:text-[#9AA0A8]">Powered by Filey</p>
       </div>
     </div>
   );
@@ -209,7 +210,7 @@ export default function PortalView() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between text-neutral-600">
+    <div className="flex justify-between text-neutral-600 dark:text-[#DDE0E4]">
       <span>{k}</span>
       <span className="tabular-nums">{v}</span>
     </div>

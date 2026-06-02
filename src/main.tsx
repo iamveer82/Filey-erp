@@ -22,6 +22,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 // (avoids caching surprises during local dev).
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register("/sw.js").catch((e) => console.error("Failed to register service worker:", e));
   });
 }

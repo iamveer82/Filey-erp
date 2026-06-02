@@ -75,7 +75,9 @@ export default function RedactStudio({
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const frac = (e: React.PointerEvent) => {
-    const r = stageRef.current!.getBoundingClientRect();
+    const s = stageRef.current;
+    if (!s) return { x: 0, y: 0 };
+    const r = s.getBoundingClientRect();
     return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
   };
   const down = (e: React.PointerEvent) => {
@@ -127,7 +129,7 @@ export default function RedactStudio({
         <span className="flex items-center gap-1 text-xs font-semibold text-brand-500">
           <Eraser size={13} /> Drag to cover · {boxes.length} box{boxes.length === 1 ? "" : "es"}
         </span>
-        <button className="btn-ghost h-7 text-xs" onClick={() => setBoxes((b) => b.filter((x) => x.page !== page))} disabled={!pageBoxes.length}>
+        <button className="btn-ghost h-7 text-xs" onClick={() => setBoxes((b) => b.filter((x) => x.page !== page))} disabled={!pageBoxes.length} aria-label="Clear all redactions on this page">
           Clear page
         </button>
         <span className="flex-1" />
@@ -138,7 +140,7 @@ export default function RedactStudio({
         <button aria-label="Next page" className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}>
           <ChevronRight size={14} />
         </button>
-        <button onClick={apply} disabled={saving || !boxes.length} className="btn-primary h-7 text-xs">
+        <button onClick={apply} disabled={saving || !boxes.length} className="btn-primary h-7 text-xs" aria-label="Apply redactions and download">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply
         </button>
       </div>

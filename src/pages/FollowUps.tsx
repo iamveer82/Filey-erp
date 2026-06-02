@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "../components/ui";
 import FollowUps from "../components/FollowUps";
 import { crm, type CrmCustomer } from "../lib/api";
+import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 
 export default function FollowUpsPage() {
+  const { toast } = useUI();
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const load = () => crm.customers().then(setCustomers).catch(() => {});
+  const load = () => crm.customers().then(setCustomers).catch((e) => toast.error("Failed to load customers: " + (e instanceof Error ? e.message : e)));
   useEffect(() => {
     load();
   }, []);

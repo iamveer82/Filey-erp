@@ -53,7 +53,7 @@ export default function PreviewModal({
     setImgUrl("");
     setText("");
     setErr("");
-    if (canvasWrap.current) canvasWrap.current.innerHTML = "";
+    if (canvasWrap.current) canvasWrap.current.replaceChildren();
   };
 
   useEffect(() => {
@@ -85,7 +85,7 @@ export default function PreviewModal({
     imgUrlRef.current = "";
     setImgUrl("");
     setText("");
-    if (canvasWrap.current) canvasWrap.current.innerHTML = "";
+    if (canvasWrap.current) canvasWrap.current.replaceChildren();
     const k = kindOf(fileName, type);
     setKind(k);
     setName(fileName);
@@ -100,7 +100,7 @@ export default function PreviewModal({
       const doc = await pdfjs.getDocument({ data: bytes }).promise;
       const wrap = canvasWrap.current;
       if (wrap) {
-        wrap.innerHTML = "";
+        wrap.replaceChildren();
         const pages = Math.min(doc.numPages, 15);
         for (let n = 1; n <= pages; n++) {
           const page = await doc.getPage(n);
@@ -181,6 +181,7 @@ export default function PreviewModal({
             <button
               className="btn-ghost text-xs"
               onClick={() => fileRef.current?.click()}
+              aria-label="Open file"
             >
               <Upload size={14} /> {loaded ? "Change" : "Open file"}
             </button>

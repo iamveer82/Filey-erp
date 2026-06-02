@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Save,
-  Eye,
   Download,
+  Eye,
   RefreshCw,
   Plus,
   Trash2,
@@ -11,8 +11,8 @@ import {
   X,
   CalendarDays,
   Send,
-  Pencil,
   FileText,
+  Upload,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -29,11 +29,13 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput, CURRENCIES } from "../lib/format";
+import { fmtDate, money, numInput, CURRENCIES } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
+import { downloadElementAsPdf } from "../lib/pdfTools";
 import { Modal, Field } from "../components/ui";
-import AnnotationLayer from "../components/AnnotationLayer";
+import TemplateTilePreview from "../components/TemplateTilePreview";
+import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
 
 interface Line {
   product: string;
@@ -67,18 +69,6 @@ const qtNo = () =>
     Math.floor(Math.random() * 900000) + 100000
   )}`;
 
-function money(v: number, ccy: string) {
-  try {
-    return new Intl.NumberFormat("en", {
-      style: "currency",
-      currency: ccy,
-      maximumFractionDigits: 2,
-    }).format(v || 0);
-  } catch {
-    return `${ccy} ${(v || 0).toFixed(2)}`;
-  }
-}
-
 const lineAmount = (l: Line) =>
   l.qty * l.rate * (1 - (l.discount || 0) / 100);
 
@@ -103,15 +93,47 @@ export default function Quoting() {
   const [invModal, setInvModal] = useState(false);
   const [vat, setVat] = useState(true);
   const [docId, setDocId] = useState<number | undefined>(undefined);
-  const [annotOpen, setAnnotOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
+  const [designing, setDesigning] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+
+  // Close view modal on Escape
+  useEffect(() => {
+    if (!viewOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewOpen]);
+  const quotePreviewRef = useRef<HTMLDivElement>(null);
+  const [pageCount, setPageCount] = useState(1);
   const [savedNote, setSavedNote] = useState(false);
   const [converting, setConverting] = useState(false);
   const navigate = useNavigate();
   const { toast, prompt } = useUI();
+  const quoteRef = useRef<HTMLDivElement>(null);
+  const downloadQuotePdf = () => {
+    if (quoteRef.current) downloadElementAsPdf(quoteRef.current, "quotation");
+    else window.print();
+  };
+
+  // Calculate page count for the full-screen preview
+  useEffect(() => {
+    if (!viewOpen || !quotePreviewRef.current) { setPageCount(1); return; }
+    const el = quotePreviewRef.current;
+    const measure = () => {
+      const contentHeight = el.scrollHeight;
+      const pageHeight = 1027; // A4 at 96dpi minus padding
+      setPageCount(Math.max(1, Math.ceil(contentHeight / pageHeight)));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [viewOpen, lines.length, tpl]);
 
   const loadTemplates = () =>
-    quoteTemplates.list().then(setSaved).catch(() => {});
+    quoteTemplates.list().then(setSaved).catch(() => toast.error("Failed to load templates"));
 
   useEffect(() => {
     billing
@@ -120,15 +142,15 @@ export default function Quoting() {
         setCompany(c);
         if (c?.currency) setCurrency(c.currency);
       })
-      .catch(() => {});
-    crm.customers().then(setCustomers).catch(() => {});
+      .catch(() => toast.error("Failed to load company profile"));
+    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
     loadTemplates();
   }, []);
 
   // Live-sync only the shared lists — re-pulling company here would
   // stomp a currency the user picked while drafting this quote.
   useLiveSync(() => {
-    crm.customers().then(setCustomers).catch(() => {});
+    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
     loadTemplates();
   });
 
@@ -195,6 +217,16 @@ export default function Quoting() {
       : "#E0AE00";
 
   const saveDraft = async () => {
+    // Validate
+    if (!number.trim()) { toast.error("Quotation number is required"); return; }
+    if (!lines.length || lines.every(l => !l.product.trim() && !(l as any).description?.trim())) {
+      toast.error("Add at least one line item with a product or description");
+      return;
+    }
+    if (!customer?.company?.trim() && !customer?.name?.trim() && !customer?.email?.trim()) {
+      toast.error("Customer name or email is required");
+      return;
+    }
     const trn =
       customer?.trn ??
       (customer?.segment?.startsWith("TRN:")
@@ -252,7 +284,131 @@ export default function Quoting() {
     }
   };
 
-  const renderQuoteBody = () => (
+  const renderQuoteBody = () => {
+    const customTemplate = tpl?.startsWith("custom-")
+      ? loadCustomTemplates().find((ct) => ct.id === tpl)
+      : null;
+
+    if (customTemplate?.type === "file" && customTemplate.fileData) {
+      const pw = customTemplate.paperSize === "Letter" ? 816 : 794;
+      const ph = customTemplate.paperSize === "Letter" ? 1056 : 1122;
+      const pos = customTemplate.positions || {};
+      const ac = customTemplate.accent || accent;
+
+      const Section = ({ k, children }: { k: string; children: React.ReactNode }) => {
+        const p = pos[k];
+        if (!p) return null;
+        return (
+          <div
+            className="absolute bg-white/78 backdrop-blur-[2px] rounded-xl px-4 py-3 shadow-sm"
+            style={{ left: `${p.x}%`, top: `${p.y}%` }}
+          >
+            {children}
+          </div>
+        );
+      };
+
+      return (
+        <div
+          className="relative text-neutral-900 overflow-hidden"
+          style={{ width: pw, minHeight: ph, background: "#fff" }}
+        >
+          <img
+            src={customTemplate.fileData}
+            alt="Template background"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ objectFit: "cover", opacity: 0.92 }}
+          />
+
+          <Section k="seller">
+            {company?.logo && <img src={company.logo} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
+            <p className="font-bold text-sm text-neutral-900">{company?.name ?? "Your Company"}</p>
+            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{company?.address}</p>
+            {company?.email && <p className="text-[9px] text-neutral-500 mt-0.5">{company.email}</p>}
+          </Section>
+
+          <Section k="header">
+            <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>QUOTATION</p>
+            <p className="text-xs font-mono text-neutral-800 mt-0.5">{number}</p>
+            <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(date)}</p>
+            <p className="text-[10px] text-neutral-500">Valid Until: {fmtDate(valid)}</p>
+          </Section>
+
+          <Section k="customer">
+            <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Bill To</p>
+            <p className="font-semibold text-xs text-neutral-900">{customer?.company || customer?.name || "Customer"}</p>
+            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{customer?.address}</p>
+            {customer?.email && <p className="text-[9px] text-neutral-500 mt-0.5">{customer.email}</p>}
+          </Section>
+
+          {pos.items && (
+            <div
+              className="absolute bg-white/82 backdrop-blur-[2px] rounded-xl p-4 shadow-sm overflow-auto"
+              style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
+            >
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr style={{ color: ac }} className="border-b-2 text-left">
+                    <th className="py-2">#</th>
+                    <th className="py-2">Item</th>
+                    <th className="py-2 text-right">Qty</th>
+                    <th className="py-2 text-right">Rate</th>
+                    <th className="py-2 text-right">Disc</th>
+                    {vat && <th className="py-2 text-right">Tax</th>}
+                    <th className="py-2 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={i} className="border-b border-neutral-200">
+                      <td className="py-2">{i + 1}</td>
+                      <td className="py-2">
+                        <p className="font-semibold">{l.product || "—"}</p>
+                        <p className="text-neutral-400">{l.sku}</p>
+                      </td>
+                      <td className="py-2 text-right">{l.qty}</td>
+                      <td className="py-2 text-right">{m(l.rate)}</td>
+                      <td className="py-2 text-right">{l.discount}%</td>
+                      {vat && <td className="py-2 text-right">{l.tax}%</td>}
+                      <td className="py-2 text-right font-semibold">{m(lineAmount(l))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {pos.totals && (
+            <div
+              className="absolute bg-white/80 backdrop-blur-[2px] rounded-xl px-4 py-2.5 shadow-sm"
+              style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
+            >
+              <div className="text-xs">
+                <Row k="Subtotal" v={m(totals.subtotal)} />
+                <Row k="Discount" v={`-${m(totals.discount)}`} tone="text-green-600" />
+                {vat && <Row k="Tax" v={m(totals.tax)} />}
+                <div className="flex justify-between py-2 mt-1 font-bold text-sm" style={{ borderTop: `2px solid ${ac}`, color: ac }}>
+                  <span>Total ({currency})</span>
+                  <span>{m(totals.total)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Section k="footer">
+            <p className="text-[10px] text-neutral-600 whitespace-pre-line">{terms}</p>
+          </Section>
+
+          <div className="absolute bottom-2 right-2 z-20">
+            <span className="text-[8px] text-neutral-400 bg-white/60 px-1.5 py-0.5 rounded-full">
+              {customTemplate.name}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
     <>
       <div className="flex justify-between items-start">
         <div className="flex items-center gap-2">
@@ -365,6 +521,7 @@ export default function Quoting() {
       </div>
     </>
   );
+  };
 
   return (
     <div className="animate-fade-up">
@@ -384,21 +541,26 @@ export default function Quoting() {
               <Check size={15} /> Draft saved
             </span>
           )}
-          <button className="btn-ghost" onClick={saveDraft}>
+          <button className="btn-ghost" aria-label="Save Draft" onClick={saveDraft}>
             <Save size={15} /> Save Draft
           </button>
           <button
             className="btn-ghost"
-            onClick={() => setStep(3)}
+            aria-label="View quotation"
+            onClick={() => setViewOpen(true)}
           >
-            <Eye size={15} /> Preview
+            <Eye size={15} /> View
           </button>
-          <button className="btn-ghost" onClick={emailQuote}>
+          <button className="btn-ghost" aria-label="Download PDF" onClick={downloadQuotePdf}>
+            <Download size={15} /> PDF
+          </button>
+          <button className="btn-ghost" aria-label="Email quotation" onClick={emailQuote}>
             <Send size={15} /> Email
           </button>
           {docId ? (
             <button
               className="btn-ghost"
+              aria-label="Convert to Invoice"
               disabled={converting}
               onClick={async () => {
                 setConverting(true);
@@ -421,7 +583,7 @@ export default function Quoting() {
               {converting ? "Converting…" : "Convert to Invoice"}
             </button>
           ) : null}
-          <button className="btn-primary" onClick={() => window.print()}>
+          <button className="btn-primary" aria-label="Generate PDF" onClick={downloadQuotePdf}>
             <Download size={15} /> Generate PDF
           </button>
         </div>
@@ -475,8 +637,11 @@ export default function Quoting() {
               Select a template for your quotation
             </p>
             <div className="flex gap-3 overflow-x-auto pb-1">
-              {TEMPLATES.map((t) => {
+              {[...TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))].map((t) => {
                 const on = tpl === t.id;
+                const isCustom = t.id.startsWith("custom-");
+                const ct = isCustom ? customTemplates.find((c) => c.id === t.id) : null;
+                const isFile = ct?.type === "file";
                 return (
                   <button
                     key={t.id}
@@ -488,32 +653,32 @@ export default function Quoting() {
                     }`}
                   >
                     {on && (
-                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center">
+                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
                         <Check size={11} strokeWidth={3} />
                       </span>
                     )}
-                    <div className="h-24 rounded-md bg-brand-50 border border-brand-100 p-2">
-                      <div className="h-1.5 w-10 rounded bg-brand-300" />
-                      <div className="mt-1 h-1 w-16 rounded bg-brand-200" />
-                      <div className="mt-3 space-y-1">
-                        <div className="h-1 w-full rounded bg-brand-200" />
-                        <div className="h-1 w-2/3 rounded bg-brand-200" />
-                      </div>
-                    </div>
-                    <p className="text-xs font-semibold text-ink mt-2">
+                    <TemplateTilePreview templateId={t.id} customTemplates={customTemplates} />
+                    <p className="text-xs font-semibold text-ink mt-2 flex items-center gap-1">
                       {t.name}
+                      {isFile ? (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
+                          <Upload size={8} /> Uploaded
+                        </span>
+                      ) : isCustom ? (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">Custom</span>
+                      ) : null}
                     </p>
                   </button>
                 );
               })}
               <button
-                onClick={saveTemplate}
+                onClick={() => setDesigning(true)}
                 className="shrink-0 w-32 rounded-xl border-2 border-dashed border-brand-300 grid place-items-center text-brand-500 hover:bg-brand-50 cursor-pointer"
               >
                 <span className="text-center">
                   <Plus size={18} className="mx-auto" />
                   <span className="text-xs font-semibold block mt-1">
-                    Create New Template
+                    + Create Template
                   </span>
                 </span>
               </button>
@@ -775,6 +940,16 @@ export default function Quoting() {
 
         {/* preview */}
         <div className="xl:sticky xl:top-2 space-y-4">
+          {designing && (
+            <TemplateDesigner
+              onSave={(tpl) => {
+                setCustomTemplates((prev) => [...prev, tpl]);
+                setTpl(tpl.id);
+                setDesigning(false);
+              }}
+              onClose={() => setDesigning(false)}
+            />
+          )}
           <div className="card !p-4">
             <div className="no-print flex items-start justify-between mb-3">
               <div>
@@ -783,39 +958,55 @@ export default function Quoting() {
                   This is how your quotation will look
                 </p>
               </div>
-              <button
-                className="btn-ghost text-xs"
-                onClick={() => setAnnotOpen(true)}
-              >
-                <Pencil size={13} /> Edit
-              </button>
             </div>
-            <div className="invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900">
+            <div className="invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900" ref={quoteRef}>
               {renderQuoteBody()}
-              <AnnotationLayer id={`quote:${docId ?? "new"}`} editable={false} />
             </div>
           </div>
 
-          <Modal
-            open={annotOpen}
-            onClose={() => setAnnotOpen(false)}
-            title="Annotate quotation"
-            size="3xl"
-          >
-            <p className="text-xs text-brand-400 mb-3">
-              Use the toolbar (pen, eraser, text, color, brush size, undo,
-              redo) to mark up the quotation. Save when done; changes appear
-              on the preview and printed PDF.
-            </p>
-            <div className="no-print invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900">
-              {renderQuoteBody()}
-              <AnnotationLayer
-                id={`quote:${docId ?? "new"}`}
-                editable
-                onSave={() => setAnnotOpen(false)}
-              />
+          {viewOpen && (
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+              <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-bold text-ink">
+                      Quotation preview
+                    </h2>
+                    <span className="text-xs font-semibold text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
+                      Page 1 of {pageCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn-ghost h-9 text-xs"
+                      onClick={downloadQuotePdf}
+                    >
+                      <Download size={14} /> PDF
+                    </button>
+                    <button
+                      onClick={() => setViewOpen(false)}
+                      className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer"
+                      aria-label="Close"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto p-6">
+                  <div className="mx-auto max-w-5xl">
+                    <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={quotePreviewRef}>
+                      {renderQuoteBody()}
+                    </div>
+                    {pageCount > 1 && (
+                      <p className="text-center text-xs text-brand-400 mt-3 font-medium">
+                        Page 1 of {pageCount} — scroll to see all pages
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </Modal>
+          )}
 
           <div className="card no-print">
             <div className="flex items-center justify-between mb-1">
@@ -862,7 +1053,7 @@ export default function Quoting() {
         onSaved={(c) => {
           setCustomer(c);
           setCustModal(false);
-          crm.customers().then(setCustomers).catch(() => {});
+          crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
         }}
       />
       <InventoryModal
@@ -913,6 +1104,7 @@ function CustomerModal({
   onClose: () => void;
   onSaved: (c: CrmCustomer) => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     company: "",
     name: "",
@@ -1004,7 +1196,8 @@ function CustomerModal({
                 payload as Omit<CrmCustomer, "id" | "created_at">
               );
             } catch (e) {
-              console.error(e);
+              toast.error(e instanceof Error ? e.message : "Failed to create customer");
+              return;
             }
             onSaved({ id: 0, created_at: "", ...payload } as CrmCustomer);
           }}
@@ -1025,10 +1218,11 @@ function InventoryModal({
   onClose: () => void;
   onPick: (p: Product) => void;
 }) {
+  const { toast } = useUI();
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   useEffect(() => {
-    if (open) erp.products().then(setProducts).catch(() => {});
+    if (open) erp.products().then(setProducts).catch(() => toast.error("Failed to load products"));
   }, [open]);
   const filtered = products.filter(
     (p) =>

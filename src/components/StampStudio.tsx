@@ -166,7 +166,7 @@ export default function StampStudio({
             }
             pwdRef.current = pw;
             updatePassword(pw);
-          });
+          }).catch(() => {});
         };
         const pdf = await task.promise;
         if (dead) return;
@@ -231,7 +231,8 @@ export default function StampStudio({
   const lastRef = useRef<{ x: number; y: number } | null>(null);
   const padSeedRef = useRef<string | null>(null); // existing sign to re-edit
   const padXY = (e: React.PointerEvent) => {
-    const c = padRef.current!;
+    const c = padRef.current;
+    if (!c) return { x: 0, y: 0 };
     const r = c.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * c.width, y: ((e.clientY - r.top) / r.height) * c.height };
   };
@@ -316,14 +317,18 @@ export default function StampStudio({
   // Save the current image to the reusable library.
   const saveCurrent = async () => {
     if (!stamp) return;
-    const name = await prompt({
-      title: "Save to your library",
-      label: "Name it so you can reuse it across tools later.",
-      placeholder: isWatermark ? "My watermark" : "My signature",
-    });
-    if (name == null) return;
-    save(name, stamp.src, stamp.ratio);
-    toastRef.current.success("Saved to your library.");
+    try {
+      const name = await prompt({
+        title: "Save to your library",
+        label: "Name it so you can reuse it across tools later.",
+        placeholder: isWatermark ? "My watermark" : "My signature",
+      });
+      if (name == null) return;
+      save(name, stamp.src, stamp.ratio);
+      toastRef.current.success("Saved to your library.");
+    } catch {
+      // prompt cancelled or errored — silently ignore
+    }
   };
 
   // ── Drag / resize ─────────────────────────────────────────────────────────
@@ -428,11 +433,12 @@ export default function StampStudio({
                 className="btn-ghost h-8 text-xs"
                 onClick={() => setPadOpen((v) => !v)}
                 title="Draw your signature"
+                aria-label="Draw mode"
               >
                 <PenLine size={13} /> Draw
               </button>
             )}
-            <label className="btn-ghost h-8 cursor-pointer text-xs">
+            <label className="btn-ghost h-8 cursor-pointer text-xs" aria-label="Upload stamp image">
               <Upload size={13} /> {stamp ? "Change" : `Upload ${noun}`}
               <input
                 type="file"
@@ -445,12 +451,12 @@ export default function StampStudio({
               />
             </label>
             {stamp && (
-              <button className="btn-ghost h-8 text-xs" onClick={saveCurrent} title="Save to your library">
+              <button className="btn-ghost h-8 text-xs" onClick={saveCurrent} title="Save to your library" aria-label="Save stamp to library">
                 <Save size={13} /> Save
               </button>
             )}
             {stamp && (
-              <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove from canvas">
+              <button className="btn-ghost h-8 text-xs" onClick={() => setStamp(null)} title="Remove from canvas" aria-label="Remove stamp from canvas">
                 <Trash2 size={13} /> Remove
               </button>
             )}
@@ -500,7 +506,7 @@ export default function StampStudio({
         >
           <ChevronRight size={14} />
         </button>
-        <button onClick={apply} disabled={saving || !stamp} className="btn-primary h-7 text-xs">
+        <button onClick={apply} disabled={saving || !stamp} className="btn-primary h-7 text-xs" aria-label="Apply stamps and download">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply
         </button>
       </div>
@@ -515,6 +521,7 @@ export default function StampStudio({
               <button
                 onClick={() => setPenMode("draw")}
                 title="Pen"
+                aria-label="Pen tool"
                 className={`grid h-7 w-8 place-items-center ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
               >
                 <PenLine size={13} />
@@ -522,6 +529,7 @@ export default function StampStudio({
               <button
                 onClick={() => setPenMode("erase")}
                 title="Eraser"
+                aria-label="Eraser tool"
                 className={`grid h-7 w-8 place-items-center ${penMode === "erase" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
               >
                 <Eraser size={13} />
@@ -548,10 +556,10 @@ export default function StampStudio({
               title={`${penWidth}px`}
             />
             <span className="ml-auto flex gap-1.5">
-              <button className="btn-ghost h-7 text-xs" onClick={clearPad}>
+              <button className="btn-ghost h-7 text-xs" onClick={clearPad} aria-label="Clear signature pad">
                 Clear
               </button>
-              <button className="btn-primary h-7 text-xs" onClick={usePad}>
+              <button className="btn-primary h-7 text-xs" onClick={usePad} aria-label="Use signature">
                 <Check size={12} /> Use
               </button>
             </span>
@@ -579,6 +587,7 @@ export default function StampStudio({
               <button
                 onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}
                 title={a.name}
+                aria-label="Select saved stamp"
                 className="grid h-12 w-12 place-items-center overflow-hidden rounded-lg border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400 dark:border-[#3A3D45] dark:bg-[#1E2025]"
               >
                 <img src={a.dataUrl} alt={a.name} className="max-h-full max-w-full object-contain" />

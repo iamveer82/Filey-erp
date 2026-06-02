@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   LayoutGrid,
   Download,
-  SquarePen,
   Eye,
   Signature,
   Sparkles,
@@ -16,7 +15,6 @@ import {
   FileText,
   Upload,
   Loader2,
-  X,
   FolderPlus,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -135,8 +133,8 @@ export default function ToolsPage() {
           }))
         )
       )
-      .catch(() => {});
-    usedBytes().then(setUsed).catch(() => {});
+      .catch(() => toast.error("Failed to load recent files"));
+    usedBytes().then(setUsed).catch(() => toast.error("Failed to load storage usage"));
   };
 
   useEffect(() => {
@@ -319,6 +317,7 @@ export default function ToolsPage() {
               ].map((s) => (
                 <button
                   key={s}
+                  aria-label={s}
                   onClick={askFiley}
                   className="flex w-full items-center justify-between rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-semibold text-brand-600 transition hover:border-primary-300 hover:text-ink dark:border-[#3A3D45] dark:bg-[#24262C] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
@@ -525,7 +524,6 @@ function PdfToolWorkspace({
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
   const [savingFiles, setSavingFiles] = useState(false);
-  const [editing, setEditing] = useState(false);
   const canSave = isConfigured && !!user && outs.length > 0;
 
   const saveToMyFiles = async () => {
@@ -549,7 +547,6 @@ function PdfToolWorkspace({
     if (!list) return;
     setFiles(Array.from(list));
     setOuts([]);
-    setEditing(false);
   };
   const run = async () => {
     if (!files.length) {
@@ -725,41 +722,24 @@ function PdfToolWorkspace({
           <div className="card min-h-[480px]">
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-xs font-semibold text-brand-500">
-                {editing ? "Editing" : "Preview"}
+                {firstIsPdf ? (LIVE_PREVIEW_TOOLS.has(tool.id) ? "Live Preview" : "Editor") : "Preview"}
               </p>
-              {firstIsPdf && (
-                <button
-                  onClick={() => setEditing((v) => !v)}
-                  className="btn-ghost h-8 text-xs"
-                  title={
-                    editing
-                      ? "Exit edit mode"
-                      : "Add text, highlight, draw, crop, rotate or delete pages before running the tool"
-                  }
-                >
-                  {editing ? (
-                    <>
-                      <X size={13} /> Close
-                    </>
-                  ) : (
-                    <>
-                      <SquarePen size={13} /> Edit PDF
-                    </>
-                  )}
-                </button>
+              {!firstIsPdf && files.length > 1 && (
+                <span className="text-[11px] text-brand-400">
+                  +{files.length - 1} more file{files.length - 1 > 1 ? "s" : ""}
+                </span>
               )}
             </div>
-            {editing && firstIsPdf ? (
+            {LIVE_PREVIEW_TOOLS.has(tool.id) && firstIsPdf ? (
+              <LivePreview tool={tool} file={files[0]} params={params} />
+            ) : firstIsPdf ? (
               <InlinePdfEditor
                 file={files[0]}
                 onApply={(f) => {
                   replaceFirstFile(f);
                   setOuts([]);
-                  setEditing(false);
                 }}
               />
-            ) : LIVE_PREVIEW_TOOLS.has(tool.id) && firstIsPdf ? (
-              <LivePreview tool={tool} file={files[0]} params={params} />
             ) : (
               <>
                 <FilePreview file={files[0]} />

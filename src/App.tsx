@@ -7,6 +7,7 @@ import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Landing from "./pages/Landing";
+import NotFound from "./pages/NotFound";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
@@ -53,7 +54,7 @@ function AppRoutes() {
         })}
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/suppliers/:id" element={<SupplierDetail />} />
-        <Route path="*" element={<Navigate to="/overview" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

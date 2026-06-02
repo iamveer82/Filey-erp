@@ -82,11 +82,12 @@ export default function Orders() {
         subtitle="Sales orders & fulfilment status"
         action={
           <div className="flex gap-2">
-            <button className="btn-ghost" onClick={() => setOpen(true)}>
+            <button className="btn-ghost" aria-label="Quick order" onClick={() => setOpen(true)}>
               <Plus size={16} /> Quick order
             </button>
             <button
               className="btn-primary"
+              aria-label="Build order"
               onClick={() => setBuildOpen(true)}
             >
               <ShoppingCart size={16} /> Build order
@@ -193,8 +194,12 @@ export default function Orders() {
                 <button
                   className="btn-ghost text-xs"
                   onClick={async () => {
-                    await erp.setOrderStatus(o.id, next);
-                    load();
+                    try {
+                      await erp.setOrderStatus(o.id, next);
+                      load();
+                    } catch (e: any) {
+                      toast.error(e?.message || "Failed to update order status");
+                    }
                   }}
                 >
                   → {next}
@@ -307,6 +312,7 @@ function OrderModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     order_number: "",
     customer_name: "",
@@ -353,9 +359,13 @@ function OrderModal({
           className="btn-primary"
           disabled={!f.customer_name.trim()}
           onClick={async () => {
-            await erp.createOrder(f.order_number, f.customer_name, f.total);
-            onSaved();
-            onClose();
+            try {
+              await erp.createOrder(f.order_number, f.customer_name, f.total);
+              onSaved();
+              onClose();
+            } catch (e: any) {
+              toast.error(e?.message || "Failed to create order");
+            }
           }}
         >
           Save Order

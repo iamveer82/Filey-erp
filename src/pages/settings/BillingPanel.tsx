@@ -29,7 +29,7 @@ export default function BillingPanel() {
         Customers: c.length,
       })
     );
-    getSubscription().then(setSub).catch(() => {});
+    getSubscription().then(setSub).catch((e) => toast.error("Failed to load subscription: " + (e instanceof Error ? e.message : e)));
   }, []);
 
   useEffect(() => {

@@ -3,7 +3,7 @@ import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { useRef, useState } from "react";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
-import { Badge, Field } from "../../components/ui";
+import { Badge, FormField } from "../../components/ui";
 
 /* ---------------- Account & Profile ---------------- */
 
@@ -68,6 +68,11 @@ export default function AccountProfile() {
   const avatarRef = useRef<HTMLInputElement>(null);
   const [savedProfile, setSavedProfile] = useState(false);
   const [savedPrefs, setSavedPrefs] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const setFieldError = (f: string, e: string) =>
+    setFieldErrors((p) => (e ? { ...p, [f]: e } : { ...p, [f]: "" }));
+  const clearFieldErrors = () => setFieldErrors({});
 
   const initials = (p.name || profile?.email || "U")
     .split(" ")
@@ -152,6 +157,10 @@ export default function AccountProfile() {
             <button
               className="btn-primary text-xs"
               onClick={async () => {
+                clearFieldErrors();
+                let hasErr = false;
+                if (!p.name?.trim()) { setFieldError("name", "Full name is required"); hasErr = true; }
+                if (hasErr) return;
                 try {
                   await updateProfile({
                     name: p.name,
@@ -202,29 +211,32 @@ export default function AccountProfile() {
               />
             </div>
             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Full Name *">
+              <FormField label="Full Name" error={fieldErrors.name} required>
                 <input
                   className="input"
                   value={p.name}
-                  onChange={(e) => set("name", e.target.value)}
+                  onChange={(e) => {
+                    set("name", e.target.value);
+                    if (fieldErrors.name) setFieldError("name", "");
+                  }}
                 />
-              </Field>
-              <Field label="Email Address *">
+              </FormField>
+              <FormField label="Email Address" hint="Contact admin to change">
                 <input
                   className="input bg-brand-50"
                   value={profile?.email ?? ""}
                   disabled
                 />
-              </Field>
-              <Field label="Phone Number">
+              </FormField>
+              <FormField label="Phone Number" hint="+971 50 123 4567">
                 <input
                   className="input"
                   placeholder="+971 50 123 4567"
                   value={p.phone}
                   onChange={(e) => set("phone", e.target.value)}
                 />
-              </Field>
-              <Field label="Role">
+              </FormField>
+              <FormField label="Role">
                 <select
                   className="select"
                   value={p.role}
@@ -238,7 +250,7 @@ export default function AccountProfile() {
                     )
                   )}
                 </select>
-              </Field>
+              </FormField>
             </div>
           </div>
         </div>
@@ -313,7 +325,7 @@ export default function AccountProfile() {
             Manage your language, timezone and other preferences
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Language">
+            <FormField label="Language">
               <select
                 className="select"
                 value={p.language}
@@ -325,8 +337,8 @@ export default function AccountProfile() {
                   )
                 )}
               </select>
-            </Field>
-            <Field label="Timezone">
+            </FormField>
+            <FormField label="Timezone">
               <select
                 className="select"
                 value={p.timezone}
@@ -341,8 +353,8 @@ export default function AccountProfile() {
                   <option key={t}>{t}</option>
                 ))}
               </select>
-            </Field>
-            <Field label="Date Format">
+            </FormField>
+            <FormField label="Date Format">
               <select
                 className="select"
                 value={p.date_format}
@@ -352,8 +364,8 @@ export default function AccountProfile() {
                   <option key={d}>{d}</option>
                 ))}
               </select>
-            </Field>
-            <Field label="Time Format">
+            </FormField>
+            <FormField label="Time Format">
               <select
                 className="select"
                 value={p.time_format}
@@ -363,7 +375,7 @@ export default function AccountProfile() {
                   <option key={t}>{t}</option>
                 ))}
               </select>
-            </Field>
+            </FormField>
           </div>
           <div className="flex items-center justify-end gap-3 mt-4">
             {savedPrefs && (
@@ -404,22 +416,22 @@ export default function AccountProfile() {
           Update your password to keep your account secure
         </p>
         <div className="space-y-3">
-          <Field label="Current Password">
+          <FormField label="Current Password">
             <PwInput
               val={cur}
               onChange={setCur}
               shown={show.c}
               toggle={() => setShow({ ...show, c: !show.c })}
             />
-          </Field>
-          <Field label="New Password">
+          </FormField>
+          <FormField label="New Password">
             <PwInput
               val={npw}
               onChange={setNpw}
               shown={show.n}
               toggle={() => setShow({ ...show, n: !show.n })}
             />
-          </Field>
+          </FormField>
           <ul className="space-y-1.5">
             {PW_RULES.map((r) => {
               const ok = r.test(npw);
@@ -444,14 +456,14 @@ export default function AccountProfile() {
               );
             })}
           </ul>
-          <Field label="Confirm New Password">
+          <FormField label="Confirm New Password">
             <PwInput
               val={cpw}
               onChange={setCpw}
               shown={show.k}
               toggle={() => setShow({ ...show, k: !show.k })}
             />
-          </Field>
+          </FormField>
           {pwMsg && (
             <p
               className={`text-xs font-semibold rounded-lg px-3 py-2 ${

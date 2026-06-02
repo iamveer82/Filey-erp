@@ -202,10 +202,10 @@ export default function ScanDocModal({
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-ghost" onClick={reset}>
+            <button className="btn-ghost" onClick={reset} aria-label="Scan another document">
               Scan another
             </button>
-            <button className="btn-primary" onClick={createDraft} disabled={creating}>
+            <button className="btn-primary" onClick={createDraft} disabled={creating} aria-label="Create draft invoice from scan">
               {creating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               Create draft invoice
             </button>

@@ -13,7 +13,6 @@ import {
   Copy,
   Check,
   CheckCircle2,
-  Eye,
   Send,
   Monitor,
   Smartphone,
@@ -24,6 +23,7 @@ import {
   CreditCard,
   Sparkles,
   Repeat,
+  Maximize2,
 } from "lucide-react";
 import {
   billing,
@@ -38,13 +38,15 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput, CURRENCIES } from "../lib/format";
+import { fmtDate, money, numInput, CURRENCIES } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
-import AnnotationLayer from "../components/AnnotationLayer";
+import { downloadElementAsPdf } from "../lib/pdfTools";
 import ScanDocModal from "../components/ScanDocModal";
+import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
   PageHeader,
   DataTable,
@@ -74,18 +76,6 @@ const TEMPLATES = [
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
-
-function money(v: number, ccy: string) {
-  try {
-    return new Intl.NumberFormat("en", {
-      style: "currency",
-      currency: ccy,
-      maximumFractionDigits: 2,
-    }).format(v || 0);
-  } catch {
-    return `${ccy} ${(v || 0).toFixed(2)}`;
-  }
-}
 
 function blankForm(c: CompanyProfile): Form {
   const y = new Date().getFullYear();
@@ -129,14 +119,13 @@ export default function Invoicing() {
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
-
   const loadDocs = () =>
-    billing.listDocs().then(setDocs).catch(console.error);
+    billing.listDocs().then(setDocs).catch(() => toast.error("Failed to load documents"));
   const loadRecurs = () =>
-    recurrences.list().then(setRecurs).catch(() => {});
+    recurrences.list().then(setRecurs).catch(() => toast.error("Failed to load recurrences"));
 
   const reload = () => {
-    billing.getCompany().then(setCompany).catch(console.error);
+    billing.getCompany().then(setCompany).catch(() => toast.error("Failed to load company profile"));
     loadDocs();
     loadRecurs();
   };
@@ -154,7 +143,7 @@ export default function Invoicing() {
           toast.info(`${n} recurring invoice${n > 1 ? "s" : ""} generated`);
         }
       })
-      .catch(() => {});
+      .catch(() => toast.error("Failed to generate recurring invoices"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -172,74 +161,97 @@ export default function Invoicing() {
   };
 
   const editInvoice = async (id: number) => {
-    const d = await billing.getDoc(id);
-    setForm({
-      id: d.id,
-      number: d.number,
-      status: d.status,
-      doc_type: d.doc_type,
-      template: d.template,
-      accent: d.accent,
-      currency: d.currency,
-      seller_name: d.seller_name,
-      seller_address: d.seller_address,
-      seller_trn: d.seller_trn,
-      seller_email: d.seller_email,
-      seller_phone: d.seller_phone,
-      logo: d.logo,
-      customer_name: d.customer_name,
-      customer_address: d.customer_address,
-      customer_trn: d.customer_trn,
-      customer_email: d.customer_email,
-      issue_date: d.issue_date,
-      due_date: d.due_date,
-      notes: d.notes,
-      terms: d.terms,
-      tax_rate: d.tax_rate,
-      discount: d.discount,
-      items: d.items.map((i) => ({
-        description: i.description,
-        qty: i.qty,
-        unit_price: i.unit_price,
-      })),
-    });
+    try {
+      const d = await billing.getDoc(id);
+      setForm({
+        id: d.id,
+        number: d.number,
+        status: d.status,
+        doc_type: d.doc_type,
+        template: d.template,
+        accent: d.accent,
+        currency: d.currency,
+        seller_name: d.seller_name,
+        seller_address: d.seller_address,
+        seller_trn: d.seller_trn,
+        seller_email: d.seller_email,
+        seller_phone: d.seller_phone,
+        logo: d.logo,
+        customer_name: d.customer_name,
+        customer_address: d.customer_address,
+        customer_trn: d.customer_trn,
+        customer_email: d.customer_email,
+        issue_date: d.issue_date,
+        due_date: d.due_date,
+        notes: d.notes,
+        terms: d.terms,
+        tax_rate: d.tax_rate,
+        discount: d.discount,
+        items: d.items.map((i) => ({
+          description: i.description,
+          qty: i.qty,
+          unit_price: i.unit_price,
+        })),
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to load invoice");
+    }
   };
 
   const duplicateInvoice = async (id: number) => {
-    const d = await billing.getDoc(id);
-    const y = new Date().getFullYear();
-    setForm({
-      number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
-      status: "draft",
-      template: d.template,
-      accent: d.accent,
-      currency: d.currency,
-      seller_name: d.seller_name,
-      seller_address: d.seller_address,
-      seller_trn: d.seller_trn,
-      seller_email: d.seller_email,
-      seller_phone: d.seller_phone,
-      logo: d.logo,
-      customer_name: d.customer_name,
-      customer_address: d.customer_address,
-      customer_trn: d.customer_trn,
-      customer_email: d.customer_email,
-      issue_date: today(),
-      due_date: addDays(30),
-      notes: d.notes,
-      terms: d.terms,
-      tax_rate: d.tax_rate,
-      discount: d.discount,
-      items: d.items.map((i) => ({
-        description: i.description,
-        qty: i.qty,
-        unit_price: i.unit_price,
-      })),
-    });
+    try {
+      const d = await billing.getDoc(id);
+      const y = new Date().getFullYear();
+      setForm({
+        number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+        status: "draft",
+        template: d.template,
+        accent: d.accent,
+        currency: d.currency,
+        seller_name: d.seller_name,
+        seller_address: d.seller_address,
+        seller_trn: d.seller_trn,
+        seller_email: d.seller_email,
+        seller_phone: d.seller_phone,
+        logo: d.logo,
+        customer_name: d.customer_name,
+        customer_address: d.customer_address,
+        customer_trn: d.customer_trn,
+        customer_email: d.customer_email,
+        issue_date: today(),
+        due_date: addDays(30),
+        notes: d.notes,
+        terms: d.terms,
+        tax_rate: d.tax_rate,
+        discount: d.discount,
+        items: d.items.map((i) => ({
+          description: i.description,
+          qty: i.qty,
+          unit_price: i.unit_price,
+        })),
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to duplicate invoice");
+    }
   };
 
   const save = async () => {
     if (!form) return;
+    // Validate
+    if (!form.number.trim()) { toast.error("Invoice number is required"); return; }
+    if (!form.items.length || form.items.every(i => !i.description.trim())) {
+      toast.error("Add at least one line item with a description");
+      return;
+    }
+    if (!form.customer_name.trim() && !(form.customer_email || "").trim()) {
+      toast.error("Customer name or email is required");
+      return;
+    }
+    // Check for duplicate invoice number
+    if (docs.some(d => d.number === form.number && d.id !== (form.id || 0))) {
+      toast.error(`Invoice number "${form.number}" already exists. Use a different number.`);
+      return;
+    }
     setSaving(true);
     try {
       // Empty date inputs must become undefined, not "" (invalid SQL date).
@@ -263,6 +275,21 @@ export default function Invoicing() {
   // saved id is applied to the form without a stale closure.
   const setDocStatus = async (status: "draft" | "sent") => {
     if (!form) return;
+    // Validate
+    if (!form.number.trim()) { toast.error("Invoice number is required"); return; }
+    if (!form.items.length || form.items.every(i => !i.description.trim())) {
+      toast.error("Add at least one line item with a description");
+      return;
+    }
+    if (!form.customer_name.trim() && !(form.customer_email || "").trim()) {
+      toast.error("Customer name or email is required");
+      return;
+    }
+    // Check for duplicate invoice number
+    if (docs.some(d => d.number === form.number && d.id !== (form.id || 0))) {
+      toast.error(`Invoice number "${form.number}" already exists. Use a different number.`);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -345,8 +372,19 @@ export default function Invoicing() {
                     <button
                       className="cursor-pointer text-xs font-semibold text-brand-400 hover:text-danger"
                       onClick={async () => {
-                        await recurrences.cancel(r.id);
-                        loadRecurs();
+                        const ok = await confirm({
+                          title: "Cancel recurring invoice",
+                          message: `Cancel this recurring invoice? No more invoices will be generated.`,
+                          confirmLabel: "Cancel recurrence",
+                          danger: true,
+                        });
+                        if (!ok) return;
+                        try {
+                          await recurrences.cancel(r.id);
+                          loadRecurs();
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed to cancel recurrence");
+                        }
                       }}
                     >
                       Cancel
@@ -523,8 +561,10 @@ export default function Invoicing() {
                   aria-label="Delete"
                   className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
+                    if (!(await confirm({ title: "Delete invoice", message: `Delete ${d.number}? This cannot be undone.` }))) return;
                     await billing.deleteDoc(d.id);
                     loadDocs();
+                    toast.success(`Deleted ${d.number}`);
                   }}
                 >
                   <Trash2 size={15} />
@@ -569,7 +609,7 @@ function PaymentsModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [rows, setRows] = useState<InvoicePayment[]>([]);
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState("bank transfer");
@@ -605,6 +645,7 @@ function PaymentsModal({
   };
 
   const remove = async (id: number) => {
+    if (!(await confirm({ title: "Remove payment", message: "Remove this payment record? This cannot be undone." }))) return;
     try {
       await billing.removePayment(id);
       load();
@@ -727,8 +768,17 @@ function Editor({
   saving: boolean;
 }) {
   const { toast } = useUI();
+  const invoiceRef = useRef<HTMLDivElement>(null);
+  const downloadPdf = () => {
+    if (invoiceRef.current) downloadElementAsPdf(invoiceRef.current, form.number || "invoice");
+    else window.print();
+  };
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setForm({ ...form, [k]: v });
+
+  const [designing, setDesigning] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const allTemplates = [...TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))];
 
   const setItem = (idx: number, patch: Partial<Item>) => {
     const items = form.items.map((it, i) =>
@@ -754,7 +804,7 @@ function Editor({
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [custModal, setCustModal] = useState(false);
   const loadCustomers = () =>
-    crm.customers().then(setCustomers).catch(() => {});
+    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
   useEffect(() => {
     loadCustomers();
   }, []);
@@ -776,10 +826,36 @@ function Editor({
   const [viewAll, setViewAll] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const [annotOpen, setAnnotOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const viewPreviewRef = useRef<HTMLDivElement>(null);
+  const [pageCount, setPageCount] = useState(1);
+
+  // Close view modal on Escape
+  useEffect(() => {
+    if (!viewOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewOpen]);
+
+  // Calculate page count for the full-screen preview
+  useEffect(() => {
+    if (!viewOpen || !viewPreviewRef.current) { setPageCount(1); return; }
+    const el = viewPreviewRef.current;
+    const measure = () => {
+      const contentHeight = el.scrollHeight;
+      const pageHeight = 1027; // A4 at 96dpi minus padding
+      setPageCount(Math.max(1, Math.ceil(contentHeight / pageHeight)));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [viewOpen, form.items.length, form.template]);
+
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
   const m = (v: number) => money(v, form.currency || "AED");
-  const shown = viewAll ? TEMPLATES : TEMPLATES.slice(0, 5);
+  const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
 
   const saveAndSend = async () => {
     await onSave();
@@ -869,9 +945,15 @@ function Editor({
           )}
           <button
             className="btn-ghost"
-            onClick={() => window.print()}
+            onClick={() => setViewOpen(true)}
           >
-            <Eye size={15} /> Preview
+            <Maximize2 size={15} /> View
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={downloadPdf}
+          >
+            <Download size={15} /> PDF
           </button>
           <button
             className="btn-ghost"
@@ -930,12 +1012,20 @@ function Editor({
             title="Choose Template"
             subtitle="Select a template for your invoice"
             action={
-              <button
-                className="btn-ghost text-xs"
-                onClick={() => setViewAll((v) => !v)}
-              >
-                {viewAll ? "Show less" : "View all templates"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={() => setViewAll((v) => !v)}
+                >
+                  {viewAll ? "Show less" : "View all templates"}
+                </button>
+                <button
+                  className="btn-ghost text-xs flex items-center gap-1"
+                  onClick={() => setDesigning(true)}
+                >
+                  <Plus size={13} /> Create Template
+                </button>
+              </div>
             }
           >
             <div
@@ -947,6 +1037,9 @@ function Editor({
             >
               {shown.map((tpl) => {
                 const active = form.template === tpl.id;
+                const isCustom = tpl.id.startsWith("custom-");
+                const ct = isCustom ? customTemplates.find((c) => c.id === tpl.id) : null;
+                const isFile = ct?.type === "file";
                 return (
                   <button
                     key={tpl.id}
@@ -958,22 +1051,20 @@ function Editor({
                     }`}
                   >
                     {active && (
-                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center">
+                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
                         <Check size={11} strokeWidth={3} />
                       </span>
                     )}
-                    <div className="h-24 rounded-md bg-brand-50 border border-brand-100 p-2 overflow-hidden">
-                      <div className="h-1.5 w-10 rounded bg-brand-300" />
-                      <div className="mt-1 h-1 w-16 rounded bg-brand-200" />
-                      <div className="mt-3 space-y-1">
-                        <div className="h-1 w-full rounded bg-brand-200" />
-                        <div className="h-1 w-full rounded bg-brand-200" />
-                        <div className="h-1 w-2/3 rounded bg-brand-200" />
-                      </div>
-                      <div className="mt-2 ml-auto h-1.5 w-10 rounded bg-primary-300" />
-                    </div>
-                    <p className="text-xs font-semibold text-ink mt-2 capitalize">
+                    <TemplateTilePreview templateId={tpl.id} customTemplates={customTemplates} />
+                    <p className="text-xs font-semibold text-ink mt-2 capitalize flex items-center gap-1">
                       {tpl.name}
+                      {isFile ? (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
+                          <Upload size={8} /> Uploaded
+                        </span>
+                      ) : isCustom ? (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">Custom</span>
+                      ) : null}
                     </p>
                   </button>
                 );
@@ -1363,8 +1454,22 @@ function Editor({
           </Step>
         </div>
 
-        {/* ---------- right: live preview ---------- */}
-        <div className="xl:sticky xl:top-2">
+        {/* ---------- right: sticky panel (preview + template designer) ---------- */}
+        <div className="xl:sticky xl:top-2 space-y-3">
+          {/* Template Designer — shown above preview when creating */}
+          {designing && (
+            <TemplateDesigner
+              onSave={(tpl) => {
+                setCustomTemplates((prev) => [...prev, tpl]);
+                // Select the new template immediately
+                set("template", tpl.id);
+                setDesigning(false);
+              }}
+              onClose={() => setDesigning(false)}
+            />
+          )}
+
+          {/* Live Preview — always visible */}
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
               <div>
@@ -1378,23 +1483,15 @@ function Editor({
                   This is how your invoice will look
                 </p>
               </div>
-              <button
-                className="btn-ghost text-xs"
-                onClick={() => setAnnotOpen(true)}
-              >
-                <Pencil size={13} /> Edit
-              </button>
             </div>
 
             <FitPreview
               baseWidth={device === "desktop" ? 794 : 420}
               zoom={zoom}
             >
-              <InvoiceView form={form} />
-              <AnnotationLayer
-                id={`invoice:${form.id ?? form.number}`}
-                editable={false}
-              />
+              <div ref={invoiceRef}>
+                <InvoiceView form={form} />
+              </div>
             </FitPreview>
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
@@ -1451,7 +1548,7 @@ function Editor({
                 </button>
                 <button
                   className="btn-primary text-xs"
-                  onClick={() => window.print()}
+                  onClick={downloadPdf}
                 >
                   <Download size={14} /> PDF
                 </button>
@@ -1461,28 +1558,49 @@ function Editor({
         </div>
       </div>
 
-      <Modal
-        open={annotOpen}
-        onClose={() => setAnnotOpen(false)}
-        title="Annotate invoice"
-        size="3xl"
-      >
-        <p className="text-xs text-brand-400 mb-3">
-          Use the toolbar (pen, eraser, text, color, brush size, undo,
-          redo) to mark up the invoice. Save when done; changes appear on
-          the preview and printed PDF.
-        </p>
-        <div className="no-print">
-          <FitPreview baseWidth={794} zoom={70}>
-            <InvoiceView form={form} />
-            <AnnotationLayer
-              id={`invoice:${form.id ?? form.number}`}
-              editable
-              onSave={() => setAnnotOpen(false)}
-            />
-          </FitPreview>
+      {viewOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+          <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-bold text-ink">
+                  {form.number || "Invoice preview"}
+                </h2>
+                <span className="text-xs font-semibold text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
+                  Page 1 of {pageCount}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-ghost h-9 text-xs"
+                  onClick={downloadPdf}
+                >
+                  <Download size={14} /> PDF
+                </button>
+                <button
+                  onClick={() => setViewOpen(false)}
+                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="mx-auto max-w-5xl">
+                <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={viewPreviewRef}>
+                  <InvoiceView form={form} />
+                </div>
+                {pageCount > 1 && (
+                  <p className="text-center text-xs text-brand-400 mt-3 font-medium">
+                    Page 1 of {pageCount} — scroll to see all pages
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }
@@ -1532,6 +1650,7 @@ function CustomerModal({
   onClose: () => void;
   onSaved: (c: CrmCustomer) => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     company: "",
     name: "",
@@ -1643,9 +1762,9 @@ function CustomerModal({
                 payload as Omit<CrmCustomer, "id" | "created_at">
               );
             } catch (e) {
-              console.error(e);
-            } finally {
+              toast.error(e instanceof Error ? e.message : "Failed to create customer");
               setSaving(false);
+              return;
             }
             onSaved({
               id: 0,
@@ -1667,7 +1786,17 @@ function InvoiceView({ form }: { form: Form }) {
   const t = totals(form);
   const ccy = form.currency || "AED";
   const m = (v: number) => money(v, ccy);
-  const a = form.accent || "#222222";
+
+  // Resolve custom templates to their base layout for rendering
+  const templateId = form.template?.startsWith("custom-")
+    ? (loadCustomTemplates().find((ct) => ct.id === form.template)?.layout || "modern")
+    : form.template;
+
+  // Override accent color for custom templates
+  const resolvedAccent = form.template?.startsWith("custom-")
+    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.accent || (form.accent || "#222222")
+    : (form.accent || "#222222");
+  const a = resolvedAccent;
 
   const Items = ({
     headerBg,
@@ -1746,8 +1875,106 @@ function InvoiceView({ form }: { form: Form }) {
       />
     ) : null;
 
+  // --- File-based (uploaded image/PDF) template ---
+  const customTemplate = form.template?.startsWith("custom-")
+    ? loadCustomTemplates().find((ct) => ct.id === form.template)
+    : null;
+
+  if (customTemplate?.type === "file" && customTemplate.fileData) {
+    const pw = customTemplate.paperSize === "Letter" ? 816 : 794;
+    const ph = customTemplate.paperSize === "Letter" ? 1056 : 1122;
+    const pos = customTemplate.positions || {};
+    const ac = customTemplate.accent || a;
+
+    // Helper: position a section using %-based coords
+    const Section = ({ k, children }: { k: string; children: React.ReactNode }) => {
+      const p = pos[k];
+      if (!p) return null;
+      return (
+        <div
+          className="absolute bg-white/78 backdrop-blur-[2px] rounded-xl px-4 py-3 shadow-sm"
+          style={{ left: `${p.x}%`, top: `${p.y}%` }}
+        >
+          {children}
+        </div>
+      );
+    };
+
+    return (
+      <div
+        className="relative text-neutral-900 overflow-hidden"
+        style={{ width: pw, minHeight: ph, background: "#fff" }}
+      >
+        {/* Background image */}
+        <img
+          src={customTemplate.fileData}
+          alt="Template background"
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ objectFit: "cover", opacity: 0.92 }}
+        />
+
+        {/* Seller — Company Info */}
+        <Section k="seller">
+          {form.logo && <img src={form.logo} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
+          <p className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
+          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.seller_address}</p>
+          {form.seller_trn && <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.seller_trn}</p>}
+        </Section>
+
+        {/* Header — Invoice title + number + dates */}
+        <Section k="header">
+          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>INVOICE</p>
+          <p className="text-xs font-mono text-neutral-800 mt-0.5">{form.number}</p>
+          <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(form.issue_date)}</p>
+          {form.due_date && <p className="text-[10px] text-neutral-500">Due: {fmtDate(form.due_date)}</p>}
+        </Section>
+
+        {/* Customer — Bill To */}
+        <Section k="customer">
+          <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Bill To</p>
+          <p className="font-semibold text-xs text-neutral-900">{form.customer_name}</p>
+          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.customer_address}</p>
+          {form.customer_trn && <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.customer_trn}</p>}
+        </Section>
+
+        {/* Items table */}
+        {pos.items && (
+          <div
+            className="absolute bg-white/82 backdrop-blur-[2px] rounded-xl p-4 shadow-sm overflow-auto"
+            style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
+          >
+            <Items headerBg={ac} />
+          </div>
+        )}
+
+        {/* Totals */}
+        {pos.totals && (
+          <div
+            className="absolute bg-white/80 backdrop-blur-[2px] rounded-xl px-4 py-2.5 shadow-sm"
+            style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
+          >
+            <Totals />
+          </div>
+        )}
+
+        {/* Footer — Notes/Terms */}
+        <Section k="footer">
+          {form.notes && <p className="text-[10px] text-neutral-600">{form.notes}</p>}
+          {form.terms && <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
+        </Section>
+
+        {/* Badge */}
+        <div className="absolute bottom-2 right-2 z-20">
+          <span className="text-[8px] text-neutral-400 bg-white/60 px-1.5 py-0.5 rounded-full">
+            {customTemplate.name}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   // ---- MINIMAL ----
-  if (form.template === "minimal") {
+  if (templateId === "minimal") {
     return (
       <div className="text-neutral-900">
         <div className="flex justify-between items-start">
@@ -1803,7 +2030,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- CLASSIC ----
-  if (form.template === "classic") {
+  if (templateId === "classic") {
     return (
       <div className="text-neutral-900">
         <div
@@ -1925,7 +2152,7 @@ function InvoiceView({ form }: { form: Form }) {
     );
 
   // ---- CORPORATE ----
-  if (form.template === "corporate") {
+  if (templateId === "corporate") {
     return (
       <div className="text-neutral-900">
         <div className="flex justify-between items-start border-b-4 pb-5" style={{ borderColor: a }}>
@@ -1981,7 +2208,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- ELEGANT ----
-  if (form.template === "elegant") {
+  if (templateId === "elegant") {
     return (
       <div className="text-neutral-800 font-serif">
         <div className="text-center">
@@ -2023,7 +2250,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- BOLD ----
-  if (form.template === "bold") {
+  if (templateId === "bold") {
     return (
       <div className="text-neutral-900">
         <div
@@ -2064,7 +2291,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- TECH ----
-  if (form.template === "tech") {
+  if (templateId === "tech") {
     return (
       <div className="text-neutral-900 font-mono">
         <div className="flex justify-between items-start">
@@ -2104,7 +2331,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- CREATIVE ----
-  if (form.template === "creative") {
+  if (templateId === "creative") {
     return (
       <div className="text-neutral-900 relative overflow-hidden">
         <div
@@ -2155,7 +2382,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- RECEIPT ----
-  if (form.template === "receipt") {
+  if (templateId === "receipt") {
     return (
       <div className="text-neutral-900 max-w-sm mx-auto text-center">
         <Initial size={44} />
@@ -2189,7 +2416,7 @@ function InvoiceView({ form }: { form: Form }) {
   }
 
   // ---- MONOGRAM ----
-  if (form.template === "monogram") {
+  if (templateId === "monogram") {
     return (
       <div className="text-neutral-900">
         <div className="flex flex-col items-center">
@@ -2364,7 +2591,7 @@ function CompanyModal({
                 setC({ ...c, default_template: e.target.value })
               }
             >
-              {TEMPLATES.map((t) => (
+              {[...TEMPLATES, ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name }))].map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>

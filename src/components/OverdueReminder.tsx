@@ -28,7 +28,7 @@ export default function OverdueReminder() {
         }
         sessionStorage.setItem(FLAG, "1");
       })
-      .catch(() => {});
+      .catch((e) => console.error("Failed to check overdue invoices:", e));
     return () => {
       active = false;
     };

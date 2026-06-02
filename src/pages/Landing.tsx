@@ -1,4 +1,5 @@
-import { motion } from "framer-motion";
+import { motion, useInView, animate } from "framer-motion";
+import { useEffect, useRef } from "react";
 import {
   ArrowRight,
   Boxes,
@@ -54,16 +55,36 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string }[] = [
 ];
 
 const STATS = [
-  ["14", "modules"],
-  ["95+", "document tools"],
-  ["1", "place for everything"],
+  [14, "modules"],
+  [95, "document tools"],
+  [1, "place for everything"],
 ];
+
+/** Animated counter — counts from 0 to target when scrolled into view. */
+function CountUp({ target, suffix = "" }: { target: number; suffix?: string }) {
+  const nodeRef = useRef<HTMLSpanElement>(null);
+  const inView = useInView(nodeRef, { once: true, margin: "-60px" });
+  useEffect(() => {
+    if (!inView) return;
+    const controls = animate(0, target, {
+      duration: 1.2,
+      ease: [0.2, 0, 0.2, 1],
+      onUpdate(v) {
+        if (nodeRef.current) {
+          nodeRef.current.textContent = `${Math.round(v)}${suffix}`;
+        }
+      },
+    });
+    return () => controls.stop();
+  }, [inView, target, suffix]);
+  return <span ref={nodeRef}>0{suffix}</span>;
+}
 
 export default function Landing({ onGetStarted }: { onGetStarted: () => void }) {
   return (
     <div className="min-h-full overflow-y-auto bg-canvas text-ink font-sans">
       {/* ───────── Nav ───────── */}
-      <header className="sticky top-0 z-40 border-b border-brand-200/70 bg-white/70 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-brand-200/70 bg-white/70 backdrop-blur-xl dark:bg-[#161618]/70 dark:border-[#3A3D45]/70">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <Logo size={34} />
@@ -73,12 +94,13 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           </div>
           <div className="flex items-center gap-2">
             <button
+              aria-label="Sign in"
               onClick={onGetStarted}
               className="btn-ghost hidden h-9 sm:inline-flex"
             >
               Sign in
             </button>
-            <button onClick={onGetStarted} className="btn-primary h-9">
+            <button aria-label="Get started" onClick={onGetStarted} className="btn-primary h-9">
               Get started
             </button>
           </div>
@@ -100,7 +122,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-semibold text-brand-600 shadow-sm shadow-black/5"
+            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white dark:bg-[#24262C] dark:border-[#3A3D45] px-3 py-1 text-xs font-semibold text-brand-600 shadow-sm shadow-black/5"
           >
             <Sparkles size={13} className="text-primary-600" />
             AI-powered business suite
@@ -114,7 +136,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           >
             Run your whole business
             <br className="hidden sm:block" />{" "}
-            in <span className="text-gradient">one place</span>
+            in <span className="text-gradient-animated font-extrabold">one place</span>
           </motion.h1>
 
           <motion.p
@@ -160,40 +182,41 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           transition={{ duration: 0.6, delay: 0.25 }}
           className="relative mx-auto -mb-10 max-w-5xl px-6"
         >
-          <div className="overflow-hidden rounded-2xl border border-brand-200 bg-white shadow-bento-hover">
+          <div className="overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#24262C] dark:border-[#3A3D45] shadow-bento-hover hover:shadow-xl hover:shadow-primary-200/30 transition-shadow duration-500">
             <div className="flex items-center gap-1.5 border-b border-brand-100 px-4 py-2.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-200" />
-              <span className="ml-3 text-[11px] font-medium text-brand-400">
-                app.filey — Overview
+              <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              <span className="ml-2 text-[11px] font-medium text-brand-400">
+                app.filey — Dashboard
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
-              {[
-                ["Total items", "1,284"],
-                ["Inventory value", "AED 482k"],
-                ["Open orders", "37"],
-                ["Overdue", "4"],
-              ].map(([l, v]) => (
-                <div key={l} className="rounded-xl border border-brand-100 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-400">
-                    {l}
-                  </p>
-                  <p className="mt-1 font-display text-xl font-bold tracking-tight">
-                    {v}
-                  </p>
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base">Welcome back, Acme Corp</h3>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Connected
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[["Total Items","1,284","+12%","success"],["Inventory Value","AED 482k","+4%","success"],["Open Orders","37","+8","warning"],["Overdue","4","-1","danger"]].map(([label,value,delta,tone]) => (
+                  <div key={label} className="rounded-xl border border-brand-100 bg-white dark:bg-[#24262C] dark:border-[#2A2C33] p-3 hover:shadow-sm transition-shadow">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-400">{label}</p>
+                    <p className="mt-1 font-bold text-lg tabular-nums">{value}</p>
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${
+                      tone==="success"?"text-emerald-600":tone==="warning"?"text-amber-600":"text-red-500"
+                    }`}><ArrowRight size={12}/> {delta}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-brand-100 bg-gradient-to-r from-brand-50 to-white dark:from-white/5 dark:to-[#24262C] dark:border-[#2A2C33] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-400 mb-3">Monthly Revenue</p>
+                <div className="flex items-end gap-1.5 h-20">
+                  {[35,48,52,62,58,44,70,65,78,85,72,90].map((h,i)=>(
+                    <div key={i} className="flex-1 rounded-sm bg-gradient-to-t from-primary-400 to-primary-300" style={{height:`${h*0.22}%`}}/>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className="flex items-end gap-2 px-4 pb-5">
-              {[40, 64, 52, 78, 60, 88, 72, 96, 70].map((h, i) => (
-                <div
-                  key={i}
-                  className="flex-1 rounded-t-md bg-primary-300"
-                  style={{ height: h }}
-                />
-              ))}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -218,7 +241,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-60px" }}
               transition={{ duration: 0.45, delay: (i % 3) * 0.06 }}
-              className="card card-hover"
+              className="card card-hover hover:ring-1 hover:ring-primary-300/40 hover:shadow-lg hover:shadow-primary-100/30 transition-all duration-300"
             >
               <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-100 text-primary-700">
                 <f.icon size={20} />
@@ -236,12 +259,12 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         {/* stats */}
         <motion.div
           {...fadeUp}
-          className="mt-10 grid grid-cols-3 gap-4 rounded-2xl border border-brand-200 bg-white p-6 text-center shadow-bento"
+          className="mt-10 grid grid-cols-3 gap-4 rounded-2xl border border-brand-200 bg-white dark:bg-[#24262C] dark:border-[#3A3D45] p-6 text-center shadow-bento"
         >
           {STATS.map(([n, l]) => (
             <div key={l}>
               <p className="font-display text-3xl font-extrabold tracking-tight">
-                {n}
+                <CountUp target={Number(n)} suffix={l === "document tools" ? "+" : ""} />
               </p>
               <p className="mt-1 text-xs font-medium text-brand-400">{l}</p>
             </div>

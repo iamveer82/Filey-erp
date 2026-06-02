@@ -17,6 +17,7 @@ import {
 } from "../components/ui";
 
 export default function Purchase() {
+  const { confirm, toast } = useUI();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -168,8 +169,10 @@ export default function Purchase() {
                     aria-label="Delete purchase"
                     className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
+                      if (!(await confirm({ title: "Delete purchase", message: "Delete this purchase record? This cannot be undone." }))) return;
                       await fin.deleteExpense(e.id);
                       load();
+                      toast.success("Purchase deleted");
                     }}
                   >
                     <Trash2 size={16} />

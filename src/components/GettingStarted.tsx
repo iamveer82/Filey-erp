@@ -12,19 +12,26 @@ const KEY = "filey.onboarding.dismissed";
 export default function GettingStarted({
   hasProducts,
   hasInvoices,
+  hasCustomers,
+  hasQuotations,
 }: {
   hasProducts: boolean;
   hasInvoices: boolean;
+  hasCustomers?: boolean;
+  hasQuotations?: boolean;
 }) {
   const nav = useNavigate();
   const [dismissed, setDismissed] = useState(() => !!localStorage.getItem(KEY));
 
   const steps = [
     { done: aiReady(), label: "Connect your AI assistant", to: "/settings?section=ai" },
-    { done: hasProducts, label: "Add your first product", to: "/inventory" },
+    { done: hasProducts, label: "Add your first product", to: "/inventory?new=1" },
+    { done: hasCustomers ?? false, label: "Add a customer", to: "/crm" },
+    { done: hasQuotations ?? false, label: "Send a quotation", to: "/quoting" },
     { done: hasInvoices, label: "Create an invoice", to: "/invoicing" },
   ];
-  const allDone = steps.every((s) => s.done);
+  const doneCount = steps.filter((s) => s.done).length;
+  const allDone = doneCount === steps.length;
   if (dismissed || allDone) return null;
 
   const dismiss = () => {
@@ -33,12 +40,23 @@ export default function GettingStarted({
   };
 
   return (
-    <div className="card mb-4">
+    <div className="card mb-4 border-primary-300/40 bg-primary-50/40 dark:bg-primary-400/5">
       <div className="mb-3 flex items-center justify-between">
-        <p className="font-bold text-ink">Get started with Filey</p>
+        <div>
+          <p className="font-bold text-ink">Get started with Filey</p>
+          <p className="text-xs text-brand-500 mt-0.5">
+            {doneCount} of {steps.length} completed
+          </p>
+        </div>
         <button onClick={dismiss} aria-label="Dismiss" className="cursor-pointer text-brand-400 hover:text-ink">
           <X size={16} />
         </button>
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-brand-100 dark:bg-white/10 mb-3 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-primary-500 transition-all"
+          style={{ width: `${(doneCount / steps.length) * 100}%` }}
+        />
       </div>
       <ul className="space-y-1.5">
         {steps.map((s) => (

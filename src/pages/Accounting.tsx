@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, TrendingUp, Wallet, Receipt, Banknote, Sparkles } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
 import ExpenseScanModal from "../components/ExpenseScanModal";
 import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
@@ -55,11 +56,12 @@ export default function Accounting() {
         subtitle="Chart of accounts, journal entries & financial position"
         action={
           <div className="flex gap-2">
-            <button className="btn-ghost" onClick={() => setScanOpen(true)}>
+            <button className="btn-ghost" aria-label="Scan receipt" onClick={() => setScanOpen(true)}>
               <Sparkles size={15} /> Scan receipt
             </button>
             <button
               className="btn-ghost"
+              aria-label="Account"
               onClick={() => setAcctOpen(true)}
             >
               <Plus size={15} /> Account
@@ -226,6 +228,7 @@ function AccountModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     code: "",
     name: "",
@@ -304,13 +307,17 @@ function AccountModal({
           onClick={async () => {
             setTouched(true);
             if (!valid) return;
-            await fin.createAccount({
-              code: f.code,
-              name: f.name,
-              account_type: f.account_type,
-              balance: f.balance,
-            } as Omit<Account, "id">);
-            onSaved();
+            try {
+              await fin.createAccount({
+                code: f.code,
+                name: f.name,
+                account_type: f.account_type,
+                balance: f.balance,
+              } as Omit<Account, "id">);
+              onSaved();
+            } catch (e: any) {
+              toast.error(e?.message || "Failed to save account");
+            }
           }}
         >
           Save Account
@@ -331,6 +338,7 @@ function JournalModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     account_id: 0,
     txn_type: "debit",
@@ -405,13 +413,17 @@ function JournalModal({
           className="btn-primary"
           disabled={!f.account_id || !f.amount}
           onClick={async () => {
-            await fin.postTransaction(
-              f.account_id,
-              f.txn_type,
-              f.amount,
-              f.description || null
-            );
-            onSaved();
+            try {
+              await fin.postTransaction(
+                f.account_id,
+                f.txn_type,
+                f.amount,
+                f.description || null
+              );
+              onSaved();
+            } catch (e: any) {
+              toast.error(e?.message || "Failed to post journal entry");
+            }
           }}
         >
           Post Entry

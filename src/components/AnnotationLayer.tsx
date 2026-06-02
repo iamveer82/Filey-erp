@@ -39,6 +39,7 @@ function load(id: string): Annotations {
       shapes: Array.isArray(v.shapes) ? v.shapes : [],
     };
   } catch {
+    console.warn('Failed to load annotations from localStorage');
     return { strokes: [], texts: [], shapes: [] };
   }
 }
@@ -81,9 +82,10 @@ export default function AnnotationLayer({
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
 
-  const [tool, setTool] = useState<Tool>("select");
+  const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState("#222222");
   const [size, setSize] = useState(3);
+  const [showHint, setShowHint] = useState(true);
   const drawing = useRef<Stroke | null>(null);
   const dragRect = useRef<Rect | null>(null);
   const rectStart = useRef<Point | null>(null);
@@ -190,7 +192,9 @@ export default function AnnotationLayer({
   }
 
   function localPoint(e: PointerEvent<HTMLDivElement>): Point {
-    const r = wrapRef.current!.getBoundingClientRect();
+    const w = wrapRef.current;
+    if (!w) return { x: 0, y: 0 };
+    const r = w.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
@@ -226,8 +230,8 @@ export default function AnnotationLayer({
             rerender();
           }
           setTool("select");
-        }
-      );
+        },
+      ).catch(() => {});
     }
   }
 
@@ -337,7 +341,9 @@ export default function AnnotationLayer({
     if (tool !== "select") return;
     const t = stateRef.current.texts.find((x) => x.id === tid);
     if (!t) return;
-    const r = wrapRef.current!.getBoundingClientRect();
+    const w = wrapRef.current;
+    if (!w) return;
+    const r = w.getBoundingClientRect();
     draggingText.current = {
       id: tid,
       dx: e.clientX - r.left - t.x,
@@ -348,7 +354,9 @@ export default function AnnotationLayer({
   function moveDragText(e: PointerEvent) {
     const d = draggingText.current;
     if (!d) return;
-    const r = wrapRef.current!.getBoundingClientRect();
+    const w2 = wrapRef.current;
+    if (!w2) return;
+    const r = w2.getBoundingClientRect();
     const t = stateRef.current.texts.find((x) => x.id === d.id);
     if (!t) return;
     t.x = e.clientX - r.left - d.dx;
@@ -445,10 +453,19 @@ export default function AnnotationLayer({
         </div>
       ))}
 
+      {showHint && (
+        <div className="no-print absolute top-0 left-0 right-0 z-20 flex items-center gap-2 bg-primary-400/90 px-3 py-1.5 text-xs font-semibold text-ink cursor-pointer"
+          onClick={() => setShowHint(false)}
+        >
+          <span className="grid h-4 w-4 place-items-center rounded-full bg-ink/20 text-[9px] font-bold">i</span>
+          Pick a tool from the toolbar below and draw on the document. Pen mode active.
+          <button className="ml-auto text-ink/60 hover:text-ink" onClick={(e) => { e.stopPropagation(); setShowHint(false); }} aria-label="Close hint"><X size={12} /></button>
+        </div>
+      )}
       {editable && (
       /* Top toolbar — Microsoft-ribbon style, full width on top of the
          doc area; never prints. */
-      <div className="no-print absolute top-0 left-0 right-0 z-10 flex flex-wrap items-center gap-1 rounded-t-2xl bg-white/95 border-b border-brand-200 shadow-sm p-2 backdrop-blur">
+      <div className={cn("no-print absolute left-0 right-0 z-10 flex flex-wrap items-center gap-1 rounded-t-2xl bg-white/95 border-b border-brand-200 shadow-sm p-2 backdrop-blur", showHint ? "top-8" : "top-0")}>
         {(
           [
             { t: "select", icon: MousePointer, label: "Select" },
@@ -536,6 +553,7 @@ export default function AnnotationLayer({
         >
           <Trash2 size={15} />
         </button>
+        <span className="mx-1 h-6 w-px bg-brand-200" />
 
         {onSave && (
           <>
@@ -543,6 +561,7 @@ export default function AnnotationLayer({
             <button
               type="button"
               onClick={onSave}
+              aria-label="Save annotations"
               className="btn-primary h-8 px-3 text-xs"
             >
               <Save size={14} /> Save
@@ -550,6 +569,21 @@ export default function AnnotationLayer({
           </>
         )}
       </div>
+      )}
+      {/* Tool description bar */}
+      {editable && tool !== "select" && (
+        <div className="no-print absolute left-0 right-0 z-10 flex items-center gap-2 px-3 py-1 text-[10px] font-semibold text-brand-500 bg-white/80 backdrop-blur border-b border-brand-100"
+          style={{ top: showHint ? "133px" : "125px" }}
+        >
+          <span className="grid h-3.5 w-3.5 place-items-center rounded bg-primary-100 text-primary-700 text-[8px] font-bold">
+            {tool === "pen" ? "P" : tool === "highlight" ? "H" : tool === "rect" ? "R" : tool === "eraser" ? "E" : "T"}
+          </span>
+          {tool === "pen" && "Draw freehand on the document"}
+          {tool === "highlight" && "Highlight text — drag to create a translucent highlight"}
+          {tool === "rect" && "Draw a rectangle outline — drag to set the shape"}
+          {tool === "eraser" && "Erase annotations — drag over your strokes to remove them"}
+          {tool === "text" && "Click to add a text note on the document"}
+        </div>
       )}
     </div>
   );

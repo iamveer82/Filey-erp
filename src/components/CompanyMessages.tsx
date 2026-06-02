@@ -49,11 +49,66 @@ function renderBody(body: string): ReactNode {
   );
 }
 
+/** Individual message row — module-level so React doesn't re-mount on every parent render. */
+function MessageRow({
+  m,
+  isReply,
+  userId,
+  onReply,
+  onDelete,
+}: {
+  m: OrgMessage;
+  isReply?: boolean;
+  userId?: string;
+  onReply: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <div className="flex gap-3 group">
+      <span
+        className={`grid ${
+          isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"
+        } shrink-0 place-items-center rounded-full font-bold ${tone(
+          m.user_id
+        )}`}
+      >
+        {initials(m.author)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-snug">
+          <span className="font-semibold text-ink">{m.author}</span>{" "}
+          <span className="text-[11px] text-brand-400">{ago(m.created_at)}</span>
+        </p>
+        <p className="text-sm text-brand-600 whitespace-pre-wrap break-words">
+          {renderBody(m.body)}
+        </p>
+        {!isReply && (
+          <button
+            onClick={() => onReply(m.id)}
+            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400 hover:text-primary-700 cursor-pointer"
+          >
+            <Reply size={11} /> Reply
+          </button>
+        )}
+      </div>
+      {m.user_id === userId && (
+        <button
+          aria-label="Delete message"
+          onClick={() => onDelete(m.id)}
+          className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer self-start"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Company message board — org-wide team feed with threaded replies and
  *  @mention highlighting. */
 export default function CompanyMessages() {
   const { user } = useAuth();
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [all, setAll] = useState<OrgMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,7 +121,7 @@ export default function CompanyMessages() {
     messages
       .list()
       .then(setAll)
-      .catch(() => {})
+      .catch(() => toast.error("Failed to load messages"))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -77,7 +132,7 @@ export default function CompanyMessages() {
       .then((ms) =>
         setMembers(ms.map((m) => ({ id: m.user_id, name: m.name })))
       )
-      .catch(() => {});
+      .catch(() => toast.error("Failed to load members"));
   }, []);
 
   const roots = useMemo(
@@ -122,6 +177,7 @@ export default function CompanyMessages() {
   };
 
   const remove = async (id: number) => {
+    if (!(await confirm({ title: "Delete message", message: "Delete this message? This cannot be undone." }))) return;
     try {
       await messages.remove(id);
       load();
@@ -130,47 +186,7 @@ export default function CompanyMessages() {
     }
   };
 
-  const Message = ({ m, isReply }: { m: OrgMessage; isReply?: boolean }) => (
-    <div className="flex gap-3 group">
-      <span
-        className={`grid ${
-          isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"
-        } shrink-0 place-items-center rounded-full font-bold ${tone(
-          m.user_id
-        )}`}
-      >
-        {initials(m.author)}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm leading-snug">
-          <span className="font-semibold text-ink">{m.author}</span>{" "}
-          <span className="text-[11px] text-brand-400">{ago(m.created_at)}</span>
-        </p>
-        <p className="text-sm text-brand-600 whitespace-pre-wrap break-words">
-          {renderBody(m.body)}
-        </p>
-        {!isReply && (
-          <button
-            onClick={() =>
-              setReplyTo((r) => (r === m.id ? null : m.id))
-            }
-            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400 hover:text-primary-700 cursor-pointer"
-          >
-            <Reply size={11} /> Reply
-          </button>
-        )}
-      </div>
-      {m.user_id === user?.id && (
-        <button
-          aria-label="Delete message"
-          onClick={() => remove(m.id)}
-          className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer self-start"
-        >
-          <Trash2 size={14} />
-        </button>
-      )}
-    </div>
-  );
+  const handleReply = (id: number) => setReplyTo((r) => (r === id ? null : id));
 
   return (
     <InfoCard
@@ -217,11 +233,11 @@ export default function CompanyMessages() {
             const replies = repliesByParent.get(m.id) ?? [];
             return (
               <li key={m.id}>
-                <Message m={m} />
+                <MessageRow m={m} userId={user?.id} onReply={handleReply} onDelete={remove} />
                 {(replies.length > 0 || replyTo === m.id) && (
                   <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2A2C33] pl-3">
                     {replies.map((r) => (
-                      <Message key={r.id} m={r} isReply />
+                      <MessageRow key={r.id} m={r} isReply userId={user?.id} onReply={handleReply} onDelete={remove} />
                     ))}
                     {replyTo === m.id && (
                       <div className="flex items-center gap-2 pt-1">

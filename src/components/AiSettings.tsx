@@ -24,6 +24,8 @@ const PRESETS: Preset[] = [
   { label: "Anthropic (Claude)", provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-6" },
   { label: "OpenRouter (any model)", provider: "openai", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
   { label: "Groq", provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  { label: "Moonshot (Kimi)", provider: "openai", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+  { label: "DeepSeek", provider: "openai", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   { label: "Ollama (local)", provider: "openai", baseUrl: "http://localhost:11434/v1", model: "llama3.1" },
 ];
 
@@ -64,11 +66,20 @@ export default function AiSettings() {
         <div>
           <p className="font-bold text-ink">AI Assistant</p>
           <p className="text-sm text-brand-500">
-            Connect any AI model with your own key. Powers the Ask-AI copilot and
-            document scanning.
+            Bring your own AI model to power smart features across Filey.
           </p>
         </div>
       </header>
+
+      <div className="rounded-xl border border-brand-200 bg-brand-50 p-3.5 text-xs text-brand-700 leading-relaxed">
+        <p className="font-semibold mb-1">What this powers:</p>
+        <ul className="space-y-0.5 list-disc pl-4">
+          <li><strong>Ask AI</strong> — chat about your business data (inventory, orders, invoices)</li>
+          <li><strong>Document scanning</strong> — extract data from receipts, invoices, and scanned PDFs</li>
+          <li><strong>AI Briefing</strong> — daily summary on your dashboard</li>
+        </ul>
+        <p className="mt-2 text-brand-500">Just pick a preset, paste your API key, and test the connection.</p>
+      </div>
 
       <div className="flex items-start gap-2 rounded-xl border border-success/30 bg-success/10 px-3 py-2.5 text-xs font-medium text-success">
         <ShieldCheck size={15} className="mt-0.5 shrink-0" />

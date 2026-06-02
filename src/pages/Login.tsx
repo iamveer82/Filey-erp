@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Logo from "../components/Logo";
 import PeekingCharacters from "../components/PeekingCharacters";
+import { FormField } from "../components/ui";
 import { useAuth, type Channel } from "../lib/auth";
 
 type Mode = "signin" | "signup";
@@ -84,6 +85,12 @@ export default function Login() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
 
+  // Inline validation
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const setFieldError = (field: string, err: string) =>
+    setFieldErrors((prev) => (err ? { ...prev, [field]: err } : { ...prev, [field]: "" }));
+  const clearFieldErrors = () => setFieldErrors({});
+
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
   const idPlaceholder =
@@ -96,25 +103,47 @@ export default function Login() {
     setPassword("");
     setConfirm("");
     setToken("");
+    clearFieldErrors();
   };
 
   const submitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setMsg(null);
+    clearFieldErrors();
 
-    if (channel === "phone" && !/^\+\d{8,15}$/.test(identifier.trim())) {
-      setErr("Enter phone in international format, e.g. +971501234567");
-      return;
+    // Inline field validation
+    let hasError = false;
+    if (!identifier.trim()) {
+      setFieldError("identifier", `${idLabel} is required`);
+      hasError = true;
+    } else if (channel === "phone" && !/^\+\d{8,15}$/.test(identifier.trim())) {
+      setFieldError("identifier", "Enter phone in international format, e.g. +971****4567");
+      hasError = true;
+    } else if (channel === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier.trim())) {
+      setFieldError("identifier", "Enter a valid email address");
+      hasError = true;
     }
+
+    if (mode === "signup" || (mode === "signin" && method === "password")) {
+      if (!password) {
+        setFieldError("password", "Password is required");
+        hasError = true;
+      } else if (password.length < 6) {
+        setFieldError("password", "Password must be at least 6 characters");
+        hasError = true;
+      }
+      if (mode === "signup" && password !== confirm) {
+        setFieldError("confirm", "Passwords do not match");
+        hasError = true;
+      }
+    }
+
+    if (hasError) return;
 
     setBusy(true);
     try {
       if (mode === "signup") {
-        if (password !== confirm) {
-          setErr("Passwords do not match.");
-          return;
-        }
         const { needsOtp } = await signUpWithPassword(cred, password);
         if (needsOtp) {
           setOtpPurpose("signup");
@@ -271,10 +300,12 @@ export default function Login() {
                 ]}
               />
 
-              <div className="field">
-                <label className="label" htmlFor="identifier">
-                  {idLabel}
-                </label>
+              <FormField
+                label={idLabel}
+                error={fieldErrors.identifier}
+                hint={channel === "phone" ? "International format, e.g. +9715XXXXXXXX" : undefined}
+                required
+              >
                 <div className="relative">
                   {channel === "email" ? (
                     <Mail
@@ -295,19 +326,23 @@ export default function Login() {
                     autoComplete={channel === "email" ? "email" : "tel"}
                     placeholder={idPlaceholder}
                     value={identifier}
-                    onChange={(e) => setIdentifier(e.target.value)}
+                    onChange={(e) => {
+                      setIdentifier(e.target.value);
+                      if (fieldErrors.identifier) setFieldError("identifier", "");
+                    }}
                     onFocus={() => setIsTyping(true)}
                     onBlur={() => setIsTyping(false)}
-                    required
                   />
                 </div>
-              </div>
+              </FormField>
 
               {!(mode === "signin" && method === "otp") && (
-                <div className="field">
-                  <label className="label" htmlFor="password">
-                    Password
-                  </label>
+                <FormField
+                  label="Password"
+                  error={fieldErrors.password}
+                  hint="At least 6 characters"
+                  required
+                >
                   <div className="relative">
                     <Lock
                       size={16}
@@ -323,10 +358,12 @@ export default function Login() {
                           : "current-password"
                       }
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (fieldErrors.password) setFieldError("password", "");
+                      }}
                       onFocus={() => setIsTyping(true)}
                       onBlur={() => setIsTyping(false)}
-                      required
                       minLength={6}
                     />
                     <button
@@ -339,14 +376,15 @@ export default function Login() {
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
-                </div>
+                </FormField>
               )}
 
               {mode === "signup" && (
-                <div className="field">
-                  <label className="label" htmlFor="confirm">
-                    Confirm password
-                  </label>
+                <FormField
+                  label="Confirm password"
+                  error={fieldErrors.confirm}
+                  required
+                >
                   <div className="relative">
                     <Lock
                       size={16}
@@ -358,8 +396,10 @@ export default function Login() {
                       type={showConfirm ? "text" : "password"}
                       autoComplete="new-password"
                       value={confirm}
-                      onChange={(e) => setConfirm(e.target.value)}
-                      required
+                      onChange={(e) => {
+                        setConfirm(e.target.value);
+                        if (fieldErrors.confirm) setFieldError("confirm", "");
+                      }}
                       minLength={6}
                     />
                     <button
@@ -378,7 +418,7 @@ export default function Login() {
                       )}
                     </button>
                   </div>
-                </div>
+                </FormField>
               )}
 
               {mode === "signin" && (
@@ -452,10 +492,7 @@ export default function Login() {
                 </p>
               </div>
 
-              <div className="field">
-                <label className="label" htmlFor="otp">
-                  6-digit code
-                </label>
+              <FormField label="6-digit code" required>
                 <input
                   id="otp"
                   className="input !h-14 text-center text-2xl font-bold tracking-[0.6em]"
@@ -467,10 +504,9 @@ export default function Login() {
                   onChange={(e) =>
                     setToken(e.target.value.replace(/\D/g, "").slice(0, 6))
                   }
-                  required
                   autoFocus
                 />
-              </div>
+              </FormField>
 
               {err && <Msg kind="err">{err}</Msg>}
               {msg && <Msg kind="msg">{msg}</Msg>}

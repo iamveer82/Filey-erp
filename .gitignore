@@ -32,3 +32,9 @@ dist-ssr
 .agents/
 .claude/
 skills-lock.json
+
+# Local dev scratch / CLI temp
+dev-output.txt
+dev-error.txt
+claude_cmds.sh
+supabase/.temp/

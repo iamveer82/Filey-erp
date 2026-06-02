@@ -35,7 +35,7 @@ import { useUI } from "../lib/ui";
 import ColorOrb from "./ColorOrb";
 
 const SYSTEM =
-  "You are Filey, a personal finance/ERP agent inside the user's business app. You can ACT via tools, not just chat. Available actions: read data (stats, customers, products, invoices); create customers; create products and adjust stock; log expenses; create draft invoices; mark invoices sent/paid; make invoices recurring; open any app page; and when the user attaches a file, run PDF/image operations on it with run_file_tool (compress, convert, pdf↔images, extract text, rotate… — the result downloads to their device). Call tools whenever the user asks you to do something, confirm what you did in one short line, and never invent data — look it up. For destructive or ambiguous requests, ask first. Be concise and practical.";
+  "You are Filey, a powerful ERP agent with FULL control of the user's business app. You can READ, CREATE, and MODIFY data via tools — not just chat. Available actions: get stats (customers, products, invoices, orders, quotes, overdue); search customers and products; list invoices by status; list employees; create customers, products, quotes, purchase orders, and draft invoices; adjust stock; log expenses; mark invoices sent/paid/recurring; mark employee attendance (present/absent/half_day/leave); email invoices to customers; run PDF/image operations on attached files (compress, convert, rotate, OCR, merge); navigate to any app page. When the user asks you to DO something, execute the tool and confirm what you did in one short line. For destructive or ambiguous requests, ask first. Never invent data — look it up. Be concise and practical.";
 
 const ORB_PRESETS = ["#FFD600", "#FF7A00", "#EC4899", "#7C3AED", "#2CADF6", "#3FB984", "#E5484D"];
 
@@ -103,15 +103,17 @@ export default function Copilot() {
   });
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (open && ready && persona.onboarded && view === "chat")
-      setTimeout(() => taRef.current?.focus(), 60);
+      timer = setTimeout(() => taRef.current?.focus(), 60);
+    return () => { if (timer) clearTimeout(timer); };
   }, [open, ready, persona.onboarded, view]);
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
   useEffect(() => {
     if (open && ready && persona.onboarded && !ctx)
-      buildAiContext(profile?.company).then(setCtx).catch(() => {});
+      buildAiContext(profile?.company).then(setCtx).catch((e) => console.error("Failed to build AI context:", e));
   }, [open, ready, persona.onboarded, ctx, profile?.company]);
   // PWA: the app shell works offline, but the AI needs to reach the model.
   useEffect(() => {
@@ -123,12 +125,6 @@ export default function Copilot() {
       window.removeEventListener("online", up);
       window.removeEventListener("offline", down);
     };
-  }, []);
-  // Other parts of the app can pop Filey open via a CustomEvent.
-  useEffect(() => {
-    const h = () => setOpen(true);
-    window.addEventListener("filey:copilot:open", h);
-    return () => window.removeEventListener("filey:copilot:open", h);
   }, []);
   // Other parts of the app can pop Filey open via a CustomEvent.
   useEffect(() => {

@@ -26,6 +26,7 @@ function readLocal(): SavedAsset[] {
     const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as SavedAsset[]) : [];
   } catch {
+    console.error("Failed to parse asset list from localStorage");
     return [];
   }
 }

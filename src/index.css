@@ -173,6 +173,40 @@
   background-image: radial-gradient(circle, #3A3D45 1px, transparent 1px);
 }
 
+/* ── Paper texture for invoice/quote previews ── */
+.paper-texture {
+  background-color: #fefefc;
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.dark .paper-texture {
+  background-color: #fff;
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,0.04) 1px, transparent 1px);
+}
+
+/* ── Pulse animation for AI briefing card ── */
+@keyframes pulse-gold {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 214, 0, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 214, 0, 0);
+  }
+}
+.animate-pulse-gold {
+  animation: pulse-gold 2.5s ease-in-out infinite;
+}
+
+/* ── Gradient empty-state background ── */
+.empty-gradient {
+  background: linear-gradient(135deg, #FFFBEB 0%, #FFF3C4 30%, #FDFBF7 70%, #FFF8E1 100%);
+}
+.dark .empty-gradient {
+  background: linear-gradient(135deg, #1C1912 0%, #211D15 40%, #15161A 100%);
+}
+
 @layer components {
   .stat-label {
     @apply text-[11px] font-semibold uppercase tracking-[0.06em] text-brand-400;
@@ -283,6 +317,24 @@
   .text-gradient {
     @apply bg-clip-text text-transparent bg-gradient-to-br from-[#B88C00] via-[#E0AE00] to-[#FFBA3D];
   }
+  /* 21st.dev-style animated gradient — background-position animation for hero titles. */
+  .text-gradient-animated {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(
+      90deg,
+      #B88C00 0%,
+      #E0AE00 25%,
+      #FFBA3D 50%,
+      #F6C954 75%,
+      #B88C00 100%
+    );
+    background-size: 200% 100%;
+    animation: gradient-shift 3s ease-in-out infinite;
+  }
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
 
   /* Brand chrome stays on the display face (Poppins); body text and
      table data inherit Open Sans for readability. */
@@ -311,8 +363,13 @@
            dark:text-[#DDE0E4] dark:border-[#2A2C33];
   }
   .row-hover {
-    @apply transition-colors duration-150 hover:bg-brand-50/70
-           dark:hover:bg-white/5;
+    @apply transition-all duration-200 ease-out hover:bg-brand-50/70
+           dark:hover:bg-white/5 border-l-[3px] border-l-transparent;
+    &:hover {
+      transform: scale(1.005);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      border-left-color: #FFD600;
+    }
   }
 }
 
@@ -470,25 +527,36 @@
    The on-screen preview wraps `.invoice-print` in scaled / clipped
    ancestors (FitPreview's .fp-box, .fp-frame, the main scroll area,
    the sidebar) — when printing we collapse all of that and pin the
-   sheet to the full A4 page so the output is never cropped. */
+   sheet to the full A4 page so the output is never cropped.
+
+   Professional print output:
+   - White background (overrides dark mode)
+   - Full width, no shadows or borders
+   - Black text throughout
+   - 0.5in page margins
+   - Page-break hints for multi-page documents */
 @media print {
-  /* Let every ancestor be tall enough that nothing clips the sheet. */
+  /* ── Reset all ancestors ── */
   html,
   body,
   #root {
     overflow: visible !important;
     height: auto !important;
     background: #fff !important;
+    color: #000 !important;
   }
+
+  /* ── Hide everything by default, then reveal only the invoice sheet ── */
   body * {
     visibility: hidden !important;
   }
+
   .invoice-print,
   .invoice-print * {
     visibility: visible !important;
   }
 
-  /* Collapse FitPreview's on-screen scaling/clipping in print. */
+  /* ── Collapse FitPreview's on-screen scaling/clipping ── */
   .fp-box,
   .fp-frame {
     position: static !important;
@@ -502,8 +570,7 @@
     transform: none !important;
   }
 
-  /* Pin the printed sheet to the full A4 page; override inline
-     position/transform/size set by FitPreview with !important. */
+  /* ── The printed sheet ── */
   .invoice-print {
     position: fixed !important;
     inset: 0 !important;
@@ -512,25 +579,97 @@
     min-height: 0 !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 14mm !important;
+    padding: 0.5in !important;
     transform: none !important;
     box-shadow: none !important;
     border: none !important;
+    border-radius: 0 !important;
     overflow: visible !important;
     background: #fff !important;
+    color: #000 !important;
   }
 
+  /* ── Professional paper: remove all chrome ── */
+  .invoice-print .shadow-bento,
+  .invoice-print .shadow,
+  .invoice-print .shadow-sm,
+  .invoice-print .shadow-md,
+  .invoice-print .shadow-lg,
+  .invoice-print .shadow-bento-hover {
+    box-shadow: none !important;
+  }
+
+  .invoice-print .border,
+  .invoice-print .border-brand-200,
+  .invoice-print .border-brand-100,
+  .invoice-print .border-neutral-200,
+  .invoice-print .border-neutral-300,
+  .invoice-print [class*="border-brand"],
+  .invoice-print [class*="border-neutral"] {
+    border-color: #e5e5e5 !important;
+  }
+
+  .invoice-print .rounded-xl,
+  .invoice-print .rounded-2xl,
+  .invoice-print .rounded-lg,
+  .invoice-print [class*="rounded"] {
+    border-radius: 0 !important;
+  }
+
+  /* ── Force black text everywhere in printed invoice ── */
+  .invoice-print,
+  .invoice-print * {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+  }
+
+  /* Preserve accent-coloured headings (but ensure legibility) */
+  .invoice-print [style*="color"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* ── Page-break hints for multi-page invoices ── */
+  .invoice-print table {
+    page-break-inside: auto;
+  }
+
+  .invoice-print thead {
+    display: table-header-group;
+  }
+
+  .invoice-print tfoot {
+    display: table-footer-group;
+  }
+
+  .invoice-print tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  .invoice-print .page-break-before {
+    page-break-before: always;
+  }
+
+  .invoice-print .page-break-after {
+    page-break-after: always;
+  }
+
+  .invoice-print .page-break-avoid {
+    page-break-inside: avoid;
+  }
+
+  /* ── Hide non-print UI ── */
   .no-print {
     display: none !important;
   }
 
-  /* @page margin: 0 suppresses the browser's "Document title /
-     localhost URL" header/footer; page margin is supplied by
-     .invoice-print padding (14mm). */
+  /* ── Page setup: 0.5in margins, A4, colour preservation ── */
   @page {
     size: A4;
-    margin: 0;
+    margin: 0.5in;
   }
+
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

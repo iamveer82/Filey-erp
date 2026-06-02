@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { motion } from "framer-motion";
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +23,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trophy } from "lucide-react";
 import { Badge } from "./ui";
 import { aed } from "../lib/format";
+import { useUI } from "../lib/ui";
 import type { Opportunity } from "../lib/api";
 
 const STAGES = [
@@ -58,17 +60,24 @@ function SortableDealCard({
     isDragging,
   } = useSortable({ id: deal.id, data: { type: "deal", deal } });
 
-  const style = {
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : 1,
   };
 
   return (
-    <div
+    <motion.div
       ref={setNodeRef}
       style={style}
       {...attributes}
+      animate={{
+        scale: isDragging ? 1.03 : 1,
+        boxShadow: isDragging
+          ? "0 20px 50px rgba(0,0,0,0.18)"
+          : "0 1px 3px rgba(0,0,0,0.04)",
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      transition={{ type: "spring", stiffness: 400, damping: 30 }}
       onClick={() => onClick(deal)}
       className="card !p-3 cursor-grab select-none transition-shadow hover:shadow-bento-hover active:cursor-grabbing"
     >
@@ -96,13 +105,17 @@ function SortableDealCard({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 function DealCardOverlay({ deal }: { deal: Deal }) {
   return (
-    <div className="card !p-3 shadow-bento-hover rotate-2 scale-105 opacity-90 w-64">
+    <motion.div
+      initial={{ scale: 0.95, opacity: 0.7 }}
+      animate={{ scale: 1.05, opacity: 0.92 }}
+      className="card !p-3 shadow-bento-hover rotate-2 w-64"
+    >
       <div className="flex items-start gap-2">
         <GripVertical size={15} className="text-brand-300 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
@@ -122,7 +135,7 @@ function DealCardOverlay({ deal }: { deal: Deal }) {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -137,9 +150,11 @@ export default function PipelineBoard({
   reload: () => void;
   onOpen: (d: Deal) => void;
 }) {
+  const { toast } = useUI();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [addStage, setAddStage] = useState<string | null>(null);
   const [addTitle, setAddTitle] = useState("");
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -162,11 +177,15 @@ export default function PipelineBoard({
 
   const handleDragStart = (e: DragStartEvent) => {
     setActiveId(Number(e.active.id));
+    setDragOverColumn(null);
   };
 
   const handleDragOver = (e: DragOverEvent) => {
     const { active, over } = e;
-    if (!over) return;
+    if (!over) {
+      setDragOverColumn(null);
+      return;
+    }
 
     const activeId = Number(active.id);
     const overId = over.id;
@@ -183,6 +202,8 @@ export default function PipelineBoard({
     } else if (overDeal) {
       targetStage = overDeal.stage;
     }
+
+    setDragOverColumn(targetStage !== activeDeal.stage ? targetStage : overIsColumn ? targetStage : null);
 
     if (targetStage !== activeDeal.stage) {
       setOpps((prev) =>
@@ -202,6 +223,7 @@ export default function PipelineBoard({
   const handleDragEnd = async (e: DragEndEvent) => {
     const { active, over } = e;
     setActiveId(null);
+    setDragOverColumn(null);
     if (!over) return;
 
     const activeId = Number(active.id);
@@ -228,6 +250,7 @@ export default function PipelineBoard({
         m.crm.setOppStage(activeId, activeDeal.stage)
       );
     } catch {
+      toast.error("Failed to update opportunity stage");
       reload();
     }
   };
@@ -251,6 +274,7 @@ export default function PipelineBoard({
       });
       reload();
     } catch {
+      toast.error("Failed to create opportunity");
       reload();
     }
   };
@@ -267,16 +291,27 @@ export default function PipelineBoard({
         {STAGES.map((s) => {
           const list = byStage[s.id] ?? [];
           const total = list.reduce((a, o) => a + o.value, 0);
+          const isOver = dragOverColumn === s.id;
           return (
-            <div
+            <motion.div
               key={s.id}
               data-column={s.id}
+              animate={{
+                backgroundColor: isOver
+                  ? "rgba(255,214,0,0.12)"
+                  : "rgba(0,0,0,0)",
+                borderColor: isOver
+                  ? "#E0AE00"
+                  : "rgba(0,0,0,0)",
+                scale: isOver ? 1.01 : 1,
+              }}
+              transition={{ type: "spring", stiffness: 400, damping: 30 }}
               className="w-72 shrink-0 rounded-2xl border border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03] p-3"
             >
               <div className="flex items-center justify-between px-1 mb-3">
                 <div className="flex items-center gap-2">
                   <Badge tone={s.tone}>{s.label}</Badge>
-                  <span className="text-xs font-semibold text-brand-400">
+                  <span className="inline-flex items-center justify-center min-w-[22px] h-5 rounded-full bg-white dark:bg-white/10 text-[11px] font-bold text-brand-500 px-1.5 shadow-sm">
                     {list.length}
                   </span>
                 </div>
@@ -335,7 +370,7 @@ export default function PipelineBoard({
                   </button>
                 )}
               </div>
-            </div>
+            </motion.div>
           );
         })}
         {opps.length === 0 && (

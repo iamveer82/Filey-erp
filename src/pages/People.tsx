@@ -10,6 +10,7 @@ import {
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
 import { aed, num, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
@@ -30,6 +31,7 @@ import {
 import MultiDatePicker from "../components/MultiDatePicker";
 
 export default function People() {
+  const { toast } = useUI();
   const [emps, setEmps] = useState<Employee[]>([]);
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
@@ -94,6 +96,27 @@ export default function People() {
         />
       </div>
 
+      {!loading && emps.length === 0 && (
+        <div className="empty-gradient rounded-2xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
+          <svg width="100" height="80" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-70">
+            <circle cx="36" cy="28" r="12" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <circle cx="34" cy="26" r="3" fill="#B88C00" />
+            <path d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <circle cx="64" cy="28" r="12" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <circle cx="62" cy="26" r="3" fill="#B88C00" />
+            <path d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <circle cx="50" cy="68" r="7" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
+            <path d="M47.5 68l1.7 1.7 3.3-3.3" stroke="#B88C00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div>
+            <p className="text-sm font-bold text-brand-700">No employees yet</p>
+            <p className="text-xs text-brand-500 mt-1">
+              Add your first team member to start tracking attendance and payroll.
+            </p>
+          </div>
+        </div>
+      )}
+
       <DataTable<Employee>
         rows={emps}
         loading={loading}
@@ -146,11 +169,15 @@ export default function People() {
             render: (e) => (
               <button
                 onClick={async () => {
-                  await hr.setEmployeeStatus(
-                    e.id,
-                    e.status === "active" ? "inactive" : "active"
-                  );
-                  load();
+                  try {
+                    await hr.setEmployeeStatus(
+                      e.id,
+                      e.status === "active" ? "inactive" : "active"
+                    );
+                    load();
+                  } catch (err: any) {
+                    toast.error(err?.message || "Failed to toggle status");
+                  }
                 }}
                 title="Toggle status"
                 className="cursor-pointer"
@@ -213,6 +240,7 @@ function EmployeeModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     employee_code: "",
     name: "",
@@ -310,17 +338,21 @@ function EmployeeModal({
           className="btn-primary"
           disabled={!f.name.trim()}
           onClick={async () => {
-            await hr.createEmployee({
-              employee_code: f.employee_code,
-              name: f.name,
-              email: f.email || undefined,
-              phone: f.phone || undefined,
-              department: f.department || undefined,
-              position: f.position || undefined,
-              salary: f.salary,
-              hire_date: f.hire_date || undefined,
-            } as Omit<Employee, "id" | "status">);
-            onSaved();
+            try {
+              await hr.createEmployee({
+                employee_code: f.employee_code,
+                name: f.name,
+                email: f.email || undefined,
+                phone: f.phone || undefined,
+                department: f.department || undefined,
+                position: f.position || undefined,
+                salary: f.salary,
+                hire_date: f.hire_date || undefined,
+              } as Omit<Employee, "id" | "status">);
+              onSaved();
+            } catch (e: any) {
+              toast.error(e?.message || "Failed to create employee");
+            }
           }}
         >
           Save Employee

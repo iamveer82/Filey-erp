@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { TrendingUp, Wallet, Boxes, Download, Printer } from "lucide-react";
+import { TrendingUp, Wallet, Boxes, Download, Printer, FileText, FileDown, DollarSign, Receipt, PiggyBank } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -36,8 +36,12 @@ import {
   ErrorBanner,
 } from "../components/ui";
 
-// design.md §2 / §6.7 — primary, secondary, info, success, surface
-const PIE = ["#FFD600", "#FFBA3D", "#0EA5E9", "#3FB984", "#CBBEAA"];
+// design.md §2 / §6.7 — Filey brand palette: gold, amber, warm gray, accent
+const PIE = ["#FFD600", "#E0AE00", "#B88C00", "#FFBA3D", "#F6C954"];
+const CHART_STROKE = "#E0AE00";
+const CHART_FILL_START = "#FFD600";
+const CHART_GRID = "#DEDBD2";
+const BAR_FILL = "#FFD600";
 
 export default function Reports() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -204,6 +208,59 @@ export default function Reports() {
           <Spinner label="Loading reports…" />
         </div>
       )}
+      {!loading && !error && products.length === 0 && invoices.length === 0 && (
+        <div className="empty-gradient rounded-2xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
+          <svg width="110" height="90" viewBox="0 0 110 90" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-70">
+            <rect x="10" y="12" width="40" height="66" rx="4" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <rect x="14" y="18" width="32" height="4" rx="2" fill="#E0AE00" opacity="0.6" />
+            <rect x="14" y="28" width="32" height="4" rx="2" fill="#E0AE00" opacity="0.3" />
+            <rect x="14" y="38" width="28" height="4" rx="2" fill="#E0AE00" opacity="0.3" />
+            <rect x="14" y="50" width="20" height="4" rx="2" fill="#D4D4D8" />
+            <rect x="14" y="60" width="32" height="4" rx="2" fill="#D4D4D8" />
+            <rect x="14" y="70" width="24" height="4" rx="2" fill="#D4D4D8" />
+            <rect x="60" y="28" width="40" height="34" rx="4" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <rect x="64" y="34" width="32" height="3" rx="1.5" fill="#E0AE00" opacity="0.5" />
+            <rect x="64" y="42" width="28" height="3" rx="1.5" fill="#D4D4D8" />
+            <rect x="64" y="50" width="24" height="3" rx="1.5" fill="#D4D4D8" />
+            <circle cx="55" cy="78" r="8" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
+            <path d="M52 78l2 2 4-4" stroke="#B88C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div>
+            <p className="text-sm font-bold text-brand-700">No data to report yet</p>
+            <p className="text-xs text-brand-500 mt-1 max-w-sm">
+              Start adding products, invoices, and expenses to see your reports come to life.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Summary stat cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary-400 via-[#F6C954] to-[#FFBA3D] p-6 text-ink shadow-bento">
+          <div className="flex items-center justify-between mb-3">
+            <DollarSign size={22} className="text-ink/70" />
+            <span className="pill bg-ink/15 text-ink text-[11px]">Paid invoices</span>
+          </div>
+          <p className="text-3xl font-bold tracking-tight">{aed(invoiceRevenue)}</p>
+          <p className="text-sm font-semibold text-ink/60 mt-1">Total Revenue</p>
+        </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#FFF8E1] to-[#FFF3C4] dark:from-[#2a2620] dark:to-[#201d24] p-6 text-ink dark:text-[#F4F5F6] shadow-bento border border-brand-200 dark:border-[#3A3D45]">
+          <div className="flex items-center justify-between mb-3">
+            <Receipt size={22} className="text-brand-600 dark:text-[#DDE0E4]" />
+            <span className="pill bg-brand-100 dark:bg-white/10 text-brand-600 dark:text-[#DDE0E4] text-[11px]">All expenses + payroll</span>
+          </div>
+          <p className="text-3xl font-bold tracking-tight">{aed(totalExpenses + payrollCost)}</p>
+          <p className="text-sm font-semibold text-brand-500 dark:text-[#B6BAC1] mt-1">Total Expenses</p>
+        </div>
+        <div className={`relative overflow-hidden rounded-2xl p-6 text-white shadow-bento ${grossProfit >= 0 ? "bg-gradient-to-br from-success to-emerald-600" : "bg-gradient-to-br from-danger to-red-600"}`}>
+          <div className="flex items-center justify-between mb-3">
+            <PiggyBank size={22} className="text-white/70" />
+            <span className="pill bg-white/20 text-white text-[11px]">Revenue − costs</span>
+          </div>
+          <p className="text-3xl font-bold tracking-tight">{aed(grossProfit)}</p>
+          <p className="text-sm font-semibold text-white/60 mt-1">Net Profit</p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
@@ -255,21 +312,48 @@ export default function Reports() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <InfoCard
           title="Revenue (paid) — last 6 months"
           className="lg:col-span-2"
+          action={
+            <div className="flex gap-1.5">
+              <button
+                className="btn-ghost text-[11px] px-2 py-1"
+                onClick={() => window.print()}
+                title="Print / PDF"
+              >
+                <FileText size={13} /> PDF
+              </button>
+              <button
+                className="btn-ghost text-[11px] px-2 py-1"
+                onClick={() =>
+                  downloadCsv(
+                    `filey-revenue-${new Date().toISOString().slice(0, 10)}`,
+                    trend.map((t) => ({ month: t.name, revenue: t.value })),
+                    [
+                      { key: "month", label: "Month" },
+                      { key: "revenue", label: "Revenue" },
+                    ]
+                  )
+                }
+                title="Export CSV"
+              >
+                <FileDown size={13} /> CSV
+              </button>
+            </div>
+          }
         >
-          <div className="h-64">
+          <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trend}>
                 <defs>
                   <linearGradient id="rep" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#FFD600" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
+                    <stop offset="0%" stopColor={CHART_FILL_START} stopOpacity={0.5} />
+                    <stop offset="100%" stopColor={CHART_FILL_START} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
                 <XAxis
                   dataKey="name"
                   tick={{ fontSize: 12, fill: "#A39B8C" }}
@@ -293,7 +377,7 @@ export default function Reports() {
                 <Area
                   type="monotone"
                   dataKey="value"
-                  stroke="#E0AE00"
+                  stroke={CHART_STROKE}
                   strokeWidth={2.5}
                   fill="url(#rep)"
                 />
@@ -302,8 +386,30 @@ export default function Reports() {
           </div>
         </InfoCard>
 
-        <InfoCard title="Value by category">
-          <div className="h-64">
+        <InfoCard
+          title="Value by category"
+          action={
+            <div className="flex gap-1.5">
+              <button
+                className="btn-ghost text-[11px] px-2 py-1"
+                onClick={() =>
+                  downloadCsv(
+                    `filey-categories-${new Date().toISOString().slice(0, 10)}`,
+                    catValue.map((c) => ({ category: c.name, value: c.value })),
+                    [
+                      { key: "category", label: "Category" },
+                      { key: "value", label: "Value" },
+                    ]
+                  )
+                }
+                title="Export CSV"
+              >
+                <FileDown size={13} /> CSV
+              </button>
+            </div>
+          }
+        >
+          <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -314,9 +420,11 @@ export default function Reports() {
                   outerRadius={85}
                   paddingAngle={3}
                 >
-                  {catValue.map((_, i) => (
-                    <Cell key={i} fill={PIE[i % PIE.length]} />
-                  ))}
+                  {catValue.length
+                    ? catValue.map((_, i) => (
+                        <Cell key={i} fill={PIE[i % PIE.length]} />
+                      ))
+                    : [<Cell key={0} fill="#DEDBD2" />]}
                 </Pie>
                 <Tooltip formatter={(v) => aed(Number(v))} />
               </PieChart>
@@ -325,11 +433,40 @@ export default function Reports() {
         </InfoCard>
       </div>
 
-      <InfoCard title="Financial position">
+      <InfoCard
+        title="Financial position"
+        action={
+          <div className="flex gap-1.5">
+            <button
+              className="btn-ghost text-[11px] px-2 py-1"
+              onClick={() => window.print()}
+              title="Print / PDF"
+            >
+              <FileText size={13} /> PDF
+            </button>
+            <button
+              className="btn-ghost text-[11px] px-2 py-1"
+              onClick={() =>
+                downloadCsv(
+                  `filey-financials-${new Date().toISOString().slice(0, 10)}`,
+                  financials.map((f) => ({ metric: f.name, amount: f.value })),
+                  [
+                    { key: "metric", label: "Metric" },
+                    { key: "amount", label: "Amount" },
+                  ]
+                )
+              }
+              title="Export CSV"
+            >
+              <FileDown size={13} /> CSV
+            </button>
+          </div>
+        }
+      >
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={financials}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
               <XAxis
                 dataKey="name"
                 tick={{ fontSize: 12, fill: "#A39B8C" }}
@@ -350,7 +487,7 @@ export default function Reports() {
                   fontSize: 13,
                 }}
               />
-              <Bar dataKey="value" fill="#FFD600" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="value" fill={BAR_FILL} radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

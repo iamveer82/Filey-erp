@@ -65,7 +65,9 @@ export default function LivePreview({
 
     const t = setTimeout(async () => {
       try {
-        const trimmed = await trimmedRef.current!.file;
+        const tr = trimmedRef.current;
+        if (!tr) return;
+        const trimmed = await tr.file;
         if (dead) return;
         let bytes: Uint8Array;
         let fellBack = false;
@@ -76,6 +78,7 @@ export default function LivePreview({
           bytes = out.bytes;
         } catch {
           // Options incomplete or not previewable — show the plain page.
+          console.warn('Preview unavailable, showing plain page');
           bytes = new Uint8Array(await trimmed.arrayBuffer());
           fellBack = true;
         }

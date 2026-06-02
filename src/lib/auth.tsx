@@ -121,7 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Defer DB read: never block while the auth lock may be held.
         if (data.session?.user) {
           loadedFor.current = data.session.user.id;
-          void loadProfile(data.session.user);
+          void loadProfile(data.session.user).catch((err) =>
+            console.error("[auth] loadProfile failed:", err)
+          );
         }
       })
       .catch((err) => {
@@ -146,7 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const u = s.user;
         setProfileLoaded(false);
         setTimeout(() => {
-          if (active) void loadProfile(u);
+          if (active) void loadProfile(u).catch((err) =>
+            console.error("[auth] loadProfile failed:", err)
+          );
         }, 0);
       } else {
         loadedFor.current = null;

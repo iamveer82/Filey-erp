@@ -27,7 +27,7 @@ export default function FollowUps({
   const [cust, setCust] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => followups.list(customerId).then(setItems).catch(() => {});
+  const load = () => followups.list(customerId).then(setItems).catch((e) => toast.error("Failed to load follow-ups: " + (e instanceof Error ? e.message : e)));
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,8 +59,12 @@ export default function FollowUps({
   };
 
   const toggle = async (f: FollowUp) => {
-    await followups.update(f.id, { done: !f.done });
-    load();
+    try {
+      await followups.update(f.id, { done: !f.done });
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
   const del = async (f: FollowUp) => {
     const ok = await confirm({
@@ -70,8 +74,12 @@ export default function FollowUps({
       danger: true,
     });
     if (!ok) return;
-    await followups.remove(f.id);
-    load();
+    try {
+      await followups.remove(f.id);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const today = todayISO();
@@ -170,9 +178,23 @@ export default function FollowUps({
       </div>
 
       {items.length === 0 && (
-        <p className="py-2 text-sm text-brand-400">
-          No reminders yet. Add a note with a date — we'll remind you that day.
-        </p>
+        <div className="empty-gradient rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+          <svg width="100" height="80" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-80">
+            <rect x="24" y="8" width="52" height="44" rx="5" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <line x1="34" y1="20" x2="66" y2="20" stroke="#E0AE00" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="34" y1="28" x2="58" y2="28" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="34" y1="36" x2="50" y2="36" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="34" y1="44" x2="62" y2="44" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="50" cy="68" r="7" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
+            <path d="M47.5 68l1.7 1.7 3.3-3.3" stroke="#B88C00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div>
+            <p className="text-sm font-bold text-brand-700">No reminders yet</p>
+            <p className="text-xs text-brand-500 mt-1">
+              Add a note with a date — we'll remind you that day.
+            </p>
+          </div>
+        </div>
       )}
 
       {groups.overdue.length > 0 && (

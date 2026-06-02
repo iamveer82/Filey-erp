@@ -28,6 +28,7 @@ import {
   Lead,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import DealDrawer from "../components/DealDrawer";
@@ -46,6 +47,7 @@ import {
 
 export default function Crm() {
   const nav = useNavigate();
+  const { toast } = useUI();
   const [view, setView] = useState<"dashboard" | "pipeline">("dashboard");
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
@@ -175,6 +177,7 @@ export default function Crm() {
           <div className="flex items-center gap-2">
             <button
               className="btn-ghost"
+              aria-label="Export customers"
               onClick={() =>
                 downloadCsv(
                   "customers",
@@ -192,7 +195,7 @@ export default function Crm() {
             >
               <Download size={15} /> Export
             </button>
-            <button className="btn-ghost" onClick={() => setImportOpen(true)}>
+            <button className="btn-ghost" aria-label="Import customers" onClick={() => setImportOpen(true)}>
               <Upload size={15} /> Import
             </button>
             <div className="flex rounded-xl bg-brand-100 dark:bg-white/5 p-1 gap-1">
@@ -454,8 +457,12 @@ export default function Crm() {
                     <button
                       aria-label="Complete task"
                       onClick={async () => {
-                        await crm.toggleActivity(a.id);
-                        load();
+                        try {
+                          await crm.toggleActivity(a.id);
+                          load();
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed to toggle task");
+                        }
                       }}
                       className="mt-0.5 w-4 h-4 rounded border-2 border-brand-300 hover:border-primary-400 cursor-pointer shrink-0"
                     />
@@ -529,6 +536,7 @@ function TaskModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { toast } = useUI();
   const [f, setF] = useState({
     subject: "",
     kind: "follow-up",
@@ -584,12 +592,16 @@ function TaskModal({
           className="btn-primary"
           disabled={!f.subject.trim()}
           onClick={async () => {
-            await crm.createActivity({
-              kind: f.kind,
-              subject: f.subject,
-              due_date: f.due_date || undefined,
-            } as Omit<Activity, "id" | "done" | "created_at">);
-            onSaved();
+            try {
+              await crm.createActivity({
+                kind: f.kind,
+                subject: f.subject,
+                due_date: f.due_date || undefined,
+              } as Omit<Activity, "id" | "done" | "created_at">);
+              onSaved();
+            } catch (e: any) {
+              toast.error(e?.message || "Failed to create task");
+            }
           }}
         >
           Add Task

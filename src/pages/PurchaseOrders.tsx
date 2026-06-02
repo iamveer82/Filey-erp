@@ -105,8 +105,12 @@ export default function PurchaseOrders() {
       danger: true,
     });
     if (!ok) return;
-    await pos.remove(r.id);
-    load();
+    try {
+      await pos.remove(r.id);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete purchase order");
+    }
   };
 
   return (
@@ -285,8 +289,8 @@ function POEditor({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    suppliersApi.list().then(setSuppliers).catch(() => {});
-    erp.products().then(setProducts).catch(() => {});
+    suppliersApi.list().then(setSuppliers).catch((e) => toast.error("Failed to load suppliers: " + (e instanceof Error ? e.message : e)));
+    erp.products().then(setProducts).catch((e) => toast.error("Failed to load products: " + (e instanceof Error ? e.message : e)));
     if (id !== "new") {
       pos
         .get(id)
@@ -302,7 +306,7 @@ function POEditor({
               : [{ description: "", quantity: 1, unit_cost: 0 }]
           );
         })
-        .catch(() => {});
+        .catch((e) => toast.error("Failed to load purchase order: " + (e instanceof Error ? e.message : e)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);

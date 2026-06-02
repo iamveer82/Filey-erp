@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Plus, X, StickyNote, GripHorizontal } from "lucide-react";
 import { cn } from "../lib/format";
+import { useUI } from "../lib/ui";
 
 interface Note {
   id: string;
@@ -35,6 +36,7 @@ const newId = () =>
  *  stored locally (per customer) so they persist across reloads without
  *  a backend table. Add, edit and delete; drag to reposition. */
 export default function CustomerNotes({ customerId }: { customerId: string }) {
+  const { confirm } = useUI();
   const key = `notes:customer:${customerId}`;
   const [notes, setNotes] = useState<Note[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -44,6 +46,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
       const raw = localStorage.getItem(key);
       setNotes(raw ? (JSON.parse(raw) as Note[]) : []);
     } catch {
+      console.error("Failed to parse customer notes from localStorage");
       setNotes([]);
     }
   }, [key]);
@@ -53,6 +56,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
     try {
       localStorage.setItem(key, JSON.stringify(next));
     } catch {
+      console.error("Failed to save customer notes to localStorage");
       /* storage full / unavailable — keep in-memory */
     }
   };
@@ -83,8 +87,10 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
       )
     );
 
-  const removeNote = (id: string) =>
+  const removeNote = async (id: string) => {
+    if (!(await confirm({ title: "Delete note", message: "Delete this sticky note? This cannot be undone." }))) return;
     persist(notes.filter((n) => n.id !== id));
+  };
 
   return (
     <section className="mb-5">

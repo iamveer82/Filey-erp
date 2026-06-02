@@ -118,6 +118,7 @@ export default function Inventory() {
           <div className="flex gap-2">
             <button
               className="btn-ghost"
+              aria-label="Export products"
               onClick={() =>
                 downloadCsv(
                   "products",
@@ -136,10 +137,10 @@ export default function Inventory() {
             >
               <Download size={15} /> Export
             </button>
-            <button className="btn-ghost" onClick={() => setImportOpen(true)}>
+            <button className="btn-ghost" aria-label="Import products" onClick={() => setImportOpen(true)}>
               <Upload size={15} /> Import
             </button>
-            <button className="btn-primary" onClick={() => setOpen(true)}>
+            <button className="btn-primary" aria-label="New product" onClick={() => setOpen(true)}>
               <Plus size={16} /> New product
             </button>
           </div>
@@ -275,18 +276,26 @@ export default function Inventory() {
             label: "Share",
             icon: <Users size={13} />,
             run: async (sel) => {
-              for (const p of sel) await shareRecord("products", p.id, true);
-              load();
-              toast.success(`Shared ${sel.length}.`);
+              try {
+                for (const p of sel) await shareRecord("products", p.id, true);
+                load();
+                toast.success(`Shared ${sel.length}.`);
+              } catch (e: any) {
+                toast.error(e?.message || "Failed to share products");
+              }
             },
           },
           {
             label: "Make private",
             icon: <Lock size={13} />,
             run: async (sel) => {
-              for (const p of sel) await shareRecord("products", p.id, false);
-              load();
-              toast.success(`Set ${sel.length} private.`);
+              try {
+                for (const p of sel) await shareRecord("products", p.id, false);
+                load();
+                toast.success(`Set ${sel.length} private.`);
+              } catch (e: any) {
+                toast.error(e?.message || "Failed to set products private");
+              }
             },
           },
           {
@@ -301,9 +310,13 @@ export default function Inventory() {
                 danger: true,
               });
               if (!ok) return;
-              for (const p of sel) await erp.deleteProduct(p.id);
-              load();
-              toast.success(`Deleted ${sel.length}.`);
+              try {
+                for (const p of sel) await erp.deleteProduct(p.id);
+                load();
+                toast.success(`Deleted ${sel.length}.`);
+              } catch (e: any) {
+                toast.error(e?.message || "Failed to delete products");
+              }
             },
           },
         ]}
@@ -374,9 +387,12 @@ export default function Inventory() {
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
                     tone="danger"
-                    onSelect={async () => {
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      if (!(await confirm({ title: "Delete product", message: `Delete ${p.name}? This cannot be undone.` }))) return;
                       await erp.deleteProduct(p.id);
                       load();
+                      toast.success(`Deleted ${p.name}`);
                     }}
                   >
                     <Trash2 size={14} /> Delete product

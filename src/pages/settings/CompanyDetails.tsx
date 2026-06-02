@@ -1,7 +1,7 @@
 import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
-import { Field } from "../../components/ui";
+import { FormField } from "../../components/ui";
 import { Building2, Upload, X, Check } from "lucide-react";
 import { numInput } from "../../lib/format";
 
@@ -23,6 +23,11 @@ export default function CompanyDetails() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const setFieldError = (f: string, e: string) =>
+    setFieldErrors((p) => (e ? { ...p, [f]: e } : { ...p, [f]: "" }));
+  const clearFieldErrors = () => setFieldErrors({});
 
   useEffect(() => {
     billing.getCompany().then(setC).catch(console.error);
@@ -47,6 +52,13 @@ export default function CompanyDetails() {
   };
 
   const save = async () => {
+    clearFieldErrors();
+    let hasErr = false;
+    if (!c.name?.trim()) { setFieldError("name", "Company name is required"); hasErr = true; }
+    if (!c.address?.trim()) { setFieldError("address", "Address is required"); hasErr = true; }
+    if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) { setFieldError("email", "Enter a valid email"); hasErr = true; }
+    if (hasErr) return;
+
     setSaving(true);
     try {
       await billing.saveCompany(c);
@@ -73,8 +85,6 @@ export default function CompanyDetails() {
       setSaving(false);
     }
   };
-
-  const Req = () => <span className="text-danger">*</span>;
 
   return (
     <div className="card">
@@ -126,15 +136,18 @@ export default function CompanyDetails() {
       </div>
 
       <div className="space-y-4">
-        <Field label="Company Name *">
+        <FormField label="Company Name" error={fieldErrors.name} required>
           <input
             className="input"
             value={c.name}
-            onChange={(e) => set("name", e.target.value)}
+            onChange={(e) => {
+              set("name", e.target.value);
+              if (fieldErrors.name) setFieldError("name", "");
+            }}
           />
-        </Field>
+        </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Business Type">
+          <FormField label="Business Type">
             <select
               className="select"
               value={c.business_type ?? ""}
@@ -147,78 +160,74 @@ export default function CompanyDetails() {
                 </option>
               ))}
             </select>
-          </Field>
-          <div>
-            <label className="label">
-              TRN (Tax Registration Number) <Req />
-            </label>
+          </FormField>
+          <FormField label="TRN (Tax Registration Number)" hint="15-digit number">
             <input
               className="input"
               placeholder="100000000000003"
               value={c.trn ?? ""}
               onChange={(e) => set("trn", e.target.value)}
             />
-          </div>
+          </FormField>
         </div>
-        <div>
-          <label className="label">
-            Address <Req />
-          </label>
-          <input
-            className="input mb-2"
-            placeholder="Street, area"
-            value={c.address ?? ""}
-            onChange={(e) => set("address", e.target.value)}
-          />
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
+        <FormField label="Address" error={fieldErrors.address} required>
+          <>
             <input
-              className="input"
-              placeholder="City, Country"
-              value={c.city ?? ""}
-              onChange={(e) => set("city", e.target.value)}
+              className="input mb-2"
+              placeholder="Street, area"
+              value={c.address ?? ""}
+              onChange={(e) => {
+                set("address", e.target.value);
+                if (fieldErrors.address) setFieldError("address", "");
+              }}
             />
-            <input
-              className="input"
-              placeholder="Zip / Postal Code"
-              value={c.zip ?? ""}
-              onChange={(e) => set("zip", e.target.value)}
-            />
-          </div>
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
+              <input
+                className="input"
+                placeholder="City, Country"
+                value={c.city ?? ""}
+                onChange={(e) => set("city", e.target.value)}
+              />
+              <input
+                className="input"
+                placeholder="Zip / Postal Code"
+                value={c.zip ?? ""}
+                onChange={(e) => set("zip", e.target.value)}
+              />
+            </div>
+          </>
+        </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="label">
-              Phone Number <Req />
-            </label>
+          <FormField label="Phone Number" hint="+971 50 123 4567">
             <input
               className="input"
               placeholder="+971 50 123 4567"
               value={c.phone ?? ""}
               onChange={(e) => set("phone", e.target.value)}
             />
-          </div>
-          <div>
-            <label className="label">
-              Email Address <Req />
-            </label>
+          </FormField>
+          <FormField label="Email Address" error={fieldErrors.email} hint="hello@company.com">
             <input
               className="input"
               placeholder="hello@company.com"
               value={c.email ?? ""}
-              onChange={(e) => set("email", e.target.value)}
+              onChange={(e) => {
+                set("email", e.target.value);
+                if (fieldErrors.email) setFieldError("email", "");
+              }}
             />
-          </div>
+          </FormField>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Website">
+          <FormField label="Website" hint="www.company.com">
             <input
               className="input"
               placeholder="www.company.com"
               value={c.website ?? ""}
               onChange={(e) => set("website", e.target.value)}
             />
-          </Field>
-          <Field label="Currency">
+          </FormField>
+          <FormField label="Currency">
             <select
               className="select"
               value={c.currency ?? "AED"}
@@ -230,7 +239,7 @@ export default function CompanyDetails() {
                 </option>
               ))}
             </select>
-          </Field>
+          </FormField>
         </div>
       </div>
 
@@ -240,7 +249,7 @@ export default function CompanyDetails() {
           Select how tax is applied to your transactions
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Field label="Tax Type">
+          <FormField label="Tax Type">
             <select
               className="select"
               value={c.tax_type ?? "VAT"}
@@ -252,15 +261,15 @@ export default function CompanyDetails() {
                 </option>
               ))}
             </select>
-          </Field>
-          <Field label="VAT Registration Number">
+          </FormField>
+          <FormField label="VAT Registration Number">
             <input
               className="input"
               value={c.vat_number ?? ""}
               onChange={(e) => set("vat_number", e.target.value)}
             />
-          </Field>
-          <Field label="Default Tax Rate (%)">
+          </FormField>
+          <FormField label="Default Tax Rate (%)" hint="e.g. 5">
             <input
               type="number"
               className="input"
@@ -270,7 +279,7 @@ export default function CompanyDetails() {
                 set("default_tax_rate", numInput(e.target.value))
               }
             />
-          </Field>
+          </FormField>
         </div>
       </div>
 
