@@ -826,6 +826,10 @@ end $$;
 -- existing row. That orphans pre-migration rows in org 'default' while a
 -- signed-in user's current_org() is their real org UUID, so RLS blocks
 -- updates. Re-point each row to its owner's actual org. Idempotent.
+-- NOTE: company_profile is intentionally excluded — it has a unique(org_id)
+-- constraint and is collapsed to one row per org in its own section below.
+-- Backfilling it here (before that dedup) can violate the constraint when
+-- legacy duplicates exist, so leave its org_id to the dedicated block.
 do $$
 declare
   t text;
@@ -835,7 +839,7 @@ declare
     'accounts','expenses','transactions',
     'app_users','app_settings','audit_log',
     'crm_leads','crm_customers','crm_opportunities','crm_activities',
-    'company_profile','invoice_docs','invoice_doc_items','invoice_payments',
+    'invoice_docs','invoice_doc_items','invoice_payments',
     'quotations','quotation_items','quotation_templates','tool_runs',
     'suppliers','purchase_orders','purchase_order_items'
   ];
