@@ -523,6 +523,28 @@ returns text language sql stable security definer set search_path = public as $$
   )
 $$;
 
+-- SECURITY: force org_id to the caller's active org and make it immutable.
+-- Without this, a client could INSERT a row carrying ANOTHER org's org_id
+-- (and shared=true) — the per-member RLS check passes on the user_id branch
+-- regardless of org_id, so the row would surface in the victim org's shared
+-- feed (cross-tenant injection / fake-invoice phishing). On UPDATE we pin
+-- org_id to its previous value so a row can never be moved between orgs.
+create or replace function public.force_org_id()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  -- Admin / service_role / SQL-migration context (no JWT) is trusted and must
+  -- stay able to backfill org_id. Only pin org_id for real client requests.
+  if auth.uid() is null then
+    return new;
+  end if;
+  if (TG_OP = 'INSERT') then
+    new.org_id := public.current_org();
+  else
+    new.org_id := old.org_id;
+  end if;
+  return new;
+end $$;
+
 -- True when the caller is an owner/admin of their active org.
 -- security definer avoids RLS recursion on org_members.
 create or replace function public.is_org_admin()
@@ -755,6 +777,14 @@ begin
     execute format(
       'create trigger %I before update on %I for each row execute function set_updated_at();',
       'trg_' || t || '_updated', t
+    );
+
+    -- SECURITY: pin org_id to the caller's org on insert and freeze it on
+    -- update (prevents cross-tenant row injection — see force_org_id()).
+    execute format('drop trigger if exists %I on %I;', 'trg_' || t || '_org', t);
+    execute format(
+      'create trigger %I before insert or update on %I for each row execute function public.force_org_id();',
+      'trg_' || t || '_org', t
     );
 
     -- clear any prior policy variants
@@ -1137,6 +1167,29 @@ begin
     );
   end loop;
 end $$;
+
+-- ---------- atomic counter updates (avoid lost-update races) ----------
+-- The app is realtime/multi-client, so client-side read-modify-write on a
+-- counter (select → compute → update) loses concurrent updates. These do the
+-- arithmetic in a single statement. SECURITY INVOKER (default) so RLS still
+-- scopes the write to rows the caller may update.
+create or replace function public.adjust_product_stock(p_id bigint, p_delta numeric)
+returns bigint language sql as $$
+  update public.products
+     set quantity = greatest(0, quantity + p_delta)
+   where id = p_id
+  returning quantity;
+$$;
+grant execute on function public.adjust_product_stock(bigint, numeric) to authenticated;
+
+create or replace function public.adjust_account_balance(p_id bigint, p_delta numeric)
+returns numeric language sql as $$
+  update public.accounts
+     set balance = balance + p_delta
+   where id = p_id
+  returning balance;
+$$;
+grant execute on function public.adjust_account_balance(bigint, numeric) to authenticated;
 
 -- Done. Tables are row-level-secured to the signed-in user.
 

@@ -1,4 +1,5 @@
-import { crm, erp, fin, billing, recurrences, followups, type InvoiceDocInput } from "./api";
+import { crm, erp, fin, billing, recurrences, followups, hr, pos, type InvoiceDocInput } from "./api";
+import { sendEmail, emailShell, esc } from "./email";
 import { getDisplayCurrency } from "./format";
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
@@ -11,6 +12,23 @@ export interface ToolDef {
   description: string;
   parameters: Record<string, unknown>;
   run: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Mutates money/inventory state or sends something outbound — must be
+   *  confirmed by the user before running (prompt-injection guard). */
+  sensitive?: boolean;
+}
+
+/* Sensitive tools require explicit user approval before they run, so injected
+ * instructions (e.g. text inside an attached document) can't silently move
+ * money or send email. The UI registers a real prompt via setToolConfirm();
+ * the default falls back to window.confirm, and denies if neither exists. */
+type ConfirmFn = (toolName: string, args: Record<string, unknown>) => boolean | Promise<boolean>;
+let confirmTool: ConfirmFn = (name, args) => {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return false;
+  const detail = Object.keys(args).length ? `\n\n${JSON.stringify(args)}` : "";
+  return window.confirm(`Allow the assistant to run "${name}"?${detail}`);
+};
+export function setToolConfirm(fn: ConfirmFn) {
+  confirmTool = fn;
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -152,6 +170,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "adjust_stock",
+    sensitive: true,
     description: "Change a product's stock. Provide either delta (e.g. -3) or set (absolute quantity).",
     parameters: {
       type: "object",
@@ -222,6 +241,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "send_invoice",
+    sensitive: true,
     description: "Mark an invoice as sent (by its number).",
     parameters: { type: "object", properties: { invoice_number: { type: "string" } }, required: ["invoice_number"] },
     run: async (a) => {
@@ -233,6 +253,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "mark_invoice_paid",
+    sensitive: true,
     description: "Mark an invoice as paid (by its number).",
     parameters: { type: "object", properties: { invoice_number: { type: "string" } }, required: ["invoice_number"] },
     run: async (a) => {
@@ -244,6 +265,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "set_recurring",
+    sensitive: true,
     description: "Make an invoice recur (by number). interval: weekly | monthly | yearly.",
     parameters: {
       type: "object",
@@ -343,11 +365,155 @@ export const TOOLS: ToolDef[] = [
       return { ok: true, message: `Opened ${page}.` };
     },
   },
+  {
+    name: "list_employees",
+    description: "List all employees with their status.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const emps = (await hr.employees().catch(() => [])) as Record<string, unknown>[];
+      return emps.map((e) => ({ id: e.id, name: e.name, status: e.status, department: e.department, email: e.email }));
+    },
+  },
+  {
+    name: "mark_attendance",
+    description: "Mark an employee present or absent for today (or a specific date). status: present | absent | half_day | leave.",
+    parameters: {
+      type: "object",
+      properties: {
+        employee_name: { type: "string", description: "Employee name (partial match OK)" },
+        status: { type: "string", enum: ["present", "absent", "half_day", "leave"] },
+        date: { type: "string", description: "YYYY-MM-DD, defaults to today" },
+      },
+      required: ["employee_name", "status"],
+    },
+    run: async (a) => {
+      const emps = (await hr.employees().catch(() => [])) as Record<string, unknown>[];
+      const q = lc(a.employee_name);
+      const emp = emps.find((e) => lc(e.name) === q) || emps.find((e) => lc(e.name).includes(q));
+      if (!emp) return { error: `No employee matching "${str(a.employee_name)}"` };
+      await hr.markAttendance(Number(emp.id), str(a.date) || today(), str(a.status));
+      return { ok: true, message: `${emp.name} marked ${str(a.status)} for ${str(a.date) || today()}.` };
+    },
+  },
+  {
+    name: "create_quote",
+    description: "Create a quotation for a customer with line items (draft — user reviews in Quoting).",
+    parameters: {
+      type: "object",
+      properties: {
+        customer_name: { type: "string" },
+        currency: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { description: { type: "string" }, qty: { type: "number" }, rate: { type: "number" } },
+            required: ["description", "qty", "rate"],
+          },
+        },
+      },
+      required: ["customer_name", "items"],
+    },
+    run: async (args) => {
+      const quoteApi = (await import("./api")).quotes;
+      const items = Array.isArray(args.items) ? (args.items as Record<string, unknown>[]) : [];
+      const qtNo = `QT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900000) + 100000)}`;
+      await quoteApi.saveDoc({
+        number: qtNo,
+        status: "draft",
+        template: "minimal",
+        accent: "#FFD600",
+        currency: str(args.currency) || getDisplayCurrency(),
+        customer_name: str(args.customer_name),
+        quote_date: today(),
+        items: items.map((it) => ({ product: str(it.description), description: str(it.description), qty: numOf(it.qty) || 1, rate: numOf(it.rate), discount: 0, tax: 0 })),
+      });
+      return { ok: true, number: qtNo, message: "Draft quotation created — open Quoting to review/send." };
+    },
+  },
+  {
+    name: "create_purchase_order",
+    description: "Create a purchase order with line items (draft).",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { description: { type: "string" }, qty: { type: "number" }, unit_price: { type: "number" } },
+            required: ["description", "qty", "unit_price"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+    run: async (args) => {
+      const items = Array.isArray(args.items) ? (args.items as Record<string, unknown>[]) : [];
+      const poNumber = `PO-${today().replace(/-/g, "")}-${Math.floor(Math.random() * 9000 + 1000)}`;
+      await pos.save({
+        po_number: poNumber,
+        status: "draft",
+        order_date: today(),
+        total: 0,
+        items: items.map((it) => ({
+          description: str(it.description),
+          quantity: numOf(it.qty) || 1,
+          unit_cost: numOf(it.unit_price),
+        })),
+      });
+      return { ok: true, number: poNumber, message: `Purchase order ${poNumber} created.` };
+    },
+  },
+  {
+    name: "email_invoice",
+    sensitive: true,
+    description: "Email an invoice to its customer (requires email configured in Settings).",
+    parameters: {
+      type: "object",
+      properties: { invoice_number: { type: "string" } },
+      required: ["invoice_number"],
+    },
+    run: async (a) => {
+      const d = await findInvoice(a.invoice_number);
+      if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
+      // Fetch full doc to get customer_email
+      const full = await billing.getDoc(Number(d.id)).catch(() => null);
+      const email = str(full?.customer_email) || str((d as any).customer_email);
+      if (!email) return { error: "This invoice has no customer email on file. Add an email to the customer record first." };
+      const body = `<p>Your invoice <strong>${esc(d.number)}</strong> for ${esc(d.currency || "AED")} ${numOf(d.total)} is ready.</p>`;
+      await sendEmail({ to: email, subject: `Invoice ${d.number} from Filey`, html: emailShell(`Invoice ${d.number}`, body) });
+      return { ok: true, message: `Invoice ${d.number} emailed to ${email}.` };
+    },
+  },
+  {
+    name: "get_attendance_today",
+    description: "Show today's attendance — who's present, absent, on leave.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const records = (await hr.attendance().catch(() => [])) as Record<string, unknown>[];
+      const t = today();
+      const todayRecords = records.filter((r) => str(r.date) === t);
+      return {
+        date: t,
+        total: todayRecords.length,
+        breakdown: {
+          present: todayRecords.filter((r) => r.status === "present").length,
+          absent: todayRecords.filter((r) => r.status === "absent").length,
+          half_day: todayRecords.filter((r) => r.status === "half_day").length,
+          leave: todayRecords.filter((r) => r.status === "leave").length,
+        },
+        records: todayRecords.map((r) => ({ employee: r.employee_name, status: r.status, check_in: r.check_in, check_out: r.check_out })),
+      };
+    },
+  },
 ];
 
 export async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { error: `Unknown tool: ${name}` };
+  if (tool.sensitive && !(await confirmTool(name, args)))
+    return { error: "Cancelled — the user did not approve this action." };
   try {
     return await tool.run(args);
   } catch (e) {

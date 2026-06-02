@@ -396,7 +396,7 @@ export async function flushOutbox(): Promise<void> {
 
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
-    flushOutbox().catch(() => {});
+    flushOutbox().catch((e) => console.error("Failed to flush outbox:", e));
   });
 }
 
@@ -417,6 +417,7 @@ async function readCached<T>(
       await cacheSet(k, data);
       return data;
     } catch {
+      console.error("Failed to read fresh data from server, using cache");
       return (await cacheGet<T>(k)) ?? empty;
     }
   }
@@ -537,15 +538,12 @@ export const erp = {
   },
   updateStock: (productId: number, delta: number) =>
     online(async () => {
-      const { data, error } = await sb()
-        .from("products")
-        .select("quantity")
-        .eq("id", productId)
-        .single();
-      if (error) throw error;
-      await sUpdate("products", productId, {
-        quantity: ((data as { quantity: number }).quantity ?? 0) + delta,
+      // Atomic — avoids lost updates when two clients adjust stock at once.
+      const { error } = await sb().rpc("adjust_product_stock", {
+        p_id: productId,
+        p_delta: delta,
       });
+      if (error) throw error;
     }),
   deleteProduct: (productId: number) =>
     write({ k: "delete", t: "products", id: productId }, () =>
@@ -596,18 +594,12 @@ export const erp = {
           );
         if (itemsErr) throw itemsErr;
         for (const l of lines) {
-          const { data, error } = await sb()
-            .from("products")
-            .select("quantity")
-            .eq("id", l.product_id)
-            .single();
-          if (error) throw error;
-          await sUpdate("products", l.product_id, {
-            quantity: Math.max(
-              0,
-              ((data as { quantity: number }).quantity ?? 0) - l.quantity
-            ),
+          // Atomic decrement (clamped at 0 server-side).
+          const { error } = await sb().rpc("adjust_product_stock", {
+            p_id: l.product_id,
+            p_delta: -l.quantity,
           });
+          if (error) throw error;
         }
       }
       return orderId;
@@ -784,16 +776,12 @@ export const hr = {
         description: `Payroll ${period}`,
         txn_date: new Date().toISOString().slice(0, 10),
       });
-      const { data, error } = await sb()
-        .from("accounts")
-        .select("balance")
-        .eq("id", accountId)
-        .single();
-      if (error) throw error;
-      await sUpdate("accounts", accountId, {
-        balance:
-          Number((data as { balance: number }).balance ?? 0) - net,
+      // Atomic balance debit — avoids lost updates under concurrency.
+      const { error } = await sb().rpc("adjust_account_balance", {
+        p_id: accountId,
+        p_delta: -net,
       });
+      if (error) throw error;
       return id;
     });
   },
@@ -880,16 +868,12 @@ export const fin = {
         description: description ?? category,
         txn_date: expenseDate,
       });
-      const { data, error } = await sb()
-        .from("accounts")
-        .select("balance")
-        .eq("id", accountId)
-        .single();
-      if (error) throw error;
-      await sUpdate("accounts", accountId, {
-        balance:
-          Number((data as { balance: number }).balance ?? 0) - amount,
+      // Atomic balance debit — avoids lost updates under concurrency.
+      const { error } = await sb().rpc("adjust_account_balance", {
+        p_id: accountId,
+        p_delta: -amount,
       });
+      if (error) throw error;
       return id;
     });
   },
