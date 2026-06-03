@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, ArrowLeft, Download, Save, Check,
-  Calendar, Banknote, Receipt,
+  Calendar, Banknote, Receipt, Maximize2, X,
 } from "lucide-react";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, money } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
-import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import ColorPicker from "../components/ColorPicker";
+import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 
 const PR_TEMPLATES = [
@@ -27,6 +28,7 @@ type PrForm = {
   payment_method: string; payment_date: string;
   for_description: string; ref_number: string;
   notes: string;
+  font: string;
 };
 
 const METHODS = ["Cash", "Bank Transfer", "Cheque", "Card", "Online"];
@@ -40,6 +42,7 @@ function blankPr(): PrForm {
     payment_method: "Bank Transfer", payment_date: today(),
     for_description: "", ref_number: "",
     notes: "Received with thanks.",
+    font: "'Plus Jakarta Sans', system-ui, sans-serif",
   };
 }
 
@@ -99,14 +102,37 @@ export default function PaymentReceipt() {
 }
 
 function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f: PrForm) => void; onBack: () => void; onSave: () => void }) {
+  const { toast, confirm } = useUI();
   const prRef = useRef<HTMLDivElement>(null);
-  const downloadPdf = () => { if (prRef.current) downloadElementAsPdf(prRef.current, form.number || "receipt"); else window.print(); };
+  const [viewOpen, setViewOpen] = useState(false);
+  const downloadPdf = () => {
+    if (prRef.current) {
+      const sheet = prRef.current.closest('.invoice-print') as HTMLElement;
+      downloadElementAsPdf(sheet || prRef.current, form.number || "receipt");
+    } else window.print();
+  };
   const set = <K extends keyof PrForm>(k: K, v: PrForm[K]) => setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
   const allTemplates = [...PR_TEMPLATES, ...customTemplates.map(t => ({ id: t.id, name: t.name }))];
   const [viewAll, setViewAll] = useState(false);
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 4);
+  const applyTemplate = (id: string) => {
+    const ct = customTemplates.find((c) => c.id === id);
+    setForm({ ...form, template: id, ...(ct ? { accent: ct.accent, font: ct.font } : {}) });
+  };
+  const removeTpl = async (id: string, name: string) => {
+    if (!(await confirm({ title: "Delete template", message: `Delete custom template "${name}"? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
+    setCustomTemplates(deleteCustomTemplate(id));
+    if (form.template === id) set("template", "standard");
+    toast.success("Template deleted.");
+  };
+  useEffect(() => {
+    if (!viewOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewOpen]);
 
   const numberToWords = (n: number): string => {
     if (n === 0) return "Zero";
@@ -130,6 +156,7 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
           <div><h1 className="text-[28px] leading-9 font-bold text-ink">Payment Receipt</h1><p className="text-sm text-brand-500 mt-0.5">Issue professional payment receipts</p></div>
         </div>
         <div className="flex items-center gap-2">
+          <button className="btn-ghost" onClick={() => setViewOpen(true)}><Maximize2 size={15} /> View</button>
           <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>
           <button className="btn-ghost" onClick={onSave}><Save size={15} /> Save</button>
         </div>
@@ -141,11 +168,24 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
             <div className={viewAll ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex gap-3 overflow-x-auto pb-1"}>
               {shown.map(tpl => {
                 const active = form.template === tpl.id;
-                return <button key={tpl.id} onClick={() => set("template", tpl.id)} className={`relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}>
+                const ct = customTemplates.find(c => c.id === tpl.id);
+                const swatch = ct?.accent ?? "#222222";
+                return <button key={tpl.id} onClick={() => applyTemplate(tpl.id)} className={`group relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}>
                   {active && <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10"><Check size={11} strokeWidth={3} /></span>}
-                  <div className="w-full h-14 rounded-lg bg-brand-100 flex items-center justify-center text-[9px] font-semibold text-brand-400">{tpl.name}</div>
+                  {ct && <span role="button" tabIndex={0} aria-label={`Delete template ${tpl.name}`} onClick={(e) => { e.stopPropagation(); removeTpl(tpl.id, tpl.name); }} className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"><Trash2 size={11} /></span>}
+                  <div className="w-full h-14 rounded-lg flex items-center justify-center text-[9px] font-semibold capitalize" style={{ background: `${swatch}14`, color: swatch, borderTop: `3px solid ${swatch}` }}>{tpl.name}</div>
                 </button>;
               })}
+            </div>
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-brand-100">
+              <span className="text-xs font-semibold text-brand-500">Accent</span>
+              <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
+              <span className="text-xs font-semibold text-brand-500 ml-2">Font</span>
+              <select className="select h-8 text-xs flex-1" value={form.font} onChange={(e) => set("font", e.target.value)}>
+                <option value="'Plus Jakarta Sans', system-ui, sans-serif">Sans</option>
+                <option value="'Lora', Georgia, serif">Serif</option>
+                <option value="'IBM Plex Mono', monospace">Mono</option>
+              </select>
             </div>
           </Step>
           <Step n={2} title="Receipt Details">
@@ -181,6 +221,21 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
           <PrPreview form={form} prRef={prRef} />
         </div>
       </div>
+
+      {viewOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+          <div className="my-4 w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white">{form.number}</h2>
+              <div className="flex items-center gap-2">
+                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}><Download size={14} /> PDF</button>
+                <button onClick={() => setViewOpen(false)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/20 cursor-pointer"><X size={18} /></button>
+              </div>
+            </div>
+            <PrPreview form={form} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -189,7 +244,7 @@ function PrPreview({ form, prRef }: { form: PrForm; prRef?: React.RefObject<HTML
   const clean = (s: string) => s || "—";
   const a = form.accent || "#222222";
   return (
-    <div ref={prRef} className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none" style={{ borderTop: `4px solid ${a}` }}>
+    <div ref={prRef} className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none" style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}>
       <div className="p-8 min-h-[500px]">
         <div className="text-center mb-8 pb-6" style={{ borderBottom: `2px solid ${a}22` }}>
           <h1 className="text-[28px] font-extrabold tracking-tight" style={{ color: a }}>PAYMENT RECEIPT</h1>
