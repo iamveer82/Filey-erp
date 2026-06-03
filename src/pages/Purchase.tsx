@@ -138,6 +138,7 @@ export default function Purchase() {
               {
                 key: "cat",
                 label: "Category",
+                sortValue: (e) => e.category,
                 render: (e) => (
                   <Badge tone="info">{e.category}</Badge>
                 ),
@@ -145,6 +146,7 @@ export default function Purchase() {
               {
                 key: "desc",
                 label: "Description",
+                sortValue: (e) => e.description ?? "",
                 render: (e) => (
                   <span className="text-ink">{e.description ?? "—"}</span>
                 ),
@@ -152,6 +154,7 @@ export default function Purchase() {
               {
                 key: "amt",
                 label: "Amount",
+                sortValue: (e) => e.amount,
                 render: (e) => (
                   <span className="font-semibold">{aed(e.amount)}</span>
                 ),
@@ -159,6 +162,7 @@ export default function Purchase() {
               {
                 key: "date",
                 label: "Date",
+                sortValue: (e) => e.expense_date,
                 render: (e) => fmtDate(e.expense_date),
               },
               {

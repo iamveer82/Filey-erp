@@ -13,6 +13,9 @@ import {
   Upload,
   Users,
   Lock,
+  ScanLine,
+  Calendar,
+  Hash,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -25,7 +28,8 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
-import { aed, num, numInput, cn, getDisplayCurrency } from "../lib/format";
+import BarcodeScanner from "../components/BarcodeScanner";
+import { aed, num, numInput, cn, getDisplayCurrency, fmtDate } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -44,6 +48,8 @@ export default function Inventory() {
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [batchFilter, setBatchFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [params, setParams] = useSearchParams();
@@ -95,9 +101,12 @@ export default function Inventory() {
         (p) =>
           (cat === "all" || (p.category || "Unsorted") === cat) &&
           (p.name.toLowerCase().includes(q.toLowerCase()) ||
-            p.sku.toLowerCase().includes(q.toLowerCase()))
+            p.sku.toLowerCase().includes(q.toLowerCase()) ||
+            ((p as any).batch_number || "").toLowerCase().includes(q.toLowerCase()) ||
+            ((p as any).barcode || "").toLowerCase().includes(q.toLowerCase())) &&
+          (!batchFilter || ((p as any).batch_number || "").toLowerCase().includes(batchFilter.toLowerCase()))
       ),
-    [products, q, cat]
+    [products, q, cat, batchFilter]
   );
 
   const lowStock = products.filter((p) => p.quantity <= p.reorder_level);
@@ -109,13 +118,33 @@ export default function Inventory() {
 
   const showAlerts = lowStock.length > 0;
 
+  const uniqueBatches = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          products
+            .map((p) => (p as any).batch_number)
+            .filter((b: any) => b && b.trim())
+        )
+      ).sort(),
+    [products]
+  );
+
   return (
     <div className="animate-fade-up">
       <PageHeader
         title="Inventory"
-        subtitle="Products, stock levels & reorder alerts"
+        subtitle="Products, stock levels, batch tracking & barcode scanning"
         action={
           <div className="flex gap-2">
+            <button
+              className="btn-ghost"
+              aria-label="Scan barcode"
+              onClick={() => setScanOpen(true)}
+              title="Scan barcode or QR code to find product"
+            >
+              <ScanLine size={15} /> Scan
+            </button>
             <button
               className="btn-ghost"
               aria-label="Export products"
@@ -131,6 +160,8 @@ export default function Inventory() {
                     { key: "cost_price", label: "Cost Price" },
                     { key: "quantity", label: "Quantity" },
                     { key: "reorder_level", label: "Reorder Level" },
+                    { key: "batch_number", label: "Batch" },
+                    { key: "expiry_date", label: "Expiry" },
                   ]
                 )
               }
@@ -181,7 +212,7 @@ export default function Inventory() {
           />
           <input
             className="input pl-10"
-            placeholder="Search products or SKU…"
+            placeholder="Search products, SKU, batch or barcode…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -203,6 +234,23 @@ export default function Inventory() {
             </button>
           ))}
         </div>
+        {uniqueBatches.length > 0 && (
+          <div className="flex items-center gap-1.5 ml-2">
+            <Hash size={13} className="text-brand-400" />
+            <select
+              className="select !h-8 text-xs"
+              value={batchFilter}
+              onChange={(e) => setBatchFilter(e.target.value)}
+            >
+              <option value="">All batches</option>
+              {uniqueBatches.map((b: any) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <span className="ml-auto text-xs font-semibold text-brand-400">
           {filtered.length} of {products.length}
         </span>
@@ -324,6 +372,7 @@ export default function Inventory() {
           {
             key: "sku",
             label: "SKU",
+            sortValue: (p) => p.sku,
             render: (p) => (
               <span className="font-mono text-xs text-brand-500">{p.sku}</span>
             ),
@@ -331,23 +380,50 @@ export default function Inventory() {
           {
             key: "name",
             label: "Product",
+            sortValue: (p) => p.name,
             render: (p) => (
               <span className="font-semibold text-ink">{p.name}</span>
             ),
           },
           {
+            key: "batch",
+            label: "Batch",
+            render: (p) => {
+              const bn = (p as any).batch_number as string | undefined;
+              const exp = (p as any).expiry_date as string | undefined;
+              if (!bn) return <span className="text-brand-400">—</span>;
+              return (
+                <span className="flex flex-col">
+                  <span className="text-xs font-mono font-semibold">{bn}</span>
+                  {exp && (
+                    <span className="text-[10px] text-brand-400 flex items-center gap-1">
+                      <Calendar size={9} />
+                      {fmtDate(exp)}
+                      {new Date(exp) < new Date() && (
+                        <Badge tone="danger">Expired</Badge>
+                      )}
+                    </span>
+                  )}
+                </span>
+              );
+            },
+          },
+          {
             key: "cat",
             label: "Category",
+            sortValue: (p) => p.category ?? "",
             render: (p) => p.category ?? "—",
           },
           {
             key: "price",
             label: "Unit Price",
+            sortValue: (p) => p.unit_price,
             render: (p) => aed(p.unit_price),
           },
           {
             key: "qty",
             label: "Stock",
+            sortValue: (p) => p.quantity,
             render: (p) => (
               <span className="flex items-center gap-2">
                 <span className="font-semibold">{p.quantity}</span>
@@ -410,6 +486,17 @@ export default function Inventory() {
         onSaved={load}
       />
 
+      <BarcodeScanner
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onScan={(code) => {
+          setQ(code);
+          setScanOpen(false);
+          toast.info(`Searching for barcode: ${code}`);
+        }}
+        title="Scan Product Barcode"
+      />
+
       <ImportCsvModal
         open={importOpen}
         title="Import products"
@@ -464,6 +551,11 @@ function ProductModal({
     cost_price: 0,
     quantity: 0,
     reorder_level: 0,
+    batch_number: "",
+    expiry_date: "",
+    barcode: "",
+    warehouse: "",
+    is_serialized: false,
   });
   const nameErr = !f.name.trim();
   const skuErr = !f.sku.trim();
@@ -474,7 +566,13 @@ function ProductModal({
     if (!valid) return;
     setSaving(true);
     try {
-      await erp.createProduct({ ...f, description: "" } as any);
+      await erp.createProduct({
+        ...f,
+        description: "",
+        batch_number: f.batch_number || undefined,
+        expiry_date: f.expiry_date || undefined,
+        barcode: f.barcode || undefined,
+      } as any);
       toast.success("Product added.");
       onSaved();
       onClose();
@@ -515,6 +613,22 @@ function ProductModal({
             onChange={(e) => setF({ ...f, category: e.target.value })}
           />
         </Field>
+        <Field label="Barcode / EAN">
+          <input
+            className="input"
+            placeholder="Scan or type"
+            value={f.barcode}
+            onChange={(e) => setF({ ...f, barcode: e.target.value })}
+          />
+        </Field>
+        <Field label="Warehouse / Location">
+          <input
+            className="input"
+            placeholder="Main Warehouse"
+            value={f.warehouse}
+            onChange={(e) => setF({ ...f, warehouse: e.target.value })}
+          />
+        </Field>
         <Field label={`Unit Price (${getDisplayCurrency()})`}>
           <input
             type="number"
@@ -549,6 +663,22 @@ function ProductModal({
             placeholder="0"
             value={f.reorder_level || ""}
             onChange={(e) => setF({ ...f, reorder_level: numInput(e.target.value) })}
+          />
+        </Field>
+        <Field label="Batch / Lot Number">
+          <input
+            className="input"
+            placeholder="LOT-2026-001"
+            value={f.batch_number}
+            onChange={(e) => setF({ ...f, batch_number: e.target.value })}
+          />
+        </Field>
+        <Field label="Expiry Date">
+          <input
+            type="date"
+            className="input"
+            value={f.expiry_date}
+            onChange={(e) => setF({ ...f, expiry_date: e.target.value })}
           />
         </Field>
       </div>

@@ -87,16 +87,16 @@ export default function ChequeRegister() {
         </div>
       </div>
       <DataTable<Cheque> rows={filtered} empty="No cheques recorded yet" columns={[
-        { key: "no", label: "Cheque #", render: c => <span className="font-mono text-xs font-semibold">{c.cheque_no}</span> },
-        { key: "type", label: "Type", render: c => <Badge tone={c.type === "issued" ? "warn" : "info"}>{c.type}</Badge> },
-        { key: "party", label: "Party", render: c => <span className="font-semibold">{c.party}</span> },
-        { key: "bank", label: "Bank", render: c => <span className="text-brand-500 text-sm">{c.bank}</span> },
-        { key: "amt", label: "Amount", render: c => <span className="font-semibold tabular-nums">{aed(c.amount)}</span> },
-        { key: "due", label: "Due Date", render: c => {
+        { key: "no", label: "Cheque #", sortValue: c => c.cheque_no, render: c => <span className="font-mono text-xs font-semibold">{c.cheque_no}</span> },
+        { key: "type", label: "Type", sortValue: c => c.type, render: c => <Badge tone={c.type === "issued" ? "warn" : "info"}>{c.type}</Badge> },
+        { key: "party", label: "Party", sortValue: c => c.party, render: c => <span className="font-semibold">{c.party}</span> },
+        { key: "bank", label: "Bank", sortValue: c => c.bank, render: c => <span className="text-brand-500 text-sm">{c.bank}</span> },
+        { key: "amt", label: "Amount", sortValue: c => c.amount, render: c => <span className="font-semibold tabular-nums">{aed(c.amount)}</span> },
+        { key: "due", label: "Due Date", sortValue: c => c.due_date, render: c => {
           const overdue = c.status === "pending" && c.due_date < new Date().toISOString().slice(0, 10);
           return <span className={overdue ? "text-danger font-semibold" : ""}>{fmtDate(c.due_date)}</span>;
         }},
-        { key: "status", label: "Status", render: c => <Badge tone={statusTone(c.status)}>{c.status}</Badge> },
+        { key: "status", label: "Status", sortValue: c => c.status, render: c => <Badge tone={statusTone(c.status)}>{c.status}</Badge> },
         { key: "act", label: "", render: c => (
           <div className="flex items-center gap-1">
             {c.status === "pending" && <button aria-label={`Mark cheque ${c.cheque_no} cleared`} className="text-success hover:bg-success/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200" onClick={() => markCleared(c)}><Check size={15} /></button>}

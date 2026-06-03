@@ -125,10 +125,11 @@ export default function Accounting() {
           loading={loading}
           empty="No journal entries yet"
           columns={[
-            { key: "d", label: "Date", render: (t) => fmtDate(t.txn_date) },
+            { key: "d", label: "Date", sortValue: (t) => t.txn_date, render: (t) => fmtDate(t.txn_date) },
             {
               key: "acct",
               label: "Account",
+              sortValue: (t) => t.account_name,
               render: (t) => (
                 <span className="font-semibold text-ink">
                   {t.account_name}
@@ -138,6 +139,7 @@ export default function Accounting() {
             {
               key: "type",
               label: "Type",
+              sortValue: (t) => t.txn_type,
               render: (t) => (
                 <Badge tone={t.txn_type === "credit" ? "success" : "info"}>
                   {t.txn_type}
@@ -147,11 +149,13 @@ export default function Accounting() {
             {
               key: "desc",
               label: "Description",
+              sortValue: (t) => t.description ?? "",
               render: (t) => t.description ?? "—",
             },
             {
               key: "amt",
               label: "Amount",
+              sortValue: (t) => t.amount,
               render: (t) => (
                 <span className="font-semibold">{aed(t.amount)}</span>
               ),
@@ -167,6 +171,7 @@ export default function Accounting() {
             {
               key: "code",
               label: "Code",
+              sortValue: (a) => a.code,
               render: (a) => (
                 <span className="font-mono text-xs text-brand-500">
                   {a.code}
@@ -176,6 +181,7 @@ export default function Accounting() {
             {
               key: "name",
               label: "Account",
+              sortValue: (a) => a.name,
               render: (a) => (
                 <span className="font-semibold text-ink">{a.name}</span>
               ),
@@ -183,6 +189,7 @@ export default function Accounting() {
             {
               key: "type",
               label: "Type",
+              sortValue: (a) => a.account_type,
               render: (a) => (
                 <Badge tone="neutral">{a.account_type}</Badge>
               ),
@@ -190,6 +197,7 @@ export default function Accounting() {
             {
               key: "bal",
               label: "Balance",
+              sortValue: (a) => a.balance,
               render: (a) => (
                 <span className="font-semibold">{aed(a.balance)}</span>
               ),

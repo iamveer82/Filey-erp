@@ -57,6 +57,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import CompanyMessages from "../components/CompanyMessages";
+import ActivityFeed from "../components/ActivityFeed";
 import { num, aed, fmtDate, cn } from "../lib/format";
 import AiSummaryCard from "../components/AiSummaryCard";
 import GettingStarted from "../components/GettingStarted";
@@ -938,6 +939,11 @@ export default function Overview() {
           </div>
         </SortableContext>
       </DndContext>
+
+      {/* Activity Feed */}
+      <div className="mt-6">
+        <ActivityFeed />
+      </div>
     </div>
   );
 }

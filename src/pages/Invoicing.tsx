@@ -24,6 +24,9 @@ import {
   Sparkles,
   Repeat,
   Maximize2,
+  FileText,
+  Wallet,
+  Clock,
 } from "lucide-react";
 import {
   billing,
@@ -38,7 +41,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, numInput, CURRENCIES } from "../lib/format";
+import { fmtDate, money, num, numInput, CURRENCIES } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
@@ -49,6 +52,7 @@ import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../c
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
   PageHeader,
+  MetricCard,
   DataTable,
   Badge,
   statusTone,
@@ -330,6 +334,18 @@ export default function Invoicing() {
     );
   }
 
+  const statToday = new Date().toISOString().slice(0, 10);
+  const outstanding = docs.reduce((s, d) => s + (d.balance ?? 0), 0);
+  const paidTotal = docs.reduce((s, d) => s + (d.paid ?? 0), 0);
+  const overdueCount = docs.filter(
+    (d) =>
+      (d.balance ?? 0) > 0 &&
+      !!d.due_date &&
+      d.due_date < statToday &&
+      d.status !== "paid"
+  ).length;
+  const statCcy = company?.currency || "AED";
+
   return (
     <div>
       <PageHeader
@@ -352,6 +368,32 @@ export default function Invoicing() {
           </div>
         }
       />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <MetricCard
+          label="Invoices"
+          value={num(docs.length)}
+          icon={<FileText size={20} />}
+        />
+        <MetricCard
+          label="Outstanding"
+          value={money(outstanding, statCcy)}
+          icon={<Wallet size={20} />}
+          iconClass="bg-secondary-400/20 text-secondary-600"
+        />
+        <MetricCard
+          label="Paid"
+          value={money(paidTotal, statCcy)}
+          icon={<CheckCircle2 size={20} />}
+          iconClass="bg-success/15 text-success"
+        />
+        <MetricCard
+          label="Overdue"
+          value={num(overdueCount)}
+          icon={<Clock size={20} />}
+          iconClass="bg-danger/15 text-danger"
+        />
+      </div>
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
@@ -456,6 +498,7 @@ export default function Invoicing() {
           {
             key: "no",
             label: "Invoice #",
+            sortValue: (d) => d.number,
             render: (d) => (
               <span className="font-mono text-xs font-semibold">
                 {d.number}
@@ -465,6 +508,7 @@ export default function Invoicing() {
           {
             key: "cust",
             label: "Customer",
+            sortValue: (d) => d.customer_name,
             render: (d) => (
               <span className="font-semibold">{d.customer_name}</span>
             ),
@@ -472,6 +516,7 @@ export default function Invoicing() {
           {
             key: "tpl",
             label: "Template",
+            sortValue: (d) => d.template,
             render: (d) => (
               <span className="capitalize text-brand-500">{d.template}</span>
             ),
@@ -479,6 +524,7 @@ export default function Invoicing() {
           {
             key: "total",
             label: "Total",
+            sortValue: (d) => d.total,
             render: (d) => (
               <span className="font-semibold">{money(d.total, d.currency || "AED")}</span>
             ),
@@ -486,6 +532,7 @@ export default function Invoicing() {
           {
             key: "status",
             label: "Status",
+            sortValue: (d) => d.status,
             render: (d) => {
               const today = new Date().toISOString().slice(0, 10);
               const overdue =
@@ -510,6 +557,7 @@ export default function Invoicing() {
           {
             key: "upd",
             label: "Updated",
+            sortValue: (d) => d.updated_at,
             render: (d) => fmtDate(d.updated_at),
           },
           {

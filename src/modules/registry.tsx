@@ -21,6 +21,10 @@ import {
   Settings2,
   PackageCheck,
   FolderOpen,
+  Truck,
+  CreditCard,
+  Banknote,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
@@ -42,6 +46,11 @@ const Accounting = lazy(() => import("../pages/Accounting"));
 const ToolsPage = lazy(() => import("../pages/PdfTools"));
 const MyFilesPage = lazy(() => import("../pages/MyFiles"));
 const Settings = lazy(() => import("../pages/Tools"));
+const DeliveryChallan = lazy(() => import("../pages/DeliveryChallan"));
+const PaymentReceipt = lazy(() => import("../pages/PaymentReceipt"));
+const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
+const BankAccounts = lazy(() => import("../pages/BankAccounts"));
+const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
 
 export interface AppModule {
   id: string;
@@ -210,5 +219,50 @@ export const MODULES: AppModule[] = [
     to: "/settings",
     Component: Settings,
     core: true,
+  },
+  {
+    id: "delivery-challans",
+    label: "Delivery Challans",
+    short: "Challans",
+    desc: "Delivery challans, goods received notes & returns",
+    icon: Truck,
+    to: "/delivery-challans",
+    Component: DeliveryChallan,
+  },
+  {
+    id: "payment-receipts",
+    label: "Payment Receipts",
+    short: "Receipts",
+    desc: "Issue payment receipts to customers & suppliers",
+    icon: CreditCard,
+    to: "/payment-receipts",
+    Component: PaymentReceipt,
+  },
+  {
+    id: "cheques",
+    label: "Cheques",
+    short: "Cheques",
+    desc: "Track issued & received cheques with status",
+    icon: Banknote,
+    to: "/cheques",
+    Component: ChequeRegister,
+  },
+  {
+    id: "bank-accounts",
+    label: "Bank Accounts",
+    short: "Bank",
+    desc: "Manage company bank accounts & balances",
+    icon: Landmark,
+    to: "/bank-accounts",
+    Component: BankAccounts,
+  },
+  {
+    id: "email-templates",
+    label: "Email Templates",
+    short: "Emails",
+    desc: "Reusable email templates with placeholders",
+    icon: Mail,
+    to: "/email-templates",
+    Component: EmailTemplates,
   },
 ];

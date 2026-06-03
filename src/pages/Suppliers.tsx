@@ -149,6 +149,7 @@ export default function Suppliers() {
           {
             key: "name",
             label: "Supplier",
+            sortValue: (s) => s.name,
             render: (s) => (
               <span className="font-semibold text-ink">{s.name}</span>
             ),
@@ -156,16 +157,19 @@ export default function Suppliers() {
           {
             key: "contact",
             label: "Contact",
+            sortValue: (s) => s.contact_person ?? "",
             render: (s) => s.contact_person ?? "—",
           },
           {
             key: "email",
             label: "Email",
+            sortValue: (s) => s.email ?? "",
             render: (s) => s.email ?? "—",
           },
           {
             key: "phone",
             label: "Phone",
+            sortValue: (s) => s.phone ?? "",
             render: (s) => s.phone ?? "—",
           },
           {

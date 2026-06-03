@@ -136,6 +136,7 @@ export default function Orders() {
           {
             key: "no",
             label: "Order #",
+            sortValue: (o) => o.order_number,
             render: (o) => (
               <span className="font-mono text-xs text-brand-500">
                 {o.order_number}
@@ -145,16 +146,18 @@ export default function Orders() {
           {
             key: "cust",
             label: "Customer",
+            sortValue: (o) => o.customer_name,
             render: (o) => (
               <span className="font-semibold text-ink">
                 {o.customer_name}
               </span>
             ),
           },
-          { key: "total", label: "Total", render: (o) => aed(o.total) },
+          { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
           {
             key: "status",
             label: "Status",
+            sortValue: (o) => o.status,
             render: (o) => (
               <Badge tone={statusTone(o.status)}>{o.status}</Badge>
             ),
@@ -162,6 +165,7 @@ export default function Orders() {
           {
             key: "date",
             label: "Created",
+            sortValue: (o) => o.created_at,
             render: (o) => fmtDate(o.created_at),
           },
           {

@@ -125,6 +125,7 @@ export default function People() {
           {
             key: "code",
             label: "Code",
+            sortValue: (e) => e.employee_code,
             render: (e) => (
               <span className="font-mono text-xs text-brand-500">
                 {e.employee_code}
@@ -134,6 +135,7 @@ export default function People() {
           {
             key: "name",
             label: "Name",
+            sortValue: (e) => e.name,
             render: (e) => (
               <div>
                 <p className="font-semibold text-ink">{e.name}</p>
@@ -146,26 +148,31 @@ export default function People() {
           {
             key: "dept",
             label: "Department",
+            sortValue: (e) => e.department ?? "",
             render: (e) => e.department ?? "—",
           },
           {
             key: "pos",
             label: "Position",
+            sortValue: (e) => e.position ?? "",
             render: (e) => e.position ?? "—",
           },
           {
             key: "salary",
             label: "Salary",
+            sortValue: (e) => e.salary,
             render: (e) => aed(e.salary),
           },
           {
             key: "hired",
             label: "Hired",
+            sortValue: (e) => e.hire_date ?? "",
             render: (e) => fmtDate(e.hire_date),
           },
           {
             key: "status",
             label: "Status",
+            sortValue: (e) => e.status ?? "",
             render: (e) => (
               <button
                 onClick={async () => {
