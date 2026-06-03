@@ -1,0 +1,230 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  Plus, Trash2, ArrowLeft, Download, Save, Check,
+  Calendar, Banknote, Receipt,
+} from "lucide-react";
+import { useLiveSync } from "../lib/realtime";
+import { useUI } from "../lib/ui";
+import { aed, fmtDate, numInput, money } from "../lib/format";
+import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
+import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import { downloadElementAsPdf } from "../lib/pdfTools";
+
+const PR_TEMPLATES = [
+  { id: "standard", name: "Standard" },
+  { id: "formal", name: "Formal" },
+  { id: "minimal", name: "Minimal" },
+];
+
+const prNumber = () => `RCPT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+const today = () => new Date().toISOString().slice(0, 10);
+
+type PrForm = {
+  number: string; template: string; accent: string;
+  company_name: string; company_address: string; company_trn: string;
+  payer_name: string; payer_address: string;
+  amount: number; amount_words: string;
+  payment_method: string; payment_date: string;
+  for_description: string; ref_number: string;
+  notes: string;
+};
+
+const METHODS = ["Cash", "Bank Transfer", "Cheque", "Card", "Online"];
+
+function blankPr(): PrForm {
+  return {
+    number: prNumber(), template: "standard", accent: "#222222",
+    company_name: "Your Company", company_address: "", company_trn: "",
+    payer_name: "", payer_address: "",
+    amount: 0, amount_words: "",
+    payment_method: "Bank Transfer", payment_date: today(),
+    for_description: "", ref_number: "",
+    notes: "Received with thanks.",
+  };
+}
+
+const PR_STORAGE_KEY = "filey_payment_receipts";
+interface PrRecord { id: number; number: string; payer_name: string; amount: number; payment_date: string; created_at: string; }
+function loadPrs(): PrRecord[] { try { return JSON.parse(localStorage.getItem(PR_STORAGE_KEY) || "[]"); } catch { return []; } }
+function savePrs(r: PrRecord[]) { try { localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(r)); } catch {} }
+
+export default function PaymentReceipt() {
+  const { toast, confirm } = useUI();
+  const [records, setRecords] = useState<PrRecord[]>([]);
+  const [form, setForm] = useState<PrForm | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setRecords(loadPrs()); setLoading(false); }, []);
+  useLiveSync(() => setRecords(loadPrs()));
+
+  const del = async (r: PrRecord) => {
+    const ok = await confirm({ title: "Delete receipt", message: `Delete ${r.number}?`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    const next = records.filter(x => x.id !== r.id);
+    setRecords(next); savePrs(next); toast.success("Deleted.");
+  };
+
+  if (form) return (
+    <PrEditor form={form} setForm={setForm} onBack={() => { setForm(null); setRecords(loadPrs()); }}
+      onSave={() => {
+        const next = loadPrs();
+        const existing = next.findIndex(r => r.number === form.number);
+        const record: PrRecord = { id: existing >= 0 ? next[existing].id : Date.now(), number: form.number, payer_name: form.payer_name, amount: form.amount, payment_date: form.payment_date, created_at: new Date().toISOString() };
+        if (existing >= 0) next[existing] = record; else next.push(record);
+        savePrs(next); toast.success("Receipt saved.");
+      }}
+    />
+  );
+
+  const totalReceived = records.reduce((s, r) => s + r.amount, 0);
+
+  return (
+    <div className="animate-fade-up">
+      <PageHeader title="Payment Receipts" subtitle="Issue payment receipts to customers & suppliers"
+        action={<button className="btn-primary" onClick={() => setForm(blankPr())}><Plus size={16} /> New Receipt</button>} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <MetricCard label="Receipts" value={String(records.length)} icon={<Receipt size={20} />} />
+        <MetricCard label="Total Received" value={aed(totalReceived)} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />
+      </div>
+      <DataTable<PrRecord> rows={records} loading={loading} empty="No receipts yet"
+        columns={[
+          { key: "no", label: "Receipt #", sortValue: r => r.number, render: r => <span className="font-mono text-xs font-semibold">{r.number}</span> },
+          { key: "payer", label: "Payer", sortValue: r => r.payer_name, render: r => <span className="font-semibold text-ink">{r.payer_name || "—"}</span> },
+          { key: "amt", label: "Amount", sortValue: r => r.amount, render: r => <span className="font-semibold text-ink tabular-nums">{aed(r.amount)}</span> },
+          { key: "date", label: "Date", sortValue: r => r.payment_date, render: r => <span className="text-brand-600">{fmtDate(r.payment_date)}</span> },
+          { key: "act", label: "", render: r => <button aria-label={`Delete receipt ${r.number}`} className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200" onClick={() => del(r)}><Trash2 size={15} /></button> },
+        ]}
+      />
+    </div>
+  );
+}
+
+function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f: PrForm) => void; onBack: () => void; onSave: () => void }) {
+  const prRef = useRef<HTMLDivElement>(null);
+  const downloadPdf = () => { if (prRef.current) downloadElementAsPdf(prRef.current, form.number || "receipt"); else window.print(); };
+  const set = <K extends keyof PrForm>(k: K, v: PrForm[K]) => setForm({ ...form, [k]: v });
+  const [designing, setDesigning] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const allTemplates = [...PR_TEMPLATES, ...customTemplates.map(t => ({ id: t.id, name: t.name }))];
+  const [viewAll, setViewAll] = useState(false);
+  const shown = viewAll ? allTemplates : allTemplates.slice(0, 4);
+
+  const numberToWords = (n: number): string => {
+    if (n === 0) return "Zero";
+    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+    const convert = (num: number): string => {
+      if (num < 20) return ones[num];
+      if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "");
+      if (num < 1000) return ones[Math.floor(num / 100)] + " Hundred" + (num % 100 ? " and " + convert(num % 100) : "");
+      if (num < 100000) return convert(Math.floor(num / 1000)) + " Thousand" + (num % 1000 ? " " + convert(num % 1000) : "");
+      return convert(Math.floor(num / 100000)) + " Lakh" + (num % 100000 ? " " + convert(num % 100000) : "");
+    };
+    return convert(Math.floor(n)) + " Only";
+  };
+
+  return (
+    <div>
+      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
+        <div className="flex items-start gap-3">
+          <button className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5" onClick={onBack} aria-label="Back"><ArrowLeft size={18} /></button>
+          <div><h1 className="text-[26px] leading-8 font-bold text-ink">Payment Receipt</h1><p className="text-sm text-brand-500 mt-0.5">Issue professional payment receipts</p></div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>
+          <button className="btn-ghost" onClick={onSave}><Save size={15} /> Save</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
+        <div className="no-print space-y-4">
+          <Step n={1} title="Template" action={<div className="flex gap-2"><button className="btn-ghost text-xs" onClick={() => setViewAll(v => !v)}>{viewAll ? "Less" : "All"}</button><button className="btn-ghost text-xs flex items-center gap-1" onClick={() => setDesigning(true)}><Plus size={13} /> Custom</button></div>}>
+            <div className={viewAll ? "grid grid-cols-2 sm:grid-cols-3 gap-3" : "flex gap-3 overflow-x-auto pb-1"}>
+              {shown.map(tpl => {
+                const active = form.template === tpl.id;
+                return <button key={tpl.id} onClick={() => set("template", tpl.id)} className={`relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}>
+                  {active && <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10"><Check size={11} strokeWidth={3} /></span>}
+                  <div className="w-full h-14 rounded-lg bg-brand-100 flex items-center justify-center text-[9px] font-semibold text-brand-400">{tpl.name}</div>
+                </button>;
+              })}
+            </div>
+          </Step>
+          <Step n={2} title="Receipt Details">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Field label="Receipt Number"><input className="input" value={form.number} onChange={e => set("number", e.target.value)} /></Field>
+                <Field label="Payer Name"><input className="input" placeholder="Customer / Company name" value={form.payer_name} onChange={e => set("payer_name", e.target.value)} /></Field>
+                <Field label="Payer Address"><textarea className="textarea" rows={2} value={form.payer_address} onChange={e => set("payer_address", e.target.value)} /></Field>
+              </div>
+              <div className="space-y-3">
+                <Field label="Payment Date"><input type="date" className="input" value={form.payment_date} onChange={e => set("payment_date", e.target.value)} /></Field>
+                <Field label="Amount (AED)"><input type="number" className="input text-lg font-bold" value={form.amount || ""} onChange={e => { const v = numInput(e.target.value); set("amount", v); set("amount_words", numberToWords(v)); }} /></Field>
+                <Field label="Payment Method"><select className="select" value={form.payment_method} onChange={e => set("payment_method", e.target.value)}>{METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
+              </div>
+            </div>
+            <div className="mt-3 space-y-3">
+              <Field label="For / Description"><input className="input" placeholder="Payment for invoice #, services, etc." value={form.for_description} onChange={e => set("for_description", e.target.value)} /></Field>
+              <Field label="Reference Number"><input className="input" placeholder="Invoice #, PO #" value={form.ref_number} onChange={e => set("ref_number", e.target.value)} /></Field>
+            </div>
+          </Step>
+          <Step n={3} title="Company Info">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Company Name"><input className="input" value={form.company_name} onChange={e => set("company_name", e.target.value)} /></Field>
+              <Field label="TRN"><input className="input" value={form.company_trn} onChange={e => set("company_trn", e.target.value)} /></Field>
+              <div><Field label="Address"><textarea className="textarea" rows={2} value={form.company_address} onChange={e => set("company_address", e.target.value)} /></Field></div>
+            </div>
+          </Step>
+          <Step n={4} title="Notes"><Field label="Notes"><textarea className="textarea" rows={2} value={form.notes} onChange={e => set("notes", e.target.value)} /></Field></Step>
+        </div>
+
+        <div className="sticky top-4">
+          {designing && <div className="mb-4"><TemplateDesigner onSave={() => { setDesigning(false); setCustomTemplates(loadCustomTemplates()); }} onClose={() => { setDesigning(false); setCustomTemplates(loadCustomTemplates()); }} /></div>}
+          <PrPreview form={form} prRef={prRef} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrPreview({ form, prRef }: { form: PrForm; prRef?: React.RefObject<HTMLDivElement | null> }) {
+  const clean = (s: string) => s || "—";
+  const a = form.accent || "#222222";
+  return (
+    <div ref={prRef} className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none" style={{ borderTop: `4px solid ${a}` }}>
+      <div className="p-8 min-h-[500px]">
+        <div className="text-center mb-8 pb-6" style={{ borderBottom: `2px solid ${a}22` }}>
+          <h1 className="text-[28px] font-extrabold tracking-tight" style={{ color: a }}>PAYMENT RECEIPT</h1>
+          <p className="font-mono text-lg font-bold mt-2">{form.number}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          <div>
+            <p className="text-xs font-semibold text-brand-400 uppercase mb-1">Received From</p>
+            <p className="font-bold text-lg">{clean(form.payer_name)}</p>
+            <p className="text-sm text-brand-500">{clean(form.payer_address)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold text-brand-400 uppercase mb-1">Date & Method</p>
+            <p className="text-sm flex items-center justify-end gap-2"><Calendar size={13} /> {form.payment_date}</p>
+            <p className="text-sm flex items-center justify-end gap-2"><Banknote size={13} /> {form.payment_method}</p>
+          </div>
+        </div>
+        <div className="text-center mb-6 p-6 rounded-2xl" style={{ backgroundColor: `${a}0A`, border: `2px solid ${a}22` }}>
+          <p className="text-[40px] font-extrabold tabular-nums" style={{ color: a }}>{money(form.amount, "AED")}</p>
+          {form.amount_words && <p className="text-sm text-brand-500 mt-1 italic">{form.amount_words}</p>}
+        </div>
+        {form.for_description && <div className="mb-4"><p className="font-semibold text-sm">For:</p><p className="text-brand-600">{form.for_description}</p></div>}
+        {form.ref_number && <div className="mb-4"><p className="text-sm text-brand-500">Reference: {form.ref_number}</p></div>}
+        <div className="mt-8 pt-6" style={{ borderTop: `2px solid #EAE4D6` }}>
+          <div className="grid grid-cols-2 gap-8">
+            <div><p className="text-xs font-semibold text-brand-400 mb-4">Received By</p><div style={{ borderTop: `1px solid ${a}22` }} className="pt-2"><p className="text-[10px] text-brand-400">Signature</p></div></div>
+            <div className="text-right"><p className="font-bold text-[15px]" style={{ color: a }}>{clean(form.company_name)}</p><p className="text-sm text-brand-500">{clean(form.company_address)}</p></div>
+          </div>
+        </div>
+        {form.notes && <p className="text-sm text-brand-500 text-center mt-4 italic">{form.notes}</p>}
+      </div>
+    </div>
+  );
+}
+
+function Step({ n, title, action, children }: { n: number; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return <div className="card p-6"><div className="flex items-center justify-between mb-4"><div className="flex items-center gap-3"><span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">{n}</span><h3 className="font-bold text-ink">{title}</h3></div>{action}</div>{children}</div>;
+}
