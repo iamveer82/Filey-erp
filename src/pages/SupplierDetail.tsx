@@ -165,6 +165,7 @@ export default function SupplierDetail() {
             {
               key: "number",
               label: "PO",
+              sortValue: (o) => o.po_number,
               render: (o) => (
                 <span className="font-semibold text-ink">{o.po_number}</span>
               ),
@@ -172,21 +173,24 @@ export default function SupplierDetail() {
             {
               key: "ordered",
               label: "Ordered",
+              sortValue: (o) => o.order_date ?? "",
               render: (o) => fmtDate(o.order_date),
             },
             {
               key: "expected",
               label: "Expected",
+              sortValue: (o) => o.expected_date ?? "",
               render: (o) => fmtDate(o.expected_date),
             },
             {
               key: "status",
               label: "Status",
+              sortValue: (o) => o.status,
               render: (o) => (
                 <Badge tone={statusTone(o.status)}>{o.status}</Badge>
               ),
             },
-            { key: "total", label: "Total", render: (o) => aed(o.total) },
+            { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
           ]}
         />
       </Section>

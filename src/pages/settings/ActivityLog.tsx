@@ -85,10 +85,11 @@ export default function ActivityLog() {
         loading={loading}
         empty="No activity recorded yet"
         columns={[
-          { key: "t", label: "When", render: (a) => fmtDate(a.created_at) },
+          { key: "t", label: "When", sortValue: (a) => a.created_at ?? "", render: (a) => fmtDate(a.created_at) },
           {
             key: "actor",
             label: "Actor",
+            sortValue: (a) => a.actor,
             render: (a) => (
               <span className="font-semibold text-ink">{a.actor}</span>
             ),
@@ -96,6 +97,7 @@ export default function ActivityLog() {
           {
             key: "act",
             label: "Action",
+            sortValue: (a) => a.action,
             render: (a) => (
               <Badge tone={ACTION_TONE[a.action] ?? "info"}>
                 {a.action === "insert"
@@ -109,9 +111,10 @@ export default function ActivityLog() {
           {
             key: "ent",
             label: "Type",
+            sortValue: (a) => a.entity,
             render: (a) => prettyEntity(a.entity),
           },
-          { key: "d", label: "Details", render: (a) => a.details ?? "—" },
+          { key: "d", label: "Details", sortValue: (a) => a.details ?? "", render: (a) => a.details ?? "—" },
         ]}
       />
     </div>

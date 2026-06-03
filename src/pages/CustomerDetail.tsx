@@ -226,6 +226,7 @@ export default function CustomerDetail() {
             {
               key: "number",
               label: "Number",
+              sortValue: (d) => d.number,
               render: (d) => (
                 <span className="font-semibold text-ink">{d.number}</span>
               ),
@@ -233,19 +234,22 @@ export default function CustomerDetail() {
             {
               key: "issue",
               label: "Issued",
+              sortValue: (d) => d.issue_date ?? "",
               render: (d) => fmtDate(d.issue_date),
             },
             {
               key: "status",
               label: "Status",
+              sortValue: (d) => d.status,
               render: (d) => (
                 <Badge tone={statusTone(d.status)}>{d.status}</Badge>
               ),
             },
-            { key: "total", label: "Total", render: (d) => aed(d.total) },
+            { key: "total", label: "Total", sortValue: (d) => d.total, render: (d) => aed(d.total) },
             {
               key: "balance",
               label: "Balance",
+              sortValue: (d) => d.balance ?? Math.max(0, d.total - (d.paid ?? 0)),
               render: (d) =>
                 aed(d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
             },
@@ -262,6 +266,7 @@ export default function CustomerDetail() {
             {
               key: "number",
               label: "Number",
+              sortValue: (q) => q.number,
               render: (q) => (
                 <span className="font-semibold text-ink">{q.number}</span>
               ),
@@ -269,16 +274,18 @@ export default function CustomerDetail() {
             {
               key: "valid",
               label: "Valid until",
+              sortValue: (q) => q.valid_until ?? "",
               render: (q) => fmtDate(q.valid_until),
             },
             {
               key: "status",
               label: "Status",
+              sortValue: (q) => q.status,
               render: (q) => (
                 <Badge tone={statusTone(q.status)}>{q.status}</Badge>
               ),
             },
-            { key: "total", label: "Total", render: (q) => aed(q.total) },
+            { key: "total", label: "Total", sortValue: (q) => q.total, render: (q) => aed(q.total) },
           ]}
         />
       </Section>
@@ -292,6 +299,7 @@ export default function CustomerDetail() {
             {
               key: "number",
               label: "Order",
+              sortValue: (o) => o.order_number,
               render: (o) => (
                 <span className="font-semibold text-ink">
                   {o.order_number}
@@ -301,16 +309,18 @@ export default function CustomerDetail() {
             {
               key: "date",
               label: "Date",
+              sortValue: (o) => o.created_at ?? "",
               render: (o) => fmtDate(o.created_at),
             },
             {
               key: "status",
               label: "Status",
+              sortValue: (o) => o.status,
               render: (o) => (
                 <Badge tone={statusTone(o.status)}>{o.status}</Badge>
               ),
             },
-            { key: "total", label: "Total", render: (o) => aed(o.total) },
+            { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
           ]}
         />
       </Section>
@@ -323,6 +333,7 @@ export default function CustomerDetail() {
               {
                 key: "title",
                 label: "Title",
+                sortValue: (o) => o.title,
                 render: (o) => (
                   <span className="font-semibold text-ink">{o.title}</span>
                 ),
@@ -330,14 +341,16 @@ export default function CustomerDetail() {
               {
                 key: "stage",
                 label: "Stage",
+                sortValue: (o) => o.stage,
                 render: (o) => (
                   <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>
                 ),
               },
-              { key: "value", label: "Value", render: (o) => aed(o.value) },
+              { key: "value", label: "Value", sortValue: (o) => o.value, render: (o) => aed(o.value) },
               {
                 key: "prob",
                 label: "Probability",
+                sortValue: (o) => o.probability,
                 render: (o) => `${o.probability}%`,
               },
             ]}
