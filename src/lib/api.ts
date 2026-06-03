@@ -1384,6 +1384,8 @@ export const billing = {
               description: it.description,
               qty: it.qty,
               unit_price: it.unit_price,
+              unit: (it as any).unit || undefined,
+              custom: (it as any).custom || undefined,
               position: i,
             }))
           );

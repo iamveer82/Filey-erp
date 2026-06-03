@@ -203,12 +203,16 @@ export default function Invoicing() {
         customer_address: d.customer_address,
         customer_trn: d.customer_trn,
         customer_email: d.customer_email,
+        customer_id: d.customer_id,
         issue_date: d.issue_date,
         due_date: d.due_date,
+        po_number: d.po_number,
         notes: d.notes,
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
+        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0 } : undefined,
+        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0 } : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -244,12 +248,16 @@ export default function Invoicing() {
         customer_address: d.customer_address,
         customer_trn: d.customer_trn,
         customer_email: d.customer_email,
+        customer_id: d.customer_id,
         issue_date: today(),
         due_date: addDays(30),
+        po_number: d.po_number,
         notes: d.notes,
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
+        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0 } : undefined,
+        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0 } : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -294,14 +302,9 @@ export default function Invoicing() {
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
-      // Remove camelCase duplicates and DB-missing columns
+      // Remove Form-only camelCase fields that don't exist as DB columns
       delete (payload as any).customColumns;
-      delete (payload as any).custom_columns;
-      delete (payload as any).stamp;
-      delete (payload as any).signature;
       delete (payload as any).doc_type;
-      delete (payload as any).doc_title;
-      delete (payload as any).po_number;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id });
       await loadDocs();
@@ -349,14 +352,9 @@ export default function Invoicing() {
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
-      // Remove camelCase duplicates and DB-missing columns
+      // Remove Form-only camelCase fields that don't exist as DB columns
       delete (payload as any).customColumns;
-      delete (payload as any).custom_columns;
-      delete (payload as any).stamp;
-      delete (payload as any).signature;
       delete (payload as any).doc_type;
-      delete (payload as any).doc_title;
-      delete (payload as any).po_number;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id, status });
       await loadDocs();
@@ -1391,6 +1389,14 @@ function Editor({
                     className="input"
                     value={form.due_date ?? ""}
                     onChange={(e) => set("due_date", e.target.value)}
+                  />
+                </Field>
+                <Field label="PO Number (optional)">
+                  <input
+                    className="input"
+                    placeholder="e.g. PO-2024-001"
+                    value={form.po_number || ""}
+                    onChange={(e) => set("po_number", e.target.value)}
                   />
                 </Field>
                 <Field label="Currency">
