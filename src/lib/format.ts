@@ -76,3 +76,15 @@ export function fmtDate(d?: string | null): string {
     year: "numeric",
   });
 }
+
+/** Extract a human-readable message from any error shape.
+ *  Handles Error, Supabase PostgrestError ({message, details, hint}),
+ *  and plain objects without producing [object Object]. */
+export function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const obj = e as Record<string, unknown>;
+    return String(obj.message ?? obj.details ?? obj.hint ?? JSON.stringify(e));
+  }
+  return String(e);
+}

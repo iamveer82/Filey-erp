@@ -29,7 +29,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, numInput, CURRENCIES } from "../lib/format";
+import { fmtDate, money, numInput, CURRENCIES, errMsg } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import { downloadElementAsPdf } from "../lib/pdfTools";
@@ -211,7 +211,7 @@ export default function Quoting() {
       });
       toast.success(`Quotation emailed to ${to}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     }
   };
 
@@ -585,11 +585,7 @@ export default function Quoting() {
                   toast.success("Invoice created from quotation.");
                   navigate("/invoicing");
                 } catch (e) {
-                  toast.error(
-                    `Could not convert: ${
-                      e instanceof Error ? e.message : String(e)
-                    }`
-                  );
+                  toast.error(`Could not convert: ${errMsg(e)}`);
                 } finally {
                   setConverting(false);
                 }

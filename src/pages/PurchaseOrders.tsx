@@ -27,7 +27,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
-import { aed, fmtDate, num, numInput } from "../lib/format";
+import { aed, fmtDate, num, numInput, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -180,7 +180,7 @@ export default function PurchaseOrders() {
       load();
       toast.success("Stock received.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     }
   };
 
@@ -438,7 +438,7 @@ async function saveLpo(
     setForm({ ...form, id, status: "draft" });
     toast.success("Purchase order saved.");
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : String(e));
+    toast.error(errMsg(e));
   }
 }
 
@@ -1755,7 +1755,7 @@ function SupplierQuickAdd({
         created_at: new Date().toISOString(),
       } as Supplier);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     } finally {
       setBusy(false);
     }

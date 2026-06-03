@@ -41,7 +41,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, num, numInput, CURRENCIES } from "../lib/format";
+import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
@@ -311,10 +311,7 @@ export default function Invoicing() {
       await loadDocs();
       return id;
     } catch (e) {
-      const msg = e instanceof Error ? e.message
-        : e && typeof e === "object" ? ((e as any).message ?? (e as any).details ?? (e as any).hint ?? JSON.stringify(e))
-        : String(e);
-      toast.error(`Could not save: ${msg}`);
+      toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -365,10 +362,7 @@ export default function Invoicing() {
           : "Moved back to draft."
       );
     } catch (e) {
-      const msg = e instanceof Error ? e.message
-        : e && typeof e === "object" ? ((e as any).message ?? (e as any).details ?? (e as any).hint ?? JSON.stringify(e))
-        : String(e);
-      toast.error(`Could not update: ${msg}`);
+      toast.error(`Could not update: ${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -671,7 +665,7 @@ export default function Invoicing() {
                     loadDocs();
                     toast.success(next ? "Shared with team." : "Set to private.");
                   } catch (e) {
-                    toast.error(e instanceof Error ? e.message : String(e));
+                    toast.error(errMsg(e));
                   }
                 }}
               />
@@ -773,7 +767,7 @@ function PaymentsModal({
       onSaved();
       toast.success("Payment recorded.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -786,7 +780,7 @@ function PaymentsModal({
       load();
       onSaved();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     }
   };
 
@@ -1100,7 +1094,7 @@ function Editor({
       });
       toast.success(`Invoice emailed to ${form.customer_email}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(errMsg(e));
     }
   };
 
@@ -3615,16 +3609,7 @@ function CompanyModal({
               onSaved(fresh);
               toast.success("Company details saved.");
             } catch (e) {
-              const msg =
-                e instanceof Error
-                  ? e.message
-                  : e && typeof e === "object"
-                  ? (e as any).message ??
-                    (e as any).details ??
-                    (e as any).hint ??
-                    JSON.stringify(e)
-                  : String(e);
-              toast.error(`Could not save company details: ${msg}`);
+              toast.error(`Could not save company details: ${errMsg(e)}`);
             }
           }}
         >
