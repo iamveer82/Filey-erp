@@ -1030,9 +1030,6 @@ function Editor({
   }, [viewOpen, form.items.length, form.template]);
 
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
-  const [showEmail, setShowEmail] = useState(false);
-  const [emailSubject, setEmailSubject] = useState("");
-  const [emailMessage, setEmailMessage] = useState("");
   const m = (v: number) => money(v, form.currency || "AED");
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
 
@@ -1056,11 +1053,10 @@ function Editor({
     try {
       await sendEmail({
         to: form.customer_email,
-        subject: emailSubject || `Invoice ${form.number} from ${form.seller_name}`,
+        subject: `Invoice ${form.number} from ${form.seller_name}`,
         html: emailShell(
-          emailSubject || `Invoice ${form.number}`,
-          `${emailMessage ? `<p>${esc(emailMessage)}</p>` : ""}
-           <p>Dear ${esc(form.customer_name || "customer")},</p>
+          `Invoice ${form.number}`,
+          `<p>Dear ${esc(form.customer_name || "customer")},</p>
            <p>Please find your invoice <b>${esc(form.number)}</b>.</p>
            <table style="width:100%;font-size:14px;margin:12px 0">
              <tr><td>Subtotal</td><td style="text-align:right">${m(
@@ -1754,32 +1750,6 @@ function Editor({
                 />
               </div>
               <div className="rounded-xl border border-brand-200 p-4">
-                <button
-                  className="flex items-center gap-2 text-ink font-semibold text-sm w-full text-left"
-                  onClick={() => setShowEmail(!showEmail)}
-                >
-                  <Send size={15} /> Email Customization
-                  <span className="ml-auto text-brand-400 text-xs">{showEmail ? "▲" : "▼"}</span>
-                </button>
-                {showEmail && (
-                  <div className="mt-3 space-y-2">
-                    <input
-                      className="input"
-                      placeholder="Subject (default: Invoice # from Company)"
-                      value={emailSubject}
-                      onChange={(e) => setEmailSubject(e.target.value)}
-                    />
-                    <textarea
-                      className="textarea"
-                      rows={3}
-                      placeholder="Custom message (appears above invoice summary)"
-                      value={emailMessage}
-                      onChange={(e) => setEmailMessage(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="rounded-xl border border-brand-200 p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Paperclip size={15} /> Logo / Attachment
                 </div>
@@ -1793,7 +1763,7 @@ function Editor({
                       />
                       <button
                         className="btn-ghost text-xs"
-                        onClick={() => set("logo", undefined)}
+                        onClick={() => set("logo", null as any)}
                       >
                         <X size={13} /> Remove
                       </button>
@@ -1819,157 +1789,177 @@ function Editor({
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm mb-5">
                   <StickyNote size={16} /> Stamp &amp; Signature
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="flex flex-col gap-6">
                   {/* ── Stamp ── */}
-                  <div className="flex flex-col">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs font-bold text-ink uppercase tracking-wider">Stamp</p>
-                    </div>
-                    {form.stamp?.data ? (
-                      <div className="flex-1 flex flex-col">
-                        <div className="flex justify-center items-center py-6 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[140px]">
-                          <img src={form.stamp.data} alt="stamp"
-                            className="max-h-32 max-w-[200px] object-contain rounded-lg"
-                            style={{ clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)`, opacity: form.stamp.opacity / 100 }}
-                          />
+                  <div className="rounded-2xl bg-white dark:bg-white/[0.02] border border-brand-200/60 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-brand-100 bg-brand-50/30">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center">
+                          <span className="text-red-500 text-sm font-black">S</span>
                         </div>
-                        <button className="btn-ghost text-[10px] text-danger self-end mt-1.5 px-1.5 py-0.5" onClick={() => setForm({ ...form, stamp: undefined })}>
-                          <X size={11} /> Remove
+                        <p className="text-base font-bold text-ink">Company Stamp</p>
+                      </div>
+                      {form.stamp?.data && (
+                        <button className="btn-ghost text-xs text-danger px-3 py-1.5 rounded-lg hover:bg-red-50/60" onClick={() => setForm({ ...form, stamp: undefined })}>
+                          <X size={14} /> Remove
                         </button>
-                        <div className="mt-3 space-y-3">
-                          <div className="flex items-end gap-3">
-                            <div className="flex-1 space-y-1">
+                      )}
+                    </div>
+                    <div className="p-6">
+                      {form.stamp?.data ? (
+                        <div className="flex flex-col lg:flex-row gap-6">
+                          <div className="lg:w-[55%] shrink-0 flex items-center justify-center py-12 rounded-2xl bg-brand-50/30 dark:bg-white/[0.02] border border-brand-100/40 min-h-[300px]">
+                            <img src={form.stamp.data} alt="stamp"
+                              className="max-h-48 max-w-[340px] object-contain rounded-xl"
+                              style={{ clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)`, opacity: form.stamp.opacity / 100 }}
+                            />
+                          </div>
+                          <div className="flex-1 space-y-4">
+                            <div className="space-y-2">
                               <div className="flex items-center justify-between">
-                                <span className="text-[11px] text-brand-500 font-medium">Opacity</span>
-                                <span className="text-[11px] font-mono tabular-nums text-brand-600 font-semibold">{form.stamp.opacity}%</span>
+                                <span className="text-xs text-brand-500 font-medium">Opacity</span>
+                                <span className="text-xs font-mono tabular-nums text-brand-600 font-semibold">{form.stamp.opacity}%</span>
                               </div>
                               <input type="range" min={5} max={100} value={form.stamp.opacity}
-                                className="w-full h-1.5 accent-brand-500 cursor-pointer"
+                                className="w-full h-2 accent-brand-500 cursor-pointer"
                                 onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, opacity: Number(e.target.value) } })}
                               />
                             </div>
-                            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 bg-white cursor-pointer hover:bg-brand-50 transition-colors">
-                              <span className="w-3.5 h-3.5 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.stamp.color }} />
-                              <input type="color" value={form.stamp.color}
-                                className="absolute opacity-0 w-0 h-0"
-                                onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, color: e.target.value } })}
-                              />
-                              <span className="text-[11px] text-brand-500 font-medium">Color</span>
+                            <div>
+                              <div className="flex items-center gap-2 rounded-lg border border-brand-200 px-4 py-2 bg-white cursor-pointer hover:bg-brand-50 transition-colors w-fit">
+                                <span className="w-4 h-4 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.stamp.color }} />
+                                <input type="color" value={form.stamp.color}
+                                  className="absolute opacity-0 w-0 h-0"
+                                  onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, color: e.target.value } })}
+                                />
+                                <span className="text-xs text-brand-500 font-medium">Watermark Color</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-brand-400 font-medium mb-2">Crop edges</p>
+                              <div className="flex gap-2">
+                                {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
+                                  <div key={k} className="flex-1 flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+                                    <span className="text-[11px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
+                                    <input type="number" min={0} max={90} value={form.stamp![k]}
+                                      className="w-full text-xs border-0 bg-transparent text-brand-700 focus:outline-none"
+                                      onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
+                                    />
+                                    <span className="text-[10px] text-brand-300 font-medium">%</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <p className="text-[11px] text-brand-400 font-medium mb-2">Crop edges</p>
-                            <div className="grid grid-cols-4 gap-2">
-                              {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
-                                <div key={k} className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
-                                  <span className="text-[10px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
-                                  <input type="number" min={0} max={90} value={form.stamp![k]}
-                                    className="w-full text-[11px] border-0 bg-transparent text-brand-700 focus:outline-none"
-                                    onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
-                                  />
-                                  <span className="text-[9px] text-brand-300 font-medium">%</span>
-                                </div>
-                              ))}
-                            </div>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center gap-5 py-20 rounded-2xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all w-full min-h-[320px]">
+                          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 flex items-center justify-center shadow-md">
+                            <Upload size={36} className="text-brand-500" />
                           </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <label className="flex-1 flex flex-col items-center justify-center gap-3 py-16 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/20 transition-all min-h-[220px]">
-                        <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center">
-                          <Upload size={22} className="text-brand-400" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm font-semibold text-brand-600">Upload Stamp</p>
-                          <p className="text-[11px] text-brand-400 mt-1">PNG, JPG, WebP — transparent PNG recommended</p>
-                        </div>
-                        <input type="file" accept="image/*" className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            const r = new FileReader();
-                            r.onload = () => setForm({ ...form, stamp: { data: String(r.result), x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
-                            r.readAsDataURL(f);
-                          }}
-                        />
-                      </label>
-                    )}
+                          <div className="text-center">
+                            <p className="text-base font-bold text-brand-700">Upload Company Stamp</p>
+                            <p className="text-sm text-brand-400 mt-1.5">Drag & drop or click to browse — transparent PNG works best</p>
+                          </div>
+                          <span className="text-sm font-semibold text-brand-500 bg-brand-50 px-5 py-2 rounded-full">Browse Files</span>
+                          <input type="file" accept="image/*" className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (!f) return;
+                              const r = new FileReader();
+                              r.onload = () => setForm({ ...form, stamp: { data: String(r.result), x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
+                              r.readAsDataURL(f);
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
                   </div>
 
                   {/* ── Signature ── */}
-                  <div className="flex flex-col">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs font-bold text-ink uppercase tracking-wider">Signature</p>
-                    </div>
-                    {form.signature?.data ? (
-                      <div className="flex-1 flex flex-col">
-                        <div className="flex justify-center items-center py-6 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[140px]">
-                          <img src={form.signature.data} alt="signature"
-                            className="max-h-28 max-w-[220px] object-contain rounded-lg"
-                            style={{ clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)`, opacity: form.signature.opacity / 100 }}
-                          />
+                  <div className="rounded-2xl bg-white dark:bg-white/[0.02] border border-brand-200/60 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-brand-100 bg-brand-50/30">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
+                          <span className="text-blue-500 text-sm font-black">S</span>
                         </div>
-                        <button className="btn-ghost text-[10px] text-danger self-end mt-1.5 px-1.5 py-0.5" onClick={() => setForm({ ...form, signature: undefined })}>
-                          <X size={11} /> Remove
+                        <p className="text-base font-bold text-ink">Authorized Signature</p>
+                      </div>
+                      {form.signature?.data && (
+                        <button className="btn-ghost text-xs text-danger px-3 py-1.5 rounded-lg hover:bg-red-50/60" onClick={() => setForm({ ...form, signature: undefined })}>
+                          <X size={14} /> Remove
                         </button>
-                        <div className="mt-3 space-y-3">
-                          <div className="flex items-end gap-3">
-                            <div className="flex-1 space-y-1">
+                      )}
+                    </div>
+                    <div className="p-6">
+                      {form.signature?.data ? (
+                        <div className="flex flex-col lg:flex-row gap-6">
+                          <div className="lg:w-[55%] shrink-0 flex items-center justify-center py-12 rounded-2xl bg-brand-50/30 dark:bg-white/[0.02] border border-brand-100/40 min-h-[300px]">
+                            <img src={form.signature.data} alt="signature"
+                              className="max-h-48 max-w-[340px] object-contain rounded-xl"
+                              style={{ clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)`, opacity: form.signature.opacity / 100 }}
+                            />
+                          </div>
+                          <div className="flex-1 space-y-4">
+                            <div className="space-y-2">
                               <div className="flex items-center justify-between">
-                                <span className="text-[11px] text-brand-500 font-medium">Opacity</span>
-                                <span className="text-[11px] font-mono tabular-nums text-brand-600 font-semibold">{form.signature.opacity}%</span>
+                                <span className="text-xs text-brand-500 font-medium">Opacity</span>
+                                <span className="text-xs font-mono tabular-nums text-brand-600 font-semibold">{form.signature.opacity}%</span>
                               </div>
                               <input type="range" min={5} max={100} value={form.signature.opacity}
-                                className="w-full h-1.5 accent-brand-500 cursor-pointer"
+                                className="w-full h-2 accent-brand-500 cursor-pointer"
                                 onChange={(e) => setForm({ ...form, signature: { ...form.signature!, opacity: Number(e.target.value) } })}
                               />
                             </div>
-                            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 bg-white cursor-pointer hover:bg-brand-50 transition-colors">
-                              <span className="w-3.5 h-3.5 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.signature.color }} />
-                              <input type="color" value={form.signature.color}
-                                className="absolute opacity-0 w-0 h-0"
-                                onChange={(e) => setForm({ ...form, signature: { ...form.signature!, color: e.target.value } })}
-                              />
-                              <span className="text-[11px] text-brand-500 font-medium">Color</span>
+                            <div>
+                              <div className="flex items-center gap-2 rounded-lg border border-brand-200 px-4 py-2 bg-white cursor-pointer hover:bg-brand-50 transition-colors w-fit">
+                                <span className="w-4 h-4 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.signature.color }} />
+                                <input type="color" value={form.signature.color}
+                                  className="absolute opacity-0 w-0 h-0"
+                                  onChange={(e) => setForm({ ...form, signature: { ...form.signature!, color: e.target.value } })}
+                                />
+                                <span className="text-xs text-brand-500 font-medium">Watermark Color</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs text-brand-400 font-medium mb-2">Crop edges</p>
+                              <div className="flex gap-2">
+                                {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
+                                  <div key={k} className="flex-1 flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+                                    <span className="text-[11px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
+                                    <input type="number" min={0} max={90} value={form.signature![k]}
+                                      className="w-full text-xs border-0 bg-transparent text-brand-700 focus:outline-none"
+                                      onChange={(e) => setForm({ ...form, signature: { ...form.signature!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
+                                    />
+                                    <span className="text-[10px] text-brand-300 font-medium">%</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <p className="text-[11px] text-brand-400 font-medium mb-2">Crop edges</p>
-                            <div className="grid grid-cols-4 gap-2">
-                              {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
-                                <div key={k} className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
-                                  <span className="text-[10px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
-                                  <input type="number" min={0} max={90} value={form.signature![k]}
-                                    className="w-full text-[11px] border-0 bg-transparent text-brand-700 focus:outline-none"
-                                    onChange={(e) => setForm({ ...form, signature: { ...form.signature!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
-                                  />
-                                  <span className="text-[9px] text-brand-300 font-medium">%</span>
-                                </div>
-                              ))}
-                            </div>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center gap-5 py-20 rounded-2xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all w-full min-h-[320px]">
+                          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center shadow-md">
+                            <Upload size={36} className="text-blue-500" />
                           </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <label className="flex-1 flex flex-col items-center justify-center gap-3 py-16 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/20 transition-all min-h-[220px]">
-                        <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center">
-                          <Upload size={22} className="text-brand-400" />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm font-semibold text-brand-600">Upload Signature</p>
-                          <p className="text-[11px] text-brand-400 mt-1">PNG, JPG, WebP — transparent PNG recommended</p>
-                        </div>
-                        <input type="file" accept="image/*" className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            const r = new FileReader();
-                            r.onload = () => setForm({ ...form, signature: { data: String(r.result), x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
-                            r.readAsDataURL(f);
-                          }}
-                        />
-                      </label>
-                    )}
+                          <div className="text-center">
+                            <p className="text-base font-bold text-brand-700">Upload Authorized Signature</p>
+                            <p className="text-sm text-brand-400 mt-1.5">Drag & drop or click to browse — transparent PNG works best</p>
+                          </div>
+                          <span className="text-sm font-semibold text-brand-500 bg-brand-50 px-5 py-2 rounded-full">Browse Files</span>
+                          <input type="file" accept="image/*" className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (!f) return;
+                              const r = new FileReader();
+                              r.onload = () => setForm({ ...form, signature: { data: String(r.result), x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
+                              r.readAsDataURL(f);
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <p className="text-[11px] text-brand-400 mt-4 text-center">Drag stamp &amp; signature on the preview to position them precisely.</p>

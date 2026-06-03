@@ -928,3 +928,60 @@ export function StockBreakdownCard({
 }
 
 export { MagicCard, ShimmerButton, SpotlightCard };
+
+/** Professional empty-state placeholder shown when a list/table is empty.
+ *  Includes an icon, title, description and optional CTA button. */
+export function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  action,
+}: {
+  icon?: React.ComponentType<{ size?: number; className?: string }>;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+      {Icon && (
+        <div className="mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5">
+          <Icon size={32} className="text-brand-300 dark:text-brand-500" />
+        </div>
+      )}
+      <h3 className="text-base font-bold text-ink mb-1.5">{title}</h3>
+      {description && (
+        <p className="text-sm text-brand-400 max-w-sm leading-relaxed">{description}</p>
+      )}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/** Consistent page section wrapper with optional header. */
+export function PageSection({
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  title?: string;
+  subtitle?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      {(title || action) && (
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            {title && <h2 className="text-base font-bold text-ink">{title}</h2>}
+            {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
