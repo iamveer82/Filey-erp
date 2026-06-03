@@ -141,6 +141,7 @@ export default function Invoicing() {
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
+  const [search, setSearch] = useState("");
   const loadDocs = () =>
     billing.listDocs().then(setDocs).catch(() => toast.error("Failed to load documents"));
   const loadRecurs = () =>
@@ -428,6 +429,12 @@ export default function Invoicing() {
       d.status !== "paid"
   ).length;
   const statCcy = company?.currency || "AED";
+  const filteredDocs = search
+    ? docs.filter(d =>
+        d.number.toLowerCase().includes(search.toLowerCase()) ||
+        d.customer_name.toLowerCase().includes(search.toLowerCase())
+      )
+    : docs;
 
   return (
     <div>
@@ -521,9 +528,18 @@ export default function Invoicing() {
         </div>
       )}
 
+      <div className="mb-4">
+        <input
+          className="input max-w-xs"
+          placeholder="Search invoices by number or customer…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <DataTable<InvoiceDocSummary>
-        rows={docs}
-        empty="No invoices yet — create your first one"
+        rows={filteredDocs}
+        empty={search ? "No invoices match your search" : "No invoices yet — create your first one"}
         rowKey={(d) => d.id}
         bulkActions={[
           {
@@ -1020,6 +1036,9 @@ function Editor({
   }, [viewOpen, form.items.length, form.template]);
 
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
+  const [showEmail, setShowEmail] = useState(false);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailMessage, setEmailMessage] = useState("");
   const m = (v: number) => money(v, form.currency || "AED");
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
 
@@ -1043,10 +1062,11 @@ function Editor({
     try {
       await sendEmail({
         to: form.customer_email,
-        subject: `Invoice ${form.number} from ${form.seller_name}`,
+        subject: emailSubject || `Invoice ${form.number} from ${form.seller_name}`,
         html: emailShell(
-          `Invoice ${form.number}`,
-          `<p>Dear ${esc(form.customer_name || "customer")},</p>
+          emailSubject || `Invoice ${form.number}`,
+          `${emailMessage ? `<p>${esc(emailMessage)}</p>` : ""}
+           <p>Dear ${esc(form.customer_name || "customer")},</p>
            <p>Please find your invoice <b>${esc(form.number)}</b>.</p>
            <table style="width:100%;font-size:14px;margin:12px 0">
              <tr><td>Subtotal</td><td style="text-align:right">${m(
@@ -1084,6 +1104,18 @@ function Editor({
     }
   };
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); onSave(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); saveAndSend(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") { e.preventDefault(); downloadPdf(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
     <div>
       {/* header bar */}
@@ -1119,6 +1151,7 @@ function Editor({
           <button
             className="btn-ghost"
             onClick={downloadPdf}
+            title="Download PDF (Ctrl+P)"
           >
             <Download size={15} /> PDF
           </button>
@@ -1126,7 +1159,7 @@ function Editor({
             className="btn-ghost"
             onClick={onSave}
             disabled={saving}
-            title="Save without sending"
+            title="Save without sending (Ctrl+S)"
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
@@ -1160,7 +1193,7 @@ function Editor({
             className="btn-primary"
             onClick={saveAndSend}
             disabled={saving}
-            title="Save and email the invoice to the customer"
+            title="Save and email the invoice to the customer (Ctrl+Enter)"
           >
             <Send size={15} /> Send
           </button>
@@ -1725,6 +1758,32 @@ function Editor({
                   value={form.terms ?? ""}
                   onChange={(e) => set("terms", e.target.value)}
                 />
+              </div>
+              <div className="rounded-xl border border-brand-200 p-4">
+                <button
+                  className="flex items-center gap-2 text-ink font-semibold text-sm w-full text-left"
+                  onClick={() => setShowEmail(!showEmail)}
+                >
+                  <Send size={15} /> Email Customization
+                  <span className="ml-auto text-brand-400 text-xs">{showEmail ? "▲" : "▼"}</span>
+                </button>
+                {showEmail && (
+                  <div className="mt-3 space-y-2">
+                    <input
+                      className="input"
+                      placeholder="Subject (default: Invoice # from Company)"
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                    />
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      placeholder="Custom message (appears above invoice summary)"
+                      value={emailMessage}
+                      onChange={(e) => setEmailMessage(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
               <div className="rounded-xl border border-brand-200 p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
