@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Plus, Trash2, ArrowLeft, Download, Save, Check,
-  Calendar, Banknote, Receipt, Maximize2, X,
+  Calendar, Banknote, Receipt, Maximize2, X, Upload,
 } from "lucide-react";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput, money } from "../lib/format";
+import { aed, fmtDate, numInput, money, CURRENCIES } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
 import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
@@ -29,6 +29,8 @@ type PrForm = {
   for_description: string; ref_number: string;
   notes: string;
   font: string;
+  currency: string;
+  logo?: string;
 };
 
 const METHODS = ["Cash", "Bank Transfer", "Cheque", "Card", "Online"];
@@ -43,6 +45,7 @@ function blankPr(): PrForm {
     for_description: "", ref_number: "",
     notes: "Received with thanks.",
     font: "'Plus Jakarta Sans', system-ui, sans-serif",
+    currency: "AED",
   };
 }
 
@@ -112,6 +115,12 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
     } else window.print();
   };
   const set = <K extends keyof PrForm>(k: K, v: PrForm[K]) => setForm({ ...form, [k]: v });
+  const onLogo = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => set("logo", String(reader.result));
+    reader.readAsDataURL(file);
+  };
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
   const allTemplates = [...PR_TEMPLATES, ...customTemplates.map(t => ({ id: t.id, name: t.name }))];
@@ -197,7 +206,10 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
               </div>
               <div className="space-y-3">
                 <Field label="Payment Date"><input type="date" className="input" value={form.payment_date} onChange={e => set("payment_date", e.target.value)} /></Field>
-                <Field label="Amount (AED)"><input type="number" className="input text-lg font-bold" value={form.amount || ""} onChange={e => { const v = numInput(e.target.value); set("amount", v); set("amount_words", numberToWords(v)); }} /></Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={`Amount (${form.currency})`}><input type="number" className="input text-lg font-bold" value={form.amount || ""} onChange={e => { const v = numInput(e.target.value); set("amount", v); set("amount_words", numberToWords(v)); }} /></Field>
+                  <Field label="Currency"><select className="select" value={form.currency} onChange={e => set("currency", e.target.value)}>{CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}</select></Field>
+                </div>
                 <Field label="Payment Method"><select className="select" value={form.payment_method} onChange={e => set("payment_method", e.target.value)}>{METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
               </div>
             </div>
@@ -207,6 +219,16 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
             </div>
           </Step>
           <Step n={3} title="Company Info">
+            <div className="mb-3">
+              {form.logo ? (
+                <div className="flex items-center gap-2">
+                  <img src={form.logo} alt="logo" className="h-12 w-12 object-contain rounded-lg border border-brand-200 bg-white" />
+                  <button className="btn-ghost text-xs" onClick={() => set("logo", undefined)}><X size={13} /> Remove logo</button>
+                </div>
+              ) : (
+                <label className="btn-ghost text-xs cursor-pointer w-fit"><Upload size={13} /> Upload logo<input type="file" accept="image/*" className="hidden" onChange={e => onLogo(e.target.files?.[0])} /></label>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Company Name"><input className="input" value={form.company_name} onChange={e => set("company_name", e.target.value)} /></Field>
               <Field label="TRN"><input className="input" value={form.company_trn} onChange={e => set("company_trn", e.target.value)} /></Field>
@@ -247,6 +269,7 @@ function PrPreview({ form, prRef }: { form: PrForm; prRef?: React.RefObject<HTML
     <div ref={prRef} className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none" style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}>
       <div className="p-8 min-h-[500px]">
         <div className="text-center mb-8 pb-6" style={{ borderBottom: `2px solid ${a}22` }}>
+          {form.logo && <img src={form.logo} alt="" className="h-12 mx-auto mb-3 object-contain" />}
           <h1 className="text-[28px] font-extrabold tracking-tight" style={{ color: a }}>PAYMENT RECEIPT</h1>
           <p className="font-mono text-lg font-bold mt-2">{form.number}</p>
         </div>
@@ -263,7 +286,7 @@ function PrPreview({ form, prRef }: { form: PrForm; prRef?: React.RefObject<HTML
           </div>
         </div>
         <div className="text-center mb-6 p-6 rounded-2xl" style={{ backgroundColor: `${a}0A`, border: `2px solid ${a}22` }}>
-          <p className="text-[40px] font-extrabold tabular-nums" style={{ color: a }}>{money(form.amount, "AED")}</p>
+          <p className="text-[40px] font-extrabold tabular-nums" style={{ color: a }}>{money(form.amount, form.currency || "AED")}</p>
           {form.amount_words && <p className="text-sm text-brand-500 mt-1 italic">{form.amount_words}</p>}
         </div>
         {form.for_description && <div className="mb-4"><p className="font-semibold text-sm">For:</p><p className="text-brand-600">{form.for_description}</p></div>}

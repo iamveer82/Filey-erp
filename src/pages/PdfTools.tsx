@@ -34,7 +34,7 @@ import {
   usedBytes,
   STORAGE_QUOTA_BYTES,
 } from "../lib/toolStorage";
-import { downloadFile, ensurePdf, type OutFile } from "../lib/pdfTools";
+import { downloadFile, type OutFile } from "../lib/pdfTools";
 import {
   PDF_TOOLS,
   toolById,
@@ -45,6 +45,7 @@ import {
 import PreviewModal from "../components/PreviewModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
+import ESignStudio from "../components/ESignStudio";
 import LivePreview from "../components/LivePreview";
 import MergeStudio from "../components/MergeStudio";
 import OrganizeStudio from "../components/OrganizeStudio";
@@ -605,7 +606,24 @@ function PdfToolWorkspace({
         </label>
       </div>
 
-      {!files.length ? (
+      {tool.interactive === "esign" ? (
+        <div className="card min-h-[480px]">
+          <ESignStudio
+            file={files[0] ?? undefined}
+            onApply={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
+              toast.success("Signed document downloaded.");
+            }}
+          />
+          {!!outs.length && (
+            <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+              ✓ Signed document downloaded.
+            </div>
+          )}
+        </div>
+      ) : !files.length ? (
         <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#3A3D45] dark:bg-[#1E2025] dark:hover:bg-white/5">
           <div>
             <Upload size={22} className="mx-auto mb-1 text-brand-300" />
@@ -667,23 +685,6 @@ function PdfToolWorkspace({
               toast.success("Redacted PDF downloaded.");
             }}
           />
-        </div>
-      ) : tool.interactive === "esign" ? (
-        <div className="card min-h-[480px]">
-          <EsignStage
-            file={files[0]}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Signed document downloaded.");
-            }}
-          />
-          {!!outs.length && (
-            <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
-              ✓ Signed document downloaded.
-            </div>
-          )}
         </div>
       ) : (tool.interactive === "stamp" ||
           tool.interactive === "text-stamp" ||
@@ -834,44 +835,4 @@ function FilePreview({ file }: { file: File }) {
       </div>
     </div>
   );
-}
-
-
-/* E-Sign accepts any supported file: normalise it to a PDF first (images,
- * scans, Office docs), then hand it to the signature studio. */
-function EsignStage({
-  file,
-  onApply,
-}: {
-  file: File;
-  onApply: (out: OutFile) => void;
-}) {
-  const [pdf, setPdf] = useState<File | null>(null);
-  const [err, setErr] = useState("");
-  useEffect(() => {
-    let dead = false;
-    setPdf(null);
-    setErr("");
-    ensurePdf(file)
-      .then((f) => !dead && setPdf(f))
-      .catch((e) => !dead && setErr(e instanceof Error ? e.message : String(e)));
-    return () => {
-      dead = true;
-    };
-  }, [file]);
-
-  if (err)
-    return (
-      <div className="grid h-72 place-items-center px-6 text-center text-sm text-danger">
-        {err}
-      </div>
-    );
-  if (!pdf)
-    return (
-      <div className="grid h-72 place-items-center gap-2 text-sm text-brand-400">
-        <Loader2 size={20} className="animate-spin" />
-        Preparing document…
-      </div>
-    );
-  return <StampStudio file={pdf} mode="image" variant="stamp" allowDraw onApply={onApply} />;
 }

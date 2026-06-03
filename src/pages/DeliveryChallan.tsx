@@ -172,8 +172,8 @@ export default function DeliveryChallan() {
   return (
     <div className="animate-fade-up">
       <PageHeader
-        title="Delivery Challans"
-        subtitle="Delivery challans, goods received notes & return challans"
+        title="Delivery"
+        subtitle="Track delivery orders, goods received notes & returns"
         action={
           <button className="btn-primary" onClick={() => setForm(blankDc())}>
             <Plus size={16} /> New Challan
@@ -341,6 +341,9 @@ function DcEditor({
                 <Field label="Vehicle Number">
                   <input className="input" placeholder="Optional" value={form.vehicle_number} onChange={(e) => set("vehicle_number", e.target.value)} />
                 </Field>
+                <Field label="Driver Name">
+                  <input className="input" placeholder="Optional" value={form.driver_name} onChange={(e) => set("driver_name", e.target.value)} />
+                </Field>
               </div>
             </div>
           </Step>
@@ -448,6 +451,7 @@ function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTML
             <div className="text-right">
               {form.ref_number && <p className="text-sm text-brand-500">Ref: {form.ref_number}</p>}
               {form.vehicle_number && <p className="text-sm text-brand-500 flex items-center gap-1 justify-end"><Truck size={13} /> {form.vehicle_number}</p>}
+              {form.driver_name && <p className="text-sm text-brand-500 flex items-center gap-1 justify-end"><Users size={13} /> {form.driver_name}</p>}
             </div>
           </div>
         </div>

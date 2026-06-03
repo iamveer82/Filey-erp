@@ -189,6 +189,8 @@ export interface InvoiceItem {
   description: string;
   qty: number;
   unit_price: number;
+  unit?: string;
+  custom?: Record<string, string>;
   product_id?: number;
 }
 export interface InvoiceDocSummary {
@@ -222,6 +224,7 @@ export interface InvoiceDoc {
   template: string;
   accent: string;
   currency: string;
+  doc_title?: string;
   seller_name: string;
   seller_address?: string;
   seller_trn?: string;
@@ -237,12 +240,16 @@ export interface InvoiceDoc {
   due_date?: string;
   notes?: string;
   terms?: string;
+  po_number?: string;
   tax_rate: number;
   discount: number;
   quotation_id?: number;
   created_at: string;
   updated_at: string;
   items: InvoiceItem[];
+  custom_columns?: { key: string; label: string }[];
+  stamp?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
+  signature?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
 }
 export type InvoiceDocInput = Omit<
   InvoiceDoc,

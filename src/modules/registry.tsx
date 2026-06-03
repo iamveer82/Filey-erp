@@ -222,9 +222,9 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "delivery-challans",
-    label: "Delivery Challans",
-    short: "Challans",
-    desc: "Delivery challans, goods received notes & returns",
+    label: "Delivery",
+    short: "Delivery",
+    desc: "Track delivery orders, goods received notes & returns",
     icon: Truck,
     to: "/delivery-challans",
     Component: DeliveryChallan,

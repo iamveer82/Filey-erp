@@ -63,8 +63,18 @@ import {
 
 type CustomColumn = { key: string; label: string };
 type Item = { description: string; qty: number; unit_price: number; unit: string; custom: Record<string, string> };
-type StampSig = { data: string; x: number; y: number };
-type Form = Omit<InvoiceDocInput, "items"> & { items: Item[]; customColumns: CustomColumn[]; stamp?: StampSig; signature?: StampSig };
+type StampSig = {
+  data: string;
+  x: number;
+  y: number;
+  opacity: number;
+  color: string;
+  cropTop: number;
+  cropRight: number;
+  cropBottom: number;
+  cropLeft: number;
+};
+type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & { items: Item[]; customColumns: CustomColumn[]; stamp?: StampSig; signature?: StampSig };
 
 const TEMPLATES = [
   { id: "minimal", name: "Minimal" },
@@ -93,7 +103,7 @@ function blankForm(c: CompanyProfile): Form {
   return {
     number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
     status: "draft",
-    doc_type: "Tax Invoice",
+    doc_title: "Tax Invoice",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
     currency: c.currency || "AED",
@@ -179,7 +189,7 @@ export default function Invoicing() {
         id: d.id,
         number: d.number,
         status: d.status,
-        doc_type: d.doc_type,
+        doc_title: d.doc_title || d.doc_type,
         template: d.template,
         accent: d.accent,
         currency: d.currency,
@@ -220,6 +230,7 @@ export default function Invoicing() {
       setForm({
         number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
         status: "draft",
+        doc_title: d.doc_title || d.doc_type,
         template: d.template,
         accent: d.accent,
         currency: d.currency,
@@ -275,22 +286,31 @@ export default function Invoicing() {
       // Empty date inputs must become undefined, not "" (invalid SQL date).
       const payload = {
         ...form,
-        custom_columns: form.customColumns,
         items: form.items.map(it => ({
           description: it.description,
           qty: it.qty,
           unit_price: it.unit_price,
-          unit: it.unit || undefined,
-          custom: it.custom,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
+      // Remove camelCase duplicates and DB-missing columns
+      delete (payload as any).customColumns;
+      delete (payload as any).custom_columns;
+      delete (payload as any).stamp;
+      delete (payload as any).signature;
+      delete (payload as any).doc_type;
+      delete (payload as any).doc_title;
+      delete (payload as any).po_number;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id });
       await loadDocs();
+      return id;
     } catch (e) {
-      toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
+      const msg = e instanceof Error ? e.message
+        : e && typeof e === "object" ? ((e as any).message ?? (e as any).details ?? (e as any).hint ?? JSON.stringify(e))
+        : String(e);
+      toast.error(`Could not save: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -321,9 +341,22 @@ export default function Invoicing() {
       const payload = {
         ...form,
         status,
+        items: form.items.map(it => ({
+          description: it.description,
+          qty: it.qty,
+          unit_price: it.unit_price,
+        })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
+      // Remove camelCase duplicates and DB-missing columns
+      delete (payload as any).customColumns;
+      delete (payload as any).custom_columns;
+      delete (payload as any).stamp;
+      delete (payload as any).signature;
+      delete (payload as any).doc_type;
+      delete (payload as any).doc_title;
+      delete (payload as any).po_number;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id, status });
       await loadDocs();
@@ -333,7 +366,10 @@ export default function Invoicing() {
           : "Moved back to draft."
       );
     } catch (e) {
-      toast.error(`Could not update: ${e instanceof Error ? e.message : e}`);
+      const msg = e instanceof Error ? e.message
+        : e && typeof e === "object" ? ((e as any).message ?? (e as any).details ?? (e as any).hint ?? JSON.stringify(e))
+        : String(e);
+      toast.error(`Could not update: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -341,18 +377,45 @@ export default function Invoicing() {
 
   if (form) {
     return (
-      <Editor
-        form={form}
-        setForm={setForm}
-        onBack={() => {
-          setForm(null);
-          loadDocs();
-        }}
-        onSave={save}
-        onFinalize={() => setDocStatus("sent")}
-        onRevertDraft={() => setDocStatus("draft")}
-        saving={saving}
-      />
+      <>
+        {company && (
+          <CompanyModal
+            open={companyOpen}
+            company={company}
+            onClose={() => setCompanyOpen(false)}
+            onSaved={(c) => {
+              setCompany(c);
+              setForm((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  seller_name: c.name,
+                  seller_address: c.address ?? prev.seller_address,
+                  seller_trn: c.trn ?? prev.seller_trn,
+                  seller_email: c.email ?? prev.seller_email,
+                  seller_phone: c.phone ?? prev.seller_phone,
+                  logo: c.logo ?? prev.logo,
+                  tax_rate: c.default_tax_rate ?? prev.tax_rate,
+                };
+              });
+              setCompanyOpen(false);
+            }}
+          />
+        )}
+        <Editor
+          form={form}
+          setForm={setForm}
+          onBack={() => {
+            setForm(null);
+            loadDocs();
+          }}
+          onSave={save}
+          onFinalize={() => setDocStatus("sent")}
+          onRevertDraft={() => setDocStatus("draft")}
+          saving={saving}
+          onEditCompany={() => setCompanyOpen(true)}
+        />
+      </>
     );
   }
 
@@ -645,18 +708,6 @@ export default function Invoicing() {
         ]}
       />
 
-      {company && (
-        <CompanyModal
-          open={companyOpen}
-          company={company}
-          onClose={() => setCompanyOpen(false)}
-          onSaved={(c) => {
-            setCompany(c);
-            setCompanyOpen(false);
-          }}
-        />
-      )}
-
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} />
 
       <PaymentsModal
@@ -828,14 +879,16 @@ function Editor({
   onFinalize,
   onRevertDraft,
   saving,
+  onEditCompany,
 }: {
   form: Form;
   setForm: (f: Form) => void;
   onBack: () => void;
-  onSave: () => void;
+  onSave: () => Promise<number | undefined>;
   onFinalize: () => void;
   onRevertDraft: () => void;
   saving: boolean;
+  onEditCompany: () => void;
 }) {
   const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
@@ -926,6 +979,7 @@ function Editor({
   const applyCustomer = (c: CrmCustomer) =>
     setForm({
       ...form,
+      customer_id: c.id,
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
@@ -972,7 +1026,8 @@ function Editor({
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
 
   const saveAndSend = async () => {
-    await onSave();
+    const savedId = await onSave();
+    const effectiveId = savedId ?? form.id;
     if (!form.customer_email) {
       toast.error("Add a customer email (Invoice Details) to send this invoice.");
       return;
@@ -980,8 +1035,8 @@ function Editor({
     const t = invoiceTotals(form.items, form.discount || 0, form.tax_rate || 0);
     let portalUrl = "";
     try {
-      if (form.id) {
-        const token = await billing.publicLink(form.id);
+      if (effectiveId) {
+        const token = await billing.publicLink(effectiveId);
         portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
       }
     } catch {
@@ -1076,6 +1131,13 @@ function Editor({
             title="Save without sending"
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={onEditCompany}
+            title="Edit company details"
+          >
+            <Building2 size={15} /> Company
           </button>
           {form.status === "draft" ? (
             <button
@@ -1331,30 +1393,6 @@ function Editor({
                     onChange={(e) => set("due_date", e.target.value)}
                   />
                 </Field>
-                <Field label="Document type">
-                  <input
-                    className="input"
-                    list="filey-doc-types"
-                    value={form.doc_type ?? ""}
-                    onChange={(e) => set("doc_type", e.target.value)}
-                    placeholder="Tax Invoice"
-                  />
-                  <datalist id="filey-doc-types">
-                    {[
-                      "Tax Invoice",
-                      "Proforma Invoice",
-                      "Commercial Invoice",
-                      "Purchase Order",
-                      "Quotation",
-                      "Credit Note",
-                      "Debit Note",
-                      "Receipt",
-                      "Delivery Note",
-                    ].map((o) => (
-                      <option key={o} value={o} />
-                    ))}
-                  </datalist>
-                </Field>
                 <Field label="Currency">
                   <select
                     className="select"
@@ -1567,9 +1605,13 @@ function Editor({
               </datalist>
               <button
                 className="btn-ghost"
-                onClick={() => setShowDiscount((v) => !v)}
+                onClick={() => {
+                  if (showDiscount) set("discount", 0);
+                  setShowDiscount((v) => !v);
+                }}
               >
-                <Plus size={14} /> Add Discount
+                {showDiscount ? <Minus size={14} /> : <Plus size={14} />}
+                {showDiscount ? "Remove Discount" : "Add Discount"}
               </button>
             </div>
             {showDiscount && (
@@ -1714,61 +1756,164 @@ function Editor({
                   </p>
                 </div>
               </div>
-              <div className="rounded-xl border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
-                  <StickyNote size={15} /> Stamp & Signature
+              <div className="rounded-xl border border-brand-200 p-5">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm mb-5">
+                  <StickyNote size={16} /> Stamp &amp; Signature
                 </div>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <p className="text-xs font-semibold text-brand-600 mb-1">Stamp</p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* ── Stamp ── */}
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-bold text-ink uppercase tracking-wider">Stamp</p>
+                    </div>
                     {form.stamp?.data ? (
-                      <div className="flex items-center gap-2">
-                        <img src={form.stamp.data} alt="stamp" className="h-14 object-contain border border-brand-200 rounded bg-white" />
-                        <button className="btn-ghost text-xs text-danger" onClick={() => setForm({ ...form, stamp: undefined })}>
-                          <X size={12} /> Remove
+                      <div className="flex-1 flex flex-col">
+                        <div className="flex justify-center items-center py-6 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[140px]">
+                          <img src={form.stamp.data} alt="stamp"
+                            className="max-h-32 max-w-[200px] object-contain rounded-lg"
+                            style={{ clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)`, opacity: form.stamp.opacity / 100 }}
+                          />
+                        </div>
+                        <button className="btn-ghost text-[10px] text-danger self-end mt-1.5 px-1.5 py-0.5" onClick={() => setForm({ ...form, stamp: undefined })}>
+                          <X size={11} /> Remove
                         </button>
+                        <div className="mt-3 space-y-3">
+                          <div className="flex items-end gap-3">
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] text-brand-500 font-medium">Opacity</span>
+                                <span className="text-[11px] font-mono tabular-nums text-brand-600 font-semibold">{form.stamp.opacity}%</span>
+                              </div>
+                              <input type="range" min={5} max={100} value={form.stamp.opacity}
+                                className="w-full h-1.5 accent-brand-500 cursor-pointer"
+                                onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, opacity: Number(e.target.value) } })}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 bg-white cursor-pointer hover:bg-brand-50 transition-colors">
+                              <span className="w-3.5 h-3.5 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.stamp.color }} />
+                              <input type="color" value={form.stamp.color}
+                                className="absolute opacity-0 w-0 h-0"
+                                onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, color: e.target.value } })}
+                              />
+                              <span className="text-[11px] text-brand-500 font-medium">Color</span>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-brand-400 font-medium mb-2">Crop edges</p>
+                            <div className="grid grid-cols-4 gap-2">
+                              {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
+                                <div key={k} className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+                                  <span className="text-[10px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
+                                  <input type="number" min={0} max={90} value={form.stamp![k]}
+                                    className="w-full text-[11px] border-0 bg-transparent text-brand-700 focus:outline-none"
+                                    onChange={(e) => setForm({ ...form, stamp: { ...form.stamp!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
+                                  />
+                                  <span className="text-[9px] text-brand-300 font-medium">%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     ) : (
-                      <label className="btn-ghost w-full justify-center cursor-pointer text-xs">
-                        <Upload size={12} /> Upload Stamp
+                      <label className="flex-1 flex flex-col items-center justify-center gap-3 py-16 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/20 transition-all min-h-[220px]">
+                        <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center">
+                          <Upload size={22} className="text-brand-400" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-brand-600">Upload Stamp</p>
+                          <p className="text-[11px] text-brand-400 mt-1">PNG, JPG, WebP — transparent PNG recommended</p>
+                        </div>
                         <input type="file" accept="image/*" className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0];
                             if (!f) return;
                             const r = new FileReader();
-                            r.onload = () => setForm({ ...form, stamp: { data: String(r.result), x: 75, y: 70 } });
+                            r.onload = () => setForm({ ...form, stamp: { data: String(r.result), x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
                             r.readAsDataURL(f);
                           }}
                         />
                       </label>
                     )}
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold text-brand-600 mb-1">Signature</p>
+
+                  {/* ── Signature ── */}
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-bold text-ink uppercase tracking-wider">Signature</p>
+                    </div>
                     {form.signature?.data ? (
-                      <div className="flex items-center gap-2">
-                        <img src={form.signature.data} alt="signature" className="h-10 object-contain border border-brand-200 rounded bg-white" />
-                        <button className="btn-ghost text-xs text-danger" onClick={() => setForm({ ...form, signature: undefined })}>
-                          <X size={12} /> Remove
+                      <div className="flex-1 flex flex-col">
+                        <div className="flex justify-center items-center py-6 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[140px]">
+                          <img src={form.signature.data} alt="signature"
+                            className="max-h-28 max-w-[220px] object-contain rounded-lg"
+                            style={{ clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)`, opacity: form.signature.opacity / 100 }}
+                          />
+                        </div>
+                        <button className="btn-ghost text-[10px] text-danger self-end mt-1.5 px-1.5 py-0.5" onClick={() => setForm({ ...form, signature: undefined })}>
+                          <X size={11} /> Remove
                         </button>
+                        <div className="mt-3 space-y-3">
+                          <div className="flex items-end gap-3">
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] text-brand-500 font-medium">Opacity</span>
+                                <span className="text-[11px] font-mono tabular-nums text-brand-600 font-semibold">{form.signature.opacity}%</span>
+                              </div>
+                              <input type="range" min={5} max={100} value={form.signature.opacity}
+                                className="w-full h-1.5 accent-brand-500 cursor-pointer"
+                                onChange={(e) => setForm({ ...form, signature: { ...form.signature!, opacity: Number(e.target.value) } })}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 bg-white cursor-pointer hover:bg-brand-50 transition-colors">
+                              <span className="w-3.5 h-3.5 rounded-full border border-brand-200/60 shadow-sm shrink-0" style={{ backgroundColor: form.signature.color }} />
+                              <input type="color" value={form.signature.color}
+                                className="absolute opacity-0 w-0 h-0"
+                                onChange={(e) => setForm({ ...form, signature: { ...form.signature!, color: e.target.value } })}
+                              />
+                              <span className="text-[11px] text-brand-500 font-medium">Color</span>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-brand-400 font-medium mb-2">Crop edges</p>
+                            <div className="grid grid-cols-4 gap-2">
+                              {(["cropTop","cropRight","cropBottom","cropLeft"] as const).map((k, i) => (
+                                <div key={k} className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-2 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200">
+                                  <span className="text-[10px] text-brand-400 font-mono font-semibold">{["T","R","B","L"][i]}</span>
+                                  <input type="number" min={0} max={90} value={form.signature![k]}
+                                    className="w-full text-[11px] border-0 bg-transparent text-brand-700 focus:outline-none"
+                                    onChange={(e) => setForm({ ...form, signature: { ...form.signature!, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) } })}
+                                  />
+                                  <span className="text-[9px] text-brand-300 font-medium">%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     ) : (
-                      <label className="btn-ghost w-full justify-center cursor-pointer text-xs">
-                        <Upload size={12} /> Upload Signature
+                      <label className="flex-1 flex flex-col items-center justify-center gap-3 py-16 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/20 transition-all min-h-[220px]">
+                        <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center">
+                          <Upload size={22} className="text-brand-400" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-brand-600">Upload Signature</p>
+                          <p className="text-[11px] text-brand-400 mt-1">PNG, JPG, WebP — transparent PNG recommended</p>
+                        </div>
                         <input type="file" accept="image/*" className="hidden"
                           onChange={(e) => {
                             const f = e.target.files?.[0];
                             if (!f) return;
                             const r = new FileReader();
-                            r.onload = () => setForm({ ...form, signature: { data: String(r.result), x: 75, y: 85 } });
+                            r.onload = () => setForm({ ...form, signature: { data: String(r.result), x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 } });
                             r.readAsDataURL(f);
                           }}
                         />
                       </label>
                     )}
                   </div>
-                  <p className="text-[10px] text-brand-400">Drag stamp/signature on the preview to position.</p>
                 </div>
+                <p className="text-[11px] text-brand-400 mt-4 text-center">Drag stamp &amp; signature on the preview to position them precisely.</p>
               </div>
             </div>
           </Step>
@@ -1813,9 +1958,7 @@ function Editor({
                 <div style={{ position: "relative" }}>
                   {/* Stamp & Signature — behind text, watermark-style */}
                   {form.stamp?.data && (
-                    <img
-                      src={form.stamp.data}
-                      alt="Stamp"
+                    <div
                       draggable
                       onDragStart={(e) => { e.dataTransfer.setData("type", "stamp"); }}
                       onDragEnd={(e) => {
@@ -1831,17 +1974,27 @@ function Editor({
                         transform: "translate(-50%, -50%)",
                         maxHeight: 100,
                         maxWidth: 200,
-                        opacity: 0.3,
-                        mixBlendMode: "multiply",
+                        backgroundColor: form.stamp.color,
                         cursor: "grab",
                         zIndex: 0,
                       }}
-                    />
+                    >
+                      <img
+                        src={form.stamp.data}
+                        alt="Stamp"
+                        style={{
+                          display: "block",
+                          maxHeight: 100,
+                          maxWidth: 200,
+                          opacity: form.stamp.opacity / 100,
+                          mixBlendMode: "multiply",
+                          clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)`,
+                        }}
+                      />
+                    </div>
                   )}
                   {form.signature?.data && (
-                    <img
-                      src={form.signature.data}
-                      alt="Signature"
+                    <div
                       draggable
                       onDragStart={(e) => { e.dataTransfer.setData("type", "signature"); }}
                       onDragEnd={(e) => {
@@ -1857,12 +2010,24 @@ function Editor({
                         transform: "translate(-50%, -50%)",
                         maxHeight: 60,
                         maxWidth: 250,
-                        opacity: 0.35,
-                        mixBlendMode: "multiply",
+                        backgroundColor: form.signature.color,
                         cursor: "grab",
                         zIndex: 0,
                       }}
-                    />
+                    >
+                      <img
+                        src={form.signature.data}
+                        alt="Signature"
+                        style={{
+                          display: "block",
+                          maxHeight: 60,
+                          maxWidth: 250,
+                          opacity: form.signature.opacity / 100,
+                          mixBlendMode: "multiply",
+                          clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)`,
+                        }}
+                      />
+                    </div>
                   )}
                   <InvoiceView form={form} />
                 </div>
@@ -1966,26 +2131,34 @@ function Editor({
                 <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={viewPreviewRef}>
                   <div style={{ position: "relative" }}>
                     {form.stamp?.data && (
-                      <img src={form.stamp.data} alt="Stamp" draggable
+                      <div draggable
                         onDragEnd={(e) => {
                           const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
                           const x = ((e.clientX - rect.left) / rect.width) * 100;
                           const y = ((e.clientY - rect.top) / rect.height) * 100;
                           setForm({ ...form, stamp: { ...form.stamp!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
                         }}
-                        style={{ position: "absolute", left: `${form.stamp.x}%`, top: `${form.stamp.y}%`, transform: "translate(-50%,-50%)", maxHeight: 100, maxWidth: 200, opacity: 0.3, mixBlendMode: "multiply", cursor: "grab", zIndex: 0 }}
-                      />
+                        style={{ position: "absolute", left: `${form.stamp.x}%`, top: `${form.stamp.y}%`, transform: "translate(-50%,-50%)", maxHeight: 100, maxWidth: 200, backgroundColor: form.stamp.color, cursor: "grab", zIndex: 0 }}
+                      >
+                        <img src={form.stamp.data} alt="Stamp"
+                          style={{ display: "block", maxHeight: 100, maxWidth: 200, opacity: form.stamp.opacity / 100, mixBlendMode: "multiply", clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)` }}
+                        />
+                      </div>
                     )}
                     {form.signature?.data && (
-                      <img src={form.signature.data} alt="Signature" draggable
+                      <div draggable
                         onDragEnd={(e) => {
                           const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
                           const x = ((e.clientX - rect.left) / rect.width) * 100;
                           const y = ((e.clientY - rect.top) / rect.height) * 100;
                           setForm({ ...form, signature: { ...form.signature!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
                         }}
-                        style={{ position: "absolute", left: `${form.signature.x}%`, top: `${form.signature.y}%`, transform: "translate(-50%,-50%)", maxHeight: 60, maxWidth: 250, opacity: 0.35, mixBlendMode: "multiply", cursor: "grab", zIndex: 0 }}
-                      />
+                        style={{ position: "absolute", left: `${form.signature.x}%`, top: `${form.signature.y}%`, transform: "translate(-50%,-50%)", maxHeight: 60, maxWidth: 250, backgroundColor: form.signature.color, cursor: "grab", zIndex: 0 }}
+                      >
+                        <img src={form.signature.data} alt="Signature"
+                          style={{ display: "block", maxHeight: 60, maxWidth: 250, opacity: form.signature.opacity / 100, mixBlendMode: "multiply", clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)` }}
+                        />
+                      </div>
                     )}
                     <InvoiceView form={form} />
                   </div>
@@ -2575,7 +2748,7 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
-              {(form.doc_type || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")).toUpperCase()}
+              {(form.doc_title || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")).toUpperCase()}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
             {form.seller_trn && (
