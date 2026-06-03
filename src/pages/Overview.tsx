@@ -633,6 +633,9 @@ export default function Overview() {
 
   const visible = layout.order.filter((id) => !layout.hidden.includes(id));
   const addable = WIDGET_META.filter((w) => layout.hidden.includes(w.id));
+  // First-load gate: render skeletons OR the real content, never both stacked.
+  const initialLoading =
+    loading && products.length === 0 && orders.length === 0 && !error;
 
   const renderWidget = (id: string) => {
     switch (id) {
@@ -853,19 +856,21 @@ export default function Overview() {
         }
       />
 
-      <GettingStarted
-        hasProducts={products.length > 0}
-        hasInvoices={invoices.length > 0}
-        hasCustomers={customers.length > 0}
-        hasQuotations={quotations.length > 0}
-      />
+      {!initialLoading && (
+        <GettingStarted
+          hasProducts={products.length > 0}
+          hasInvoices={invoices.length > 0}
+          hasCustomers={customers.length > 0}
+          hasQuotations={quotations.length > 0}
+        />
+      )}
 
       {error && (
         <div className="mb-4">
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading && products.length === 0 && orders.length === 0 && !error && (
+      {initialLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
           {visible.map((id, i) => (
               <motion.div
@@ -903,6 +908,7 @@ export default function Overview() {
         </style>
       )}
 
+      {!initialLoading && (
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={visible} strategy={rectSortingStrategy}>
           <div
@@ -939,6 +945,7 @@ export default function Overview() {
           </div>
         </SortableContext>
       </DndContext>
+      )}
 
       {/* Activity Feed */}
       <div className="mt-6">
