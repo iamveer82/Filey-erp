@@ -239,7 +239,7 @@ function DcEditor({
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[26px] leading-8 font-bold text-ink">{typeLabel}</h1>
+            <h1 className="text-[28px] leading-9 font-bold text-ink">{typeLabel}</h1>
             <p className="text-sm text-brand-500 mt-0.5">Create delivery challans, goods received notes & returns</p>
           </div>
         </div>

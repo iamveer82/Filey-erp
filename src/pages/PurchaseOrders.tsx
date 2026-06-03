@@ -556,7 +556,7 @@ function LPOEditor({
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[26px] leading-8 font-bold text-ink">
+            <h1 className="text-[28px] leading-9 font-bold text-ink">
               Local Purchase Order
             </h1>
             <p className="text-sm text-brand-500 mt-0.5">

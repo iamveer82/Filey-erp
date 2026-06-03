@@ -127,7 +127,7 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
       <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
         <div className="flex items-start gap-3">
           <button className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5" onClick={onBack} aria-label="Back"><ArrowLeft size={18} /></button>
-          <div><h1 className="text-[26px] leading-8 font-bold text-ink">Payment Receipt</h1><p className="text-sm text-brand-500 mt-0.5">Issue professional payment receipts</p></div>
+          <div><h1 className="text-[28px] leading-9 font-bold text-ink">Payment Receipt</h1><p className="text-sm text-brand-500 mt-0.5">Issue professional payment receipts</p></div>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>

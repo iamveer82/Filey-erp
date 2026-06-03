@@ -217,8 +217,7 @@
 
   /* ── Buttons — uniform 40px height, centered, focus-visible ring,
         subtle press feedback. ── */
-  .btn-primary,
-  .btn-cta {
+  .btn-primary {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
            bg-primary-400 px-4 text-sm font-semibold text-ink select-none
            transition-colors duration-200 hover:bg-primary-500
@@ -339,7 +338,6 @@
   /* Brand chrome stays on the display face (Poppins); body text and
      table data inherit Open Sans for readability. */
   .btn-primary,
-  .btn-cta,
   .btn-secondary,
   .btn-ghost,
   .btn-danger,

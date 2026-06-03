@@ -362,7 +362,7 @@ export default function Invoicing() {
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
               <Sparkles size={16} /> Scan with AI
             </button>
-            <button className="btn-cta" onClick={newInvoice}>
+            <button className="btn-primary" onClick={newInvoice}>
               <Plus size={16} /> New Invoice
             </button>
           </div>
@@ -978,7 +978,7 @@ function Editor({
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[26px] leading-8 font-bold text-ink">
+            <h1 className="text-[28px] leading-9 font-bold text-ink">
               Create Invoice
             </h1>
             <p className="text-sm text-brand-500 mt-0.5">

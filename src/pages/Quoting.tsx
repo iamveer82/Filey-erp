@@ -527,7 +527,7 @@ export default function Quoting() {
     <div className="animate-fade-up">
       <div className="flex items-start justify-between gap-3 flex-wrap mb-5">
         <div>
-          <h1 className="text-[26px] leading-8 font-bold text-ink">
+          <h1 className="text-[28px] leading-9 font-bold text-ink">
             Create Quotation
           </h1>
           <p className="text-sm text-brand-500 mt-0.5">
