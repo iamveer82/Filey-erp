@@ -29,7 +29,7 @@ export interface CustomTemplate {
 /** Sections the user can drag around on a file template */
 export const DRAGGABLE_SECTIONS = [
   { key: "seller", label: "Company Info", w: 180, h: 72 },
-  { key: "header", label: "Invoice Header", w: 160, h: 64 },
+  { key: "header", label: "Document Header", w: 160, h: 64 },
   { key: "customer", label: "Customer Info", w: 170, h: 64 },
   { key: "items", label: "Items Table", w: 340, h: 120 },
   { key: "totals", label: "Totals", w: 150, h: 70 },
@@ -48,9 +48,8 @@ function defaultPositions(): Record<string, { x: number; y: number }> {
 }
 
 const FONTS = [
-  { label: "Poppins (Default)", value: "Poppins, sans-serif" },
-  { label: "Inter", value: "Inter, sans-serif" },
-  { label: "Georgia (Serif)", value: "Georgia, serif" },
+  { label: "Plus Jakarta Sans (Default)", value: "'Plus Jakarta Sans', system-ui, sans-serif" },
+  { label: "Lora (Serif)", value: "'Lora', Georgia, serif" },
   { label: "IBM Plex Mono", value: "'IBM Plex Mono', monospace" },
 ];
 
@@ -69,13 +68,21 @@ function saveCustomTemplates(templates: CustomTemplate[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
 }
 
+/** Remove a custom template by id; returns the updated list so callers
+ *  can sync their local state without a re-read. */
+export function deleteCustomTemplate(id: string): CustomTemplate[] {
+  const next = loadCustomTemplates().filter((t) => t.id !== id);
+  saveCustomTemplates(next);
+  return next;
+}
+
 function blankTemplate(): CustomTemplate {
   return {
     id: `custom-${Date.now()}`,
     name: "",
     type: "builder",
-    accent: "#FFD600",
-    font: "Poppins, sans-serif",
+    accent: "#222222",
+    font: "'Plus Jakarta Sans', system-ui, sans-serif",
     layout: "minimal",
     showLogo: true,
     showSeller: true,
@@ -214,7 +221,7 @@ export default function TemplateDesigner({
         <div>
           <p className="font-display font-bold text-ink">Create Template</p>
           <p className="text-xs text-brand-400 mt-0.5">
-            {step === "position" ? "Drag boxes to position them" : "Design your own invoice layout"}
+            {step === "position" ? "Drag boxes to position them" : "Design your own document layout"}
           </p>
         </div>
         <button

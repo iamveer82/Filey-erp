@@ -35,7 +35,7 @@ import { sendEmail, emailShell, esc } from "../lib/email";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { Modal, Field } from "../components/ui";
 import TemplateTilePreview from "../components/TemplateTilePreview";
-import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
 
 interface Line {
   product: string;
@@ -110,11 +110,27 @@ export default function Quoting() {
   const [savedNote, setSavedNote] = useState(false);
   const [converting, setConverting] = useState(false);
   const navigate = useNavigate();
-  const { toast, prompt } = useUI();
+  const { toast, prompt, confirm } = useUI();
+  const removeCustomTpl = async (id: string, name: string) => {
+    if (
+      !(await confirm({
+        title: "Delete template",
+        message: `Delete custom template "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    setCustomTemplates(deleteCustomTemplate(id));
+    if (tpl === id) setTpl("clean");
+    toast.success("Template deleted.");
+  };
   const quoteRef = useRef<HTMLDivElement>(null);
   const downloadQuotePdf = () => {
-    if (quoteRef.current) downloadElementAsPdf(quoteRef.current, "quotation");
-    else window.print();
+    if (quoteRef.current) {
+      const sheet = quoteRef.current.closest('.invoice-print') as HTMLElement;
+      downloadElementAsPdf(sheet || quoteRef.current, "quotation");
+    } else window.print();
   };
 
   // Calculate page count for the full-screen preview
@@ -646,7 +662,7 @@ export default function Quoting() {
                   <button
                     key={t.id}
                     onClick={() => setTpl(t.id)}
-                    className={`relative shrink-0 w-32 rounded-xl border-2 p-2 text-left cursor-pointer transition-all ${
+                    className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left cursor-pointer transition-all ${
                       on
                         ? "border-primary-400 bg-primary-50 shadow-glow"
                         : "border-brand-200 bg-white hover:border-primary-300"
@@ -655,6 +671,20 @@ export default function Quoting() {
                     {on && (
                       <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
                         <Check size={11} strokeWidth={3} />
+                      </span>
+                    )}
+                    {isCustom && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Delete template ${t.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeCustomTpl(t.id, t.name);
+                        }}
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
                       </span>
                     )}
                     <TemplateTilePreview templateId={t.id} customTemplates={customTemplates} />

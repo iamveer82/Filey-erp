@@ -48,7 +48,7 @@ import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import ScanDocModal from "../components/ScanDocModal";
-import TemplateDesigner, { loadCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
   PageHeader,
@@ -61,8 +61,10 @@ import {
   ShareToggle,
 } from "../components/ui";
 
-type Item = { description: string; qty: number; unit_price: number };
-type Form = Omit<InvoiceDocInput, "items"> & { items: Item[] };
+type CustomColumn = { key: string; label: string };
+type Item = { description: string; qty: number; unit_price: number; unit: string; custom: Record<string, string> };
+type StampSig = { data: string; x: number; y: number };
+type Form = Omit<InvoiceDocInput, "items"> & { items: Item[]; customColumns: CustomColumn[]; stamp?: StampSig; signature?: StampSig };
 
 const TEMPLATES = [
   { id: "minimal", name: "Minimal" },
@@ -75,6 +77,11 @@ const TEMPLATES = [
   { id: "creative", name: "Creative" },
   { id: "receipt", name: "Receipt" },
   { id: "monogram", name: "Monogram" },
+  { id: "green-gold", name: "Green Gold" },
+  { id: "uae", name: "UAE Professional" },
+  { id: "industrial", name: "Industrial" },
+  { id: "executive", name: "Executive" },
+  { id: "fresh", name: "Fresh" },
 ];
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -106,7 +113,8 @@ function blankForm(c: CompanyProfile): Form {
     terms: "Payment due within 30 days.",
     tax_rate: c.default_tax_rate ?? 5,
     discount: 0,
-    items: [{ description: "", qty: 1, unit_price: 0 }],
+    items: [{ description: "", qty: 1, unit_price: 0, unit: "", custom: {} }],
+    customColumns: [],
   };
 }
 
@@ -195,7 +203,10 @@ export default function Invoicing() {
           description: i.description,
           qty: i.qty,
           unit_price: i.unit_price,
+          unit: i.unit || "",
+          custom: i.custom || {},
         })),
+        customColumns: d.custom_columns || [],
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
@@ -232,7 +243,10 @@ export default function Invoicing() {
           description: i.description,
           qty: i.qty,
           unit_price: i.unit_price,
+          unit: i.unit || "",
+          custom: i.custom || {},
         })),
+        customColumns: d.custom_columns || [],
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to duplicate invoice");
@@ -261,6 +275,14 @@ export default function Invoicing() {
       // Empty date inputs must become undefined, not "" (invalid SQL date).
       const payload = {
         ...form,
+        custom_columns: form.customColumns,
+        items: form.items.map(it => ({
+          description: it.description,
+          qty: it.qty,
+          unit_price: it.unit_price,
+          unit: it.unit || undefined,
+          custom: it.custom,
+        })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
@@ -815,11 +837,14 @@ function Editor({
   onRevertDraft: () => void;
   saving: boolean;
 }) {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
   const downloadPdf = () => {
-    if (invoiceRef.current) downloadElementAsPdf(invoiceRef.current, form.number || "invoice");
-    else window.print();
+    if (invoiceRef.current) {
+      // Capture the full A4 sheet (with padding), not just the inner div
+      const sheet = invoiceRef.current.closest('.invoice-print') as HTMLElement;
+      downloadElementAsPdf(sheet || invoiceRef.current, form.number || "invoice");
+    } else window.print();
   };
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setForm({ ...form, [k]: v });
@@ -827,6 +852,20 @@ function Editor({
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
   const allTemplates = [...TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))];
+  const removeTpl = async (id: string, name: string) => {
+    if (
+      !(await confirm({
+        title: "Delete template",
+        message: `Delete custom template "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    setCustomTemplates(deleteCustomTemplate(id));
+    if (form.template === id) set("template", "minimal");
+    toast.success("Template deleted.");
+  };
 
   const setItem = (idx: number, patch: Partial<Item>) => {
     const items = form.items.map((it, i) =>
@@ -837,10 +876,37 @@ function Editor({
   const addItem = () =>
     setForm({
       ...form,
-      items: [...form.items, { description: "", qty: 1, unit_price: 0 }],
+      items: [...form.items, { description: "", qty: 1, unit_price: 0, unit: "", custom: {} }],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  const setItemCustom = (idx: number, key: string, value: string) => {
+    const items = form.items.map((it, i) =>
+      i === idx ? { ...it, custom: { ...it.custom, [key]: value } } : it
+    );
+    setForm({ ...form, items });
+  };
+
+  const addCustomColumn = () => {
+    const label = window.prompt("Column name:")?.trim();
+    if (!label) return;
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `col_${Date.now()}`;
+    if (form.customColumns.some(c => c.key === key)) return;
+    setForm({ ...form, customColumns: [...form.customColumns, { key, label }] });
+  };
+
+  const removeCustomColumn = (key: string) => {
+    setForm({
+      ...form,
+      customColumns: form.customColumns.filter(c => c.key !== key),
+      items: form.items.map(it => {
+        const c = { ...it.custom };
+        delete c[key];
+        return { ...it, custom: c };
+      }),
+    });
+  };
 
   const onLogo = (file?: File) => {
     if (!file) return;
@@ -1092,7 +1158,7 @@ function Editor({
                   <button
                     key={tpl.id}
                     onClick={() => set("template", tpl.id)}
-                    className={`relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
+                    className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
                       active
                         ? "border-primary-400 bg-primary-50 shadow-glow"
                         : "border-brand-200 bg-white hover:border-primary-300"
@@ -1101,6 +1167,20 @@ function Editor({
                     {active && (
                       <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
                         <Check size={11} strokeWidth={3} />
+                      </span>
+                    )}
+                    {isCustom && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Delete template ${tpl.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTpl(tpl.id, tpl.name);
+                        }}
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
                       </span>
                     )}
                     <TemplateTilePreview templateId={tpl.id} customTemplates={customTemplates} />
@@ -1198,6 +1278,28 @@ function Editor({
                 </Field>
               </div>
               <div className="space-y-3">
+                <Field label="Document Title">
+                  <input
+                    className="input"
+                    placeholder="INVOICE"
+                    value={form.doc_title || ""}
+                    list="doc-title-suggestions"
+                    onChange={(e) => set("doc_title", e.target.value)}
+                  />
+                  <datalist id="doc-title-suggestions">
+                    <option value="Tax Invoice" />
+                    <option value="Proforma Invoice" />
+                    <option value="Commercial Invoice" />
+                    <option value="Invoice" />
+                    <option value="Quotation" />
+                    <option value="Receipt" />
+                    <option value="Credit Note" />
+                    <option value="Debit Note" />
+                    <option value="Delivery Note" />
+                    <option value="Purchase Order" />
+                    <option value="Statement" />
+                  </datalist>
+                </Field>
                 <Field label="Invoice Number">
                   <div className="flex gap-2">
                     <input
@@ -1279,7 +1381,38 @@ function Editor({
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
-                    <th className="py-2 px-2 w-32 text-right">Unit</th>
+                    <th className="py-2 px-2 w-24 text-right">Unit</th>
+                    {form.customColumns.map((col, idx) => (
+                      <th
+                        key={col.key}
+                        className="py-2 px-2 text-right group relative cursor-grab active:cursor-grabbing"
+                        draggable
+                        onDragStart={(e) => { e.dataTransfer.setData("text/plain", col.key); e.dataTransfer.effectAllowed = "move"; }}
+                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const fromKey = e.dataTransfer.getData("text/plain");
+                          if (fromKey && fromKey !== col.key) {
+                            const fromIdx = form.customColumns.findIndex(c => c.key === fromKey);
+                            const toIdx = idx;
+                            if (fromIdx >= 0) {
+                              const next = [...form.customColumns];
+                              const [moved] = next.splice(fromIdx, 1);
+                              next.splice(toIdx, 0, moved);
+                              setForm({ ...form, customColumns: next });
+                            }
+                          }
+                        }}
+                      >
+                        <span className="text-[10px]">{col.label}</span>
+                        <button
+                          className="ml-1 opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger inline cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); removeCustomColumn(col.key); }}
+                          title="Remove column"
+                        >×</button>
+                      </th>
+                    ))}
+                    <th className="py-2 px-2 w-32 text-right">Unit Price</th>
                     {(form.tax_rate || 0) > 0 && (
                       <th className="py-2 px-2 w-16 text-right">Tax</th>
                     )}
@@ -1314,6 +1447,29 @@ function Editor({
                       </td>
                       <td className="py-2 px-2">
                         <input
+                          className="input text-right !px-2"
+                          placeholder="pcs"
+                          value={it.unit || ""}
+                          list="unit-suggestions"
+                          onChange={(e) =>
+                            setItem(i, { unit: e.target.value })
+                          }
+                        />
+                      </td>
+                      {form.customColumns.map((col) => (
+                        <td key={col.key} className="py-2 px-2">
+                          <input
+                            className="input text-right !px-2 !py-1 text-xs"
+                            placeholder={col.label}
+                            value={it.custom?.[col.key] || ""}
+                            onChange={(e) =>
+                              setItemCustom(i, col.key, e.target.value)
+                            }
+                          />
+                        </td>
+                      ))}
+                      <td className="py-2 px-2">
+                        <input
                           type="number"
                           className="input text-right !px-2"
                           placeholder="0"
@@ -1345,10 +1501,70 @@ function Editor({
                 </tbody>
               </table>
             </div>
+            {/* Custom column management */}
+            {form.customColumns.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 mt-2 text-xs text-brand-400">
+                <span className="mr-1">Custom fields (drag to reorder):</span>
+                {form.customColumns.map((col, idx) => (
+                  <span
+                    key={col.key}
+                    className="inline-flex items-center gap-0.5 bg-brand-50 border border-brand-200 rounded px-1.5 py-0.5 cursor-grab active:cursor-grabbing select-none"
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", col.key); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const fromKey = e.dataTransfer.getData("text/plain");
+                      if (fromKey && fromKey !== col.key) {
+                        const fromIdx = form.customColumns.findIndex(c => c.key === fromKey);
+                        const toIdx = idx;
+                        if (fromIdx >= 0) {
+                          const next = [...form.customColumns];
+                          const [moved] = next.splice(fromIdx, 1);
+                          next.splice(toIdx, 0, moved);
+                          setForm({ ...form, customColumns: next });
+                        }
+                      }
+                    }}
+                  >
+                    <span className="font-medium">{col.label}</span>
+                    <button className="text-brand-300 hover:text-danger ml-0.5 cursor-pointer" onClick={(e) => { e.stopPropagation(); removeCustomColumn(col.key); }} title="Remove">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 mt-3">
               <button className="btn-primary" onClick={addItem}>
                 <Plus size={14} /> Add Item
               </button>
+              <button className="btn-ghost text-xs" onClick={addCustomColumn}>
+                <Plus size={12} /> Add Field
+              </button>
+              <datalist id="unit-suggestions">
+                <option value="pcs" />
+                <option value="L" />
+                <option value="mL" />
+                <option value="kg" />
+                <option value="g" />
+                <option value="MT" />
+                <option value="ton" />
+                <option value="m" />
+                <option value="cm" />
+                <option value="ft" />
+                <option value="sqm" />
+                <option value="sqft" />
+                <option value="hrs" />
+                <option value="days" />
+                <option value="set" />
+                <option value="box" />
+                <option value="carton" />
+                <option value="drum" />
+                <option value="barrel" />
+                <option value="pack" />
+                <option value="roll" />
+                <option value="pair" />
+                <option value="dozen" />
+              </datalist>
               <button
                 className="btn-ghost"
                 onClick={() => setShowDiscount((v) => !v)}
@@ -1498,6 +1714,62 @@ function Editor({
                   </p>
                 </div>
               </div>
+              <div className="rounded-xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+                  <StickyNote size={15} /> Stamp & Signature
+                </div>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <p className="text-xs font-semibold text-brand-600 mb-1">Stamp</p>
+                    {form.stamp?.data ? (
+                      <div className="flex items-center gap-2">
+                        <img src={form.stamp.data} alt="stamp" className="h-14 object-contain border border-brand-200 rounded bg-white" />
+                        <button className="btn-ghost text-xs text-danger" onClick={() => setForm({ ...form, stamp: undefined })}>
+                          <X size={12} /> Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="btn-ghost w-full justify-center cursor-pointer text-xs">
+                        <Upload size={12} /> Upload Stamp
+                        <input type="file" accept="image/*" className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            const r = new FileReader();
+                            r.onload = () => setForm({ ...form, stamp: { data: String(r.result), x: 75, y: 70 } });
+                            r.readAsDataURL(f);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-brand-600 mb-1">Signature</p>
+                    {form.signature?.data ? (
+                      <div className="flex items-center gap-2">
+                        <img src={form.signature.data} alt="signature" className="h-10 object-contain border border-brand-200 rounded bg-white" />
+                        <button className="btn-ghost text-xs text-danger" onClick={() => setForm({ ...form, signature: undefined })}>
+                          <X size={12} /> Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="btn-ghost w-full justify-center cursor-pointer text-xs">
+                        <Upload size={12} /> Upload Signature
+                        <input type="file" accept="image/*" className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            const r = new FileReader();
+                            r.onload = () => setForm({ ...form, signature: { data: String(r.result), x: 75, y: 85 } });
+                            r.readAsDataURL(f);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-brand-400">Drag stamp/signature on the preview to position.</p>
+                </div>
+              </div>
             </div>
           </Step>
         </div>
@@ -1538,7 +1810,62 @@ function Editor({
               zoom={zoom}
             >
               <div ref={invoiceRef}>
-                <InvoiceView form={form} />
+                <div style={{ position: "relative" }}>
+                  {/* Stamp & Signature — behind text, watermark-style */}
+                  {form.stamp?.data && (
+                    <img
+                      src={form.stamp.data}
+                      alt="Stamp"
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData("type", "stamp"); }}
+                      onDragEnd={(e) => {
+                        const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
+                        const x = ((e.clientX - rect.left) / rect.width) * 100;
+                        const y = ((e.clientY - rect.top) / rect.height) * 100;
+                        setForm({ ...form, stamp: { ...form.stamp!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
+                      }}
+                      style={{
+                        position: "absolute",
+                        left: `${form.stamp.x}%`,
+                        top: `${form.stamp.y}%`,
+                        transform: "translate(-50%, -50%)",
+                        maxHeight: 100,
+                        maxWidth: 200,
+                        opacity: 0.3,
+                        mixBlendMode: "multiply",
+                        cursor: "grab",
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+                  {form.signature?.data && (
+                    <img
+                      src={form.signature.data}
+                      alt="Signature"
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData("type", "signature"); }}
+                      onDragEnd={(e) => {
+                        const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
+                        const x = ((e.clientX - rect.left) / rect.width) * 100;
+                        const y = ((e.clientY - rect.top) / rect.height) * 100;
+                        setForm({ ...form, signature: { ...form.signature!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
+                      }}
+                      style={{
+                        position: "absolute",
+                        left: `${form.signature.x}%`,
+                        top: `${form.signature.y}%`,
+                        transform: "translate(-50%, -50%)",
+                        maxHeight: 60,
+                        maxWidth: 250,
+                        opacity: 0.35,
+                        mixBlendMode: "multiply",
+                        cursor: "grab",
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+                  <InvoiceView form={form} />
+                </div>
               </div>
             </FitPreview>
 
@@ -1637,7 +1964,31 @@ function Editor({
             <div className="flex-1 overflow-auto p-6">
               <div className="mx-auto max-w-5xl">
                 <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={viewPreviewRef}>
-                  <InvoiceView form={form} />
+                  <div style={{ position: "relative" }}>
+                    {form.stamp?.data && (
+                      <img src={form.stamp.data} alt="Stamp" draggable
+                        onDragEnd={(e) => {
+                          const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
+                          const x = ((e.clientX - rect.left) / rect.width) * 100;
+                          const y = ((e.clientY - rect.top) / rect.height) * 100;
+                          setForm({ ...form, stamp: { ...form.stamp!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
+                        }}
+                        style={{ position: "absolute", left: `${form.stamp.x}%`, top: `${form.stamp.y}%`, transform: "translate(-50%,-50%)", maxHeight: 100, maxWidth: 200, opacity: 0.3, mixBlendMode: "multiply", cursor: "grab", zIndex: 0 }}
+                      />
+                    )}
+                    {form.signature?.data && (
+                      <img src={form.signature.data} alt="Signature" draggable
+                        onDragEnd={(e) => {
+                          const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
+                          const x = ((e.clientX - rect.left) / rect.width) * 100;
+                          const y = ((e.clientY - rect.top) / rect.height) * 100;
+                          setForm({ ...form, signature: { ...form.signature!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
+                        }}
+                        style={{ position: "absolute", left: `${form.signature.x}%`, top: `${form.signature.y}%`, transform: "translate(-50%,-50%)", maxHeight: 60, maxWidth: 250, opacity: 0.35, mixBlendMode: "multiply", cursor: "grab", zIndex: 0 }}
+                      />
+                    )}
+                    <InvoiceView form={form} />
+                  </div>
                 </div>
                 {pageCount > 1 && (
                   <p className="text-center text-xs text-brand-400 mt-3 font-medium">
@@ -1860,11 +2211,15 @@ function InvoiceView({ form }: { form: Form }) {
           className={bordered ? "" : "border-b-2"}
         >
           <th className="text-left py-2 px-2 font-semibold">Description</th>
-          <th className="text-right py-2 px-2 font-semibold w-16">Qty</th>
-          <th className="text-right py-2 px-2 font-semibold w-28">
-            Unit
+          <th className="text-right py-2 px-2 font-semibold w-14">Qty</th>
+          <th className="text-right py-2 px-2 font-semibold w-14">Unit</th>
+          {form.customColumns.map((col) => (
+            <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">{col.label}</th>
+          ))}
+          <th className="text-right py-2 px-2 font-semibold w-24">
+            Unit Price
           </th>
-          <th className="text-right py-2 px-2 font-semibold w-32">
+          <th className="text-right py-2 px-2 font-semibold w-28">
             Amount
           </th>
         </tr>
@@ -1878,6 +2233,10 @@ function InvoiceView({ form }: { form: Form }) {
           >
             <td className="py-2 px-2">{it.description || "—"}</td>
             <td className="py-2 px-2 text-right">{it.qty}</td>
+            <td className="py-2 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
+            {form.customColumns.map((col) => (
+              <td key={col.key} className="py-2 px-2 text-right text-[10px] text-neutral-500">{it.custom?.[col.key] || "—"}</td>
+            ))}
             <td className="py-2 px-2 text-right">{m(it.unit_price)}</td>
             <td className="py-2 px-2 text-right">
               {m((it.qty || 0) * (it.unit_price || 0))}
@@ -1940,7 +2299,7 @@ function InvoiceView({ form }: { form: Form }) {
       if (!p) return null;
       return (
         <div
-          className="absolute bg-white/78 backdrop-blur-[2px] rounded-xl px-4 py-3 shadow-sm"
+          className="absolute"
           style={{ left: `${p.x}%`, top: `${p.y}%` }}
         >
           {children}
@@ -1971,7 +2330,7 @@ function InvoiceView({ form }: { form: Form }) {
 
         {/* Header — Invoice title + number + dates */}
         <Section k="header">
-          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>INVOICE</p>
+          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>{form.doc_title || "INVOICE"}</p>
           <p className="text-xs font-mono text-neutral-800 mt-0.5">{form.number}</p>
           <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(form.issue_date)}</p>
           {form.due_date && <p className="text-[10px] text-neutral-500">Due: {fmtDate(form.due_date)}</p>}
@@ -1988,7 +2347,7 @@ function InvoiceView({ form }: { form: Form }) {
         {/* Items table */}
         {pos.items && (
           <div
-            className="absolute bg-white/82 backdrop-blur-[2px] rounded-xl p-4 shadow-sm overflow-auto"
+            className="absolute overflow-auto"
             style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
           >
             <Items headerBg={ac} />
@@ -1998,7 +2357,7 @@ function InvoiceView({ form }: { form: Form }) {
         {/* Totals */}
         {pos.totals && (
           <div
-            className="absolute bg-white/80 backdrop-blur-[2px] rounded-xl px-4 py-2.5 shadow-sm"
+            className="absolute"
             style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
           >
             <Totals />
@@ -2043,7 +2402,7 @@ function InvoiceView({ form }: { form: Form }) {
               className="text-3xl font-extrabold tracking-tight"
               style={{ color: a }}
             >
-              INVOICE
+              {form.doc_title || "INVOICE"}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
           </div>
@@ -2089,7 +2448,7 @@ function InvoiceView({ form }: { form: Form }) {
             <Logo size={88} />
             <p className="font-bold text-xl">{form.seller_name}</p>
           </div>
-          <p className="text-2xl font-extrabold tracking-widest">INVOICE</p>
+          <p className="text-2xl font-extrabold tracking-widest">{form.doc_title || "INVOICE"}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
@@ -2262,7 +2621,7 @@ function InvoiceView({ form }: { form: Form }) {
         <div className="text-center">
           <Logo size={104} />
           <p className="text-3xl tracking-[0.3em] mt-4" style={{ color: a }}>
-            INVOICE
+            {form.doc_title || "INVOICE"}
           </p>
           <div className="mx-auto w-16 h-px my-3" style={{ background: a }} />
           <p className="text-xs tracking-widest text-neutral-500">
@@ -2307,7 +2666,7 @@ function InvoiceView({ form }: { form: Form }) {
         >
           <div className="flex justify-between items-start">
             <Logo size={100} />
-            <p className="text-5xl font-extrabold tracking-tight">INVOICE</p>
+            <p className="text-5xl font-extrabold tracking-tight">{form.doc_title || "INVOICE"}</p>
           </div>
           <div className="flex justify-between items-end mt-8">
             <div>
@@ -2441,7 +2800,7 @@ function InvoiceView({ form }: { form: Form }) {
         <SellerContact />
         <div className="border-t-2 border-dashed border-neutral-300 my-4" />
         <div className="flex justify-between text-xs">
-          <span className="text-neutral-500">Invoice</span>
+          <span className="text-neutral-500">{form.doc_title || "Invoice"}</span>
           <span className="font-mono">{form.number}</span>
         </div>
         <div className="flex justify-between text-xs">
@@ -2479,13 +2838,320 @@ function InvoiceView({ form }: { form: Form }) {
           className="mt-6 py-2 text-center text-sm font-semibold tracking-[0.25em]"
           style={{ borderTop: `1px solid ${a}`, borderBottom: `1px solid ${a}`, color: a }}
         >
-          INVOICE {form.number}
+          {form.doc_title || "INVOICE"} {form.number}
         </div>
         <Parties />
         <Meta />
         <Items />
         <Totals />
         <Footer />
+      </div>
+    );
+  }
+
+  // ---- GREEN GOLD (UAE Manufacturing) ----
+  if (templateId === "green-gold") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+        {/* Top gold band */}
+        <div className="-mx-12 -mt-12 mb-0" style={{ background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)", height: 6 }} />
+        
+        {/* Header with logo */}
+        <div className="flex justify-between items-start mt-8 pb-6" style={{ borderBottom: `3px solid #D4A017` }}>
+          <div className="flex items-center gap-4">
+            <Logo size={64} />
+            <div>
+              <p className="font-extrabold text-xl tracking-tight" style={{ color: "#1B5E20" }}>{form.seller_name}</p>
+              <p className="text-xs text-neutral-500 whitespace-pre-line leading-relaxed">{form.seller_address}</p>
+              {form.seller_trn && <p className="text-[11px] text-neutral-400 mt-0.5">TRN: {form.seller_trn}</p>}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-4xl font-black tracking-tighter" style={{ color: "#D4A017" }}>{form.doc_title || "INVOICE"}</p>
+            <p className="text-sm font-mono text-neutral-600 mt-1">{form.number}</p>
+            <div className="mt-3 pt-3" style={{ borderTop: "1px solid #E8D5A3" }}>
+              <p className="text-[11px] text-neutral-500">{fmtDate(form.issue_date)}</p>
+              <p className="text-[11px] text-neutral-400">Due: {fmtDate(form.due_date)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Bill To + Company Info */}
+        <div className="grid grid-cols-2 gap-8 mt-6">
+          <div className="rounded-lg p-4" style={{ background: "#F1F8E9", border: "1px solid #C8E6C9" }}>
+            <p className="text-[10px] uppercase tracking-[0.2em] font-semibold mb-2" style={{ color: "#1B5E20" }}>Bill To</p>
+            <p className="font-bold text-sm">{form.customer_name}</p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line leading-relaxed mt-1">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="rounded-lg p-4" style={{ background: "#FFF8E1", border: "1px solid #FFE082" }}>
+            <div className="flex justify-between text-xs text-neutral-600">
+              <span>Invoice Date</span><span className="font-medium">{fmtDate(form.issue_date)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-neutral-600 mt-2">
+              <span>Due Date</span><span className="font-medium">{fmtDate(form.due_date)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-neutral-600 mt-2">
+              <span>Reference</span><span className="font-mono font-medium">{form.number}</span>
+            </div>
+            {form.po_number && (
+              <div className="flex justify-between text-xs text-neutral-600 mt-2">
+                <span>PO Number</span><span className="font-medium">{form.po_number}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Items headerBg="#1B5E20" />
+        <Totals />
+        <Footer />
+        
+        {/* Bottom gold band */}
+        <div className="-mx-12 mt-8" style={{ background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)", height: 3 }} />
+        <p className="text-center text-[10px] text-neutral-400 mt-3">Thank you for your business</p>
+      </div>
+    );
+  }
+
+  // ---- UAE PROFESSIONAL ----
+  if (templateId === "uae") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+        {/* UAE flag-inspired accent bar */}
+        <div className="-mx-12 -mt-12 mb-8 flex" style={{ height: 4 }}>
+          <div style={{ flex: 1, background: "#00732E" }} />
+          <div style={{ flex: 1, background: "#FFFFFF", borderLeft: "1px solid #ddd", borderRight: "1px solid #ddd" }} />
+          <div style={{ flex: 1, background: "#000000" }} />
+          <div style={{ width: 8, background: "#CE1126" }} />
+        </div>
+
+        <div className="flex justify-between items-start">
+          <div>
+            <Logo size={56} />
+            <p className="font-bold text-lg mt-2">{form.seller_name}</p>
+            <p className="text-[11px] text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
+            <SellerContact />
+          </div>
+          <div className="text-right">
+            <div className="inline-block px-6 py-3 rounded-sm" style={{ background: "#1a1a1a" }}>
+              <p className="text-white text-2xl font-bold tracking-widest">{form.doc_title || "INVOICE"}</p>
+            </div>
+            <p className="text-sm font-mono mt-3">{form.number}</p>
+            <p className="text-xs text-neutral-500 mt-1">{fmtDate(form.issue_date)}</p>
+          </div>
+        </div>
+
+        <div className="mt-8 grid grid-cols-2 gap-6">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-semibold">Bill To</p>
+            <p className="font-bold mt-2">{form.customer_name}</p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+              <span className="text-neutral-500">Date</span>
+              <span className="font-medium">{fmtDate(form.issue_date)}</span>
+            </div>
+            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+              <span className="text-neutral-500">Due</span>
+              <span className="font-medium">{fmtDate(form.due_date)}</span>
+            </div>
+            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+              <span className="text-neutral-500">Reference</span>
+              <span className="font-mono font-medium">{form.number}</span>
+            </div>
+          </div>
+        </div>
+
+        <Items headerBg="#1a1a1a" />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- INDUSTRIAL ----
+  if (templateId === "industrial") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "'IBM Plex Mono', 'Plus Jakarta Sans', monospace" }}>
+        {/* Industrial top bar with rivet-style circles */}
+        <div className="-mx-12 -mt-12 mb-8 flex items-center" style={{ background: "#2C3E50", height: 48 }}>
+          <div className="flex gap-2 px-4">
+            <div className="rounded-full" style={{ width: 10, height: 10, background: "#E74C3C" }} />
+            <div className="rounded-full" style={{ width: 10, height: 10, background: "#F39C12" }} />
+            <div className="rounded-full" style={{ width: 10, height: 10, background: "#2ECC71" }} />
+          </div>
+          <p className="text-white font-bold tracking-[0.3em] text-sm uppercase mx-auto">Industrial Invoice</p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2">
+            <div className="flex items-start gap-3">
+              <Logo size={48} />
+              <div>
+                <p className="font-extrabold text-lg tracking-tight" style={{ color: "#2C3E50" }}>{form.seller_name}</p>
+                <p className="text-[10px] text-neutral-500 whitespace-pre-line uppercase tracking-wide">{form.seller_address}</p>
+                {form.seller_trn && <p className="text-[9px] text-neutral-400 mt-0.5">TRN: {form.seller_trn}</p>}
+              </div>
+            </div>
+            <div className="mt-6 p-4 rounded" style={{ background: "#ECF0F1", borderLeft: "4px solid #E74C3C" }}>
+              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-neutral-500 mb-1">Bill To</p>
+              <p className="font-bold">{form.customer_name}</p>
+              <p className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
+              {form.customer_trn && <p className="text-[10px] text-neutral-400">TRN: {form.customer_trn}</p>}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="p-4 rounded" style={{ background: "#2C3E50", color: "#fff" }}>
+              <p className="text-xs uppercase tracking-widest opacity-70">Document</p>
+              <p className="text-2xl font-black tracking-tighter mt-1">{form.doc_title || "INVOICE"}</p>
+              <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}>
+                <p className="text-xs font-mono">{form.number}</p>
+                <p className="text-[10px] opacity-70 mt-1">{fmtDate(form.issue_date)}</p>
+                <p className="text-[10px] opacity-70">Due: {fmtDate(form.due_date)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Items headerBg="#2C3E50" bordered />
+        <Totals />
+        <Footer />
+        
+        <div className="mt-8 pt-4 text-center" style={{ borderTop: "2px solid #2C3E50" }}>
+          <p className="text-[9px] text-neutral-400 uppercase tracking-[0.3em]">Industrial Grade Products</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- EXECUTIVE ----
+  if (templateId === "executive") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "'Lora', 'Plus Jakarta Sans', Georgia, serif" }}>
+        {/* Premium dark header */}
+        <div className="-mx-12 -mt-12 mb-10 px-12 py-10" style={{ background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)", color: "#fff" }}>
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <Logo size={72} />
+              <div>
+                <p className="text-xl font-bold tracking-tight" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.seller_name}</p>
+                <p className="text-xs opacity-60 whitespace-pre-line mt-1 leading-relaxed">{form.seller_address}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-sm uppercase tracking-[0.5em] opacity-50" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.doc_title || "Invoice"}</p>
+              <p className="text-4xl font-light mt-1 tracking-tight" style={{ color: "#C9A84C" }}>{form.number}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-10">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">Bill To</p>
+            </div>
+            <p className="font-bold text-base" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.customer_name}</p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1 leading-relaxed">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">Details</p>
+            </div>
+            <div className="space-y-3 text-sm" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              <div className="flex justify-between">
+                <span className="text-neutral-400">Issued</span>
+                <span className="font-medium">{fmtDate(form.issue_date)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-400">Due</span>
+                <span className="font-medium">{fmtDate(form.due_date)}</span>
+              </div>
+              {form.po_number && (
+                <div className="flex justify-between">
+                  <span className="text-neutral-400">PO #</span>
+                  <span className="font-mono font-medium text-xs">{form.po_number}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-8 pt-6" style={{ borderTop: "1px solid #e5e5e5" }}>
+          <Items headerBg="#0a0a0a" />
+        </div>
+        <Totals />
+        <Footer />
+        
+        <div className="mt-10 pt-6 text-center" style={{ borderTop: `2px solid #C9A84C` }}>
+          <p className="text-[10px] text-neutral-400 tracking-widest uppercase" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            Payment Terms: {form.terms || "Net 30"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- FRESH ----
+  if (templateId === "fresh") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+        {/* Playful top accent */}
+        <div className="-mx-12 -mt-12 mb-0" style={{ background: "linear-gradient(90deg, #667EEA 0%, #764BA2 50%, #F093FB 100%)", height: 5 }} />
+
+        <div className="flex justify-between items-start mt-8">
+          <div>
+            <Logo size={52} />
+            <p className="font-extrabold text-xl mt-3" style={{ color: "#4C51BF" }}>
+              {form.seller_name}
+              <span className="text-neutral-400 font-normal text-sm ml-2">{form.doc_title || "Invoice"}</span>
+            </p>
+            <SellerContact cls="text-neutral-400 text-[11px]" />
+          </div>
+          <div className="text-right">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: "#EBF4FF" }}>
+              <div className="w-2 h-2 rounded-full" style={{ background: "#667EEA" }} />
+              <span className="text-xs font-bold tracking-wider" style={{ color: "#4C51BF" }}>#{form.number}</span>
+            </div>
+            <div className="mt-3 text-xs text-neutral-500">
+              <p>Issued: {fmtDate(form.issue_date)}</p>
+              <p>Due: {fmtDate(form.due_date)}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-5 gap-0 mt-8 rounded-2xl overflow-hidden" style={{ border: "1px solid #E8E8F0" }}>
+          <div className="col-span-3 p-5" style={{ background: "#FAFBFF" }}>
+            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400 mb-2">Bill To</p>
+            <p className="font-bold text-base">{form.customer_name}</p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="col-span-2 p-5" style={{ background: "#4C51BF", color: "#fff" }}>
+            <p className="text-[10px] uppercase tracking-wider opacity-60">Amount Due</p>
+            <p className="text-3xl font-black mt-2 tracking-tight">{m(t.total)}</p>
+            <div className="mt-3 pt-3 space-y-1 text-xs" style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}>
+              <div className="flex justify-between"><span className="opacity-60">Subtotal</span><span>{m(t.subtotal)}</span></div>
+              {(form.tax_rate || 0) > 0 && (
+                <div className="flex justify-between"><span className="opacity-60">VAT ({form.tax_rate}%)</span><span>{m(t.tax)}</span></div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <Items headerBg="#F7F8FC" />
+        <Totals />
+        <Footer />
+        
+        <div className="mt-8 text-center">
+          <p className="text-[11px] text-neutral-400">
+            Questions? Contact <span className="font-medium text-neutral-600">{form.seller_email || form.seller_name}</span>
+          </p>
+        </div>
       </div>
     );
   }
@@ -2499,7 +3165,7 @@ function InvoiceView({ form }: { form: Form }) {
             className="text-5xl font-extrabold tracking-tight"
             style={{ color: a }}
           >
-            Invoice
+            {form.doc_title || "Invoice"}
           </p>
           <p className="text-sm font-mono text-neutral-500 mt-2">
             {form.number}

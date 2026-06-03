@@ -40,6 +40,7 @@ import {
 } from "../components/ui";
 import TemplateDesigner, {
   loadCustomTemplates,
+  deleteCustomTemplate,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf } from "../lib/pdfTools";
@@ -456,12 +457,13 @@ function LPOEditor({
   onBack: () => void;
   onSave: () => void;
 }) {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const lpoRef = useRef<HTMLDivElement>(null);
   const downloadPdf = () => {
-    if (lpoRef.current)
-      downloadElementAsPdf(lpoRef.current, form.number || "lpo");
-    else window.print();
+    if (lpoRef.current) {
+      const sheet = lpoRef.current.closest('.invoice-print') as HTMLElement;
+      downloadElementAsPdf(sheet || lpoRef.current, form.number || "lpo");
+    } else window.print();
   };
   const set = <K extends keyof LpoForm>(k: K, v: LpoForm[K]) =>
     setForm({ ...form, [k]: v });
@@ -474,6 +476,20 @@ function LPOEditor({
     ...LPO_TEMPLATES,
     ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
   ];
+  const removeTpl = async (id: string, name: string) => {
+    if (
+      !(await confirm({
+        title: "Delete template",
+        message: `Delete custom template "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    setCustomTemplates(deleteCustomTemplate(id));
+    if (form.template === id) set("template", "uae-standard");
+    toast.success("Template deleted.");
+  };
 
   const setItem = (idx: number, patch: Partial<LpoItem>) => {
     const items = form.items.map((it, i) =>
@@ -632,7 +648,7 @@ function LPOEditor({
                   <button
                     key={tpl.id}
                     onClick={() => set("template", tpl.id)}
-                    className={`relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
+                    className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
                       active
                         ? "border-primary-400 bg-primary-50 shadow-glow"
                         : "border-brand-200 bg-white hover:border-primary-300"
@@ -641,6 +657,20 @@ function LPOEditor({
                     {active && (
                       <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
                         <Check size={11} strokeWidth={3} />
+                      </span>
+                    )}
+                    {isCustom && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Delete template ${tpl.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTpl(tpl.id, tpl.name);
+                        }}
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
                       </span>
                     )}
                     <LpoTilePreview templateId={tpl.id} />
@@ -1500,8 +1530,10 @@ function LpoLetter({
 }) {
   const letterRef = useRef<HTMLDivElement>(null);
   const downloadLetter = () => {
-    if (letterRef.current)
-      downloadElementAsPdf(letterRef.current, `LPO-Letter-${form.number}`);
+    if (letterRef.current) {
+      const sheet = letterRef.current.closest('.invoice-print') as HTMLElement;
+      downloadElementAsPdf(sheet || letterRef.current, `LPO-Letter-${form.number}`);
+    }
   };
 
   const dateStr = form.order_date
