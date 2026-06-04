@@ -11,6 +11,7 @@ import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
+import { tools } from "../lib/api";
 
 const PR_TEMPLATES = [
   { id: "standard", name: "Standard" },
@@ -51,16 +52,34 @@ function blankPr(): PrForm {
 }
 
 const PR_STORAGE_KEY = "filey_payment_receipts";
+const PR_SETTING_KEY = "payment_receipts"; // Supabase (app_settings) mirror for cross-device sync
 interface PrRecord { id: number; number: string; payer_name: string; amount: number; payment_date: string; created_at: string; }
 function loadPrs(): PrRecord[] { try { return JSON.parse(localStorage.getItem(PR_STORAGE_KEY) || "[]"); } catch { return []; } }
-function savePrs(r: PrRecord[]) { try { localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(r)); } catch {} }
+function savePrs(r: PrRecord[]) {
+  try { localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(r)); } catch {}
+  // Write-through so receipts follow the user across devices.
+  void tools.setSetting(PR_SETTING_KEY, JSON.stringify(r)).catch(() => {});
+}
+/** Pull receipts saved on the user's other devices; remote wins when present. */
+async function syncPrs(): Promise<PrRecord[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === PR_SETTING_KEY);
+    if (row?.value) {
+      const remote: PrRecord[] = JSON.parse(row.value);
+      localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(remote));
+      return remote;
+    }
+  } catch { /* offline / not configured — fall back to local */ }
+  return loadPrs();
+}
 
 export default function PaymentReceipt() {
   const { toast, confirm } = useUI();
   const [records, setRecords] = useState<PrRecord[]>([]);
   const [form, setForm] = useState<PrForm | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { setRecords(loadPrs()); setLoading(false); }, []);
+  useEffect(() => { syncPrs().then((r) => { setRecords(r); setLoading(false); }); }, []);
   useLiveSync(() => setRecords(loadPrs()));
 
   const del = async (r: PrRecord) => {

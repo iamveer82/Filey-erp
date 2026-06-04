@@ -33,6 +33,7 @@ import TemplateDesigner, {
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
+import { tools } from "../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -102,8 +103,9 @@ function blankDc(): DcForm {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
-// Store DC records in localStorage for demo (no Supabase table yet)
+// DC records: localStorage cache mirrored to Supabase (app_settings) for cross-device sync.
 const DC_STORAGE_KEY = "filey_delivery_challans";
+const DC_SETTING_KEY = "delivery_challans";
 
 interface DcRecord {
   id: number;
@@ -120,6 +122,21 @@ function loadDcs(): DcRecord[] {
 }
 function saveDcs(records: DcRecord[]) {
   try { localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records)); } catch {}
+  // Write-through so challans follow the user across devices.
+  void tools.setSetting(DC_SETTING_KEY, JSON.stringify(records)).catch(() => {});
+}
+/** Pull challans saved on the user's other devices; remote wins when present. */
+async function syncDcs(): Promise<DcRecord[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === DC_SETTING_KEY);
+    if (row?.value) {
+      const remote: DcRecord[] = JSON.parse(row.value);
+      localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(remote));
+      return remote;
+    }
+  } catch { /* offline / not configured — fall back to local */ }
+  return loadDcs();
 }
 
 export default function DeliveryChallan() {
@@ -128,7 +145,7 @@ export default function DeliveryChallan() {
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { setRecords(loadDcs()); setLoading(false); }, []);
+  useEffect(() => { syncDcs().then((r) => { setRecords(r); setLoading(false); }); }, []);
   useLiveSync(() => setRecords(loadDcs()));
 
   const del = async (r: DcRecord) => {
