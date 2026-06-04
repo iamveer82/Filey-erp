@@ -8,7 +8,7 @@ import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, money, CURRENCIES } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
 import ColorPicker from "../components/ColorPicker";
-import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 
 const PR_TEMPLATES = [
@@ -123,6 +123,10 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
   };
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  // Pull templates saved on the user's other devices (Supabase-backed).
+  useEffect(() => {
+    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+  }, []);
   const allTemplates = [...PR_TEMPLATES, ...customTemplates.map(t => ({ id: t.id, name: t.name }))];
   const [viewAll, setViewAll] = useState(false);
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 4);

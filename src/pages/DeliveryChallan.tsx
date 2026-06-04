@@ -28,6 +28,7 @@ import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, {
   loadCustomTemplates,
   deleteCustomTemplate,
+  syncCustomTemplates,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf } from "../lib/pdfTools";
@@ -228,6 +229,10 @@ function DcEditor({
   const set = <K extends keyof DcForm>(k: K, v: DcForm[K]) => setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  // Pull templates saved on the user's other devices (Supabase-backed).
+  useEffect(() => {
+    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+  }, []);
   const allTemplates = [...DC_TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))];
   const applyTemplate = (id: string) => {
     const ct = customTemplates.find((c) => c.id === id);

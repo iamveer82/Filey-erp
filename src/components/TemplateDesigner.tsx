@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { Save, X, PaintBucket, Type, Layout, Eye, Plus, Upload, FileImage, Image, FileText, Pencil, GripHorizontal, ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "../lib/format";
+import { tools } from "../lib/api";
 
 export interface CustomTemplate {
   id: string;
@@ -54,6 +55,9 @@ const FONTS = [
 ];
 
 const STORAGE_KEY = "filey.customTemplates";
+/** Key under which the full template list is mirrored to Supabase
+ *  (app_settings) so it follows the user across devices. */
+const SETTING_KEY = "custom_templates";
 
 export function loadCustomTemplates(): CustomTemplate[] {
   try {
@@ -66,6 +70,35 @@ export function loadCustomTemplates(): CustomTemplate[] {
 
 function saveCustomTemplates(templates: CustomTemplate[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+  // Write-through to Supabase so templates created on one device appear
+  // on every device the user logs in from. Fire-and-forget: offline writes
+  // simply stay local until the next successful save.
+  void tools.setSetting(SETTING_KEY, JSON.stringify(templates)).catch(() => {});
+}
+
+/** Pull the user's templates saved on other devices into local storage.
+ *  Remote (Supabase) is treated as the source of truth when present so that
+ *  deletions propagate correctly; on first run any local-only templates are
+ *  pushed up. Falls back to the local list when offline / not configured.
+ *  Call on mount in pages that render the template picker. */
+export async function syncCustomTemplates(): Promise<CustomTemplate[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === SETTING_KEY);
+    if (row?.value) {
+      const remote: CustomTemplate[] = JSON.parse(row.value);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+      return remote;
+    }
+    // No remote record yet — seed it from whatever is local.
+    const local = loadCustomTemplates();
+    if (local.length) {
+      void tools.setSetting(SETTING_KEY, JSON.stringify(local)).catch(() => {});
+    }
+    return local;
+  } catch {
+    return loadCustomTemplates();
+  }
 }
 
 /** Remove a custom template by id; returns the updated list so callers

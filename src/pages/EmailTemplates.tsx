@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2, Copy, Mail, Tags } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
+import { tools } from "../lib/api";
 
 const TMPL_KEY = "filey_email_templates";
+/** Mirror key in Supabase (app_settings) for cross-device sync. */
+const SETTING_KEY = "email_templates";
 
 interface EmailTemplate {
   id: number;
@@ -15,7 +18,25 @@ interface EmailTemplate {
 }
 
 function load(): EmailTemplate[] { try { return JSON.parse(localStorage.getItem(TMPL_KEY) || "[]"); } catch { return []; } }
-function save(t: EmailTemplate[]) { try { localStorage.setItem(TMPL_KEY, JSON.stringify(t)); } catch {} }
+function save(t: EmailTemplate[]) {
+  try { localStorage.setItem(TMPL_KEY, JSON.stringify(t)); } catch {}
+  // Write-through to Supabase so templates follow the user across devices.
+  void tools.setSetting(SETTING_KEY, JSON.stringify(t)).catch(() => {});
+}
+
+/** Pull email templates saved on other devices; remote wins when present. */
+async function syncEmailTemplates(): Promise<EmailTemplate[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === SETTING_KEY);
+    if (row?.value) {
+      const remote: EmailTemplate[] = JSON.parse(row.value);
+      localStorage.setItem(TMPL_KEY, JSON.stringify(remote));
+      return remote;
+    }
+  } catch { /* offline / not configured — fall back to local */ }
+  return load();
+}
 
 const CATEGORIES = ["Invoice", "Quote", "Payment Receipt", "Follow-up", "Welcome", "General"];
 
@@ -37,7 +58,7 @@ export default function EmailTemplates() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<EmailTemplate | null>(null);
-  useEffect(() => { setTemplates(seedDefaults(load())); }, []);
+  useEffect(() => { syncEmailTemplates().then((t) => setTemplates(seedDefaults(t))); }, []);
 
   const del = async (t: EmailTemplate) => {
     const ok = await confirm({ title: "Delete template", message: `Delete "${t.name}"?`, confirmLabel: "Delete", danger: true });
