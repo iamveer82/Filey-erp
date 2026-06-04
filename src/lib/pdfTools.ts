@@ -2768,41 +2768,39 @@ export function downloadFile(f: OutFile) {
 /** Capture a DOM element as a PDF and download it.
  *  Uses html-to-image to render the element to PNG, then pdf-lib to
  *  wrap it in a proper PDF file. Falls back to window.print() on error. */
-export async function downloadElementAsPdf(el: HTMLElement, name: string) {
+/** Render an on-screen element to A4 PDF bytes (multi-page when tall). Shared
+ *  by the Download action and by auto-save-to-My-Files so both produce an
+ *  identical document. */
+export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<OutFile> {
+  // Reset any CSS transform scaling (from FitPreview zoom) before capture
+  const prevTransform = el.style.transform;
+  const prevTransformOrigin = el.style.transformOrigin;
+  el.style.transform = 'none';
+  el.style.transformOrigin = 'top left';
   try {
-    // Reset any CSS transform scaling (from FitPreview zoom) before capture
-    const prevTransform = el.style.transform;
-    const prevTransformOrigin = el.style.transformOrigin;
-    el.style.transform = 'none';
-    el.style.transformOrigin = 'top left';
-    
     const { toPng } = await import("html-to-image");
     const { PDFDocument } = await import("pdf-lib");
     const imgData = await toPng(el, { quality: 0.95, pixelRatio: 2 });
-    
-    // Restore transform
-    el.style.transform = prevTransform;
-    el.style.transformOrigin = prevTransformOrigin;
-    
+
     const pdfDoc = await PDFDocument.create();
     const img = await pdfDoc.embedPng(imgData);
     const { width: imgW, height: imgH } = img.scale(1);
-    
+
     // A4 portrait at 72 points per inch: 595 × 842 pt
     const A4_W = 595;
     const A4_H = 842;
-    
+
     // Scale image to fit A4 width, keeping aspect ratio
     const scale = A4_W / imgW;
     const drawW = A4_W;
     const drawH = imgH * scale;
-    
+
     // Use standard A4 page size
     const page = pdfDoc.addPage([A4_W, A4_H]);
     // Center image vertically on A4 if it's shorter
     const yOffset = drawH < A4_H ? (A4_H - drawH) / 2 : 0;
     page.drawImage(img, { x: 0, y: yOffset, width: drawW, height: Math.min(drawH, A4_H) });
-    
+
     // Add additional pages if content exceeds one A4 page
     let remainingH = drawH - A4_H;
     while (remainingH > 0) {
@@ -2810,9 +2808,19 @@ export async function downloadElementAsPdf(el: HTMLElement, name: string) {
       page2.drawImage(img, { x: 0, y: -(A4_H + (drawH - A4_H - remainingH)), width: drawW, height: drawH });
       remainingH -= A4_H;
     }
-    
+
     const bytes = await pdfDoc.save();
-    downloadFile({ name: `${name}.pdf`, bytes });
+    return { name: `${name}.pdf`, bytes };
+  } finally {
+    // Always restore the transform, even if capture throws.
+    el.style.transform = prevTransform;
+    el.style.transformOrigin = prevTransformOrigin;
+  }
+}
+
+export async function downloadElementAsPdf(el: HTMLElement, name: string) {
+  try {
+    downloadFile(await elementToPdfBytes(el, name));
   } catch (e) {
     window.print();
   }

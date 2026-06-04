@@ -48,7 +48,8 @@ import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
-import { downloadElementAsPdf } from "../lib/pdfTools";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
 import ScanDocModal from "../components/ScanDocModal";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
 import TemplateTilePreview from "../components/TemplateTilePreview";
@@ -360,7 +361,7 @@ export default function Invoicing() {
       await loadDocs();
       toast.success(
         status === "sent"
-          ? "Invoice finalized — it now counts as issued."
+          ? "Invoice finalized — posted to Orders & Accounting."
           : "Moved back to draft."
       );
     } catch (e) {
@@ -1002,7 +1003,7 @@ function Editor({
   setForm: (f: Form) => void;
   onBack: () => void;
   onSave: () => Promise<number | undefined>;
-  onFinalize: () => void;
+  onFinalize: () => void | Promise<void>;
   onRevertDraft: () => void;
   saving: boolean;
   onEditCompany: () => void;
@@ -1015,6 +1016,20 @@ function Editor({
       const sheet = invoiceRef.current.closest('.invoice-print') as HTMLElement;
       downloadElementAsPdf(sheet || invoiceRef.current, form.number || "invoice");
     } else window.print();
+  };
+  // Finalize, then archive the issued invoice PDF to My Files (best-effort,
+  // deduped by name so re-finalizing won't pile up copies).
+  const handleFinalize = async () => {
+    await onFinalize();
+    try {
+      const el = (invoiceRef.current?.closest(".invoice-print") as HTMLElement) || invoiceRef.current;
+      if (el) {
+        const out = await elementToPdfBytes(el, form.number || "invoice");
+        if (await autoSaveDocument(out, "invoice")) toast.success("Saved a copy to My Files.");
+      }
+    } catch {
+      /* archiving is a convenience — never block finalize on it */
+    }
   };
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setForm({ ...form, [k]: v });
@@ -1276,9 +1291,9 @@ function Editor({
           {form.status === "draft" ? (
             <button
               className="btn-primary !bg-success !text-white"
-              onClick={onFinalize}
+              onClick={handleFinalize}
               disabled={saving}
-              title="Finalize — counts as issued and shows in reports & the dashboard"
+              title="Finalize — posts to Orders & Accounting, saves a PDF to My Files, and shows in reports & the dashboard"
             >
               <CheckCircle2 size={15} /> Mark as done
             </button>

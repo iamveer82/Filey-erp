@@ -1284,6 +1284,88 @@ function docTotal(
   return (subtotal - d.discount) * (1 + d.tax_rate / 100);
 }
 
+/** Find an existing sales/revenue account or create a default one.
+ *  Returns the account id, or -1 if it could not be resolved. */
+async function findOrCreateSalesAccount(): Promise<number> {
+  const { data } = await sb()
+    .from("accounts")
+    .select("id,name")
+    .eq("account_type", "revenue");
+  const list = (data as { id: number; name: string }[] | null) ?? [];
+  const sales = list.find((a) => /sales|revenue|income/i.test(a.name)) ?? list[0];
+  if (sales) return sales.id;
+  try {
+    return await sInsert("accounts", {
+      code: "4000",
+      name: "Sales Revenue",
+      account_type: "revenue",
+      balance: 0,
+    });
+  } catch {
+    return -1;
+  }
+}
+
+/** When an invoice is finalized, mirror it into the rest of the ERP so the
+ *  user never re-enters the same data:
+ *    • a linked Sales Order (SO-<invoice number>) appears under Orders
+ *    • a Sales Revenue transaction posts to Accounting (and revenue totals)
+ *  Idempotent — keyed on the deterministic SO order number, so re-finalizing
+ *  or editing an already-posted invoice never double-posts. Best-effort: a
+ *  failure here is logged but never blocks saving the invoice itself. */
+async function propagateInvoice(
+  doc: Record<string, unknown>,
+  items: { qty: number; unit_price: number }[]
+) {
+  try {
+    const number = String(doc.number ?? "").trim();
+    if (!number) return;
+    const orderNumber = `SO-${number}`;
+
+    // Idempotency guard: if the linked order already exists this invoice was
+    // already propagated.
+    const { data: existing } = await sb()
+      .from("orders")
+      .select("id")
+      .eq("order_number", orderNumber)
+      .maybeSingle();
+    if (existing) return;
+
+    const total = docTotal(
+      { tax_rate: Number(doc.tax_rate ?? 0), discount: Number(doc.discount ?? 0) },
+      items
+    );
+
+    // 1) Linked sales order — header-level only. Invoice lines are free-text
+    //    (no product_id), so we deliberately don't adjust stock here.
+    await sInsert("orders", {
+      order_number: orderNumber,
+      customer_name: doc.customer_name ?? "—",
+      customer_id: (doc.customer_id as number | undefined) ?? null,
+      status: "confirmed",
+      total,
+    });
+
+    // 2) Sales revenue entry in Accounting.
+    if (total > 0) {
+      const acctId = await findOrCreateSalesAccount();
+      if (acctId > 0) {
+        await sInsert("transactions", {
+          account_id: acctId,
+          txn_type: "credit",
+          amount: total,
+          description: `Invoice ${number}`,
+          txn_date:
+            (doc.issue_date as string) || new Date().toISOString().slice(0, 10),
+        });
+        await sb().rpc("adjust_account_balance", { p_id: acctId, p_delta: total });
+      }
+    }
+  } catch (e) {
+    console.error("Invoice propagation failed:", e);
+  }
+}
+
 export const billing = {
   listDocs: () =>
     readCached<InvoiceDocSummary[]>(
@@ -1390,6 +1472,11 @@ export const billing = {
             }))
           );
         if (error) throw error;
+      }
+      // When an invoice is saved as finalized ("sent"), mirror it across the
+      // rest of the ERP (Orders + Accounting). Idempotent + best-effort.
+      if (String((row as Record<string, unknown>).status ?? "") === "sent") {
+        await propagateInvoice(row, items);
       }
       return docId;
     }),
