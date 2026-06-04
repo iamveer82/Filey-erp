@@ -32,7 +32,8 @@ import { useUI } from "../lib/ui";
 import { fmtDate, money, numInput, CURRENCIES, errMsg } from "../lib/format";
 import { quotationTotals } from "../lib/money";
 import { sendEmail, emailShell, esc } from "../lib/email";
-import { downloadElementAsPdf } from "../lib/pdfTools";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
 import { Modal, Field } from "../components/ui";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
@@ -277,6 +278,12 @@ export default function Quoting() {
       if (newId && newId > 0) setDocId(newId);
       setSavedNote(true);
       setTimeout(() => setSavedNote(false), 2500);
+      // Archive the quotation PDF to My Files (deduped, best-effort).
+      if (quoteRef.current) {
+        const base = number || "quotation";
+        const saved = await autoSaveDocument(`${base}.pdf`, "quotation", () => elementToPdfBytes(quoteRef.current!, base));
+        if (saved) toast.success("Saved a copy to My Files.");
+      }
     } catch (e) {
       toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
     }

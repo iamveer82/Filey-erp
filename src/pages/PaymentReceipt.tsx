@@ -9,7 +9,8 @@ import { aed, fmtDate, numInput, money, CURRENCIES } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
 import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
-import { downloadElementAsPdf } from "../lib/pdfTools";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
 
 const PR_TEMPLATES = [
   { id: "standard", name: "Standard" },
@@ -114,6 +115,17 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
       downloadElementAsPdf(sheet || prRef.current, form.number || "receipt");
     } else window.print();
   };
+  // Save the record, then archive the receipt PDF to My Files (deduped, best-effort).
+  const handleSave = async () => {
+    const el = (prRef.current?.closest(".invoice-print") as HTMLElement) || prRef.current;
+    onSave();
+    if (!el) return;
+    try {
+      const base = form.number || "receipt";
+      const saved = await autoSaveDocument(`${base}.pdf`, "receipt", () => elementToPdfBytes(el, base));
+      if (saved) toast.success("Saved a copy to My Files.");
+    } catch { /* archiving is a convenience — never block save */ }
+  };
   const set = <K extends keyof PrForm>(k: K, v: PrForm[K]) => setForm({ ...form, [k]: v });
   const onLogo = (file?: File) => {
     if (!file) return;
@@ -171,7 +183,7 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
         <div className="flex items-center gap-2">
           <button className="btn-ghost" onClick={() => setViewOpen(true)}><Maximize2 size={15} /> View</button>
           <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>
-          <button className="btn-ghost" onClick={onSave}><Save size={15} /> Save</button>
+          <button className="btn-ghost" onClick={handleSave}><Save size={15} /> Save</button>
         </div>
       </div>
 

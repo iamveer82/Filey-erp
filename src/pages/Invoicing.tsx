@@ -1024,8 +1024,9 @@ function Editor({
     try {
       const el = (invoiceRef.current?.closest(".invoice-print") as HTMLElement) || invoiceRef.current;
       if (el) {
-        const out = await elementToPdfBytes(el, form.number || "invoice");
-        if (await autoSaveDocument(out, "invoice")) toast.success("Saved a copy to My Files.");
+        const base = form.number || "invoice";
+        const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () => elementToPdfBytes(el, base));
+        if (saved) toast.success("Saved a copy to My Files.");
       }
     } catch {
       /* archiving is a convenience — never block finalize on it */

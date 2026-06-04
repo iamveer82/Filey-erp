@@ -31,7 +31,8 @@ import TemplateDesigner, {
   syncCustomTemplates,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
-import { downloadElementAsPdf } from "../lib/pdfTools";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -226,6 +227,17 @@ function DcEditor({
       downloadElementAsPdf(sheet || dcRef.current, form.number || "challan");
     } else window.print();
   };
+  // Save the record, then archive the challan PDF to My Files (deduped, best-effort).
+  const handleSave = async () => {
+    const el = (dcRef.current?.closest(".invoice-print") as HTMLElement) || dcRef.current;
+    onSave();
+    if (!el) return;
+    try {
+      const base = form.number || "challan";
+      const saved = await autoSaveDocument(`${base}.pdf`, "challan", () => elementToPdfBytes(el, base));
+      if (saved) toast.success("Saved a copy to My Files.");
+    } catch { /* archiving is a convenience — never block save */ }
+  };
   const set = <K extends keyof DcForm>(k: K, v: DcForm[K]) => setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
@@ -277,7 +289,7 @@ function DcEditor({
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn-ghost" onClick={() => setViewOpen(true)}><Maximize2 size={15} /> View</button>
           <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>
-          <button className="btn-ghost" onClick={onSave}><Save size={15} /> Save</button>
+          <button className="btn-ghost" onClick={handleSave}><Save size={15} /> Save</button>
         </div>
       </div>
 

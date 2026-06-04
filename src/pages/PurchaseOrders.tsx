@@ -43,7 +43,8 @@ import TemplateDesigner, {
   deleteCustomTemplate,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
-import { downloadElementAsPdf } from "../lib/pdfTools";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -465,6 +466,17 @@ function LPOEditor({
       downloadElementAsPdf(sheet || lpoRef.current, form.number || "lpo");
     } else window.print();
   };
+  // Save the LPO, then archive its PDF to My Files (deduped, best-effort).
+  const handleSave = async () => {
+    const el = (lpoRef.current?.closest(".invoice-print") as HTMLElement) || lpoRef.current;
+    onSave();
+    if (!el) return;
+    try {
+      const base = form.number || "lpo";
+      const saved = await autoSaveDocument(`${base}.pdf`, "lpo", () => elementToPdfBytes(el, base));
+      if (saved) toast.success("Saved a copy to My Files.");
+    } catch { /* archiving is a convenience — never block save */ }
+  };
   const set = <K extends keyof LpoForm>(k: K, v: LpoForm[K]) =>
     setForm({ ...form, [k]: v });
 
@@ -599,7 +611,7 @@ function LPOEditor({
           <button className="btn-ghost" onClick={downloadPdf}>
             <Download size={15} /> PDF
           </button>
-          <button className="btn-ghost" onClick={onSave}>
+          <button className="btn-ghost" onClick={handleSave}>
             <Save size={15} /> Save
           </button>
         </div>

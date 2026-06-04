@@ -77,16 +77,22 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
 }
 
 /** Auto-save a generated document (invoice, receipt, challan, …) to My Files.
- *  Idempotent by name+tool so re-finalizing the same document doesn't pile up
- *  duplicates. Best-effort: silently no-ops when signed out or offline, and
- *  never throws — callers can `void` it without a try/catch. Returns true when
- *  a new file was actually written. */
-export async function autoSaveDocument(out: OutFile, tool: string): Promise<boolean> {
+ *  Idempotent by name+tool so re-saving the same document doesn't pile up
+ *  duplicates. The PDF is produced lazily via `gen` — only when the user is
+ *  signed in and no copy exists yet — so callers can fire this on every save
+ *  without paying the render cost each time. Best-effort: silently no-ops when
+ *  signed out or offline and never throws. Returns true when a new file was
+ *  actually written. `name` should include the extension (e.g. "INV-001.pdf"). */
+export async function autoSaveDocument(
+  name: string,
+  tool: string,
+  gen: () => Promise<OutFile>
+): Promise<boolean> {
   try {
     if (!(await canSaveFiles())) return false;
     const existing = await listFiles();
-    if (existing.some((f) => f.name === out.name && f.tool === tool)) return false;
-    await saveOutput(out, tool);
+    if (existing.some((f) => f.name === name && f.tool === tool)) return false;
+    await saveOutput(await gen(), tool);
     return true;
   } catch {
     return false;
