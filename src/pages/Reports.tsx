@@ -69,18 +69,22 @@ export default function Reports() {
   useEffect(() => { load(); }, []);
   useLiveSync(load);
 
+  // Collected = cash actually received = total − outstanding balance, across
+  // every non-draft invoice (matches the Overview "Collected" card). Keying off
+  // status === "paid" under-reported revenue as 0 for invoices that are "sent"
+  // and partially/fully paid down via recorded payments rather than a status flip.
   const invoiceRevenue = useMemo(
     () =>
       invoices
-        .filter((i) => i.status === "paid")
-        .reduce((s, i) => s + i.total, 0),
+        .filter((i) => i.status !== "draft")
+        .reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0),
     [invoices]
   );
   const accountsReceivable = useMemo(
     () =>
       invoices
-        .filter((i) => i.status !== "paid")
-        .reduce((s, i) => s + i.total, 0),
+        .filter((i) => i.status !== "draft")
+        .reduce((s, i) => s + (i.balance ?? 0), 0),
     [invoices]
   );
   const totalExpenses = useMemo(
@@ -123,7 +127,7 @@ export default function Reports() {
     0
   );
 
-  // Real revenue trend: paid invoices grouped into the last 6 months.
+  // Revenue trend: collected amount (total − balance) per issue month, last 6.
   const trend = useMemo(() => {
     const now = new Date();
     const buckets: { name: string; value: number; key: string }[] = [];
@@ -137,10 +141,12 @@ export default function Reports() {
     }
     const byKey = new Map(buckets.map((b) => [b.key, b]));
     for (const inv of invoices) {
-      if (inv.status !== "paid" || !inv.issue_date) continue;
+      if (inv.status === "draft" || !inv.issue_date) continue;
+      const collected = (inv.total || 0) - (inv.balance ?? 0);
+      if (collected <= 0) continue;
       const d = new Date(inv.issue_date);
       const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
-      if (b) b.value += inv.total;
+      if (b) b.value += collected;
     }
     return buckets.map(({ name, value }) => ({ name, value }));
   }, [invoices]);

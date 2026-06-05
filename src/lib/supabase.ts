@@ -23,8 +23,18 @@ export const supabase: SupabaseClient | null = isConfigured
 export function sb(): SupabaseClient {
   if (!supabase) {
     throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env"
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY " +
+        "(in .env locally, or your host's environment variables in production)."
     );
   }
   return supabase;
+}
+
+// Loud, early signal in production builds that shipped without config — otherwise
+// every user silently lands on the SetupNotice screen with no clue why.
+if (import.meta.env.PROD && !isConfigured) {
+  console.error(
+    "[Filey] Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in this build — " +
+      "set them in your host environment and rebuild, or users will see the setup screen."
+  );
 }
