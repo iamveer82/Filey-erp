@@ -13,6 +13,13 @@ export interface Product {
   cost_price: number;
   quantity: number;
   reorder_level: number;
+  batch_number?: string;
+  expiry_date?: string;
+  barcode?: string;
+  warehouse?: string;
+  is_serialized?: boolean;
+  custom_fields?: Record<string, string>;
+  supplier_id?: number;
   shared?: boolean;
   created_at: string;
 }

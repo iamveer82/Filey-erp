@@ -543,6 +543,15 @@ function ProductModal({
   const { toast } = useUI();
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [customFields, setCustomFields] = useState<
+    { key: string; value: string }[]
+  >([]);
+  const addField = () =>
+    setCustomFields((cf) => [...cf, { key: "", value: "" }]);
+  const updateField = (i: number, patch: Partial<{ key: string; value: string }>) =>
+    setCustomFields((cf) => cf.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const removeField = (i: number) =>
+    setCustomFields((cf) => cf.filter((_, idx) => idx !== i));
   const [f, setF] = useState({
     sku: "",
     name: "",
@@ -566,15 +575,23 @@ function ProductModal({
     if (!valid) return;
     setSaving(true);
     try {
+      const custom = Object.fromEntries(
+        customFields
+          .filter((c) => c.key.trim())
+          .map((c) => [c.key.trim(), c.value])
+      );
       await erp.createProduct({
         ...f,
         description: "",
         batch_number: f.batch_number || undefined,
         expiry_date: f.expiry_date || undefined,
         barcode: f.barcode || undefined,
-      } as any);
+        warehouse: f.warehouse || undefined,
+        custom_fields: Object.keys(custom).length ? custom : undefined,
+      } as Omit<Product, "id" | "created_at">);
       toast.success("Product added.");
       onSaved();
+      setCustomFields([]);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -682,6 +699,52 @@ function ProductModal({
           />
         </Field>
       </div>
+
+      <div className="mt-4 border-t border-brand-100 dark:border-white/10 pt-4">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs font-bold text-ink">Custom fields</label>
+          <button
+            type="button"
+            className="btn-ghost !h-7 !px-2 text-xs"
+            onClick={addField}
+          >
+            <Plus size={13} /> Add field
+          </button>
+        </div>
+        {customFields.length === 0 ? (
+          <p className="text-[11px] text-brand-400">
+            Add your own attributes (e.g. Color, Material, Voltage, Origin).
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {customFields.map((cf, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="Field name"
+                  value={cf.key}
+                  onChange={(e) => updateField(i, { key: e.target.value })}
+                />
+                <input
+                  className="input flex-1"
+                  placeholder="Value"
+                  value={cf.value}
+                  onChange={(e) => updateField(i, { value: e.target.value })}
+                />
+                <button
+                  type="button"
+                  aria-label="Remove field"
+                  className="rounded-lg p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger transition-colors duration-200"
+                  onClick={() => removeField(i)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
