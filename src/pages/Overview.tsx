@@ -49,10 +49,12 @@ import {
   fin,
   crm,
   quotes,
+  pos,
   Product,
   Order,
   InvoiceDocSummary,
   Expense,
+  PoSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -85,6 +87,7 @@ const WIDGET_META: { id: string; label: string; span?: number }[] = [
   { id: "invoice-revenue", label: "Invoice revenue" },
   { id: "collected", label: "Collected" },
   { id: "outstanding", label: "Outstanding" },
+  { id: "profit", label: "Net Profit", span: 2 },
   { id: "orders-stat", label: "Orders status" },
   { id: "orders-chart", label: "Orders over time", span: 2 },
   { id: "messages", label: "Team messages", span: 4 },
@@ -106,6 +109,7 @@ const WIDGET_LINK: Record<string, string> = {
   "invoice-revenue": "/invoicing",
   collected: "/invoicing",
   outstanding: "/invoicing",
+  profit: "/invoicing",
   "orders-stat": "/orders",
   "orders-chart": "/orders",
   stock: "/inventory",
@@ -395,6 +399,7 @@ export default function Overview() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PoSummary[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [quotations, setQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -486,6 +491,7 @@ export default function Overview() {
       erp.orders().then(setOrders),
       billing.listDocs().then(setInvoices),
       fin.expenses().then(setExpenses),
+      pos.list().then(setPurchaseOrders),
       crm.customers().then(setCustomers).catch((e) => toast.error("Failed to load customers: " + (e instanceof Error ? e.message : e))),
       quotes.listDocs().then(setQuotations).catch((e) => toast.error("Failed to load quotations: " + (e instanceof Error ? e.message : e))),
     ])
@@ -631,6 +637,18 @@ export default function Overview() {
       .map((a) => ({ who: a.who, what: a.what, when: since(a.ts) }));
   }, [orders, invoices, expenses]);
 
+  const profit = useMemo(() => {
+    const revenue = invoices
+      .filter((i) => i.status !== "draft")
+      .reduce((s, i) => s + (i.total || 0), 0);
+    const materialCost = purchaseOrders
+      .filter((po) => po.status !== "draft" && po.status !== "cancelled")
+      .reduce((s, po) => s + (po.total || 0), 0);
+    const expenseTotal = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const netProfit = revenue - materialCost - expenseTotal;
+    return { revenue, materialCost, expenseTotal, netProfit };
+  }, [invoices, purchaseOrders, expenses]);
+
   const visible = layout.order.filter((id) => !layout.hidden.includes(id));
   const addable = WIDGET_META.filter((w) => layout.hidden.includes(w.id));
   // First-load gate: render skeletons OR the real content, never both stacked.
@@ -655,6 +673,31 @@ export default function Overview() {
         return <MetricCard label="Collected" value={aed(invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0))} rawValue={invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0)} formatValue={aed} icon={<Banknote size={20} />} iconClass="bg-success/15 text-success" />;
       case "outstanding":
         return <MetricCard label="Outstanding" value={aed(invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0))} rawValue={invoices.filter((i) => i.status !== "draft" && i.status !== "paid").reduce((s, i) => s + (i.balance ?? 0), 0)} formatValue={aed} icon={<Clock size={20} />} iconClass="bg-danger/15 text-danger" />;
+      case "profit":
+        return (
+          <InfoCard title="Net Profit">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-brand-500">Revenue</span>
+                <span className="text-sm font-semibold text-success">{aed(profit.revenue)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-brand-500">Material costs</span>
+                <span className="text-sm font-semibold text-danger">- {aed(profit.materialCost)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-brand-500">Expenses</span>
+                <span className="text-sm font-semibold text-danger">- {aed(profit.expenseTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-brand-200">
+                <span className="text-sm font-bold text-ink">Net</span>
+                <span className={`text-lg font-extrabold ${profit.netProfit >= 0 ? "text-success" : "text-danger"}`}>
+                  {aed(profit.netProfit)}
+                </span>
+              </div>
+            </div>
+          </InfoCard>
+        );
       case "orders-stat":
         return (
           <OrdersStatCard

@@ -186,6 +186,30 @@
     radial-gradient(circle, rgba(0,0,0,0.04) 1px, transparent 1px);
 }
 
+/* ── Crisp rendering for zoomed invoice preview ── */
+.fp-box {
+  will-change: transform;
+}
+
+.invoice-print {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  isolation: isolate;
+  contain: layout paint style;
+  text-rendering: optimizeLegibility;
+}
+
+.invoice-print img {
+  image-rendering: auto;
+}
+
+/* Ensure paper-texture stays sharp in full-screen view modal */
+.paper-texture {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  isolation: isolate;
+}
+
 /* ── Pulse animation for AI briefing card ── */
 @keyframes pulse-gold {
   0%, 100% {
@@ -579,6 +603,7 @@
     margin: 0 !important;
     padding: 0.5in !important;
     transform: none !important;
+    zoom: 1 !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;

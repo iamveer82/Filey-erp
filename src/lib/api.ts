@@ -559,6 +559,15 @@ export const erp = {
       });
       if (error) throw error;
     }),
+  updateProduct: (
+    productId: number,
+    patch: Partial<Omit<Product, "id" | "created_at">>
+  ) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write({ k: "update", t: "products", id: productId, row }, () =>
+      sUpdate("products", productId, row), undefined
+    );
+  },
   deleteProduct: (productId: number) =>
     write({ k: "delete", t: "products", id: productId }, () =>
       sDelete("products", productId), undefined
@@ -622,6 +631,126 @@ export const erp = {
     write({ k: "update", t: "orders", id: orderId, row: { status } }, () =>
       sUpdate("orders", orderId, { status }), undefined
     ),
+  /** Fetch an order plus its line items (for editing). */
+  getOrder: (orderId: number) =>
+    online(async () => {
+      const { data: order, error } = await sb()
+        .from("orders")
+        .select("*")
+        .eq("id", orderId)
+        .single();
+      if (error) throw error;
+      const { data: items, error: ie } = await sb()
+        .from("order_items")
+        .select("*")
+        .eq("order_id", orderId);
+      if (ie) throw ie;
+      return {
+        ...(order as Order),
+        items: (items ?? []) as OrderItem[],
+      };
+    }),
+  /** Update an order header + replace its line items, re-adjusting stock by
+   *  the net delta (old qty restored, new qty removed) atomically per product. */
+  updateOrder: (
+    orderId: number,
+    patch: {
+      customer_name?: string;
+      status?: string;
+      total: number;
+      customer_id?: number | null;
+    },
+    lines: { product_id: number; quantity: number; unit_price: number }[]
+  ) =>
+    online(async () => {
+      const { data: oldItems, error: oe } = await sb()
+        .from("order_items")
+        .select("product_id,quantity")
+        .eq("order_id", orderId);
+      if (oe) throw oe;
+      const oldMap = new Map<number, number>();
+      for (const it of (oldItems ?? []) as {
+        product_id: number | null;
+        quantity: number;
+      }[]) {
+        if (it.product_id != null)
+          oldMap.set(it.product_id, (oldMap.get(it.product_id) ?? 0) + it.quantity);
+      }
+      const newMap = new Map<number, number>();
+      for (const l of lines)
+        newMap.set(l.product_id, (newMap.get(l.product_id) ?? 0) + l.quantity);
+
+      const headerRow = clean({
+        customer_name: patch.customer_name,
+        status: patch.status,
+        customer_id: patch.customer_id,
+        total: patch.total,
+      });
+      const { error: ue } = await sb()
+        .from("orders")
+        .update(headerRow)
+        .eq("id", orderId);
+      if (ue) throw ue;
+
+      const { error: de } = await sb()
+        .from("order_items")
+        .delete()
+        .eq("order_id", orderId);
+      if (de) throw de;
+      if (lines.length) {
+        const { error: ie } = await sb()
+          .from("order_items")
+          .insert(
+            lines.map((l) => ({
+              order_id: orderId,
+              product_id: l.product_id,
+              quantity: l.quantity,
+              unit_price: l.unit_price,
+            }))
+          );
+        if (ie) throw ie;
+      }
+
+      const ids = new Set<number>([...oldMap.keys(), ...newMap.keys()]);
+      for (const pid of ids) {
+        const delta = (oldMap.get(pid) ?? 0) - (newMap.get(pid) ?? 0);
+        if (delta !== 0) {
+          const { error } = await sb().rpc("adjust_product_stock", {
+            p_id: pid,
+            p_delta: delta,
+          });
+          if (error) throw error;
+        }
+      }
+    }),
+  /** Delete an order, restoring any stock its line items had reserved. */
+  deleteOrder: (orderId: number) =>
+    online(async () => {
+      const { data: items, error: oe } = await sb()
+        .from("order_items")
+        .select("product_id,quantity")
+        .eq("order_id", orderId);
+      if (oe) throw oe;
+      for (const it of (items ?? []) as {
+        product_id: number | null;
+        quantity: number;
+      }[]) {
+        if (it.product_id != null && it.quantity) {
+          const { error } = await sb().rpc("adjust_product_stock", {
+            p_id: it.product_id,
+            p_delta: it.quantity,
+          });
+          if (error) throw error;
+        }
+      }
+      const { error: de } = await sb()
+        .from("order_items")
+        .delete()
+        .eq("order_id", orderId);
+      if (de) throw de;
+      const { error: ee } = await sb().from("orders").delete().eq("id", orderId);
+      if (ee) throw ee;
+    }),
   shareOrder: (orderId: number, shared: boolean) =>
     online(() =>
       shareWithItems("orders", "order_items", "order_id", orderId, shared)
@@ -2083,6 +2212,15 @@ export interface PoItem {
   description: string;
   quantity: number;
   unit_cost: number;
+  unit?: string;
+}
+
+export interface PoPayment {
+  id: number;
+  po_id: number;
+  amount: number;
+  method?: string;
+  paid_at: string;
 }
 export interface PoSummary {
   id: number;
@@ -2242,6 +2380,36 @@ export const pos = {
   remove: (poId: number) =>
     write({ k: "delete", t: "purchase_orders", id: poId }, () =>
       sDelete("purchase_orders", poId), undefined
+    ),
+  /* ---- payments ---- */
+  payments: (poId: number) =>
+    readCached<PoPayment[]>(
+      `po_payments:${poId}`,
+      async () => {
+        const { data } = await sb()
+          .from("po_payments")
+          .select("*")
+          .eq("po_id", poId)
+          .order("paid_at", { ascending: false });
+        return ((data ?? []) as any[]).map((p: any) => ({
+          id: p.id,
+          po_id: p.po_id,
+          amount: Number(p.amount),
+          method: p.method ?? undefined,
+          paid_at: p.paid_at,
+        })) as PoPayment[];
+      },
+      []
+    ),
+  addPayment: (poId: number, amount: number, method?: string | null, paidAt?: string) =>
+    write(
+      { k: "insert", t: "po_payments", row: { po_id: poId, amount, method: method || null, paid_at: paidAt || new Date().toISOString().slice(0, 10) } },
+      () => sInsert("po_payments", { po_id: poId, amount, method: method || null, paid_at: paidAt || new Date().toISOString().slice(0, 10) }),
+      -1
+    ),
+  removePayment: (paymentId: number) =>
+    write({ k: "delete", t: "po_payments", id: paymentId }, () =>
+      sDelete("po_payments", paymentId), undefined
     ),
 };
 

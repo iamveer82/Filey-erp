@@ -29,16 +29,20 @@ import {
   FileText,
   Wallet,
   Clock,
+  PackageSearch,
+  Landmark,
 } from "lucide-react";
 import {
   billing,
   crm,
+  erp,
   recurrences,
   InvoiceDocSummary,
   InvoiceDocInput,
   InvoicePayment,
   CompanyProfile,
   CrmCustomer,
+  Product,
   Recurrence,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -54,6 +58,18 @@ import ScanDocModal from "../components/ScanDocModal";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
+  StampSigCard,
+  StampSignatureLayer,
+  DraggableBlock,
+  type StampSig,
+} from "../components/StampSignature";
+import {
+  BankDetailsBlock,
+  loadBankInfo,
+  EMPTY_BANK,
+  type BankInfo,
+} from "../components/BankDetails";
+import {
   PageHeader,
   MetricCard,
   DataTable,
@@ -66,17 +82,6 @@ import {
 
 type CustomColumn = { key: string; label: string };
 type Item = { description: string; qty: number; unit_price: number; unit: string; custom: Record<string, string> };
-type StampSig = {
-  data: string;
-  x: number;
-  y: number;
-  opacity: number;
-  color: string;
-  cropTop: number;
-  cropRight: number;
-  cropBottom: number;
-  cropLeft: number;
-};
 type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & { items: Item[]; customColumns: CustomColumn[]; stamp?: StampSig; signature?: StampSig };
 
 const TEMPLATES = [
@@ -215,8 +220,8 @@ export default function Invoicing() {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
-        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0 } : undefined,
-        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0 } : undefined,
+        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0, scale: (d.stamp as any).scale ?? 100 } : undefined,
+        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0, scale: (d.signature as any).scale ?? 100 } : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -260,8 +265,8 @@ export default function Invoicing() {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
-        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0 } : undefined,
-        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0 } : undefined,
+        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0, scale: (d.stamp as any).scale ?? 100 } : undefined,
+        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0, scale: (d.signature as any).scale ?? 100 } : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -298,15 +303,21 @@ export default function Invoicing() {
       // Empty date inputs must become undefined, not "" (invalid SQL date).
       const payload = {
         ...form,
+        // Persist user-defined columns + per-item unit & custom values so they
+        // survive a reload (DB columns: invoice_docs.custom_columns,
+        // invoice_doc_items.unit / .custom).
+        custom_columns: form.customColumns,
         items: form.items.map(it => ({
           description: it.description,
           qty: it.qty,
           unit_price: it.unit_price,
+          unit: it.unit || undefined,
+          custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
-      // Remove Form-only camelCase fields that don't exist as DB columns
+      // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
       delete (payload as any).doc_type;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
@@ -345,15 +356,18 @@ export default function Invoicing() {
       const payload = {
         ...form,
         status,
+        custom_columns: form.customColumns,
         items: form.items.map(it => ({
           description: it.description,
           qty: it.qty,
           unit_price: it.unit_price,
+          unit: it.unit || undefined,
+          custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
       };
-      // Remove Form-only camelCase fields that don't exist as DB columns
+      // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
       delete (payload as any).doc_type;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
@@ -880,110 +894,67 @@ function PaymentsModal({
   );
 }
 
-/* ---------------- Stamp / Signature card ---------------- */
+/* ---------------- Import from Inventory ---------------- */
 
-function StampSigCard({
-  label,
-  icon,
-  value,
-  onChange,
-  defaults,
+function InventoryImportModal({
+  open,
+  onClose,
+  onPick,
 }: {
-  label: string;
-  icon: React.ReactNode;
-  value?: StampSig;
-  onChange: (v: StampSig | undefined) => void;
-  defaults: StampSig;
+  open: boolean;
+  onClose: () => void;
+  onPick: (p: Product) => void;
 }) {
+  const { toast } = useUI();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    if (open) erp.products().then(setProducts).catch(() => toast.error("Failed to load products"));
+  }, [open]);
+  const filtered = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(q.toLowerCase()) ||
+      p.sku.toLowerCase().includes(q.toLowerCase())
+  );
   return (
-    <div className="rounded-xl border border-brand-200 p-4">
-      <div className="flex items-center gap-2 text-ink font-semibold text-sm">
-        {icon} {label}
-      </div>
-      <div className="mt-3">
-        {value?.data ? (
-          <div className="space-y-3">
-            {/* preview with inline remove */}
-            <div className="relative flex items-center justify-center py-4 rounded-lg bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
-              <img
-                src={value.data}
-                alt={label}
-                className="max-h-20 max-w-[180px] object-contain rounded"
-                style={{
-                  clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`,
-                  opacity: value.opacity / 100,
-                }}
-              />
-              <button
-                title={`Remove ${label.toLowerCase()}`}
-                aria-label={`Remove ${label.toLowerCase()}`}
-                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-md bg-white/90 border border-brand-200 text-danger shadow-sm hover:bg-red-50 transition-colors"
-                onClick={() => onChange(undefined)}
-              >
-                <X size={13} />
-              </button>
+    <Modal open={open} onClose={onClose} title="Import from Inventory">
+      <input
+        className="input mb-3"
+        placeholder="Search products or SKU…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="max-h-72 overflow-y-auto space-y-1">
+        {filtered.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onPick(p)}
+            className="w-full flex items-center justify-between rounded-lg px-3 py-2 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
+              <p className="text-[11px] text-brand-400 font-mono">
+                {p.sku}
+                {p.quantity === 0 ? " · out of stock" : ` · ${p.quantity} in stock`}
+              </p>
             </div>
-            {/* opacity */}
-            <label className="block">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-medium text-brand-500">Opacity</span>
-                <span className="text-[11px] font-mono tabular-nums text-brand-600">{value.opacity}%</span>
-              </div>
-              <input
-                type="range"
-                min={5}
-                max={100}
-                value={value.opacity}
-                className="w-full h-1.5 accent-brand-500 cursor-pointer"
-                onChange={(e) => onChange({ ...value, opacity: Number(e.target.value) })}
-              />
-            </label>
-            {/* crop edges */}
-            <div>
-              <p className="text-[11px] font-medium text-brand-400 mb-1.5">Crop edges</p>
-              <div className="grid grid-cols-4 gap-1.5">
-                {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map((k, i) => (
-                  <div
-                    key={k}
-                    className="flex items-center gap-1 rounded-md border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
-                  >
-                    <span className="text-[10px] font-mono font-semibold text-brand-400">{["T", "R", "B", "L"][i]}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={90}
-                      value={value[k]}
-                      className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none"
-                      onChange={(e) =>
-                        onChange({ ...value, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-lg border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
-            <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-semibold text-brand-600">Upload {label}</span>
-            <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                const r = new FileReader();
-                r.onload = () => onChange({ ...defaults, data: String(r.result) });
-                r.readAsDataURL(f);
-              }}
-            />
-          </label>
+            <span className="text-sm font-semibold text-ink">
+              {money(p.unit_price, "AED")}
+            </span>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <p className="text-sm text-brand-400 text-center py-6">
+            No products found. Add them in Inventory first.
+          </p>
         )}
       </div>
-    </div>
+      <div className="flex justify-end mt-4">
+        <button className="btn-ghost" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1107,6 +1078,26 @@ function Editor({
 
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [custModal, setCustModal] = useState(false);
+  const [invOpen, setInvOpen] = useState(false);
+  const [showBank, setShowBank] = useState(false);
+  const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [bankX, setBankX] = useState(50);
+  const [bankY, setBankY] = useState(93);
+  useEffect(() => {
+    loadBankInfo().then(setBank).catch(() => {});
+  }, []);
+  // Append an inventory product as an invoice line item (fills description &
+  // unit price); drops a leftover empty row so the first import replaces it.
+  const addItemFromProduct = (p: Product) => {
+    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+    setForm({
+      ...form,
+      items: [
+        ...form.items.filter((it) => it.description.trim() || it.unit_price),
+        { description: desc, qty: 1, unit_price: p.unit_price, unit: "", custom: {} },
+      ],
+    });
+  };
   const loadCustomers = () =>
     crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
   useEffect(() => {
@@ -1326,6 +1317,15 @@ function Editor({
           applyCustomer(c);
           setCustModal(false);
           loadCustomers();
+        }}
+      />
+
+      <InventoryImportModal
+        open={invOpen}
+        onClose={() => setInvOpen(false)}
+        onPick={(p) => {
+          addItemFromProduct(p);
+          toast.success(`Added ${p.name}`);
         }}
       />
 
@@ -1733,8 +1733,19 @@ function Editor({
               <button className="btn-primary" onClick={addItem}>
                 <Plus size={14} /> Add Item
               </button>
+              <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
+                <PackageSearch size={13} /> Import from Inventory
+              </button>
               <button className="btn-ghost text-xs" onClick={addCustomColumn}>
                 <Plus size={12} /> Add Field
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBank((v) => !v)}
+                className={`btn-ghost text-xs ${showBank ? "!bg-primary-100 !text-primary-700" : ""}`}
+                title="Show your saved bank details on this invoice"
+              >
+                <Landmark size={13} /> Bank details: {showBank ? "On" : "Off"}
               </button>
               <datalist id="unit-suggestions">
                 <option value="pcs" />
@@ -1919,14 +1930,14 @@ function Editor({
                 icon={<Stamp size={15} />}
                 value={form.stamp}
                 onChange={(v) => setForm({ ...form, stamp: v })}
-                defaults={{ data: "", x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 }}
+                defaults={{ data: "", x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0, scale: 100 }}
               />
               <StampSigCard
                 label="Signature"
                 icon={<PenTool size={15} />}
                 value={form.signature}
                 onChange={(v) => setForm({ ...form, signature: v })}
-                defaults={{ data: "", x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 }}
+                defaults={{ data: "", x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0, scale: 100 }}
               />
             </div>
           </Step>
@@ -1968,81 +1979,24 @@ function Editor({
               zoom={zoom}
             >
               <div ref={invoiceRef}>
-                <div style={{ position: "relative" }}>
-                  {/* Stamp & Signature — behind text, watermark-style */}
-                  {form.stamp?.data && (
-                    <div
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData("type", "stamp"); }}
-                      onDragEnd={(e) => {
-                        const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
-                        const x = ((e.clientX - rect.left) / rect.width) * 100;
-                        const y = ((e.clientY - rect.top) / rect.height) * 100;
-                        setForm({ ...form, stamp: { ...form.stamp!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
-                      }}
-                      style={{
-                        position: "absolute",
-                        left: `${form.stamp.x}%`,
-                        top: `${form.stamp.y}%`,
-                        transform: "translate(-50%, -50%)",
-                        maxHeight: 100,
-                        maxWidth: 200,
-                        backgroundColor: "transparent",
-                        cursor: "grab",
-                        zIndex: 0,
-                      }}
-                    >
-                      <img
-                        src={form.stamp.data}
-                        alt="Stamp"
-                        style={{
-                          display: "block",
-                          maxHeight: 100,
-                          maxWidth: 200,
-                          opacity: form.stamp.opacity / 100,
-                          mixBlendMode: "multiply",
-                          clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)`,
-                        }}
-                      />
-                    </div>
-                  )}
-                  {form.signature?.data && (
-                    <div
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData("type", "signature"); }}
-                      onDragEnd={(e) => {
-                        const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
-                        const x = ((e.clientX - rect.left) / rect.width) * 100;
-                        const y = ((e.clientY - rect.top) / rect.height) * 100;
-                        setForm({ ...form, signature: { ...form.signature!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
-                      }}
-                      style={{
-                        position: "absolute",
-                        left: `${form.signature.x}%`,
-                        top: `${form.signature.y}%`,
-                        transform: "translate(-50%, -50%)",
-                        maxHeight: 60,
-                        maxWidth: 250,
-                        backgroundColor: "transparent",
-                        cursor: "grab",
-                        zIndex: 0,
-                      }}
-                    >
-                      <img
-                        src={form.signature.data}
-                        alt="Signature"
-                        style={{
-                          display: "block",
-                          maxHeight: 60,
-                          maxWidth: 250,
-                          opacity: form.signature.opacity / 100,
-                          mixBlendMode: "multiply",
-                          clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)`,
-                        }}
-                      />
-                    </div>
-                  )}
+                <div style={{ position: "relative", minHeight: device === "desktop" ? 1027 : 498 }}>
+                  {/* Stamp & Signature — draggable, watermark-style overlay */}
+                  <StampSignatureLayer
+                    stamp={form.stamp}
+                    signature={form.signature}
+                    onStampMove={(x, y) =>
+                      setForm({ ...form, stamp: { ...form.stamp!, x, y } })
+                    }
+                    onSignatureMove={(x, y) =>
+                      setForm({ ...form, signature: { ...form.signature!, x, y } })
+                    }
+                  />
                   <InvoiceView form={form} />
+                  {showBank && (
+                    <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                      <BankDetailsBlock bank={bank} accent={form.accent} />
+                    </DraggableBlock>
+                  )}
                 </div>
               </div>
             </FitPreview>
@@ -2142,39 +2096,24 @@ function Editor({
             <div className="flex-1 overflow-auto p-6">
               <div className="mx-auto max-w-5xl">
                 <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]" ref={viewPreviewRef}>
-                  <div style={{ position: "relative" }}>
-                    {form.stamp?.data && (
-                      <div draggable
-                        onDragEnd={(e) => {
-                          const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
-                          const x = ((e.clientX - rect.left) / rect.width) * 100;
-                          const y = ((e.clientY - rect.top) / rect.height) * 100;
-                          setForm({ ...form, stamp: { ...form.stamp!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
-                        }}
-                        style={{ position: "absolute", left: `${form.stamp.x}%`, top: `${form.stamp.y}%`, transform: "translate(-50%,-50%)", maxHeight: 100, maxWidth: 200, backgroundColor: "transparent", cursor: "grab", zIndex: 0 }}
-                      >
-                        <img src={form.stamp.data} alt="Stamp"
-                          style={{ display: "block", maxHeight: 100, maxWidth: 200, opacity: form.stamp.opacity / 100, mixBlendMode: "multiply", clipPath: `inset(${form.stamp.cropTop}% ${form.stamp.cropRight}% ${form.stamp.cropBottom}% ${form.stamp.cropLeft}%)` }}
-                        />
-                      </div>
-                    )}
-                    {form.signature?.data && (
-                      <div draggable
-                        onDragEnd={(e) => {
-                          const rect = (e.target as HTMLElement).parentElement!.getBoundingClientRect();
-                          const x = ((e.clientX - rect.left) / rect.width) * 100;
-                          const y = ((e.clientY - rect.top) / rect.height) * 100;
-                          setForm({ ...form, signature: { ...form.signature!, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) } });
-                        }}
-                        style={{ position: "absolute", left: `${form.signature.x}%`, top: `${form.signature.y}%`, transform: "translate(-50%,-50%)", maxHeight: 60, maxWidth: 250, backgroundColor: "transparent", cursor: "grab", zIndex: 0 }}
-                      >
-                        <img src={form.signature.data} alt="Signature"
-                          style={{ display: "block", maxHeight: 60, maxWidth: 250, opacity: form.signature.opacity / 100, mixBlendMode: "multiply", clipPath: `inset(${form.signature.cropTop}% ${form.signature.cropRight}% ${form.signature.cropBottom}% ${form.signature.cropLeft}%)` }}
-                        />
-                      </div>
-                    )}
+                  <div style={{ position: "relative", minHeight: 1059 }}>
+                    <StampSignatureLayer
+                      stamp={form.stamp}
+                      signature={form.signature}
+                      onStampMove={(x, y) =>
+                        setForm({ ...form, stamp: { ...form.stamp!, x, y } })
+                      }
+                      onSignatureMove={(x, y) =>
+                        setForm({ ...form, signature: { ...form.signature!, x, y } })
+                      }
+                    />
                     <InvoiceView form={form} />
-                  </div>
+                    {showBank && (
+                      <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
+                    </div>
                 </div>
                 {pageCount > 1 && (
                   <p className="text-center text-xs text-brand-400 mt-3 font-medium">

@@ -13,6 +13,12 @@ import {
   Send,
   FileText,
   Upload,
+  Stamp,
+  PenTool,
+  Landmark,
+  Monitor,
+  Smartphone,
+  Minus,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -35,6 +41,20 @@ import { sendEmail, emailShell, esc } from "../lib/email";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import { Modal, Field } from "../components/ui";
+import FitPreview from "../components/FitPreview";
+import {
+  StampSigCard,
+  StampSignatureLayer,
+  STAMP_DEFAULT,
+  SIGN_DEFAULT,
+  type StampSig,
+} from "../components/StampSignature";
+import {
+  BankDetailsBlock,
+  loadBankInfo,
+  EMPTY_BANK,
+  type BankInfo,
+} from "../components/BankDetails";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
 
@@ -55,13 +75,6 @@ const TEMPLATES = [
   { id: "classic", name: "Classic" },
 ];
 
-const STEPS = [
-  "Choose Template",
-  "Add Details",
-  "Add Products",
-  "Review & Send",
-];
-
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
@@ -77,7 +90,6 @@ export default function Quoting() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [tpl, setTpl] = useState("clean");
-  const [step, setStep] = useState(0);
   const [number, setNumber] = useState(qtNo());
   const [date, setDate] = useState(today());
   const [valid, setValid] = useState(addDays(30));
@@ -97,7 +109,14 @@ export default function Quoting() {
   const [viewOpen, setViewOpen] = useState(false);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [designing, setDesigning] = useState(false);
+  const [stamp, setStamp] = useState<StampSig | undefined>(undefined);
+  const [signature, setSignature] = useState<StampSig | undefined>(undefined);
+  const [showBank, setShowBank] = useState(false);
+  const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const [zoom, setZoom] = useState(100);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [viewAll, setViewAll] = useState(false);
 
   // Close view modal on Escape
   useEffect(() => {
@@ -162,6 +181,7 @@ export default function Quoting() {
       .catch(() => toast.error("Failed to load company profile"));
     crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
     loadTemplates();
+    loadBankInfo().then(setBank).catch(() => {});
   }, []);
 
   // Live-sync only the shared lists — re-pulling company here would
@@ -178,6 +198,13 @@ export default function Quoting() {
   );
 
   const m = (v: number) => money(v, currency);
+
+  // Built-in + custom templates; collapsed view shows only the first 4.
+  const allTemplates = [
+    ...TEMPLATES,
+    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
+  ];
+  const shownTemplates = viewAll ? allTemplates : allTemplates.slice(0, 4);
 
   const emailQuote = async () => {
     const to = customer?.email;
@@ -608,55 +635,40 @@ export default function Quoting() {
         </div>
       </div>
 
-      {/* stepper */}
-      <div className="no-print card !py-3 mb-4 flex items-center gap-2 overflow-x-auto">
-        {STEPS.map((s, i) => (
-          <button
-            key={s}
-            onClick={() => setStep(i)}
-            className="flex items-center gap-2 shrink-0 cursor-pointer"
-          >
-            <span
-              className={`w-6 h-6 rounded-full grid place-items-center text-xs font-bold ${
-                i <= step
-                  ? "bg-primary-400 text-ink"
-                  : "bg-brand-100 text-brand-400"
-              }`}
-            >
-              {i + 1}
-            </span>
-            <span
-              className={`text-sm font-semibold ${
-                i === step ? "text-primary-700" : "text-brand-500"
-              }`}
-            >
-              {s}
-            </span>
-            {i < STEPS.length - 1 && (
-              <span className="w-8 h-px bg-brand-200 mx-1" />
-            )}
-          </button>
-        ))}
-      </div>
-
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
         {/* builder */}
         <div className="no-print space-y-4">
-          <div className="card">
-            <div className="flex items-center justify-between mb-1">
-              <p className="font-bold text-ink">Choose Template</p>
-              <button
-                className="btn-ghost text-xs"
-                onClick={saveTemplate}
-              >
-                View all templates
-              </button>
-            </div>
-            <p className="text-xs text-brand-400 mb-4">
-              Select a template for your quotation
-            </p>
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {[...TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))].map((t) => {
+          <Step
+            n={1}
+            title="Choose Template"
+            subtitle="Select a template for your quotation"
+            action={
+              <div className="flex items-center gap-2">
+                {allTemplates.length > 4 && (
+                  <button
+                    className="btn-ghost text-xs"
+                    onClick={() => setViewAll((v) => !v)}
+                  >
+                    {viewAll ? "Show less" : "View all templates"}
+                  </button>
+                )}
+                <button
+                  className="btn-ghost text-xs flex items-center gap-1"
+                  onClick={() => setDesigning(true)}
+                >
+                  <Plus size={13} /> Create Template
+                </button>
+              </div>
+            }
+          >
+            <div
+              className={
+                viewAll
+                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
+                  : "flex gap-3 overflow-x-auto pb-1"
+              }
+            >
+              {shownTemplates.map((t) => {
                 const on = tpl === t.id;
                 const isCustom = t.id.startsWith("custom-");
                 const ct = isCustom ? customTemplates.find((c) => c.id === t.id) : null;
@@ -704,25 +716,14 @@ export default function Quoting() {
                   </button>
                 );
               })}
-              <button
-                onClick={() => setDesigning(true)}
-                className="shrink-0 w-32 rounded-xl border-2 border-dashed border-brand-300 grid place-items-center text-brand-500 hover:bg-brand-50 cursor-pointer"
-              >
-                <span className="text-center">
-                  <Plus size={18} className="mx-auto" />
-                  <span className="text-xs font-semibold block mt-1">
-                    + Create Template
-                  </span>
-                </span>
-              </button>
             </div>
-          </div>
+          </Step>
 
-          <div className="card">
-            <p className="font-bold text-ink mb-1">Quotation Details</p>
-            <p className="text-xs text-brand-400 mb-4">
-              Add basic information for your quotation
-            </p>
+          <Step
+            n={2}
+            title="Quotation Details"
+            subtitle="Add basic information for your quotation"
+          >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Field label="Quotation Number">
                 <div className="flex gap-2">
@@ -806,12 +807,14 @@ export default function Quoting() {
                 />
               </Field>
             </div>
-          </div>
+          </Step>
 
-          <div className="card">
-            <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
-              <p className="font-bold text-ink">Products</p>
-              <div className="flex items-center gap-2">
+          <Step
+            n={3}
+            title="Products"
+            subtitle="Add products and their rates"
+            action={
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-semibold text-brand-500">
                   VAT
                 </span>
@@ -833,14 +836,20 @@ export default function Quoting() {
                     )
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBank((v) => !v)}
+                  className={`btn-ghost text-xs ${showBank ? "!bg-primary-100 !text-primary-700" : ""}`}
+                  title="Show your saved bank details on this quotation"
+                >
+                  <Landmark size={13} /> Bank: {showBank ? "On" : "Off"}
+                </button>
                 <button className="btn-ghost text-xs" onClick={addLine}>
                   <Plus size={13} /> Add Product
                 </button>
               </div>
-            </div>
-            <p className="text-xs text-brand-400 mb-3">
-              Add products and their rates
-            </p>
+            }
+          >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -968,7 +977,30 @@ export default function Quoting() {
                 </div>
               </div>
             </div>
-          </div>
+          </Step>
+
+          <Step
+            n={4}
+            title="Stamp & Signature"
+            subtitle="Upload your stamp and signature, then drag them onto the preview to position them. They appear on the PDF."
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <StampSigCard
+                label="Stamp"
+                icon={<Stamp size={15} />}
+                value={stamp}
+                onChange={setStamp}
+                defaults={STAMP_DEFAULT}
+              />
+              <StampSigCard
+                label="Signature"
+                icon={<PenTool size={15} />}
+                value={signature}
+                onChange={setSignature}
+                defaults={SIGN_DEFAULT}
+              />
+            </div>
+          </Step>
         </div>
 
         {/* preview */}
@@ -984,16 +1016,81 @@ export default function Quoting() {
             />
           )}
           <div className="card !p-4">
-            <div className="no-print flex items-start justify-between mb-3">
+            <div className="no-print flex items-center justify-between mb-3">
               <div>
-                <p className="font-bold text-ink">Quotation Preview</p>
-                <p className="text-xs text-brand-400">
+                <p className="font-bold text-ink flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
+                    5
+                  </span>
+                  Preview
+                </p>
+                <p className="text-xs text-brand-400 mt-0.5 ml-8">
                   This is how your quotation will look
                 </p>
               </div>
             </div>
-            <div className="invoice-print relative bg-white border border-brand-200 rounded-xl p-7 text-neutral-900" ref={quoteRef}>
-              {renderQuoteBody()}
+            <FitPreview
+              baseWidth={device === "desktop" ? 794 : 420}
+              zoom={zoom}
+            >
+              <div ref={quoteRef} className="relative">
+                <StampSignatureLayer
+                  stamp={stamp}
+                  signature={signature}
+                  onStampMove={(x, y) => setStamp((s) => (s ? { ...s, x, y } : s))}
+                  onSignatureMove={(x, y) =>
+                    setSignature((s) => (s ? { ...s, x, y } : s))
+                  }
+                />
+                {renderQuoteBody()}
+                {showBank && <BankDetailsBlock bank={bank} accent={accent} />}
+              </div>
+            </FitPreview>
+
+            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "desktop"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("desktop")}
+                  aria-label="Desktop preview"
+                >
+                  <Monitor size={15} />
+                </button>
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "mobile"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("mobile")}
+                  aria-label="Mobile preview"
+                >
+                  <Smartphone size={15} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
+                  aria-label="Zoom out"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                  {zoom}%
+                </span>
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
+                  aria-label="Zoom in"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1028,7 +1125,20 @@ export default function Quoting() {
                 <div className="flex-1 overflow-auto p-6">
                   <div className="mx-auto max-w-5xl">
                     <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={quotePreviewRef}>
-                      {renderQuoteBody()}
+                      <div className="relative">
+                        <StampSignatureLayer
+                          stamp={stamp}
+                          signature={signature}
+                          onStampMove={(x, y) =>
+                            setStamp((s) => (s ? { ...s, x, y } : s))
+                          }
+                          onSignatureMove={(x, y) =>
+                            setSignature((s) => (s ? { ...s, x, y } : s))
+                          }
+                        />
+                        {renderQuoteBody()}
+                        {showBank && <BankDetailsBlock bank={bank} accent={accent} />}
+                      </div>
                     </div>
                     {pageCount > 1 && (
                       <p className="text-center text-xs text-brand-400 mt-3 font-medium">
@@ -1124,6 +1234,40 @@ function Row({
     <div className="flex justify-between py-1">
       <span className="text-neutral-500">{k}</span>
       <span className={tone}>{v}</span>
+    </div>
+  );
+}
+
+function Step({
+  n,
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  n: number;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between mb-4 gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold shrink-0">
+            {n}
+          </span>
+          <div>
+            <p className="font-bold text-ink leading-tight">{title}</p>
+            {subtitle && (
+              <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>
+            )}
+          </div>
+        </div>
+        {action}
+      </div>
+      {children}
     </div>
   );
 }

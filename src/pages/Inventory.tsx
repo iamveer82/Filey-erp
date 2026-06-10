@@ -16,6 +16,7 @@ import {
   ScanLine,
   Calendar,
   Hash,
+  Pencil,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -47,6 +48,7 @@ export default function Inventory() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [batchFilter, setBatchFilter] = useState("");
@@ -462,6 +464,15 @@ export default function Inventory() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setEditing(p);
+                      setOpen(true);
+                    }}
+                  >
+                    <Pencil size={14} /> Edit product
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
                     tone="danger"
                     onClick={async (e) => {
                       e.preventDefault();
@@ -482,7 +493,11 @@ export default function Inventory() {
 
       <ProductModal
         open={open}
-        onClose={() => setOpen(false)}
+        product={editing}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
         onSaved={load}
       />
 
@@ -533,10 +548,12 @@ export default function Inventory() {
 
 function ProductModal({
   open,
+  product,
   onClose,
   onSaved,
 }: {
   open: boolean;
+  product?: Product | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -570,6 +587,50 @@ function ProductModal({
   const skuErr = !f.sku.trim();
   const valid = !nameErr && !skuErr;
 
+  // Populate (edit) or reset (new) the form whenever the modal opens.
+  useEffect(() => {
+    if (!open) return;
+    setTouched(false);
+    if (product) {
+      setF({
+        sku: product.sku ?? "",
+        name: product.name ?? "",
+        category: product.category ?? "",
+        unit_price: product.unit_price ?? 0,
+        cost_price: product.cost_price ?? 0,
+        quantity: product.quantity ?? 0,
+        reorder_level: product.reorder_level ?? 0,
+        batch_number: product.batch_number ?? "",
+        expiry_date: product.expiry_date ?? "",
+        barcode: product.barcode ?? "",
+        warehouse: product.warehouse ?? "",
+        is_serialized: product.is_serialized ?? false,
+      });
+      setCustomFields(
+        Object.entries(product.custom_fields ?? {}).map(([key, value]) => ({
+          key,
+          value: String(value),
+        }))
+      );
+    } else {
+      setF({
+        sku: "",
+        name: "",
+        category: "",
+        unit_price: 0,
+        cost_price: 0,
+        quantity: 0,
+        reorder_level: 0,
+        batch_number: "",
+        expiry_date: "",
+        barcode: "",
+        warehouse: "",
+        is_serialized: false,
+      });
+      setCustomFields([]);
+    }
+  }, [open, product]);
+
   const save = async () => {
     setTouched(true);
     if (!valid) return;
@@ -580,16 +641,32 @@ function ProductModal({
           .filter((c) => c.key.trim())
           .map((c) => [c.key.trim(), c.value])
       );
-      await erp.createProduct({
+      const payload = {
         ...f,
-        description: "",
         batch_number: f.batch_number || undefined,
         expiry_date: f.expiry_date || undefined,
         barcode: f.barcode || undefined,
         warehouse: f.warehouse || undefined,
-        custom_fields: Object.keys(custom).length ? custom : undefined,
-      } as Omit<Product, "id" | "created_at">);
-      toast.success("Product added.");
+        // Send {} (not undefined) when editing so clearing all fields persists.
+        custom_fields: Object.keys(custom).length
+          ? custom
+          : product
+          ? {}
+          : undefined,
+      };
+      if (product) {
+        await erp.updateProduct(
+          product.id,
+          payload as Partial<Omit<Product, "id" | "created_at">>
+        );
+        toast.success("Product updated.");
+      } else {
+        await erp.createProduct({
+          ...payload,
+          description: "",
+        } as Omit<Product, "id" | "created_at">);
+        toast.success("Product added.");
+      }
       onSaved();
       setCustomFields([]);
       onClose();
@@ -601,7 +678,11 @@ function ProductModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="New Product">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={product ? "Edit Product" : "New Product"}
+    >
       <div className="grid grid-cols-2 gap-3">
         <Field label="SKU *">
           <input
@@ -754,7 +835,7 @@ function ProductModal({
           disabled={saving || (touched && !valid)}
           onClick={save}
         >
-          {saving ? "Saving…" : "Save Product"}
+          {saving ? "Saving…" : product ? "Save changes" : "Save Product"}
         </button>
       </div>
     </Modal>

@@ -126,6 +126,50 @@ export async function fileUrl(f: SavedFile): Promise<string | null> {
   return data?.signedUrl ?? null;
 }
 
+/** Rename a saved file (metadata only — the storage object keeps its path;
+ *  downloads use the display name, so the new name is what the user sees). */
+export async function renameFile(f: SavedFile, newName: string): Promise<string> {
+  let name = newName.trim();
+  if (!name) throw new Error("Name cannot be empty.");
+  // Preserve the original extension so the file still opens correctly.
+  const ext = f.name.includes(".") ? f.name.split(".").pop()! : "";
+  if (ext && !name.toLowerCase().endsWith(`.${ext.toLowerCase()}`)) {
+    name = `${name}.${ext}`;
+  }
+  if (!supabase) return name;
+  const { error } = await supabase.from("user_files").update({ name }).eq("id", f.id);
+  if (error) throw error;
+  return name;
+}
+
+/** Longer-lived signed URL for sharing a file (default 7 days). */
+export async function shareFileLink(
+  f: SavedFile,
+  expiresSec = 604800
+): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(f.storagePath, expiresSec);
+  return data?.signedUrl ?? null;
+}
+
+/** Document folders surfaced in My Files, mapped from each file's `tool` key.
+ *  Anything not listed (or with no tool) lands in "Other files". */
+export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
+  { key: "invoice", label: "Invoices", route: "/invoicing" },
+  { key: "quotation", label: "Quotations", route: "/quoting" },
+  { key: "receipt", label: "Payment Receipts", route: "/payment-receipts" },
+  { key: "challan", label: "Delivery Challans", route: "/delivery-challans" },
+  { key: "lpo", label: "Purchase Orders", route: "/purchase-orders" },
+  { key: "declaration", label: "Declaration Letters", route: "/declaration" },
+];
+
+/** The folder key a file belongs to ("other" when its tool isn't a doc type). */
+export function folderOf(f: SavedFile): string {
+  return FILE_FOLDERS.some((d) => d.key === f.tool) ? (f.tool as string) : "other";
+}
+
 export async function deleteFile(f: SavedFile): Promise<void> {
   if (!supabase) return;
   await supabase.storage.from(BUCKET).remove([f.storagePath]);
@@ -154,6 +198,11 @@ export function useFiles() {
     remove: async (f: SavedFile) => {
       await deleteFile(f);
       setFiles((prev) => prev.filter((x) => x.id !== f.id));
+    },
+    rename: async (f: SavedFile, newName: string) => {
+      const finalName = await renameFile(f, newName);
+      await refresh();
+      return finalName;
     },
   };
 }

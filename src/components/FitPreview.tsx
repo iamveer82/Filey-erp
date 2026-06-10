@@ -4,66 +4,100 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 const A4_RATIO = 297 / 210; // ≈ 1.4142
 
 /**
- * Renders the invoice "paper" at true A4 portrait dimensions:
- * the sheet is always sized to A4 (baseWidth × baseWidth·√2) and is
- * scaled via transform by the zoom control. The container reserves
- * the correct layout space for the scaled sheet and scrolls when the
- * page outgrows it.
+ * Renders the invoice/quote "paper" at true A4 portrait dimensions, then
+ * scales it to fit the available panel width so it sits neatly inside its
+ * column.
+ *
+ * Scale down (fit to panel): uses `transform: scale()` — the content renders
+ * at full native resolution (crisp text, whole-pixel borders) and the GPU
+ * handles the downscale. This avoids the sub-pixel blur that CSS `zoom`
+ * produces at low zoom levels (thin borders become 0.4px, text anti-aliases
+ * poorly).
+ *
+ * Scale up (zoom in): uses CSS `zoom` so the browser re-layouts at the
+ * larger size — crisper than bitmap-scaling a full-size render.
+ *
+ * Note: the inline `transform` and `zoom` are reset for PDF capture
+ * (lib/pdfTools) and print (index.css `@media print`) so exports always
+ * render at native A4.
  */
 export default function FitPreview({
   baseWidth,
   zoom,
+  padding = 48,
   children,
 }: {
   baseWidth: number;
   zoom: number;
+  /** Inner sheet padding in px. Pass 0 for full-bleed content (letterheads). */
+  padding?: number;
   children: ReactNode;
 }) {
-  const sheetRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const a4Height = Math.round(baseWidth * A4_RATIO);
-  const [contentH, setContentH] = useState(a4Height);
+  const [fitW, setFitW] = useState(baseWidth);
 
   useEffect(() => {
-    const el = sheetRef.current;
-    if (!el) return;
-    const measure = () =>
-      setContentH(Math.max(a4Height, el.scrollHeight));
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
+    const box = boxRef.current;
+    if (!box) return;
+    // Measure once on mount — never resize. ResizeObserver was causing
+    // jarring zoom in/out on every focus/blur (autofill dropdowns,
+    // scrollbar shifts). The preview stays at its initial fit forever.
+    const avail = box.clientWidth - 32;
+    if (avail > 0) setFitW(avail);
   }, []);
 
-  const scale = Math.max(0.2, zoom / 100);
+  // Shrink the A4 sheet to the panel width (never enlarge past 1:1), then
+  // apply the user's zoom on top of that fit.
+  const fitScale = Math.min(1, fitW / baseWidth);
+  const scale = Math.max(0.2, fitScale * (zoom / 100));
 
   return (
-    <div className="fp-box bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]">
-      <div
-        className="fp-frame"
-        style={{
-          width: baseWidth * scale,
-          height: contentH * scale,
-          margin: "0 auto",
-          position: "relative",
-        }}
-      >
+    <div
+      ref={boxRef}
+      className="fp-box bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]"
+    >
+      {scale <= 0.98 ? (
+        /* Scale down: render at full resolution, then GPU-scale to fit.
+           Text/borders render crisp at native size; GPU handles downscale.
+           Viewport clips overflow so layout stays at the scaled dimensions. */
         <div
-          ref={sheetRef}
-          className="invoice-print bg-white shadow-bento"
+          className="mx-auto"
+          style={{
+            width: Math.round(baseWidth * scale),
+            height: Math.round(a4Height * scale),
+            overflow: "hidden",
+          }}
+        >
+          <div
+            className="invoice-print bg-white"
+            style={{
+              width: baseWidth,
+              minHeight: a4Height,
+              padding,
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
+            }}
+          >
+            {children}
+          </div>
+        </div>
+      ) : (
+        /* Scale up (zoom in): use CSS zoom so browser re-layouts at the
+           larger size — crisper than bitmap-scaling a full-size render.
+           Overflow on fp-box enables scrolling when zoomed past 100%. */
+        <div
+          className="invoice-print bg-white mx-auto"
           style={{
             width: baseWidth,
             minHeight: a4Height,
-            padding: 48,
-            transform: `scale(${scale})`,
-            transformOrigin: "top left",
-            position: "absolute",
-            top: 0,
-            left: 0,
+            padding,
+            zoom: scale,
           }}
         >
           {children}
         </div>
-      </div>
+      )}
     </div>
   );
 }

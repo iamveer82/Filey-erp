@@ -9,6 +9,10 @@ import {
   PackageCheck,
   Wallet,
   ClipboardList,
+  BadgeCheck,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 import {
   suppliers as suppliersApi,
@@ -24,6 +28,8 @@ import {
   statusTone,
 } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
+import { useUI } from "../lib/ui";
+import ActivityTimeline from "../components/ActivityTimeline";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -39,6 +45,7 @@ export default function SupplierDetail() {
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<PoSummary[]>([]);
+  const { toast } = useUI();
 
   useEffect(() => {
     let alive = true;
@@ -61,6 +68,34 @@ export default function SupplierDetail() {
     [list, id]
   );
 
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+
+  useEffect(() => {
+    if (supplier) setNotesDraft(supplier.notes || "");
+  }, [supplier?.id]);
+
+  const saveNotes = async () => {
+    if (!supplier || !id) return;
+    setSavingNotes(true);
+    try {
+      await suppliersApi.update(Number(id), { notes: notesDraft || undefined });
+      // Update local state
+      setList((prev) =>
+        prev.map((s) =>
+          s.id === Number(id) ? { ...s, notes: notesDraft } : s
+        )
+      );
+      setEditingNotes(false);
+      toast.success("Notes saved.");
+    } catch (e) {
+      toast.error("Failed to save notes.");
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
   const myOrders = useMemo(
     () =>
       orders.filter(
@@ -75,6 +110,12 @@ export default function SupplierDetail() {
   const openCount = myOrders.filter(
     (o) => !["received", "cancelled"].includes(o.status.toLowerCase())
   ).length;
+  const receivedCount = myOrders.filter(
+    (o) => o.status.toLowerCase() === "received"
+  ).length;
+  const receivedValue = myOrders
+    .filter((o) => o.status.toLowerCase() === "received")
+    .reduce((s, o) => s + o.total, 0);
 
   if (!loading && !supplier) {
     return (
@@ -106,56 +147,122 @@ export default function SupplierDetail() {
       />
 
       <div className="grid lg:grid-cols-4 gap-4 mb-5">
-        <div className="card lg:col-span-1">
-          <p className="stat-label mb-3">Contact</p>
-          <ul className="space-y-2.5 text-sm">
-            {supplier?.contact_person && (
-              <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
-                <User size={15} className="text-brand-400 shrink-0" />
-                <span className="truncate">{supplier.contact_person}</span>
-              </li>
-            )}
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
-              <Mail size={15} className="text-brand-400 shrink-0" />
-              <span className="truncate">{supplier?.email || "—"}</span>
-            </li>
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
-              <Phone size={15} className="text-brand-400 shrink-0" />
-              <span className="truncate">{supplier?.phone || "—"}</span>
-            </li>
-            <li className="flex items-start gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
-              <MapPin size={15} className="text-brand-400 shrink-0 mt-0.5" />
-              <span>{supplier?.address || "—"}</span>
-            </li>
-          </ul>
-          {supplier?.notes && (
-            <p className="text-xs text-brand-500 mt-4 border-t border-brand-100 dark:border-[#2A2C33] pt-3">
-              {supplier.notes}
-            </p>
-          )}
+        {/* Sticky contact card */}
+        <div className="lg:col-span-1">
+          <div className="card lg:sticky lg:top-4 space-y-4">
+            <div>
+              <p className="stat-label mb-3">Contact</p>
+              <ul className="space-y-2.5 text-sm">
+                {supplier?.contact_person && (
+                  <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+                    <User size={15} className="text-brand-400 shrink-0" />
+                    <span className="truncate">{supplier.contact_person}</span>
+                  </li>
+                )}
+                {supplier?.tax_id && (
+                  <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+                    <BadgeCheck size={15} className="text-brand-400 shrink-0" />
+                    <span className="font-mono text-xs truncate">{supplier.tax_id}</span>
+                  </li>
+                )}
+                <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+                  <Mail size={15} className="text-brand-400 shrink-0" />
+                  <span className="truncate">{supplier?.email || "—"}</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+                  <Phone size={15} className="text-brand-400 shrink-0" />
+                  <span className="truncate">{supplier?.phone || "—"}</span>
+                </li>
+                <li className="flex items-start gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+                  <MapPin size={15} className="text-brand-400 shrink-0 mt-0.5" />
+                  <span>{supplier?.address || "—"}</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Notes */}
+            <div className="border-t border-brand-100 dark:border-[#2A2C33] pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-brand-400">Notes</p>
+                {!editingNotes && (
+                  <button
+                    className="text-brand-400 hover:text-ink p-0.5 rounded cursor-pointer"
+                    onClick={() => {
+                      setNotesDraft(supplier?.notes || "");
+                      setEditingNotes(true);
+                    }}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                )}
+              </div>
+              {editingNotes ? (
+                <div className="space-y-2">
+                  <textarea
+                    className="textarea text-xs"
+                    rows={4}
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
+                    placeholder="Add notes about this supplier..."
+                  />
+                  <div className="flex gap-1.5">
+                    <button
+                      className="btn-primary text-xs !py-1 !px-2.5"
+                      disabled={savingNotes}
+                      onClick={saveNotes}
+                    >
+                      <Save size={11} /> {savingNotes ? "..." : "Save"}
+                    </button>
+                    <button
+                      className="btn-ghost text-xs !py-1 !px-2.5"
+                      onClick={() => setEditingNotes(false)}
+                    >
+                      <X size={11} /> Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-brand-500 whitespace-pre-line">
+                  {supplier?.notes || "No notes yet."}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Stat cards */}
         <div className="lg:col-span-3 grid sm:grid-cols-3 gap-4">
-          <StatCard
-            label="Purchase orders"
-            value={num(myOrders.length)}
-            hint={`${openCount} open`}
-            icon={<ClipboardList size={18} />}
-          />
           <StatCard
             label="Total ordered"
             value={aed(totalValue)}
-            hint="Across all POs"
+            hint={`${myOrders.length} PO${myOrders.length === 1 ? "" : "s"}`}
             icon={<Wallet size={18} />}
+          />
+          <StatCard
+            label="Received"
+            value={aed(receivedValue)}
+            hint={`${receivedCount} PO${receivedCount === 1 ? "" : "s"} received`}
+            icon={<PackageCheck size={18} />}
           />
           <StatCard
             label="Open POs"
             value={num(openCount)}
             hint={openCount > 0 ? "Awaiting receipt" : "All received"}
-            icon={<PackageCheck size={18} />}
+            icon={<ClipboardList size={18} />}
           />
         </div>
       </div>
 
+      {/* Activity Timeline */}
+      {supplier && (
+        <Section title="Activity timeline">
+          <div className="flex h-[440px] flex-col">
+            <ActivityTimeline relatedTo={supplier.name} />
+          </div>
+        </Section>
+      )}
+
+      {/* Purchase orders */}
       <Section title="Purchase orders">
         <DataTable<PoSummary>
           rows={myOrders}
@@ -164,10 +271,12 @@ export default function SupplierDetail() {
           columns={[
             {
               key: "number",
-              label: "PO",
+              label: "PO #",
               sortValue: (o) => o.po_number,
               render: (o) => (
-                <span className="font-semibold text-ink">{o.po_number}</span>
+                <span className="font-mono text-xs font-semibold text-ink">
+                  {o.po_number}
+                </span>
               ),
             },
             {
@@ -190,7 +299,12 @@ export default function SupplierDetail() {
                 <Badge tone={statusTone(o.status)}>{o.status}</Badge>
               ),
             },
-            { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
+            {
+              key: "total",
+              label: "Total",
+              sortValue: (o) => o.total,
+              render: (o) => aed(o.total),
+            },
           ]}
         />
       </Section>

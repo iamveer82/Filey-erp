@@ -2,8 +2,22 @@ import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
-import { Building2, Upload, X, Check } from "lucide-react";
+import { Building2, Upload, X, Check, Landmark, FileText } from "lucide-react";
 import { numInput } from "../../lib/format";
+import {
+  loadBankInfo,
+  saveBankInfo,
+  EMPTY_BANK,
+  BANK_FIELDS,
+  type BankInfo,
+} from "../../components/BankDetails";
+import {
+  loadLetterhead,
+  saveLetterhead,
+  EMPTY_LETTERHEAD,
+  LetterheadConfig,
+  type LetterheadInfo,
+} from "../../components/Letterhead";
 
 const CURRENCIES = ["AED", "USD", "EUR", "GBP", "INR", "SAR"];
 const BUSINESS_TYPES = [
@@ -20,6 +34,8 @@ const BUSINESS_TYPES = [
 export default function CompanyDetails() {
   const { toast } = useUI();
   const [c, setC] = useState<CompanyProfile | null>(null);
+  const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -31,7 +47,14 @@ export default function CompanyDetails() {
 
   useEffect(() => {
     billing.getCompany().then(setC).catch(console.error);
+    loadBankInfo().then(setBank).catch(() => {});
+    loadLetterhead().then(setLh).catch(() => {});
   }, []);
+
+  const setBankField = (k: keyof BankInfo, v: string) => {
+    setBank((b) => ({ ...b, [k]: v }));
+    setSaved(false);
+  };
 
   if (!c)
     return <div className="card text-sm text-brand-400">Loading…</div>;
@@ -62,6 +85,8 @@ export default function CompanyDetails() {
     setSaving(true);
     try {
       await billing.saveCompany(c);
+      await saveBankInfo(bank);
+      await saveLetterhead(lh);
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
@@ -281,6 +306,47 @@ export default function CompanyDetails() {
             />
           </FormField>
         </div>
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-brand-100">
+        <p className="font-bold text-ink flex items-center gap-2">
+          <Landmark size={16} /> Bank Details
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Enter once here. Then toggle “Show bank details” on any invoice,
+          quotation or other document to print them.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {BANK_FIELDS.map((f) => (
+            <FormField key={f.key} label={f.label}>
+              <input
+                className="input"
+                placeholder={f.placeholder}
+                value={bank[f.key] ?? ""}
+                onChange={(e) => setBankField(f.key, e.target.value)}
+              />
+            </FormField>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-brand-100">
+        <p className="font-bold text-ink flex items-center gap-2">
+          <FileText size={16} /> Letterhead
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Upload your full A4 letterhead (logo, header and footer artwork on one
+          page). Toggle “Use letterhead” on an LPO, declaration letter or other
+          document to print the body on top of it — then adjust the header and
+          footer spacing on that document so the text clears your artwork.
+        </p>
+        <LetterheadConfig
+          value={lh}
+          onChange={(next) => {
+            setLh(next);
+            setSaved(false);
+          }}
+        />
       </div>
 
       <div className="flex items-center justify-end gap-3 mt-6">

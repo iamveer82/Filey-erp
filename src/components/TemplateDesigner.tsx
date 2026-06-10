@@ -1,8 +1,15 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Save, X, PaintBucket, Type, Layout, Eye, Plus, Upload, FileImage, Image, FileText, Pencil, GripHorizontal, ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "../lib/format";
 import { tools } from "../lib/api";
+import {
+  LetterheadConfig,
+  loadLetterhead,
+  saveLetterhead,
+  EMPTY_LETTERHEAD,
+  type LetterheadInfo,
+} from "./Letterhead";
 
 export interface CustomTemplate {
   id: string;
@@ -134,10 +141,24 @@ export default function TemplateDesigner({
   onSave: (t: CustomTemplate) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"design" | "upload">("design");
+  const [tab, setTab] = useState<"design" | "upload" | "letterhead">("design");
   const [step, setStep] = useState<"upload" | "position">("upload"); // for file flow
   const [tpl, setTpl] = useState<CustomTemplate>(blankTemplate());
   const [saved, setSaved] = useState(false);
+  const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
+  const [lhSaved, setLhSaved] = useState(false);
+  useEffect(() => {
+    loadLetterhead().then(setLh).catch(() => {});
+  }, []);
+  const handleSaveLetterhead = async () => {
+    try {
+      await saveLetterhead(lh);
+      setLhSaved(true);
+      setTimeout(() => onClose(), 700);
+    } catch {
+      /* offline writes stay local until the next sync */
+    }
+  };
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string>("");
   const [fileName, setFileName] = useState("");
@@ -411,6 +432,17 @@ export default function TemplateDesigner({
             >
               <Upload size={13} /> Upload
             </button>
+            <button
+              onClick={() => { setTab("letterhead"); setStep("upload"); }}
+              className={cn(
+                "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
+                tab === "letterhead"
+                  ? "bg-white text-ink shadow-sm"
+                  : "text-brand-400 hover:text-brand-600"
+              )}
+            >
+              <FileText size={13} /> Letterhead
+            </button>
           </div>
 
           {tab === "design" ? (
@@ -569,7 +601,7 @@ export default function TemplateDesigner({
                 <Plus size={16} /> Create Template
               </button>
             </>
-          ) : (
+          ) : tab === "upload" ? (
             <>
               {/* Upload Tab */}
               <div className="space-y-1.5">
@@ -652,6 +684,40 @@ export default function TemplateDesigner({
               >
                 Next: Position Elements <ChevronRight size={14} />
               </button>
+            </>
+          ) : (
+            <>
+              {/* Letterhead Tab */}
+              {lhSaved ? (
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="text-center py-8"
+                >
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center mx-auto mb-3">
+                    <Save size={24} />
+                  </div>
+                  <p className="font-bold text-ink">Letterhead saved!</p>
+                  <p className="text-sm text-brand-400 mt-1">
+                    Toggle “Use letterhead” on any document to apply it.
+                  </p>
+                </motion.div>
+              ) : (
+                <>
+                  <p className="text-xs text-brand-400 -mt-1">
+                    Upload a header strip (logos) and a footer strip (contact band).
+                    They print across the top and bottom of every document where you
+                    enable “Use letterhead”. Saved to your account and shared across devices.
+                  </p>
+                  <LetterheadConfig value={lh} onChange={setLh} />
+                  <button
+                    onClick={handleSaveLetterhead}
+                    className="btn-primary w-full h-10 flex items-center justify-center gap-2"
+                  >
+                    <Save size={16} /> Save Letterhead
+                  </button>
+                </>
+              )}
             </>
           )}
         </>

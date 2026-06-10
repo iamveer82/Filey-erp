@@ -12,22 +12,32 @@ import {
   Upload,
   Check,
   Maximize2,
-  FileText,
-  Printer,
   Building2,
   Stamp,
+  LayoutTemplate,
+  CreditCard,
+  Pencil,
+  Minus,
+  Monitor,
+  Smartphone,
 } from "lucide-react";
 import {
   pos,
   suppliers as suppliersApi,
+  billing,
   type PoSummary,
   type PoInput,
+  type PoPayment,
   type Supplier,
+  type CompanyProfile,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import { aed, fmtDate, num, numInput, errMsg } from "../lib/format";
+import {
+  invoiceTotals,
+} from "../lib/money";
 import {
   PageHeader,
   MetricCard,
@@ -43,6 +53,16 @@ import TemplateDesigner, {
   deleteCustomTemplate,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
+import {
+  LetterheadFrame,
+  loadLetterhead,
+  hasLetterhead,
+  EMPTY_LETTERHEAD,
+  DEFAULT_HEADER_SPACE,
+  DEFAULT_FOOTER_SPACE,
+  type LetterheadInfo,
+} from "../components/Letterhead";
+import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 
@@ -61,7 +81,12 @@ const LPO_TEMPLATES = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-type LpoItem = { description: string; qty: number; unit_price: number };
+type LpoItem = {
+  description: string;
+  qty: number;
+  unit: string;
+  unit_price: number;
+};
 
 type LpoForm = {
   id?: number;
@@ -69,6 +94,7 @@ type LpoForm = {
   status: string;
   template: string;
   accent: string;
+  supplier_id?: number;
   supplier_name: string;
   supplier_address: string;
   supplier_trn: string;
@@ -79,41 +105,42 @@ type LpoForm = {
   company_trn: string;
   company_email: string;
   company_phone: string;
-  company_logo: string;
   company_stamp: string;
   company_signature: string;
   order_date: string;
   expected_date: string;
+  tax_rate: number;
   notes: string;
   terms: string;
   items: LpoItem[];
 };
 
-function blankLpo(company?: { name: string; address?: string; trn?: string; email?: string; phone?: string; logo?: string }): LpoForm {
+function blankLpo(c: CompanyProfile): LpoForm {
   const y = new Date().getFullYear();
   return {
     number: `LPO-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
     status: "draft",
-    template: "uae-standard",
-    accent: "#222222",
+    template: c.default_template || "uae-standard",
+    accent: c.default_accent || "#222222",
+    supplier_id: undefined,
     supplier_name: "",
     supplier_address: "",
     supplier_trn: "",
     supplier_email: "",
     supplier_phone: "",
-    company_name: company?.name || "Your Company",
-    company_address: company?.address || "",
-    company_trn: company?.trn || "",
-    company_email: company?.email || "",
-    company_phone: company?.phone || "",
-    company_logo: company?.logo || "",
+    company_name: c.name,
+    company_address: c.address || "",
+    company_trn: c.trn || "",
+    company_email: c.email || "",
+    company_phone: c.phone || "",
     company_stamp: loadSavedStamp(),
     company_signature: loadSavedSignature(),
     order_date: today(),
     expected_date: "",
+    tax_rate: c.default_tax_rate ?? 5,
     notes: "Thank you for your business.",
     terms: "1. Payment due within 30 days of invoice.\n2. Goods remain property of seller until paid in full.\n3. All prices are in AED unless otherwise stated.\n4. Delivery within 7-14 working days.",
-    items: [{ description: "", qty: 1, unit_price: 0 }],
+    items: [{ description: "", qty: 1, unit: "MT", unit_price: 0 }],
   };
 }
 
@@ -143,6 +170,12 @@ export default function PurchaseOrders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lpoForm, setLpoForm] = useState<LpoForm | null>(null);
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [payFor, setPayFor] = useState<PoSummary | null>(null);
+
+  useEffect(() => {
+    billing.getCompany().then(setCompany).catch(() => {});
+  }, []);
 
   const load = () => {
     return pos
@@ -201,6 +234,50 @@ export default function PurchaseOrders() {
     }
   };
 
+  const editPo = async (poId: number) => {
+    try {
+      const [po, supps] = await Promise.all([
+        pos.get(poId),
+        suppliersApi.list(),
+      ]);
+      if (!po) return;
+      const supplier = supps.find((s) => s.id === po.supplier_id);
+      setLpoForm({
+        id: po.id,
+        number: po.po_number || "",
+        status: po.status || "draft",
+        template: "uae-standard",
+        accent: "#222222",
+        supplier_id: po.supplier_id,
+        supplier_name: supplier?.name || "",
+        supplier_address: supplier?.address || "",
+        supplier_trn: (supplier as any)?.trn || "",
+        supplier_email: supplier?.email || "",
+        supplier_phone: supplier?.phone || "",
+        company_name: company?.name || "",
+        company_address: company?.address || "",
+        company_trn: company?.trn || "",
+        company_email: company?.email || "",
+        company_phone: company?.phone || "",
+        company_stamp: loadSavedStamp(),
+        company_signature: loadSavedSignature(),
+        order_date: po.order_date || today(),
+        expected_date: po.expected_date || "",
+        tax_rate: (po as any).tax_rate ?? (company?.default_tax_rate ?? 5),
+        notes: po.notes || "",
+        terms: "",
+        items: po.items.map((i: any) => ({
+          description: i.description || "",
+          qty: i.quantity || 1,
+          unit: (i as any).unit || "MT",
+          unit_price: i.unit_cost || 0,
+        })),
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to load PO");
+    }
+  };
+
   /* Show LPO Editor if form is active */
   if (lpoForm) {
     return (
@@ -247,7 +324,8 @@ export default function PurchaseOrders() {
             </button>
             <button
               className="btn-primary"
-              onClick={() => setLpoForm(blankLpo())}
+              disabled={!company}
+              onClick={() => company && setLpoForm(blankLpo(company))}
             >
               <Plus size={16} /> New LPO
             </button>
@@ -337,6 +415,22 @@ export default function PurchaseOrders() {
             label: "",
             render: (r) => (
               <div className="flex items-center gap-1">
+                <button
+                  aria-label="Record payment"
+                  title="Record payment"
+                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  onClick={() => setPayFor(r)}
+                >
+                  <CreditCard size={15} />
+                </button>
+                <button
+                  aria-label="Edit"
+                  title="Edit PO"
+                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  onClick={() => editPo(r.id)}
+                >
+                  <Pencil size={15} />
+                </button>
                 {r.status !== "received" && (
                   <button
                     aria-label="Receive stock"
@@ -347,50 +441,6 @@ export default function PurchaseOrders() {
                     <PackageCheck size={15} />
                   </button>
                 )}
-                <button
-                  aria-label="View / Print LPO"
-                  title="View LPO"
-                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-lg p-1.5 cursor-pointer"
-                  onClick={async () => {
-                    try {
-                      const po = await pos.get(r.id);
-                      if (!po) return;
-                      setLpoForm({
-                        id: po.id,
-                        number: po.po_number || "",
-                        status: po.status || "draft",
-                        template: "uae-standard",
-                        accent: "#222222",
-                        supplier_name: (po as any).supplier_name || "",
-                        supplier_address: "",
-                        supplier_trn: "",
-                        supplier_email: "",
-                        supplier_phone: "",
-                        company_name: "Your Company",
-                        company_address: "",
-                        company_trn: "",
-                        company_email: "",
-                        company_phone: "",
-                        company_logo: "",
-                        company_stamp: loadSavedStamp(),
-                        company_signature: loadSavedSignature(),
-                        order_date: po.order_date || today(),
-                        expected_date: po.expected_date || "",
-                        notes: po.notes || "",
-                        terms: "",
-                        items: po.items.map((i: any) => ({
-                          description: i.description || "",
-                          qty: i.quantity || 1,
-                          unit_price: i.unit_cost || 0,
-                        })),
-                      });
-                    } catch (e: any) {
-                      toast.error(e?.message || "Failed to load PO");
-                    }
-                  }}
-                >
-                  <Printer size={15} />
-                </button>
                 <button
                   aria-label="Delete"
                   className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
@@ -403,6 +453,14 @@ export default function PurchaseOrders() {
           },
         ]}
       />
+
+      {payFor && (
+        <PoPaymentsModal
+          po={payFor}
+          onClose={() => setPayFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
@@ -421,7 +479,7 @@ async function saveLpo(
     const input: PoInput = {
       id: form.id,
       po_number: form.number,
-      supplier_id: undefined,
+      supplier_id: form.supplier_id || undefined,
       status: (form.status as "draft" | "sent" | "received") || "draft",
       total,
       order_date: form.order_date,
@@ -433,6 +491,7 @@ async function saveLpo(
           description: i.description,
           quantity: i.qty,
           unit_cost: i.unit_price,
+          unit: i.unit || undefined,
         })),
     };
     const id = await pos.save(input);
@@ -484,6 +543,18 @@ function LPOEditor({
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(
     loadCustomTemplates
   );
+  const [letterhead, setLetterhead] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
+  const [useLetterhead, setUseLetterhead] = useState(false);
+  const [headerSpace, setHeaderSpace] = useState(DEFAULT_HEADER_SPACE);
+  const [footerSpace, setFooterSpace] = useState(DEFAULT_FOOTER_SPACE);
+  useEffect(() => {
+    loadLetterhead()
+      .then((l) => {
+        setLetterhead(l);
+        setUseLetterhead(hasLetterhead(l));
+      })
+      .catch(() => {});
+  }, []);
   const allTemplates = [
     ...LPO_TEMPLATES,
     ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
@@ -512,7 +583,7 @@ function LPOEditor({
   const addItem = () =>
     setForm({
       ...form,
-      items: [...form.items, { description: "", qty: 1, unit_price: 0 }],
+      items: [...form.items, { description: "", qty: 1, unit: "MT", unit_price: 0 }],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
@@ -529,17 +600,19 @@ function LPOEditor({
   const applySupplier = (s: Supplier) =>
     setForm({
       ...form,
+      supplier_id: s.id,
       supplier_name: s.name,
       supplier_address: s.address ?? "",
       supplier_email: s.email ?? "",
       supplier_phone: s.phone ?? "",
-      supplier_trn: (s as any).trn ?? form.supplier_trn,
+      supplier_trn: s.tax_id ?? form.supplier_trn,
     });
 
   const [viewAll, setViewAll] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  const viewPreviewRef = useRef<HTMLDivElement>(null);
-  const [pageCount, setPageCount] = useState(1);
+  const [zoom, setZoom] = useState(100);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const baseWidth = device === "desktop" ? 794 : 420;
 
   useEffect(() => {
     if (!viewOpen) return;
@@ -550,24 +623,6 @@ function LPOEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
 
-  useEffect(() => {
-    if (!viewOpen || !viewPreviewRef.current) {
-      setPageCount(1);
-      return;
-    }
-    const el = viewPreviewRef.current;
-    const measure = () => {
-      const contentHeight = el.scrollHeight;
-      const pageHeight = 1027;
-      setPageCount(Math.max(1, Math.ceil(contentHeight / pageHeight)));
-    };
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
-  }, [viewOpen, form.items.length, form.template]);
-
-  const [showLetter, setShowLetter] = useState(false);
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
   const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
 
@@ -600,11 +655,52 @@ function LPOEditor({
             </span>
           )}
           <button
-            className="btn-ghost"
-            onClick={() => setShowLetter(!showLetter)}
+            className={`btn-ghost ${
+              useLetterhead ? "!bg-primary-100 !text-primary-700" : ""
+            }`}
+            disabled={!hasLetterhead(letterhead)}
+            title={
+              hasLetterhead(letterhead)
+                ? "Print the body over your A4 letterhead background"
+                : "Set a letterhead in Settings → Company Details"
+            }
+            onClick={() => setUseLetterhead((v) => !v)}
           >
-            <FileText size={15} /> {showLetter ? "Hide Letter" : "Letter"}
+            <LayoutTemplate size={15} /> Letterhead{" "}
+            {hasLetterhead(letterhead) ? (useLetterhead ? "On" : "Off") : ""}
           </button>
+          {useLetterhead && hasLetterhead(letterhead) && (
+            <div className="flex items-center gap-1.5 rounded-xl border border-brand-200 bg-white px-2 py-1">
+              <label className="flex items-center gap-1 text-[11px] font-semibold text-brand-500">
+                Header
+                <input
+                  type="number"
+                  min={0}
+                  step={10}
+                  value={headerSpace}
+                  onChange={(e) =>
+                    setHeaderSpace(Math.max(0, Number(e.target.value) || 0))
+                  }
+                  className="w-14 rounded-md border border-brand-200 px-1.5 py-0.5 text-xs tabular-nums text-ink"
+                  title="Top space (px) so the body clears your letterhead header"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-[11px] font-semibold text-brand-500">
+                Footer
+                <input
+                  type="number"
+                  min={0}
+                  step={10}
+                  value={footerSpace}
+                  onChange={(e) =>
+                    setFooterSpace(Math.max(0, Number(e.target.value) || 0))
+                  }
+                  className="w-14 rounded-md border border-brand-200 px-1.5 py-0.5 text-xs tabular-nums text-ink"
+                  title="Bottom space (px) so the body clears your letterhead footer"
+                />
+              </label>
+            </div>
+          )}
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
             <Maximize2 size={15} /> View
           </button>
@@ -712,7 +808,7 @@ function LPOEditor({
                   <div className="flex gap-2">
                     <select
                       className="select"
-                      value=""
+                      value={form.supplier_id ? String(form.supplier_id) : ""}
                       onChange={(e) => {
                         const s = suppliers.find(
                           (x) => String(x.id) === e.target.value
@@ -832,10 +928,11 @@ function LPOEditor({
                 <thead>
                   <tr className="text-left text-xs font-semibold text-brand-400">
                     <th className="py-2 pr-2 w-6">#</th>
-                    <th className="py-2 px-2">Description</th>
-                    <th className="py-2 px-2 w-24 text-right">Qty</th>
-                    <th className="py-2 px-2 w-32 text-right">Unit Price</th>
-                    <th className="py-2 px-2 w-28 text-right">Amount</th>
+                    <th className="py-2 px-2">Item Name</th>
+                    <th className="py-2 px-2 w-20 text-right">Qty</th>
+                    <th className="py-2 px-2 w-16 text-right">Unit</th>
+                    <th className="py-2 px-2 w-28 text-right">Cost Price</th>
+                    <th className="py-2 px-2 w-28 text-right">Total</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -846,7 +943,7 @@ function LPOEditor({
                       <td className="py-2 px-2">
                         <input
                           className="input"
-                          placeholder="Item description"
+                          placeholder="Item name"
                           value={it.description}
                           onChange={(e) =>
                             setItem(i, { description: e.target.value })
@@ -860,6 +957,16 @@ function LPOEditor({
                           value={it.qty || ""}
                           onChange={(e) =>
                             setItem(i, { qty: numInput(e.target.value) })
+                          }
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          className="input text-right"
+                          placeholder="MT"
+                          value={it.unit}
+                          onChange={(e) =>
+                            setItem(i, { unit: e.target.value })
                           }
                         />
                       </td>
@@ -907,6 +1014,53 @@ function LPOEditor({
             </div>
           </Step>
 
+          {/* VAT Toggle */}
+          <div className="card p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-ink text-sm">Apply VAT</p>
+                <p className="text-xs text-brand-400">
+                  Add VAT to LPO total
+                </p>
+              </div>
+              <div className="flex rounded-lg bg-brand-100 p-0.5">
+                {(["Yes", "No"] as const).map((lbl) => {
+                  const on = lbl === "Yes";
+                  const active = (form.tax_rate || 0) > 0 === on;
+                  return (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() =>
+                        set("tax_rate", on ? (form.tax_rate > 0 ? form.tax_rate : 5) : 0)
+                      }
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors ${
+                        active
+                          ? "bg-white text-ink shadow-bento"
+                          : "text-brand-500 hover:text-ink"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {(form.tax_rate || 0) > 0 && (
+              <div className="mt-3 max-w-[160px]">
+                <Field label="VAT Rate %">
+                  <input
+                    type="number"
+                    className="input"
+                    placeholder="5"
+                    value={form.tax_rate}
+                    onChange={(e) => set("tax_rate", numInput(e.target.value))}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+
           {/* 4 · Notes & Terms */}
           <Step n={4} title="Notes & Terms">
             <div className="space-y-3">
@@ -931,7 +1085,7 @@ function LPOEditor({
         </div>
 
         {/* ---------- right: live preview ---------- */}
-        <div className="sticky top-4">
+        <div className="xl:sticky xl:top-2 space-y-3">
           {/* Template designer ABOVE preview */}
           {designing && (
             <div className="mb-4">
@@ -949,7 +1103,71 @@ function LPOEditor({
             </div>
           )}
 
-          <LPOView form={form} lpoRef={lpoRef} />
+          <div className="card !p-4">
+            <div className="no-print flex items-start justify-between mb-3">
+              <div>
+                <p className="font-bold text-ink">Preview</p>
+                <p className="text-xs text-brand-400">
+                  This is how your LPO will look
+                </p>
+              </div>
+            </div>
+
+            <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
+              <div ref={lpoRef} className="relative">
+                <LPOView
+                  form={form}
+                  letterhead={letterhead}
+                  useLetterhead={useLetterhead}
+                  headerSpace={headerSpace}
+                  footerSpace={footerSpace}
+                />
+              </div>
+            </FitPreview>
+
+            {/* preview controls */}
+            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
+              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "desktop" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("desktop")}
+                  aria-label="Desktop preview"
+                >
+                  <Monitor size={15} />
+                </button>
+                <button
+                  className={`rounded-lg p-1.5 cursor-pointer ${
+                    device === "mobile" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                  }`}
+                  onClick={() => setDevice("mobile")}
+                  aria-label="Mobile preview"
+                >
+                  <Smartphone size={15} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.max(40, z - 10))}
+                  aria-label="Zoom out"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                  {zoom}%
+                </span>
+                <button
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
+                  aria-label="Zoom in"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -966,14 +1184,6 @@ function LPOEditor({
         />
       )}
 
-      {/* Letter generator */}
-      {showLetter && (
-        <LpoLetter
-          form={form}
-          onClose={() => setShowLetter(false)}
-        />
-      )}
-
       {/* Full-screen view modal */}
       {viewOpen && (
         <Modal
@@ -983,19 +1193,16 @@ function LPOEditor({
           size="full"
         >
           <div
-            ref={viewPreviewRef}
             className="bg-white rounded-xl overflow-y-auto"
-            style={{
-              maxHeight: "85vh",
-              background: `repeating-linear-gradient(
-                white 0px,
-                white ${(pageCount - 1) * 1027 + 30}px,
-                #e5e7eb ${(pageCount - 1) * 1027 + 30}px,
-                #e5e7eb ${(pageCount - 1) * 1027 + 32}px
-              )`,
-            }}
+            style={{ maxHeight: "85vh" }}
           >
-            <LPOView form={form} />
+            <LPOView
+              form={form}
+              letterhead={letterhead}
+              useLetterhead={useLetterhead}
+              headerSpace={headerSpace}
+              footerSpace={footerSpace}
+            />
           </div>
         </Modal>
       )}
@@ -1010,21 +1217,29 @@ function LPOEditor({
 function LPOView({
   form,
   lpoRef,
+  letterhead,
+  useLetterhead = false,
+  headerSpace = DEFAULT_HEADER_SPACE,
+  footerSpace = DEFAULT_FOOTER_SPACE,
 }: {
   form: LpoForm;
   lpoRef?: React.RefObject<HTMLDivElement | null>;
+  letterhead?: LetterheadInfo;
+  useLetterhead?: boolean;
+  headerSpace?: number;
+  footerSpace?: number;
 }) {
   const customTemplates = loadCustomTemplates();
   const ct = customTemplates.find((c) => c.id === form.template);
   const isFileTemplate = ct?.type === "file";
 
   const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  const totals = invoiceTotals(form.items, 0, form.tax_rate || 0);
   const clean = (s: string) => s || "—";
 
   if (isFileTemplate && ct) {
     return (
       <div ref={lpoRef} className="relative bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none">
-        {/* Background image */}
         {ct && (ct as any).imageData && (
           <img
             src={(ct as any).imageData}
@@ -1036,11 +1251,9 @@ function LPOView({
           className="relative p-8 min-h-[1123px] flex flex-col gap-6"
           style={{ width: ct.paperSize === "Letter" ? "816px" : "794px" }}
         >
-          {/* If positions defined, render frosted glass boxes */}
           {ct.positions && Object.keys(ct.positions).length > 0 ? (
             <FrostedOverlayLpo form={form} template={ct} />
           ) : (
-            /* Default overlay positions */
             <div className="flex flex-col gap-5 mt-24">
               <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
                 <h1 className="text-2xl font-bold text-ink">LOCAL PURCHASE ORDER</h1>
@@ -1072,10 +1285,11 @@ function LPOView({
                   <thead>
                     <tr className="border-b border-brand-200 text-left text-xs font-semibold text-brand-400">
                       <th className="pb-2 pr-2 w-6">#</th>
-                      <th className="pb-2 px-2">Description</th>
-                      <th className="pb-2 px-2 w-20 text-right">Qty</th>
-                      <th className="pb-2 px-2 w-28 text-right">Unit Price</th>
-                      <th className="pb-2 px-2 w-28 text-right">Amount</th>
+                      <th className="pb-2 px-2">Item</th>
+                      <th className="pb-2 px-2 w-16 text-right">Qty</th>
+                      <th className="pb-2 px-2 w-14 text-right">Unit</th>
+                      <th className="pb-2 px-2 w-24 text-right">Cost</th>
+                      <th className="pb-2 px-2 w-24 text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1085,24 +1299,17 @@ function LPOView({
                         <tr key={i} className="border-b border-brand-100/50">
                           <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
                           <td className="py-2 px-2">{it.description}</td>
-                          <td className="py-2 px-2 text-right tabular-nums">
-                            {it.qty}
-                          </td>
-                          <td className="py-2 px-2 text-right tabular-nums">
-                            {aed(it.unit_price)}
-                          </td>
-                          <td className="py-2 px-2 text-right font-semibold tabular-nums">
-                            {aed(it.qty * it.unit_price)}
-                          </td>
+                          <td className="py-2 px-2 text-right tabular-nums">{it.qty}</td>
+                          <td className="py-2 px-2 text-right">{it.unit || "—"}</td>
+                          <td className="py-2 px-2 text-right tabular-nums">{aed(it.unit_price)}</td>
+                          <td className="py-2 px-2 text-right font-semibold tabular-nums">{aed(it.qty * it.unit_price)}</td>
                         </tr>
                       ))}
                   </tbody>
                 </table>
                 <div className="flex justify-end mt-3">
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-ink tabular-nums">
-                      {aed(total)}
-                    </p>
+                    <p className="text-2xl font-bold text-ink tabular-nums">{aed(total)}</p>
                     <p className="text-xs text-brand-400">Total Amount (AED)</p>
                   </div>
                 </div>
@@ -1110,9 +1317,7 @@ function LPOView({
               {form.terms && (
                 <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
                   <p className="font-semibold text-sm text-brand-400 mb-2">TERMS & CONDITIONS</p>
-                  <p className="text-sm text-brand-600 whitespace-pre-line">
-                    {form.terms}
-                  </p>
+                  <p className="text-sm text-brand-600 whitespace-pre-line">{form.terms}</p>
                 </div>
               )}
               {form.notes && (
@@ -1159,20 +1364,21 @@ function LPOView({
       className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
       style={styles.wrapper}
     >
-      <div className="p-8 min-h-[1123px]" style={styles.container}>
-        {/* Header */}
+      <LetterheadFrame
+        letterhead={letterhead}
+        enabled={useLetterhead}
+        minHeight={1123}
+        headerSpace={headerSpace}
+        footerSpace={footerSpace}
+        bodyPadding={32}
+      >
+      <div style={styles.container}>
+        {/* Header — no logo, letterhead provides branding */}
         <div
           className="flex items-start justify-between pb-6 mb-6"
           style={{ borderBottom: styles.headerBorder || "2px solid #EAE4D6" }}
         >
           <div>
-            {form.company_logo && (
-              <img
-                src={form.company_logo}
-                alt="Logo"
-                className="h-12 mb-3 object-contain"
-              />
-            )}
             <h1 style={styles.title} className="text-[28px] font-extrabold tracking-tight">
               LOCAL PURCHASE ORDER
             </h1>
@@ -1222,10 +1428,11 @@ function LPOView({
                 style={{ color: styles.accentColor || "#6B6B6B" }}
               >
                 <th className="pb-3 pr-2 w-6">#</th>
-                <th className="pb-3 px-2">Description</th>
-                <th className="pb-3 px-2 w-20 text-right">Qty</th>
-                <th className="pb-3 px-2 w-28 text-right">Unit Price</th>
-                <th className="pb-3 px-2 w-28 text-right">Amount</th>
+                <th className="pb-3 px-2">Item</th>
+                <th className="pb-3 px-2 w-16 text-right">Qty</th>
+                <th className="pb-3 px-2 w-14 text-right">Unit</th>
+                <th className="pb-3 px-2 w-24 text-right">Cost</th>
+                <th className="pb-3 px-2 w-24 text-right">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -1239,15 +1446,10 @@ function LPOView({
                   >
                     <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
                     <td className="py-3 px-2 font-medium">{it.description}</td>
-                    <td className="py-3 px-2 text-right tabular-nums">
-                      {it.qty}
-                    </td>
-                    <td className="py-3 px-2 text-right tabular-nums">
-                      {aed(it.unit_price)}
-                    </td>
-                    <td className="py-3 px-2 text-right font-semibold tabular-nums">
-                      {aed(it.qty * it.unit_price)}
-                    </td>
+                    <td className="py-3 px-2 text-right tabular-nums">{it.qty}</td>
+                    <td className="py-3 px-2 text-right">{it.unit || "—"}</td>
+                    <td className="py-3 px-2 text-right tabular-nums">{aed(it.unit_price)}</td>
+                    <td className="py-3 px-2 text-right font-semibold tabular-nums">{aed(it.qty * it.unit_price)}</td>
                   </tr>
                 ))}
             </tbody>
@@ -1258,16 +1460,26 @@ function LPOView({
             className="flex justify-end mt-4 pt-4"
             style={{ borderTop: "2px solid #EAE4D6" }}
           >
-            <div className="text-right">
-              <p
-                className="text-[32px] font-extrabold tracking-tight tabular-nums"
-                style={{ color: styles.accentColor || "#222222" }}
-              >
-                {aed(total)}
-              </p>
-              <p className="text-xs text-brand-400 font-semibold uppercase tracking-wider">
-                Total Amount (AED)
-              </p>
+            <div className="text-right space-y-1 min-w-[200px]">
+              <div className="flex justify-between text-sm">
+                <span className="text-brand-400">Subtotal</span>
+                <span className="font-semibold tabular-nums">{aed(totals.subtotal)}</span>
+              </div>
+              {(form.tax_rate || 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-brand-400">VAT ({form.tax_rate}%)</span>
+                  <span className="font-semibold tabular-nums">{aed(totals.tax)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-2" style={{ borderTop: "2px solid #EAE4D6" }}>
+                <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">Total</span>
+                <p
+                  className="text-[28px] font-extrabold tracking-tight tabular-nums"
+                  style={{ color: styles.accentColor || "#222222" }}
+                >
+                  {aed(totals.total)}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1315,6 +1527,7 @@ function LPOView({
           </div>
         </div>
       </div>
+      </LetterheadFrame>
     </div>
   );
 }
@@ -1330,7 +1543,7 @@ function FrostedOverlayLpo({
   form: LpoForm;
   template: CustomTemplate;
 }) {
-  const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  const totals = invoiceTotals(form.items, 0, form.tax_rate || 0);
   const clean = (s: string) => s || "—";
   const pos = template.positions || {};
 
@@ -1375,10 +1588,11 @@ function FrostedOverlayLpo({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-brand-200 text-xs font-semibold text-brand-400">
-              <th className="pb-1 text-left">Description</th>
-              <th className="pb-1 text-right w-12">Qty</th>
-              <th className="pb-1 text-right w-20">Price</th>
-              <th className="pb-1 text-right w-20">Amount</th>
+              <th className="pb-1 text-left">Item</th>
+              <th className="pb-1 text-right w-10">Qty</th>
+              <th className="pb-1 text-right w-10">Unit</th>
+              <th className="pb-1 text-right w-16">Cost</th>
+              <th className="pb-1 text-right w-16">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -1386,17 +1600,27 @@ function FrostedOverlayLpo({
               <tr key={i} className="border-b border-brand-100/50">
                 <td className="py-1.5">{it.description}</td>
                 <td className="py-1.5 text-right">{it.qty}</td>
+                <td className="py-1.5 text-right">{it.unit || "—"}</td>
                 <td className="py-1.5 text-right">{aed(it.unit_price)}</td>
                 <td className="py-1.5 text-right font-semibold">{aed(it.qty * it.unit_price)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="text-right mt-2 font-bold text-lg tabular-nums">{aed(total)}</div>
+        <div className="text-right mt-2 space-y-1">
+          <div className="text-sm"><span className="text-brand-400">Subtotal</span> <span className="font-semibold tabular-nums ml-2">{aed(totals.subtotal)}</span></div>
+          {(form.tax_rate || 0) > 0 && (
+            <div className="text-sm"><span className="text-brand-400">VAT ({form.tax_rate}%)</span> <span className="font-semibold tabular-nums ml-2">{aed(totals.tax)}</span></div>
+          )}
+          <div className="font-bold text-lg tabular-nums">{aed(totals.total)}</div>
+        </div>
       </div>
       <div style={boxStyle("totals")}>
-        <p className="text-2xl font-extrabold tabular-nums">{aed(total)}</p>
+        <p className="text-2xl font-extrabold tabular-nums">{aed(totals.total)}</p>
         <p className="text-xs text-brand-400">Total Amount (AED)</p>
+        {(form.tax_rate || 0) > 0 && (
+          <p className="text-[10px] text-brand-400 mt-0.5">incl. {form.tax_rate}% VAT</p>
+        )}
       </div>
       <div style={boxStyle("notes_terms")}>
         {form.terms && (
@@ -1506,185 +1730,158 @@ function LpoTilePreview({ templateId }: { templateId: string }) {
       className="w-full h-auto rounded-lg"
       style={{ background: "#FFFFFF" }}
     >
-      {/* Top bar */}
       <rect x="4" y="6" width="112" height="4" rx="2" fill={color} opacity="0.8" />
-      {/* Title line */}
       <rect x="4" y="14" width="60" height="3" rx="1.5" fill={color} />
-      {/* Company lines */}
       <rect x="4" y="22" width="40" height="2" rx="1" fill="#6B6B6B" opacity="0.6" />
       <rect x="4" y="28" width="30" height="2" rx="1" fill="#6B6B6B" opacity="0.4" />
-      {/* LPO number */}
       <rect x="70" y="22" width="46" height="6" rx="1" fill={color} opacity="0.15" />
-      {/* Supplier box */}
       <rect x="4" y="36" width="112" height="18" rx="3" fill={color} opacity="0.08" />
       <rect x="10" y="40" width="35" height="2" rx="1" fill={color} opacity="0.4" />
       <rect x="10" y="46" width="50" height="2" rx="1" fill="#6B6B6B" opacity="0.3" />
-      {/* Items table */}
       <rect x="4" y="58" width="112" height="2" rx="1" fill="#EAE4D6" />
       <rect x="4" y="63" width="112" height="2" rx="1" fill="#EAE4D6" />
       <rect x="4" y="68" width="112" height="2" rx="1" fill="#EAE4D6" />
-      {/* Total */}
       <rect x="80" y="74" width="36" height="4" rx="2" fill={color} opacity="0.2" />
     </svg>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  LPO Letter Generator                                               */
+/*  PO Payments Modal                                                  */
 /* ------------------------------------------------------------------ */
 
-function LpoLetter({
-  form,
+function PoPaymentsModal({
+  po,
   onClose,
+  onSaved,
 }: {
-  form: LpoForm;
+  po: PoSummary;
   onClose: () => void;
+  onSaved: () => void;
 }) {
-  const letterRef = useRef<HTMLDivElement>(null);
-  const downloadLetter = () => {
-    if (letterRef.current) {
-      const sheet = letterRef.current.closest('.invoice-print') as HTMLElement;
-      downloadElementAsPdf(sheet || letterRef.current, `LPO-Letter-${form.number}`);
+  const { toast, confirm } = useUI();
+  const [rows, setRows] = useState<PoPayment[]>([]);
+  const [amount, setAmount] = useState(0);
+  const [method, setMethod] = useState("bank transfer");
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    pos.payments(po.id).then(setRows).catch(() => setRows([]));
+  };
+  useEffect(load, [po.id]);
+
+  const total = po.total;
+  const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
+  const balance = Math.max(0, total - paid);
+
+  const add = async () => {
+    if (amount <= 0) return;
+    setBusy(true);
+    try {
+      await pos.addPayment(po.id, amount, method || null, paidAt);
+      setAmount(0);
+      load();
+      onSaved();
+      toast.success("Payment recorded.");
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const dateStr = form.order_date
-    ? new Date(form.order_date).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      })
-    : new Date().toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
-
-  const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  const remove = async (id: number) => {
+    if (!(await confirm({ title: "Remove payment", message: "Remove this payment record? This cannot be undone." }))) return;
+    try {
+      await pos.removePayment(id);
+      load();
+      onSaved();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
 
   return (
-    <Modal open onClose={onClose} title="Purchase Order Letter" size="3xl">
-      <div className="flex justify-end mb-4 no-print">
-        <button className="btn-ghost" onClick={downloadLetter}>
-          <Download size={15} /> Download Letter
+    <Modal open onClose={onClose} title={`Payments — ${po.po_number}`}>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="rounded-xl bg-brand-50 px-3 py-2.5">
+          <p className="text-[10px] uppercase text-brand-400">Total</p>
+          <p className="font-bold text-sm tabular-nums">{aed(total)}</p>
+        </div>
+        <div className="rounded-xl bg-success/10 px-3 py-2.5">
+          <p className="text-[10px] uppercase text-success/70">Paid</p>
+          <p className="font-bold text-sm text-success tabular-nums">{aed(paid)}</p>
+        </div>
+        <div className={`rounded-xl px-3 py-2.5 ${balance > 0 ? "bg-danger/10" : "bg-success/10"}`}>
+          <p className="text-[10px] uppercase text-brand-400">Balance</p>
+          <p className={`font-bold text-sm tabular-nums ${balance > 0 ? "text-danger" : "text-success"}`}>{aed(balance)}</p>
+        </div>
+      </div>
+
+      {/* New payment form */}
+      <div className="flex items-end gap-2 mb-4 p-3 bg-brand-50 rounded-xl">
+        <div className="flex-1">
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Amount (AED)</label>
+          <input
+            type="number"
+            min={0}
+            className="input tabular-nums"
+            value={amount || ""}
+            onChange={(e) => setAmount(Number(e.target.value) || 0)}
+          />
+        </div>
+        <div className="w-32">
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Method</label>
+          <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
+            <option>bank transfer</option>
+            <option>cash</option>
+            <option>cheque</option>
+            <option>online</option>
+          </select>
+        </div>
+        <div className="w-32">
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>
+          <input type="date" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+        </div>
+        <button className="btn-primary shrink-0" disabled={busy || amount <= 0} onClick={add}>
+          {busy ? "…" : "Add"}
         </button>
       </div>
 
-      <div
-        ref={letterRef}
-        className="bg-white p-12 rounded-xl shadow-card print:shadow-none print:rounded-none"
-        style={{ fontFamily: "Georgia, serif", lineHeight: 1.8, minHeight: "1123px" }}
-      >
-        {/* Letterhead */}
-        <div className="text-center mb-8 pb-6" style={{ borderBottom: "2px solid #222" }}>
-          <h1 className="text-2xl font-bold tracking-wide uppercase" style={{ fontFamily: "Georgia, serif" }}>
-            {form.company_name || "Your Company"}
-          </h1>
-          <p className="text-sm text-brand-500 mt-1">
-            {form.company_address || "Dubai, UAE"}
-            {form.company_trn && ` | TRN: ${form.company_trn}`}
-          </p>
-        </div>
-
-        <p className="text-right text-sm mb-6">{dateStr}</p>
-
-        <p className="mb-4">
-          <strong>To:</strong><br />
-          {form.supplier_name || "[Supplier Name]"}<br />
-          {form.supplier_address || "[Supplier Address]"}
-          {form.supplier_trn && <><br />TRN: {form.supplier_trn}</>}
-        </p>
-
-        <p className="mb-4">
-          <strong>Subject: Local Purchase Order — {form.number}</strong>
-        </p>
-
-        <p className="mb-4">
-          Dear Sir/Madam,
-        </p>
-
-        <p className="mb-4">
-          We are pleased to issue this Local Purchase Order for the supply of the
-          following items as per the terms and conditions outlined below.
-        </p>
-
-        {/* Items table in letter */}
-        <table className="w-full mb-6" style={{ borderCollapse: "collapse" }}>
+      {/* Payment list */}
+      {rows.length === 0 ? (
+        <p className="text-center text-sm text-brand-400 py-4">No payments recorded yet.</p>
+      ) : (
+        <table className="w-full text-sm">
           <thead>
-            <tr style={{ borderBottom: "1px solid #222", borderTop: "1px solid #222" }}>
-              <th className="py-2 text-left text-sm" style={{ width: "8%" }}>#</th>
-              <th className="py-2 text-left text-sm">Description</th>
-              <th className="py-2 text-right text-sm" style={{ width: "12%" }}>Qty</th>
-              <th className="py-2 text-right text-sm" style={{ width: "20%" }}>Unit Price (AED)</th>
-              <th className="py-2 text-right text-sm" style={{ width: "20%" }}>Amount (AED)</th>
+            <tr className="text-xs font-semibold text-brand-400 border-b border-brand-100">
+              <th className="py-2 text-left">Date</th>
+              <th className="py-2 text-right">Amount</th>
+              <th className="py-2 text-left">Method</th>
+              <th className="py-2 w-8" />
             </tr>
           </thead>
           <tbody>
-            {form.items
-              .filter((i) => i.description.trim())
-              .map((it, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid #DDD" }}>
-                  <td className="py-2 text-sm">{i + 1}</td>
-                  <td className="py-2 text-sm">{it.description}</td>
-                  <td className="py-2 text-right text-sm">{it.qty}</td>
-                  <td className="py-2 text-right text-sm">{aed(it.unit_price)}</td>
-                  <td className="py-2 text-right text-sm font-bold">{aed(it.qty * it.unit_price)}</td>
-                </tr>
-              ))}
-            <tr style={{ borderTop: "2px solid #222" }}>
-              <td colSpan={4} className="py-3 text-right font-bold">TOTAL (AED):</td>
-              <td className="py-3 text-right font-bold text-lg">{aed(total)}</td>
-            </tr>
+            {rows.map((p) => (
+              <tr key={p.id} className="border-b border-brand-50">
+                <td className="py-2">{fmtDate(p.paid_at)}</td>
+                <td className="py-2 text-right font-semibold tabular-nums">{aed(p.amount)}</td>
+                <td className="py-2 capitalize">{p.method || "—"}</td>
+                <td className="py-2">
+                  <button
+                    aria-label="Remove payment"
+                    className="text-danger hover:bg-danger/10 rounded p-1 cursor-pointer"
+                    onClick={() => remove(p.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
-
-        {form.terms && (
-          <div className="mb-6">
-            <p className="font-bold text-sm mb-2">Terms & Conditions:</p>
-            <p className="text-sm whitespace-pre-line" style={{ lineHeight: 1.6 }}>
-              {form.terms}
-            </p>
-          </div>
-        )}
-
-        <p className="mb-4">
-          Please confirm acceptance of this order by signing and returning a copy of this letter.
-        </p>
-
-        {form.expected_date && (
-          <p className="mb-4">
-            <strong>Expected Delivery Date:</strong> {new Date(form.expected_date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
-          </p>
-        )}
-
-        {form.notes && (
-          <p className="mb-4 italic text-brand-600">{form.notes}</p>
-        )}
-
-        <p className="mb-2">Yours faithfully,</p>
-        <p className="mb-1 font-bold">{form.company_name || "Your Company"}</p>
-
-        <div className="mt-12 grid grid-cols-2 gap-8">
-          <div>
-            <div style={{ borderTop: "1px solid #222" }} className="pt-2">
-              <p className="text-xs text-brand-400">Authorized Signature</p>
-              <p className="text-xs text-brand-400">Name: _________________</p>
-              <p className="text-xs text-brand-400">Date: _________________</p>
-            </div>
-          </div>
-          <div>
-            {form.company_stamp && (
-              <img src={form.company_stamp} alt="Company stamp" className="h-20 mx-auto object-contain mb-2" />
-            )}
-            {form.company_signature && (
-              <img src={form.company_signature} alt="Authorized signature" className="h-14 mx-auto object-contain mb-2 opacity-80" />
-            )}
-            <div style={{ borderTop: "1px solid #222" }} className="pt-2">
-              <p className="text-xs text-brand-400">Company Stamp</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
     </Modal>
   );
 }
@@ -1756,6 +1953,7 @@ function SupplierQuickAdd({
         address: address.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        tax_id: trn.trim() || undefined,
       });
       toast.success("Supplier added.");
       onSaved({
@@ -1764,6 +1962,7 @@ function SupplierQuickAdd({
         address: address.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
+        tax_id: trn.trim() || null,
         created_at: new Date().toISOString(),
       } as Supplier);
     } catch (e) {

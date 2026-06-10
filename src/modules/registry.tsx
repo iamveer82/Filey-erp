@@ -25,6 +25,7 @@ import {
   CreditCard,
   Banknote,
   Mail,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
@@ -48,6 +49,7 @@ const MyFilesPage = lazy(() => import("../pages/MyFiles"));
 const Settings = lazy(() => import("../pages/Tools"));
 const DeliveryChallan = lazy(() => import("../pages/DeliveryChallan"));
 const PaymentReceipt = lazy(() => import("../pages/PaymentReceipt"));
+const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
 const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
 const BankAccounts = lazy(() => import("../pages/BankAccounts"));
 const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
@@ -237,6 +239,15 @@ export const MODULES: AppModule[] = [
     icon: CreditCard,
     to: "/payment-receipts",
     Component: PaymentReceipt,
+  },
+  {
+    id: "declaration",
+    label: "Declaration Letter",
+    short: "Declaration",
+    desc: "VAT supply declaration letters in the standard UAE format",
+    icon: ScrollText,
+    to: "/declaration",
+    Component: DeclarationLetter,
   },
   {
     id: "cheques",

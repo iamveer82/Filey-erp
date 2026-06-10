@@ -2772,11 +2772,14 @@ export function downloadFile(f: OutFile) {
  *  by the Download action and by auto-save-to-My-Files so both produce an
  *  identical document. */
 export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<OutFile> {
-  // Reset any CSS transform scaling (from FitPreview zoom) before capture
+  // Reset any CSS scaling (from FitPreview) before capture so the export is
+  // rendered at native A4 — FitPreview fits the on-screen sheet with `zoom`.
   const prevTransform = el.style.transform;
   const prevTransformOrigin = el.style.transformOrigin;
+  const prevZoom = el.style.zoom;
   el.style.transform = 'none';
   el.style.transformOrigin = 'top left';
+  el.style.zoom = '1';
   try {
     const { toPng } = await import("html-to-image");
     const { PDFDocument } = await import("pdf-lib");
@@ -2812,9 +2815,10 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
     const bytes = await pdfDoc.save();
     return { name: `${name}.pdf`, bytes };
   } finally {
-    // Always restore the transform, even if capture throws.
+    // Always restore the scaling, even if capture throws.
     el.style.transform = prevTransform;
     el.style.transformOrigin = prevTransformOrigin;
+    el.style.zoom = prevZoom;
   }
 }
 
