@@ -115,42 +115,20 @@
   .card-dark {
     @apply relative rounded-2xl bg-ink text-white shadow-bento ring-1 ring-inset ring-white/10 p-5;
   }
+  /* Quiet accent card — white surface with a primary left rule. */
   .card-accent {
-    @apply relative overflow-hidden rounded-2xl bg-primary-300 shadow-bento p-5 text-ink;
+    @apply relative overflow-hidden rounded-2xl bg-white border border-brand-200/80
+           border-l-4 border-l-primary-400 shadow-bento p-5 text-ink
+           dark:bg-[#24262C] dark:border-[#3A3D45] dark:border-l-primary-400;
   }
 
-  /* ── 21st.dev-style glow & bento enhancements ── */
-  .glow-border {
-    position: relative;
-  }
-  .glow-border::before {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(99,102,241,0.4), rgba(168,85,247,0.2), rgba(99,102,241,0.4));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-  .glow-border:hover::before {
-    opacity: 1;
-  }
-  .ambient-glow {
-    box-shadow: 0 0 40px -10px rgba(99,102,241,0.15);
-  }
-  .text-glow {
-    text-shadow: 0 0 20px rgba(99,102,241,0.3);
-  }
+  /* Legacy decorative hooks — neutralized for the minimal theme. Kept as
+     no-ops so stale class references render quietly until removed. */
+  .glow-border,
+  .ambient-glow,
+  .text-glow,
   .lift-hover {
-    @apply transition-transform duration-200;
-  }
-  .lift-hover:hover {
-    transform: translateY(-2px);
+    /* intentionally no decoration */
   }
 }
 
@@ -164,13 +142,9 @@
   animation: shimmer 2s infinite;
 }
 
-/* Dot pattern background */
+/* Dot pattern background — neutralized (minimal theme). */
 .dot-pattern {
-  background-image: radial-gradient(circle, #e7e7ee 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-.dark .dot-pattern {
-  background-image: radial-gradient(circle, #3A3D45 1px, transparent 1px);
+  background-image: none;
 }
 
 /* ── Paper texture for invoice/quote previews ── */
@@ -210,25 +184,17 @@
   isolation: isolate;
 }
 
-/* ── Pulse animation for AI briefing card ── */
-@keyframes pulse-gold {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(255, 214, 0, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(255, 214, 0, 0);
-  }
-}
+/* ── AI briefing pulse — neutralized (minimal theme: no attention animations). ── */
 .animate-pulse-gold {
-  animation: pulse-gold 2.5s ease-in-out infinite;
+  animation: none;
 }
 
-/* ── Gradient empty-state background ── */
+/* ── Empty-state background — flat quiet surface (minimal theme). ── */
 .empty-gradient {
-  background: linear-gradient(135deg, #FFFBEB 0%, #FFF3C4 30%, #FDFBF7 70%, #FFF8E1 100%);
+  background: #fafafa;
 }
 .dark .empty-gradient {
-  background: linear-gradient(135deg, #1C1912 0%, #211D15 40%, #15161A 100%);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 @layer components {
@@ -331,32 +297,15 @@
     @apply border-primary-300 bg-primary-100 text-primary-700;
   }
 
-  /* Frosted chrome — sidebar, top bar, sticky surfaces. */
+  /* Chrome surfaces — flat white, no blur (minimal theme). */
   .glass {
-    @apply bg-white/70 backdrop-blur-xl border border-white/60 shadow-bento
-           dark:bg-[#24262C]/70 dark:border-white/10;
+    @apply bg-white border border-brand-200/80 shadow-bento
+           dark:bg-[#24262C] dark:border-[#3A3D45];
   }
-  /* Gradient text for hero metrics / brand emphasis. */
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-br from-[#B88C00] via-[#E0AE00] to-[#FFBA3D];
-  }
-  /* 21st.dev-style animated gradient — background-position animation for hero titles. */
+  /* Brand emphasis text — solid accent ink, no gradients (minimal theme). */
+  .text-gradient,
   .text-gradient-animated {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(
-      90deg,
-      #B88C00 0%,
-      #E0AE00 25%,
-      #FFBA3D 50%,
-      #F6C954 75%,
-      #B88C00 100%
-    );
-    background-size: 200% 100%;
-    animation: gradient-shift 3s ease-in-out infinite;
-  }
-  @keyframes gradient-shift {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
+    @apply text-primary-700 dark:text-primary-300;
   }
 
   /* Brand chrome stays on the display face (Poppins); body text and
@@ -384,14 +333,10 @@
     @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-100 align-middle tabular-nums
            dark:text-[#DDE0E4] dark:border-[#2A2C33];
   }
+  /* Row hover — quiet background shift only (minimal theme). */
   .row-hover {
-    @apply transition-all duration-200 ease-out hover:bg-brand-50/70
-           dark:hover:bg-white/5 border-l-[3px] border-l-transparent;
-    &:hover {
-      transform: scale(1.005);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-      border-left-color: #FFD600;
-    }
+    @apply transition-colors duration-150 hover:bg-brand-50/70
+           dark:hover:bg-white/5;
   }
 }
 

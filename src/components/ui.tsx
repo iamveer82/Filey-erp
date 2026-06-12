@@ -1,15 +1,14 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence, useInView, animate } from "framer-motion";
 import {
   X,
   ArrowUpRight,
   ArrowDownRight,
-  SlidersHorizontal,
   Users,
   Lock,
   Loader2,
   AlertCircle,
+  Inbox,
 } from "lucide-react";
 import { cn } from "../lib/format";
 import FitText from "./FitText";
@@ -91,12 +90,7 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 100, damping: 20 }}
-      className="flex items-end justify-between mb-6 gap-4 flex-wrap"
-    >
+    <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
       <div>
         <h1 className="text-[28px] leading-9 font-bold text-ink">{title}</h1>
         {subtitle && (
@@ -104,7 +98,7 @@ export function PageHeader({
         )}
       </div>
       {action}
-    </motion.div>
+    </div>
   );
 }
 
@@ -162,53 +156,20 @@ export function MetricCard({
   rawValue?: number;
   formatValue?: (n: number) => string;
 }) {
-  const nodeRef = useRef<HTMLSpanElement>(null);
-  const inView = useInView(nodeRef, { once: true, margin: "-40px" });
-
-  useEffect(() => {
-    if (!inView || rawValue === undefined || !formatValue) return;
-    const controls = animate(0, rawValue, {
-      duration: 1.0,
-      ease: [0.2, 0, 0.2, 1],
-      onUpdate(v) {
-        if (nodeRef.current) {
-          nodeRef.current.textContent = formatValue(Math.round(v));
-        }
-      },
-    });
-    return () => controls.stop();
-  }, [inView, rawValue, formatValue]);
-
-  const animated = rawValue !== undefined && formatValue !== undefined;
-
   return (
     <SpotlightCard>
       <div className="p-5">
         <div className="flex items-start gap-3">
           {icon && (
-            <motion.div
-              whileHover={{ scale: 1.08, rotate: 3 }}
-              transition={{ type: "spring", stiffness: 300 }}
-              className={cn("rounded-xl p-2.5 shrink-0", iconClass)}
-            >
+            <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>
               {icon}
-            </motion.div>
+            </div>
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold text-brand-500">{label}</p>
-            {animated ? (
-              <span
-                ref={nodeRef}
-                className="font-display text-ink mt-1 tabular-nums block"
-                style={{ fontSize: 24, lineHeight: 1.15, whiteSpace: "nowrap", fontWeight: 700 }}
-              >
-                {value}
-              </span>
-            ) : (
-              <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
-                {value}
-              </FitText>
-            )}
+            <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
+              {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
+            </FitText>
           </div>
         </div>
         {delta !== undefined && (
@@ -227,21 +188,19 @@ export function InfoCard({
   action,
   children,
   className,
-  tone = "default",
 }: {
   title: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Kept for API compatibility — all tones render the quiet surface now. */
   tone?: "default" | "accent" | "dark";
 }) {
   return (
     <SpotlightCard className={className}>
       <div className="p-5">
         <div className="flex items-center justify-between mb-4">
-          <p className={cn("font-display font-bold", tone === "dark" ? "text-white" : "text-ink")}>
-            {title}
-          </p>
+          <p className="font-display font-bold text-ink">{title}</p>
           {action}
         </div>
         {children}
@@ -419,58 +378,37 @@ export function DataTable<T>({
   const colCount = columns.length + (selectable ? 1 : 0);
   return (
     <div className="card overflow-hidden p-0">
-      <AnimatePresence>
-        {selectable && sel.size > 0 && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 350, damping: 32 }}
-            className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-primary-100 border-b border-primary-200 shadow-md overflow-hidden"
+      {selectable && sel.size > 0 && (
+        <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-brand-50 border-b border-brand-200 dark:bg-white/5 dark:border-[#3A3D45]">
+          <span className="text-sm font-semibold text-ink">
+            {sel.size} selected
+          </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {bulkActions!.map((a) => (
+              <button
+                key={a.label}
+                disabled={running}
+                onClick={() => runBulk(a)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
+                  a.danger
+                    ? "text-danger hover:bg-danger/10"
+                    : "text-brand-700 hover:bg-white dark:hover:bg-white/10"
+                )}
+              >
+                {a.icon}
+                {a.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setSel(new Set())}
+            className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
           >
-            <motion.span
-              initial={{ x: -12, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.05 }}
-              className="text-sm font-semibold text-primary-700"
-            >
-              {sel.size} selected
-            </motion.span>
-            <motion.div
-              initial={{ x: -12, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-              className="flex items-center gap-1.5 flex-wrap"
-            >
-              {bulkActions!.map((a) => (
-                <button
-                  key={a.label}
-                  disabled={running}
-                  onClick={() => runBulk(a)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
-                    a.danger
-                      ? "text-danger hover:bg-danger/10"
-                      : "text-brand-700 hover:bg-white"
-                  )}
-                >
-                  {a.icon}
-                  {a.label}
-                </button>
-              ))}
-            </motion.div>
-            <motion.button
-              initial={{ x: -12, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: 0.15 }}
-              onClick={() => setSel(new Set())}
-              className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
-            >
-              Clear
-            </motion.button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            Clear
+          </button>
+        </div>
+      )}
       <div
         ref={scrollRef}
         className={cn(
@@ -536,23 +474,9 @@ export function DataTable<T>({
               <tr>
                 <td className="td py-14" colSpan={colCount}>
                   <div className="flex flex-col items-center gap-3 text-center px-4">
-                    <svg
-                      width="120"
-                      height="90"
-                      viewBox="0 0 120 90"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="opacity-70"
-                    >
-                      <rect x="18" y="4" width="84" height="58" rx="6" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
-                      <rect x="28" y="14" width="48" height="4" rx="2" fill="#E0AE00" opacity="0.5" />
-                      <rect x="28" y="24" width="64" height="3" rx="1.5" fill="#D4D4D8" />
-                      <rect x="28" y="32" width="52" height="3" rx="1.5" fill="#D4D4D8" />
-                      <rect x="28" y="40" width="40" height="3" rx="1.5" fill="#D4D4D8" />
-                      <rect x="28" y="48" width="56" height="3" rx="1.5" fill="#D4D4D8" />
-                      <circle cx="60" cy="78" r="8" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
-                      <path d="M57 78l2 2 4-4" stroke="#B88C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5">
+                      <Inbox size={24} className="text-brand-300 dark:text-brand-500" />
+                    </div>
                     <div>
                       <p className="text-sm font-bold text-brand-600">
                         {empty ?? "Nothing here yet"}
@@ -740,14 +664,7 @@ export function Modal({
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-4 px-6 py-4 relative">
-          {/* Gradient border along the top of the modal header */}
-          <div
-            className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl"
-            style={{
-              background: "linear-gradient(90deg, #FFD600 0%, #FFBA3D 40%, #E0AE00 70%, #B88C00 100%)",
-            }}
-          />
+        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-brand-100 dark:border-[#2A2C33]">
           <h2 className="text-lg font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
@@ -803,38 +720,21 @@ export function FormField({
         {required && <span className="text-danger ml-0.5">*</span>}
       </label>
       {children}
-      <AnimatePresence mode="wait">
-        {error ? (
-          <motion.p
-            key="err"
-            initial={{ height: 0, opacity: 0, y: -4 }}
-            animate={{ height: "auto", opacity: 1, y: 0 }}
-            exit={{ height: 0, opacity: 0, y: -4 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            className="text-xs font-medium text-danger mt-1.5 flex items-center gap-1"
-          >
-            <AlertCircle size={12} className="shrink-0" />
-            {error}
-          </motion.p>
-        ) : hint ? (
-          <motion.p
-            key="hint"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-xs text-brand-400 mt-1.5"
-          >
-            {hint}
-          </motion.p>
-        ) : null}
-      </AnimatePresence>
+      {error ? (
+        <p className="text-xs font-medium text-danger mt-1.5 flex items-center gap-1">
+          <AlertCircle size={12} className="shrink-0" />
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="text-xs text-brand-400 mt-1.5">{hint}</p>
+      ) : null}
     </div>
   );
 }
 
-/* ---------- Bold dashboard cards (design.md §05) ---------- */
+/* ---------- Dashboard breakdown cards (minimal theme) ---------- */
 
-/** Vivid solid-yellow KPI card: stacked value/label rows + a mini
- *  bar-chart flourish, e.g. the Orders card. */
+/** Quiet KPI breakdown card: stacked value/label rows on a white surface. */
 export function OrdersStatCard({
   title,
   items,
@@ -843,36 +743,21 @@ export function OrdersStatCard({
   items: [string, number][];
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-primary-400 text-ink p-5 shadow-bento">
-      <div className="flex items-center justify-between mb-4">
-        <p className="font-bold text-lg">{title}</p>
-        <span className="grid place-items-center rounded-xl border border-ink/20 p-2">
-          <SlidersHorizontal size={16} />
-        </span>
-      </div>
-      <div className="relative z-10 grid grid-cols-2 gap-x-6 gap-y-4">
+    <div className="card">
+      <p className="font-bold text-ink mb-4">{title}</p>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4">
         {items.map(([k, v]) => (
           <div key={k}>
-            <p className="text-3xl font-bold leading-none">{v}</p>
-            <p className="text-xs font-semibold text-ink/60 mt-1">{k}</p>
+            <p className="text-2xl font-bold leading-none text-ink tabular-nums">{v}</p>
+            <p className="text-xs font-semibold text-brand-400 mt-1">{k}</p>
           </div>
-        ))}
-      </div>
-      <div className="pointer-events-none absolute bottom-4 right-4 flex items-end gap-1 h-16 opacity-30">
-        {[40, 65, 30, 80, 55, 95].map((h, i) => (
-          <span
-            key={i}
-            className="w-2.5 rounded-sm bg-ink"
-            style={{ height: `${h}%` }}
-          />
         ))}
       </div>
     </div>
   );
 }
 
-/** Vivid orange breakdown card: dot legend + a big number badge and a
- *  soft decorative pattern, e.g. the Stock card. */
+/** Quiet breakdown card: dot legend + total tile on a white surface. */
 export function StockBreakdownCard({
   title,
   total,
@@ -883,44 +768,25 @@ export function StockBreakdownCard({
   items: [string, number, string][];
 }) {
   return (
-    <div
-      className="relative overflow-hidden rounded-2xl p-5 text-white shadow-bento"
-      style={{
-        background: "linear-gradient(135deg,#FFB23D 0%,#F2691E 100%)",
-      }}
-    >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-20"
-        style={{
-          backgroundImage:
-            "radial-gradient(currentColor 1.5px, transparent 1.5px)",
-          backgroundSize: "14px 14px",
-          color: "#7a2f06",
-        }}
-      />
-      <div className="relative flex items-center justify-between mb-4">
-        <p className="font-bold text-lg">{title}</p>
-        <span className="grid place-items-center rounded-xl border border-white/30 p-2">
-          <SlidersHorizontal size={16} />
-        </span>
-      </div>
-      <div className="relative flex items-center gap-5">
+    <div className="card">
+      <p className="font-bold text-ink mb-4">{title}</p>
+      <div className="flex items-center gap-5">
         <ul className="flex-1 space-y-2.5">
           {items.map(([k, v, dot]) => (
             <li
               key={k}
-              className="flex items-center justify-between text-sm"
+              className="flex items-center justify-between text-sm text-brand-700"
             >
               <span className="flex items-center gap-2 font-medium">
                 <span className={`w-2.5 h-2.5 rounded-full ${dot}`} />
                 {k}
               </span>
-              <span className="font-bold">{v}</span>
+              <span className="font-bold tabular-nums">{v}</span>
             </li>
           ))}
         </ul>
-        <div className="grid place-items-center rounded-2xl bg-primary-400 text-ink w-16 h-16 shrink-0 shadow-bento">
-          <span className="text-2xl font-bold">{total}</span>
+        <div className="grid place-items-center rounded-2xl bg-brand-50 text-ink w-16 h-16 shrink-0 dark:bg-white/5">
+          <span className="text-2xl font-bold tabular-nums">{total}</span>
         </div>
       </div>
     </div>

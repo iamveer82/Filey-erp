@@ -326,14 +326,9 @@ export default function ToolsPage() {
                 </button>
               ))}
             </div>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              onClick={askFiley}
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-white cursor-pointer"
-              style={{ background: "linear-gradient(135deg,#8B5CF6,#7C4DFF)" }}
-            >
+            <button onClick={askFiley} className="btn-primary mt-3 w-full">
               Ask Filey Anything <ArrowRight size={14} />
-            </motion.button>
+            </button>
           </div>
 
           {/* Smart recommendations */}
@@ -477,10 +472,9 @@ function ToolMiniCard({
   onUse: () => void;
 }) {
   return (
-    <motion.button
+    <button
       onClick={onUse}
-      whileHover={{ y: -3 }}
-      className="group flex flex-col gap-2 rounded-3xl border border-black/[0.04] bg-white p-4 text-left shadow-bento transition-shadow hover:shadow-bento-hover dark:border-white/[0.06] dark:bg-[#1E2025] cursor-pointer"
+      className="group flex flex-col gap-2 rounded-2xl border border-brand-200/80 bg-white p-4 text-left shadow-bento transition-shadow hover:shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025] cursor-pointer"
     >
       <span
         className={`grid h-12 w-12 place-items-center rounded-2xl transition-colors ${badgeBg} ${badgeFg}`}
@@ -501,7 +495,7 @@ function ToolMiniCard({
           }}
         />
       </div>
-    </motion.button>
+    </button>
   );
 }
 

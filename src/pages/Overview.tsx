@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Boxes,
   Users,
@@ -587,12 +586,13 @@ export default function Overview() {
       const d = new Date(cutoff + i * bucketMs + bucketMs / 2);
       buckets.push({ name: labelFn(d), key: keyFn(d), items: 0 });
     }
-    const byKey = new Map(buckets.map((b) => [b.key, b]));
+    // Assign orders by time-range index — label keys can collide across
+    // period boundaries (e.g. two quarter buckets in the same month), so
+    // key-based matching would silently drop counts into one bucket.
     for (const o of orders) {
-      const d = new Date(o.created_at);
-      const k = keyFn(d);
-      const b = byKey.get(k);
-      if (b) b.items += 1;
+      const t = new Date(o.created_at).getTime();
+      const idx = Math.floor((t - cutoff) / bucketMs);
+      if (idx >= 0 && idx < numBuckets) buckets[idx].items += 1;
     }
     return buckets.map(({ name, items }) => ({ name, items }));
   }, [orders, ordersPeriod]);
@@ -746,17 +746,11 @@ export default function Overview() {
             <div className="h-40 mt-4">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={trend}>
-                  <defs>
-                    <linearGradient id="ov" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#FFD600" stopOpacity={0.5} />
-                      <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 12, fill: "#A39B8C" }} axisLine={false} tickLine={false} width={40} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #DEDBD2", fontSize: 13 }} />
-                  <Area type="monotone" dataKey="items" stroke="#E0AE00" strokeWidth={2.5} fill="url(#ov)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E7E7EE" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#9A9A9A" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: "#9A9A9A" }} axisLine={false} tickLine={false} width={40} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #E7E7EE", fontSize: 13 }} />
+                  <Area type="monotone" dataKey="items" stroke="#0A0A0A" strokeWidth={2} fill="rgba(10,10,10,0.06)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -766,10 +760,7 @@ export default function Overview() {
         return <CompanyMessages />;
       case "activity":
         return (
-          <InfoCard
-            title="Recent activity"
-            action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
-          >
+          <InfoCard title="Recent activity">
             <ul className="space-y-3.5">
               {activity.length === 0 && <li className="text-sm text-brand-400">No activity yet.</li>}
               {activity.map((a, i) => (
@@ -790,10 +781,10 @@ export default function Overview() {
             title="Stock"
             total={stock.total}
             items={[
-              ["In stock", stock.inStock, "bg-emerald-300"],
-              ["Low stock", stock.low, "bg-primary-400"],
-              ["Out of stock", stock.out, "bg-white"],
-              ["Dead stock", stock.dead, "bg-ink/40"],
+              ["In stock", stock.inStock, "bg-success"],
+              ["Low stock", stock.low, "bg-warning"],
+              ["Out of stock", stock.out, "bg-danger"],
+              ["Dead stock", stock.dead, "bg-brand-300"],
             ]}
           />
         );
@@ -801,21 +792,20 @@ export default function Overview() {
         return (
           <InfoCard
             title="Reorder spotlight"
-            tone="dark"
-            action={<span className="text-[11px] font-semibold text-primary-300">{lowStock.length} flagged</span>}
+            action={<span className="text-[11px] font-semibold text-brand-400">{lowStock.length} flagged</span>}
           >
             {lowStock[0] ? (
               <div>
-                <div className="flex items-center gap-2 text-primary-300 text-xs font-semibold"><Star size={13} /> High demand</div>
-                <p className="text-lg font-bold mt-2">{lowStock[0].name}</p>
-                <p className="text-sm text-white/60 mt-0.5">{lowStock[0].category ?? "Uncategorised"} · SKU {lowStock[0].sku}</p>
-                <div className="mt-4 flex items-center justify-between rounded-xl bg-white/10 p-3">
-                  <span className="text-xs text-white/70">In stock</span>
-                  <span className="font-bold">{lowStock[0].quantity} / reorder {lowStock[0].reorder_level}</span>
+                <div className="flex items-center gap-2 text-warning text-xs font-semibold"><Star size={13} /> High demand</div>
+                <p className="text-lg font-bold text-ink mt-2">{lowStock[0].name}</p>
+                <p className="text-sm text-brand-400 mt-0.5">{lowStock[0].category ?? "Uncategorised"} · SKU {lowStock[0].sku}</p>
+                <div className="mt-4 flex items-center justify-between rounded-xl bg-brand-50 p-3 dark:bg-white/5">
+                  <span className="text-xs text-brand-500">In stock</span>
+                  <span className="font-bold text-ink">{lowStock[0].quantity} / reorder {lowStock[0].reorder_level}</span>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-white/60">All products above reorder level. Nice.</p>
+              <p className="text-sm text-brand-400">All products above reorder level. Nice.</p>
             )}
           </InfoCard>
         );
@@ -823,7 +813,14 @@ export default function Overview() {
         return (
           <InfoCard
             title="Top low-stock items"
-            action={<span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700">View all <ArrowUpRight size={12} /></span>}
+            action={
+              <button
+                onClick={() => nav("/inventory")}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700 hover:underline cursor-pointer"
+              >
+                View all <ArrowUpRight size={12} />
+              </button>
+            }
           >
             <ul className="space-y-3">
               {(lowStock.length ? lowStock : products).slice(0, 4).map((p) => (
@@ -915,12 +912,9 @@ export default function Overview() {
       )}
       {initialLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-          {visible.map((id, i) => (
-              <motion.div
+          {visible.map((id) => (
+              <div
                 key={id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
                 className={spanClass(effSpan(id))}
               >
                 <div className="card overflow-hidden">
@@ -938,7 +932,7 @@ export default function Overview() {
                     </div>
                   </div>
                 </div>
-              </motion.div>
+              </div>
             ))}
         </div>
       )}
@@ -958,12 +952,9 @@ export default function Overview() {
             ref={gridRef}
             className="grid grid-cols-2 lg:grid-cols-4 gap-4 items-start"
           >
-            {visible.map((id, i) => (
-              <motion.div
+            {visible.map((id) => (
+              <div
                 key={id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ type: "spring", stiffness: 100, damping: 20, delay: i * 0.04 }}
                 className={spanClass(effSpan(id))}
               >
                 <WidgetItem
@@ -983,7 +974,7 @@ export default function Overview() {
                 >
                   {renderWidget(id)}
                 </WidgetItem>
-              </motion.div>
+              </div>
             ))}
           </div>
         </SortableContext>

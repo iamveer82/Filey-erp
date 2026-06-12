@@ -84,55 +84,41 @@ export default {
         caption: ["12px", { lineHeight: "18px" }],
       },
       borderRadius: {
-        // Rounder, softer scale (theme --radius: 1.4rem).
-        sm: "0.5rem",
-        DEFAULT: "0.75rem",
-        lg: "0.9rem",
-        xl: "0.95rem",
-        "2xl": "1.4rem",
-        "3xl": "1.75rem",
+        // Minimal scale — buttons 12px (xl), cards 16px (2xl).
+        sm: "0.375rem",
+        DEFAULT: "0.5rem",
+        lg: "0.625rem",
+        xl: "0.75rem",
+        "2xl": "1rem",
+        "3xl": "1.25rem",
       },
       boxShadow: {
-        // Theme shadow: 2px offset, tight blur, low opacity.
-        bento: "0 2px 3px 0 rgb(0 0 0 / 0.08)",
-        "bento-hover": "0 4px 12px 0 rgb(0 0 0 / 0.12)",
-        glow: "0 6px 18px rgba(255,214,0,0.28)",
-        "glow-sm": "0 3px 10px rgba(255,214,0,0.20)",
-        sheen: "inset 0 1px 0 0 rgba(255,255,255,0.6)",
-        "sheen-dark": "inset 0 1px 0 0 rgba(255,255,255,0.05)",
+        // Quiet elevation only — no colored glows.
+        bento: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "bento-hover": "0 2px 8px 0 rgb(0 0 0 / 0.08)",
+        glow: "0 2px 8px 0 rgb(0 0 0 / 0.08)",
+        "glow-sm": "0 1px 4px 0 rgb(0 0 0 / 0.06)",
+        sheen: "none",
+        "sheen-dark": "none",
       },
       backgroundImage: {
-        // Warm cream page wash (light) — depth without clutter.
-        "app-light":
-          "radial-gradient(1200px 600px at 12% -10%, #FBF6EA 0%, transparent 55%), radial-gradient(1000px 700px at 100% 0%, #F7EFDC 0%, transparent 50%), linear-gradient(180deg, #F5EDDA 0%, #F1E8D2 100%)",
-        "app-dark":
-          "radial-gradient(1100px 600px at 10% -10%, #211D15 0%, transparent 55%), radial-gradient(1000px 700px at 100% 0%, #1C1912 0%, transparent 50%), linear-gradient(180deg, #17150F 0%, #141109 100%)",
-        // Yellow→amber CTA / hero highlight.
-        cta: "linear-gradient(135deg, #FFE066 0%, #FFD600 45%, #FFBA3D 100%)",
-        // Glassy card top-light sheen.
-        "card-sheen":
-          "linear-gradient(180deg, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0) 28%)",
+        // `bg-cta` kept as a token but resolves to flat brand yellow.
+        cta: "linear-gradient(0deg, #FFD600, #FFD600)",
       },
       keyframes: {
-        // 100% resolves to `transform: none` so a finished entrance never
-        // leaves a containing block / stacking context behind it.
         "fade-up": {
-          "0%": { opacity: "0", transform: "translateY(10px)" },
-          "100%": { opacity: "1", transform: "none" },
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
         },
         "fade-in": {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
         },
-        "scale-in": {
-          "0%": { opacity: "0", transform: "scale(0.97)" },
-          "100%": { opacity: "1", transform: "none" },
-        },
       },
       animation: {
-        "fade-up": "fade-up 0.4s cubic-bezier(0.2,0,0.2,1) both",
-        "fade-in": "fade-in 0.25s ease-out both",
-        "scale-in": "scale-in 0.18s cubic-bezier(0.2,0,0.2,1) both",
+        // design.md motion: page content fades in ≤150ms, opacity only.
+        "fade-up": "fade-up 0.15s ease-out both",
+        "fade-in": "fade-in 0.15s ease-out both",
       },
     },
   },

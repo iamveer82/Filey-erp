@@ -476,10 +476,14 @@ export default function Inventory() {
                     tone="danger"
                     onClick={async (e) => {
                       e.preventDefault();
-                      if (!(await confirm({ title: "Delete product", message: `Delete ${p.name}? This cannot be undone.` }))) return;
-                      await erp.deleteProduct(p.id);
+                      if (!(await confirm({ title: "Delete product", message: `Delete ${p.name}? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
+                      try {
+                        await erp.deleteProduct(p.id);
+                        toast.success(`Deleted ${p.name}`);
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Failed to delete product");
+                      }
                       load();
-                      toast.success(`Deleted ${p.name}`);
                     }}
                   >
                     <Trash2 size={14} /> Delete product
@@ -517,18 +521,32 @@ export default function Inventory() {
         title="Import products"
         onClose={() => setImportOpen(false)}
         onImport={async (rows) => {
+          let ok = 0;
+          const failed: string[] = [];
           for (const r of rows) {
             if (!String(r.name ?? "").trim()) continue;
-            await erp.createProduct({
-              sku: String(r.sku ?? ""),
-              name: String(r.name ?? ""),
-              category: String(r.category ?? "") || undefined,
-              unit_price: Number(r.unit_price) || 0,
-              cost_price: Number(r.cost_price) || 0,
-              quantity: Number(r.quantity) || 0,
-              reorder_level: Number(r.reorder_level) || 0,
-              description: "",
-            } as Omit<Product, "id" | "created_at">);
+            try {
+              await erp.createProduct({
+                sku: String(r.sku ?? ""),
+                name: String(r.name ?? ""),
+                category: String(r.category ?? "") || undefined,
+                unit_price: Number(r.unit_price) || 0,
+                cost_price: Number(r.cost_price) || 0,
+                quantity: Number(r.quantity) || 0,
+                reorder_level: Number(r.reorder_level) || 0,
+                description: "",
+              } as Omit<Product, "id" | "created_at">);
+              ok++;
+            } catch {
+              failed.push(String(r.name));
+            }
+          }
+          if (failed.length) {
+            toast.error(
+              `Imported ${ok} product${ok === 1 ? "" : "s"}; ${failed.length} failed: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}`
+            );
+          } else if (ok) {
+            toast.success(`Imported ${ok} product${ok === 1 ? "" : "s"}.`);
           }
           load();
         }}

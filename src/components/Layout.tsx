@@ -7,11 +7,9 @@ import {
   type KeyboardEvent as RKeyboardEvent,
 } from "react";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Bell,
   Search,
-  Send,
   LogOut,
   UserRound,
   Settings,
@@ -537,30 +535,13 @@ export default function Layout({ children }: { children: ReactNode }) {
               }}
               onFocus={() => setSearchOpen(true)}
             />
-            {/* Morphing search/send indicator */}
             <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-400">
-              <AnimatePresence mode="popLayout" initial={false}>
-                <motion.span
-                  key={q ? "send" : "search"}
-                  initial={{ y: -16, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: 16, opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className="absolute inset-0"
-                >
-                  {q ? <Send size={16} /> : <Search size={16} />}
-                </motion.span>
-              </AnimatePresence>
+              <Search size={16} />
             </div>
 
-            <AnimatePresence>
-              {searchOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: "auto" }}
-                  exit={{ opacity: 0, y: -6, height: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover"
+            {searchOpen && (
+                <div
+                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover animate-fade-in"
                 >
                   <div className="max-h-[52vh] overflow-y-auto p-2">
                     {/* Quick actions (command palette) */}
@@ -630,9 +611,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                     </span>
                     <span>ESC to clear</span>
                   </div>
-                </motion.div>
+                </div>
               )}
-            </AnimatePresence>
           </div>
 
           <div className="flex items-center gap-3">
@@ -793,7 +773,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       {profile?.email ?? profile?.company ?? "Admin"}
                     </span>
                   </span>
-                  <span className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-violet-500 via-pink-500 to-amber-400 p-0.5">
+                  <span className="h-9 w-9 shrink-0 rounded-full border border-brand-200 dark:border-[#3A3D45] p-0.5">
                     {profile?.avatar ? (
                       <img
                         src={profile.avatar}
@@ -828,17 +808,9 @@ export default function Layout({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
           <Breadcrumbs />
           <div className="pb-4 pr-1">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={pathname}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.2, ease: [0.2, 0, 0.2, 1] }}
-              >
-                <ErrorBoundary>{children}</ErrorBoundary>
-              </motion.div>
-            </AnimatePresence>
+            <div key={pathname} className="animate-fade-in">
+              <ErrorBoundary>{children}</ErrorBoundary>
+            </div>
           </div>
         </main>
       </div>

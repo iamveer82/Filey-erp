@@ -31,9 +31,17 @@ import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
-const nextOrderNumber = () => {
+/** Next sequential order number for this year, derived from existing
+ *  orders — random suffixes collide and confuse customers. */
+const nextOrderNumber = (existing: Order[]) => {
   const y = new Date().getFullYear();
-  return `SO-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+  const max = existing.reduce((m, o) => {
+    const match = /^SO-(\d{4})-(\d+)$/.exec(o.order_number ?? "");
+    return match && Number(match[1]) === y
+      ? Math.max(m, parseInt(match[2], 10))
+      : m;
+  }, 0);
+  return `SO-${y}-${String(max + 1).padStart(4, "0")}`;
 };
 
 export default function Orders() {
@@ -197,10 +205,13 @@ export default function Orders() {
             key: "act",
             label: "",
             render: (o) => {
-              const next =
-                FLOW[(FLOW.indexOf(o.status.toLowerCase()) + 1) % FLOW.length];
+              const idx = FLOW.indexOf(o.status.toLowerCase());
+              // No forward transition from "cancelled" or unknown statuses —
+              // wrapping back to "draft" silently regressed orders.
+              const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
               return (
                 <div className="flex items-center gap-1">
+                  {next && (
                   <button
                     className="btn-ghost text-xs"
                     onClick={async () => {
@@ -214,6 +225,7 @@ export default function Orders() {
                   >
                     → {next}
                   </button>
+                  )}
                   <button
                     aria-label="Edit order"
                     className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
@@ -254,12 +266,14 @@ export default function Orders() {
         open={open}
         onClose={() => setOpen(false)}
         onSaved={load}
+        suggestedNumber={nextOrderNumber(orders)}
       />
 
       <BuildOrderModal
         open={buildOpen}
         onClose={() => setBuildOpen(false)}
         products={products}
+        suggestedNumber={nextOrderNumber(orders)}
         onSaved={() => {
           setBuildOpen(false);
           load();
@@ -613,11 +627,13 @@ function BuildOrderModal({
   onClose,
   products,
   onSaved,
+  suggestedNumber,
 }: {
   open: boolean;
   onClose: () => void;
   products: Product[];
   onSaved: () => void;
+  suggestedNumber: string;
 }) {
   const [customer, setCustomer] = useState("");
   const [busy, setBusy] = useState(false);
@@ -639,7 +655,7 @@ function BuildOrderModal({
     setBusy(true);
     try {
       await erp.createOrderWithItems(
-        nextOrderNumber(),
+        suggestedNumber,
         customer.trim(),
         lines.map((l) => ({
           product_id: l.id,
@@ -686,10 +702,12 @@ function OrderModal({
   open,
   onClose,
   onSaved,
+  suggestedNumber,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  suggestedNumber: string;
 }) {
   const { toast } = useUI();
   const [f, setF] = useState({
@@ -697,6 +715,15 @@ function OrderModal({
     customer_name: "",
     total: 0,
   });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setF({ order_number: "", customer_name: "", total: 0 });
+      setSaving(false);
+    }
+  }, [open]);
+
   return (
     <Modal open={open} onClose={onClose} title="New Sales Order">
       <div className="space-y-3">
@@ -705,7 +732,7 @@ function OrderModal({
             className="input"
             value={f.order_number}
             onChange={(e) => setF({ ...f, order_number: e.target.value })}
-            placeholder="SO-2026-0004"
+            placeholder={suggestedNumber}
           />
         </Field>
         <Field label="Customer Name *">
@@ -736,18 +763,26 @@ function OrderModal({
         </button>
         <button
           className="btn-primary"
-          disabled={!f.customer_name.trim()}
+          disabled={!f.customer_name.trim() || saving}
           onClick={async () => {
+            setSaving(true);
             try {
-              await erp.createOrder(f.order_number, f.customer_name, f.total);
+              await erp.createOrder(
+                f.order_number.trim() || suggestedNumber,
+                f.customer_name,
+                f.total
+              );
+              toast.success("Order created.");
               onSaved();
               onClose();
             } catch (e: any) {
               toast.error(e?.message || "Failed to create order");
+            } finally {
+              setSaving(false);
             }
           }}
         >
-          Save Order
+          {saving ? "Saving…" : "Save Order"}
         </button>
       </div>
     </Modal>
