@@ -218,7 +218,7 @@ export default function OrganizeStudio({
           )}
           {isDel && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="rounded-xl bg-danger/20 px-4 py-2 text-lg font-bold text-danger backdrop-blur-sm">
+              <span className="rounded-xl bg-danger/20 px-4 py-2 text-lg font-bold text-danger">
                 DELETED
               </span>
             </div>

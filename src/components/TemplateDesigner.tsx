@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
 import { Save, X, PaintBucket, Type, Layout, Eye, Plus, Upload, FileImage, Image, FileText, Pencil, GripHorizontal, ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "../lib/format";
 import { tools } from "../lib/api";
@@ -263,11 +262,7 @@ export default function TemplateDesigner({
   const previewScale = 0.35; // scale down for sidebar display
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 40 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 40 }}
-      transition={{ type: "spring", stiffness: 300, damping: 28 }}
+    <div
       className="card !p-5 space-y-5"
     >
       {/* Header */}
@@ -287,9 +282,7 @@ export default function TemplateDesigner({
       </div>
 
       {saved ? (
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
+        <div
           className="text-center py-8"
         >
           <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center mx-auto mb-3">
@@ -299,7 +292,7 @@ export default function TemplateDesigner({
           <p className="text-sm text-brand-400 mt-1">
             "{fileName || tpl.name}" is ready to use
           </p>
-        </motion.div>
+        </div>
       ) : step === "position" ? (
         <>
           {/* Back button */}
@@ -352,7 +345,7 @@ export default function TemplateDesigner({
                   key={sec.key}
                   onMouseDown={onDragStart(sec.key)}
                   className={cn(
-                    "absolute rounded-lg border-2 bg-white/80 backdrop-blur-sm px-2 py-1.5 flex items-center gap-1 cursor-grab active:cursor-grabbing transition-shadow select-none",
+                    "absolute rounded-lg border-2 bg-white/80 px-2 py-1.5 flex items-center gap-1 cursor-grab active:cursor-grabbing transition-shadow select-none",
                     isActive
                       ? "border-primary-400 shadow-lg shadow-primary-200/40 z-20 scale-105"
                       : "border-brand-200 shadow-sm hover:border-primary-300 hover:shadow-md z-10"
@@ -689,9 +682,7 @@ export default function TemplateDesigner({
             <>
               {/* Letterhead Tab */}
               {lhSaved ? (
-                <motion.div
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
+                <div
                   className="text-center py-8"
                 >
                   <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center mx-auto mb-3">
@@ -701,7 +692,7 @@ export default function TemplateDesigner({
                   <p className="text-sm text-brand-400 mt-1">
                     Toggle “Use letterhead” on any document to apply it.
                   </p>
-                </motion.div>
+                </div>
               ) : (
                 <>
                   <p className="text-xs text-brand-400 -mt-1">
@@ -722,6 +713,6 @@ export default function TemplateDesigner({
           )}
         </>
       )}
-    </motion.div>
+    </div>
   );
 }

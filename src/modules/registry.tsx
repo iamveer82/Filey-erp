@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
-const Overview = lazy(() => import("../pages/Overview"));
+const ModernOverview = lazy(() => import("../pages/ModernOverview"));
 const Inventory = lazy(() => import("../pages/Inventory"));
 const Orders = lazy(() => import("../pages/Orders"));
 const Invoicing = lazy(() => import("../pages/Invoicing"));
@@ -73,8 +73,8 @@ export const MODULES: AppModule[] = [
     short: "Overview",
     desc: "Inventory KPIs & operational snapshot",
     icon: LayoutGrid,
-    to: "/overview",
-    Component: Overview,
+    to: "/overview-modern",
+    Component: ModernOverview,
     core: true,
   },
   {

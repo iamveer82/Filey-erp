@@ -135,7 +135,7 @@ export default function CommandPalette() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-ink/40 p-4 pt-[12vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-ink/40 p-4 pt-[12vh]"
       onClick={() => setOpen(false)}
     >
       <div

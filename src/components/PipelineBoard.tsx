@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
 import {
   DndContext,
   DragOverlay,
@@ -66,20 +65,15 @@ function SortableDealCard({
   };
 
   return (
-    <motion.div
+    <div
       ref={setNodeRef}
       style={style}
       {...attributes}
-      animate={{
-        scale: isDragging ? 1.03 : 1,
-        boxShadow: isDragging
-          ? "0 20px 50px rgba(0,0,0,0.18)"
-          : "0 1px 3px rgba(0,0,0,0.04)",
-        opacity: isDragging ? 0.4 : 1,
-      }}
-      transition={{ type: "spring", stiffness: 400, damping: 30 }}
       onClick={() => onClick(deal)}
-      className="card !p-3 cursor-grab select-none transition-shadow hover:shadow-bento-hover active:cursor-grabbing"
+      className={
+        "card !p-3 cursor-grab select-none hover:shadow-bento-hover active:cursor-grabbing " +
+        (isDragging ? "opacity-50" : "")
+      }
     >
       <div className="flex items-start gap-2">
         <button
@@ -105,17 +99,13 @@ function SortableDealCard({
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
 function DealCardOverlay({ deal }: { deal: Deal }) {
   return (
-    <motion.div
-      initial={{ scale: 0.95, opacity: 0.7 }}
-      animate={{ scale: 1.05, opacity: 0.92 }}
-      className="card !p-3 shadow-bento-hover rotate-2 w-64"
-    >
+    <div className="card !p-3 shadow-bento-hover rotate-2 w-64">
       <div className="flex items-start gap-2">
         <GripVertical size={15} className="text-brand-300 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
@@ -135,7 +125,7 @@ function DealCardOverlay({ deal }: { deal: Deal }) {
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -293,20 +283,15 @@ export default function PipelineBoard({
           const total = list.reduce((a, o) => a + o.value, 0);
           const isOver = dragOverColumn === s.id;
           return (
-            <motion.div
+            <div
               key={s.id}
               data-column={s.id}
-              animate={{
-                backgroundColor: isOver
-                  ? "rgba(255,214,0,0.12)"
-                  : "rgba(0,0,0,0)",
-                borderColor: isOver
-                  ? "#E0AE00"
-                  : "rgba(0,0,0,0)",
-                scale: isOver ? 1.01 : 1,
-              }}
-              transition={{ type: "spring", stiffness: 400, damping: 30 }}
-              className="w-72 shrink-0 rounded-2xl border border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03] p-3"
+              className={
+                "w-72 shrink-0 rounded-2xl border bg-brand-50/60 dark:bg-white/[0.03] p-3 transition-colors " +
+                (isOver
+                  ? "border-primary-500 bg-primary-100/40"
+                  : "border-brand-200 dark:border-[#3A3D45]")
+              }
             >
               <div className="flex items-center justify-between px-1 mb-3">
                 <div className="flex items-center gap-2">
@@ -370,7 +355,7 @@ export default function PipelineBoard({
                   </button>
                 )}
               </div>
-            </motion.div>
+            </div>
           );
         })}
         {opps.length === 0 && (

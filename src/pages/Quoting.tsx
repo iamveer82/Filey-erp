@@ -350,7 +350,7 @@ export default function Quoting() {
         if (!p) return null;
         return (
           <div
-            className="absolute bg-white/78 backdrop-blur-[2px] rounded-xl px-4 py-3 shadow-sm"
+            className="absolute bg-white/78 rounded-xl px-4 py-3 shadow-sm"
             style={{ left: `${p.x}%`, top: `${p.y}%` }}
           >
             {children}
@@ -393,7 +393,7 @@ export default function Quoting() {
 
           {pos.items && (
             <div
-              className="absolute bg-white/82 backdrop-blur-[2px] rounded-xl p-4 shadow-sm overflow-auto"
+              className="absolute bg-white/82 rounded-xl p-4 shadow-sm overflow-auto"
               style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
             >
               <table className="w-full text-xs border-collapse">
@@ -430,7 +430,7 @@ export default function Quoting() {
 
           {pos.totals && (
             <div
-              className="absolute bg-white/80 backdrop-blur-[2px] rounded-xl px-4 py-2.5 shadow-sm"
+              className="absolute bg-white/80 rounded-xl px-4 py-2.5 shadow-sm"
               style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
             >
               <div className="text-xs">
@@ -1095,7 +1095,7 @@ export default function Quoting() {
           </div>
 
           {viewOpen && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+            <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4" onClick={() => setViewOpen(false)}>
               <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
                   <div className="flex items-center gap-3">

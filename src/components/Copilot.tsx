@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Send, X, Plus, NotepadText, MoreHorizontal, Pencil, Share2, Trash2, Paperclip } from "lucide-react";
 import { cn, fmtDate } from "../lib/format";
@@ -267,16 +266,10 @@ export default function Copilot() {
 
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            key="panel"
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.96 }}
-            transition={{ type: "spring", stiffness: 420, damping: 34 }}
-            className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
-          >
+      {open && (
+        <div
+          className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
+        >
             {/* header */}
             <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3 dark:border-[#2A2C33]">
               <button
@@ -329,15 +322,10 @@ export default function Copilot() {
             </div>
 
             {/* customizer */}
-            <AnimatePresence>
-              {customizing && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden border-b border-brand-100 dark:border-[#2A2C33]"
-                >
+            {customizing && (
+              <div
+                className="overflow-hidden border-b border-brand-100 dark:border-[#2A2C33]"
+              >
                   <div className="space-y-2.5 px-4 py-3">
                     <div className="field">
                       <label className="label">Assistant name</label>
@@ -378,9 +366,8 @@ export default function Copilot() {
                       Done
                     </button>
                   </div>
-                </motion.div>
+              </div>
               )}
-            </AnimatePresence>
 
             {/* body */}
             <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -576,20 +563,17 @@ export default function Copilot() {
                 </div>
               </div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
-      <motion.button
-        whileHover={{ scale: 1.04 }}
-        whileTap={{ scale: 0.96 }}
+      <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Filey AI assistant"
-        className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025]"
+        className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 shadow-bento-hover hover:bg-brand-50 dark:border-[#3A3D45] dark:bg-[#1E2025] dark:hover:bg-white/5 transition-colors"
       >
         <ColorOrb dimension="32px" tones={tones} />
         <span className="font-display text-sm font-bold text-ink">Ask AI</span>
-      </motion.button>
+      </button>
     </div>
   );
 }

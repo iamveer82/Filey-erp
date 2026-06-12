@@ -9,6 +9,9 @@ import {
   Loader2,
   AlertCircle,
   Inbox,
+  Check,
+  Circle as CircleIcon,
+  Search,
 } from "lucide-react";
 import { cn } from "../lib/format";
 import FitText from "./FitText";
@@ -198,9 +201,9 @@ export function InfoCard({
 }) {
   return (
     <SpotlightCard className={className}>
-      <div className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <p className="font-display font-bold text-ink">{title}</p>
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-display font-bold text-ink text-sm">{title}</p>
           {action}
         </div>
         {children}
@@ -417,7 +420,7 @@ export function DataTable<T>({
         )}
       >
         <table className="w-full">
-          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E] backdrop-blur-sm">          
+          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E]">          
             <tr>
               {selectable && (
                 <th className="th w-10">
@@ -649,7 +652,7 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
       onClick={onClose}
     >
       <div
@@ -849,5 +852,165 @@ export function PageSection({
       )}
       {children}
     </section>
+  );
+}
+
+/* ── 21st.dev-inspired primitives ──────────────────────────────────────────
+   Adapted from nyxbui/timeline + reui/hextaui table filters.              */
+
+/** Vertical timeline with status dots. Used in ModernOverview "Recent
+ *  activity" + any place a chronological feed is needed. */
+export type TimelineStatus = "done" | "current" | "error" | "default";
+
+export function Timeline({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <ul className={cn("space-y-1", className)}>{children}</ul>;
+}
+
+export function TimelineItem({
+  icon,
+  title,
+  subtitle,
+  status = "default",
+  meta,
+  last,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  status?: TimelineStatus;
+  meta?: ReactNode;
+  last?: boolean;
+}) {
+  const dotClass: Record<TimelineStatus, string> = {
+    done: "bg-success text-white border-success",
+    current: "bg-primary-500 text-white border-primary-500 ring-4 ring-primary-500/15",
+    error: "bg-danger text-white border-danger",
+    default: "bg-white text-brand-500 border-brand-200 dark:border-white/10 dark:bg-[#24262C]",
+  };
+  return (
+    <li className="relative flex gap-3 pb-4">
+      <div className="flex flex-col items-center shrink-0">
+        <div
+          className={cn(
+            "grid h-7 w-7 place-items-center rounded-full border-2 transition-all",
+            dotClass[status]
+          )}
+        >
+          {icon ?? (status === "done" ? <Check size={12} /> : <CircleIcon size={6} className="fill-current" />)}
+        </div>
+        {!last && (
+          <div className="w-px flex-1 bg-brand-200 dark:bg-white/10 mt-1" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1 pt-0.5">
+        <p className="text-sm text-ink leading-snug">{title}</p>
+        {subtitle && (
+          <p className="text-[11px] text-brand-400 mt-0.5">{subtitle}</p>
+        )}
+        {meta && <div className="mt-1.5">{meta}</div>}
+      </div>
+    </li>
+  );
+}
+
+/** Pill-shaped filter chip with optional count. Used in table filter bars. */
+export function FilterChip({
+  active,
+  onClick,
+  children,
+  count,
+  tone = "neutral",
+}: {
+  active?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+  count?: number | string;
+  tone?: "neutral" | "success" | "warn" | "danger" | "info";
+}) {
+  const tones: Record<string, string> = {
+    neutral: active
+      ? "bg-ink text-white border-ink dark:bg-white dark:text-ink"
+      : "bg-white text-brand-600 border-brand-200 hover:bg-brand-50 dark:bg-[#24262C] dark:border-white/10 dark:text-[#B6BAC1] dark:hover:bg-white/5",
+    success: active
+      ? "bg-success text-white border-success"
+      : "bg-success/10 text-success border-success/20 hover:bg-success/20",
+    warn: active
+      ? "bg-warning text-white border-warning"
+      : "bg-warning/10 text-warning border-warning/20 hover:bg-warning/20",
+    danger: active
+      ? "bg-danger text-white border-danger"
+      : "bg-danger/10 text-danger border-danger/20 hover:bg-danger/20",
+    info: active
+      ? "bg-info text-white border-info"
+      : "bg-info/10 text-info border-info/20 hover:bg-info/20",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors cursor-pointer",
+        tones[tone]
+      )}
+    >
+      {children}
+      {count !== undefined && (
+        <span
+          className={cn(
+            "inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold",
+            active
+              ? "bg-white/20 text-white"
+              : "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#B6BAC1]"
+          )}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** Search input with built-in clear button. */
+export function SearchInput({
+  value,
+  onChange,
+  placeholder = "Search…",
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative", className)}>
+      <Search
+        size={14}
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-400 pointer-events-none"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-brand-200 bg-white pl-9 pr-9 py-2 text-sm text-ink placeholder:text-brand-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-colors dark:bg-[#24262C] dark:border-white/10"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-5 w-5 rounded-full bg-brand-100 text-brand-500 hover:bg-brand-200 hover:text-ink transition-colors cursor-pointer dark:bg-white/10 dark:hover:bg-white/20"
+          aria-label="Clear"
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
   );
 }

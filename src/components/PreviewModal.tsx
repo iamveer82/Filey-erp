@@ -158,7 +158,7 @@ export default function PreviewModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-ink/40 backdrop-blur-sm flex justify-end"
+      className="fixed inset-0 z-50 bg-ink/40 flex justify-end"
       onClick={onClose}
     >
       <div

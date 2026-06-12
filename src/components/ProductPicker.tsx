@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Minus, Plus, ShoppingCart, X, CreditCard, Search } from "lucide-react";
 import NumberFlow from "@number-flow/react";
 import type { Product } from "../lib/api";
@@ -8,10 +7,8 @@ import { cn } from "../lib/format";
 
 export type CartLine = Product & { quantity: number };
 
-/** Pick products from a catalog → live cart → checkout.
- *  Adapted from the InteractiveCheckout pattern: Filey tokens,
- *  real Product type (no image field — uses a category-color
- *  initial tile instead), AED money, no scale>1.02 hover (spec §9). */
+/** Pick products from a catalog → live cart → checkout. Stripped of all
+ *  framer-motion entrances/layout animations for design.md §0.8. */
 export default function ProductPicker({
   products,
   onCheckout,
@@ -89,11 +86,8 @@ export default function ProductPicker({
             </p>
           )}
           {filtered.map((p) => (
-            <motion.div
+            <div
               key={p.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.18 }}
               className={cn(
                 "group flex items-center justify-between gap-3",
                 "p-3 rounded-xl bg-white border border-brand-200 dark:bg-[#24262C] dark:border-[#3A3D45]",
@@ -146,18 +140,13 @@ export default function ProductPicker({
               >
                 <Plus size={14} /> Add
               </button>
-            </motion.div>
+            </div>
           ))}
         </div>
       </div>
 
       {/* Cart */}
-      <motion.div
-        initial={{ opacity: 0, x: 12 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.2 }}
-        className="w-full lg:w-72 shrink-0 flex flex-col rounded-2xl bg-white border border-brand-200 shadow-bento p-4 dark:bg-[#24262C] dark:border-[#3A3D45]"
-      >
+      <div className="w-full lg:w-72 shrink-0 flex flex-col rounded-2xl bg-white border border-brand-200 shadow-bento p-4 dark:bg-[#24262C] dark:border-[#3A3D45]">
         <div className="flex items-center gap-2 mb-3">
           <ShoppingCart size={16} className="text-brand-500" />
           <p className="text-sm font-bold text-ink">
@@ -171,70 +160,54 @@ export default function ProductPicker({
               No items yet — add products from the list.
             </p>
           )}
-          <AnimatePresence initial={false} mode="popLayout">
-            {cart.map((item) => (
-              <motion.div
-                key={item.id}
-                layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-                className="flex items-center gap-3 p-2 rounded-lg bg-brand-50 dark:bg-white/5 mb-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-ink truncate">
-                      {item.name}
+          {cart.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 p-2 rounded-lg bg-brand-50 dark:bg-white/5 mb-2"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-ink truncate">
+                    {item.name}
+                  </span>
+                  <button
+                    onClick={() => remove(item.id)}
+                    aria-label={`Remove ${item.name}`}
+                    className="p-1 rounded-md text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="flex items-center justify-between mt-1">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => update(item.id, -1)}
+                      aria-label="Decrease quantity"
+                      className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                    >
+                      <Minus size={12} />
+                    </button>
+                    <span className="text-xs font-semibold text-ink w-4 text-center tabular-nums">
+                      {item.quantity}
                     </span>
                     <button
-                      onClick={() => remove(item.id)}
-                      aria-label={`Remove ${item.name}`}
-                      className="p-1 rounded-md text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      onClick={() => update(item.id, 1)}
+                      aria-label="Increase quantity"
+                      className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
-                      <X size={12} />
+                      <Plus size={12} />
                     </button>
                   </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => update(item.id, -1)}
-                        aria-label="Decrease quantity"
-                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <motion.span
-                        layout
-                        className="text-xs font-semibold text-ink w-4 text-center tabular-nums"
-                      >
-                        {item.quantity}
-                      </motion.span>
-                      <button
-                        onClick={() => update(item.id, 1)}
-                        aria-label="Increase quantity"
-                        className="p-1 rounded-md text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
-                    <motion.span
-                      layout
-                      className="text-xs font-semibold text-brand-700 tabular-nums"
-                    >
-                      {aed(item.unit_price * item.quantity)}
-                    </motion.span>
-                  </div>
+                  <span className="text-xs font-semibold text-brand-700 tabular-nums">
+                    {aed(item.unit_price * item.quantity)}
+                  </span>
                 </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+              </div>
+            </div>
+          ))}
         </div>
 
-        <motion.div
-          layout
-          className="pt-3 mt-3 border-t border-brand-100 dark:border-[#2A2C33]"
-        >
+        <div className="pt-3 mt-3 border-t border-brand-100 dark:border-[#2A2C33]">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-semibold text-ink">Total</span>
             <span className="text-base font-bold text-ink tabular-nums">
@@ -255,8 +228,8 @@ export default function ProductPicker({
           >
             <CreditCard size={14} /> Checkout
           </button>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
     </div>
   );
 }

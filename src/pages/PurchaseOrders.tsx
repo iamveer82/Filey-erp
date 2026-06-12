@@ -1255,7 +1255,7 @@ function LPOView({
             <FrostedOverlayLpo form={form} template={ct} />
           ) : (
             <div className="flex flex-col gap-5 mt-24">
-              <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
                 <h1 className="text-2xl font-bold text-ink">LOCAL PURCHASE ORDER</h1>
                 <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
                   <div>
@@ -1272,7 +1272,7 @@ function LPOView({
                   </div>
                 </div>
               </div>
-              <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
                 <p className="font-semibold text-sm text-brand-400 mb-1">SUPPLIER</p>
                 <p className="font-semibold">{clean(form.supplier_name)}</p>
                 <p className="text-brand-500 text-sm">{clean(form.supplier_address)}</p>
@@ -1280,7 +1280,7 @@ function LPOView({
                   <p className="text-brand-500 text-sm">TRN: {form.supplier_trn}</p>
                 )}
               </div>
-              <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-brand-200 text-left text-xs font-semibold text-brand-400">
@@ -1315,24 +1315,24 @@ function LPOView({
                 </div>
               </div>
               {form.terms && (
-                <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                <div className="bg-white/88 rounded-xl p-6 shadow-sm">
                   <p className="font-semibold text-sm text-brand-400 mb-2">TERMS & CONDITIONS</p>
                   <p className="text-sm text-brand-600 whitespace-pre-line">{form.terms}</p>
                 </div>
               )}
               {form.notes && (
-                <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm">
+                <div className="bg-white/88 rounded-xl p-6 shadow-sm">
                   <p className="text-sm text-brand-500">{form.notes}</p>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-6 mt-8">
-                <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm text-center">
+                <div className="bg-white/88 rounded-xl p-6 shadow-sm text-center">
                   <p className="text-sm font-semibold text-ink mb-4">For Supplier</p>
                   <div className="border-t border-brand-200 pt-3">
                     <p className="text-xs text-brand-400">Authorized Signature</p>
                   </div>
                 </div>
-                <div className="bg-white/88 backdrop-blur-sm rounded-xl p-6 shadow-sm text-center">
+                <div className="bg-white/88 rounded-xl p-6 shadow-sm text-center">
                   <p className="text-sm font-semibold text-ink mb-4">Company Stamp & Signature</p>
                   {form.company_stamp ? (
                     <img src={form.company_stamp} alt="Company stamp" className="h-20 mx-auto object-contain mb-2" />

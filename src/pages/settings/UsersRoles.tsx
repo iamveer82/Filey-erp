@@ -1,6 +1,5 @@
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
-import { motion, AnimatePresence } from "framer-motion";
 import { MODULES } from "../../modules/registry";
 import { Badge, Modal, Field } from "../../components/ui";
 import { Plus, Trash2, Building } from "lucide-react";
@@ -209,22 +208,13 @@ export default function UsersRoles() {
           </p>
         ) : (
           <div>
-            <AnimatePresence initial={false}>
-              {members.map((m, i) => {
-                const editable = isAdmin && m.user_id !== user?.id;
-                return (
-                  <motion.div
-                    key={m.id}
-                    layout
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{
-                      opacity: 1,
-                      y: 0,
-                      transition: { delay: i * 0.04 },
-                    }}
-                    exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
-                    className="flex items-center justify-between gap-3 border-b border-brand-100 dark:border-[#2A2C33] py-3 last:border-0"
-                  >
+            {members.map((m) => {
+              const editable = isAdmin && m.user_id !== user?.id;
+              return (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between gap-3 border-b border-brand-100 dark:border-[#2A2C33] py-3 last:border-0"
+                >
                     <div className="flex min-w-0 items-center gap-3">
                       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-sm font-bold dark:bg-primary-400/15 dark:text-primary-300">
                         {(m.name || m.email || "?").charAt(0).toUpperCase()}
@@ -292,10 +282,9 @@ export default function UsersRoles() {
                         </>
                       )}
                     </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+                </div>
+              );
+            })}
           </div>
         )}
 

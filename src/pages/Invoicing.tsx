@@ -2066,7 +2066,7 @@ function Editor({
       </div>
 
       {viewOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4" onClick={() => setViewOpen(false)}>
           <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
               <div className="flex items-center gap-3">

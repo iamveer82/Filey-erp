@@ -18,6 +18,7 @@ import OverdueReminder from "./components/OverdueReminder";
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
 const PortalView = lazy(() => import("./pages/PortalView"));
+const ModernOverview = lazy(() => import("./pages/ModernOverview"));
 
 function Splash() {
   return <FileyLoader />;
@@ -39,7 +40,9 @@ function AppRoutes() {
   return (
     <Suspense fallback={<Splash />}>
       <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/" element={<Navigate to="/overview-modern" replace />} />
+        {/* Legacy alias — older bookmarks pointing at /overview still work. */}
+        <Route path="/overview" element={<ModernOverview />} />
         {modules.map((m) => {
           const Page = m.Component;
           return (

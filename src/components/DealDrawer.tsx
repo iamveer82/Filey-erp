@@ -67,7 +67,7 @@ export default function DealDrawer({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/40" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"

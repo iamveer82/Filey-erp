@@ -102,7 +102,7 @@ export default function ColorPicker({
                 type="button"
                 onClick={() => onChange(s)}
                 aria-label={`Set colour ${s}`}
-                className="h-6 w-6 rounded-md border border-black/10 transition-transform hover:scale-110 cursor-pointer"
+                className="h-6 w-6 rounded-md border border-black/10 transition-shadow hover:ring-2 hover:ring-ink/30 cursor-pointer"
                 style={{ background: s }}
               />
             ))}

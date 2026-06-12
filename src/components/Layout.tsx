@@ -364,7 +364,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Mobile drawer backdrop */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-ink/40 lg:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden="true"
         />

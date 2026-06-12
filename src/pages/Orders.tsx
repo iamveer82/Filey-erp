@@ -18,7 +18,6 @@ import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
 import {
   PageHeader,
-  MetricCard,
   DataTable,
   Badge,
   statusTone,
@@ -26,7 +25,10 @@ import {
   Field,
   ShareToggle,
   ErrorBanner,
+  FilterChip,
+  SearchInput,
 } from "../components/ui";
+import StatStrip from "../components/StatStrip";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
@@ -53,6 +55,7 @@ export default function Orders() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [q, setQ] = useState("");
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1") {
@@ -88,8 +91,26 @@ export default function Orders() {
     };
   }, [orders]);
 
+  const [statusFilter, setStatusFilter] = useState<"all" | "progress" | "completed" | "returns">("all");
+  const filteredOrders = useMemo(
+    () => {
+      const ql = q.trim().toLowerCase();
+      return orders.filter((o) => {
+        if (ql && !o.order_number.toLowerCase().includes(ql) && !o.customer_name.toLowerCase().includes(ql)) {
+          return false;
+        }
+        if (statusFilter === "all") return true;
+        const st = o.status.toLowerCase();
+        if (statusFilter === "progress") return ["confirmed", "draft", "processing"].includes(st);
+        if (statusFilter === "completed") return ["delivered", "paid", "completed"].includes(st);
+        return ["returned", "cancelled"].includes(st);
+      });
+    },
+    [orders, statusFilter, q]
+  );
+
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="Orders"
         subtitle="Sales orders & fulfilment status"
@@ -115,34 +136,77 @@ export default function Orders() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <MetricCard
-          label="Total Orders"
-          value={String(orders.length)}
-          icon={<ClipboardList size={20} />}
+      <StatStrip
+        className="mb-4"
+        items={[
+          {
+            label: "Total Orders",
+            value: String(orders.length),
+            icon: <ClipboardList size={16} />,
+          },
+          {
+            label: "Completed",
+            value: String(stats.completed),
+            icon: <CheckCircle2 size={16} />,
+          },
+          {
+            label: "In Progress",
+            value: String(stats.progress),
+            icon: <Clock size={16} />,
+          },
+          {
+            label: "Order Value",
+            value: aed(stats.value),
+            icon: <Wallet size={16} />,
+          },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <SearchInput
+          className="w-full max-w-xs"
+          value={q}
+          onChange={setQ}
+          placeholder="Search by order # or customer…"
         />
-        <MetricCard
-          label="Completed"
-          value={String(stats.completed)}
-          icon={<CheckCircle2 size={20} />}
-          iconClass="bg-success/15 text-success"
-        />
-        <MetricCard
-          label="In Progress"
-          value={String(stats.progress)}
-          icon={<Clock size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
-        />
-        <MetricCard
-          label="Order Value"
-          value={aed(stats.value)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-info/15 text-info"
-        />
+        <FilterChip
+          active={statusFilter === "all"}
+          onClick={() => setStatusFilter("all")}
+          count={orders.length}
+        >
+          All
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === "progress"}
+          onClick={() => setStatusFilter("progress")}
+          count={stats.progress}
+          tone="info"
+        >
+          In progress
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === "completed"}
+          onClick={() => setStatusFilter("completed")}
+          count={stats.completed}
+          tone="success"
+        >
+          Completed
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === "returns"}
+          onClick={() => setStatusFilter("returns")}
+          count={stats.returns}
+          tone="danger"
+        >
+          Cancelled
+        </FilterChip>
+        <span className="ml-auto text-xs font-semibold text-brand-400">
+          {filteredOrders.length} of {orders.length}
+        </span>
       </div>
 
       <DataTable<Order>
-        rows={orders}
+        rows={filteredOrders}
         loading={loading}
         empty="No orders yet"
         columns={[
@@ -214,12 +278,25 @@ export default function Orders() {
                   {next && (
                   <button
                     className="btn-ghost text-xs"
+                    aria-label={`Mark ${o.order_number} as ${next}`}
                     onClick={async () => {
+                      // Cancelling returns reserved stock — make it deliberate.
+                      if (next === "cancelled") {
+                        const ok = await confirm({
+                          title: "Cancel order",
+                          message: `Cancel ${o.order_number}? Any stock it reserved is returned.`,
+                          confirmLabel: "Cancel order",
+                          danger: true,
+                        });
+                        if (!ok) return;
+                      }
                       try {
                         await erp.setOrderStatus(o.id, next);
                         load();
-                      } catch (e: any) {
-                        toast.error(e?.message || "Failed to update order status");
+                      } catch (e) {
+                        toast.error(
+                          e instanceof Error ? e.message : "Failed to update order status"
+                        );
                       }
                     }}
                   >

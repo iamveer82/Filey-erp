@@ -184,7 +184,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       {/* confirm dialog */}
       {confirmState && (
         <div
-          className="fixed inset-0 z-[101] bg-ink/40 backdrop-blur-sm grid place-items-center p-4"
+          className="fixed inset-0 z-[101] bg-ink/40 grid place-items-center p-4"
           onClick={() => closeConfirm(false)}
         >
           <div
@@ -215,7 +215,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       {/* prompt dialog */}
       {promptState && (
         <div
-          className="fixed inset-0 z-[101] bg-ink/40 backdrop-blur-sm grid place-items-center p-4"
+          className="fixed inset-0 z-[101] bg-ink/40 grid place-items-center p-4"
           onClick={() => closePrompt(null)}
         >
           <form

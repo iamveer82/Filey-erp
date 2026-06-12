@@ -128,7 +128,6 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
             dragConstraints={canvasRef}
             dragElastic={0}
             style={{ x: n.x, y: n.y }}
-            whileDrag={{ scale: 1.03, zIndex: 30 }}
             onDragEnd={(_, info) =>
               moveNote(n.id, n.x + info.offset.x, n.y + info.offset.y)
             }

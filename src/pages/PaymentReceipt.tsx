@@ -280,7 +280,7 @@ function PrEditor({ form, setForm, onBack, onSave }: { form: PrForm; setForm: (f
       </div>
 
       {viewOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 backdrop-blur-sm p-4" onClick={() => setViewOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4" onClick={() => setViewOpen(false)}>
           <div className="my-4 w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-bold text-white">{form.number}</h2>

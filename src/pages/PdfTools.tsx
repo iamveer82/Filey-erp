@@ -8,7 +8,6 @@ import {
   Signature,
   Sparkles,
   Wand2,
-  Star,
   ChevronRight,
   ArrowRight,
   ArrowLeft,
@@ -17,7 +16,6 @@ import {
   Loader2,
   FolderPlus,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -113,8 +111,7 @@ export default function ToolsPage() {
       const t = toolById(id);
       if (t) setActive(t);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+  }, [params, active]);
   const [preview, setPreview] = useState<RunLog | null>(null);
   const [used, setUsed] = useState(0);
   const { toast } = useUI();
@@ -134,8 +131,14 @@ export default function ToolsPage() {
           }))
         )
       )
-      .catch(() => toast.error("Failed to load recent files"));
-    usedBytes().then(setUsed).catch(() => toast.error("Failed to load storage usage"));
+      .catch(() => {
+        if (isConfigured) toast.error("Failed to load recent files");
+      });
+    usedBytes()
+      .then(setUsed)
+      .catch(() => {
+        if (isConfigured) toast.error("Failed to load storage usage");
+      });
   };
 
   useEffect(() => {
@@ -160,10 +163,13 @@ export default function ToolsPage() {
         if (room) {
           const paths = await uploadOutputs(runId, outputs);
           if (paths.length) await toolRuns.setPaths(runId, paths, total);
+        } else {
+          toast.info("Storage quota full — output downloaded but not archived.");
         }
       }
     } catch {
-      /* offline / storage unavailable — log still recorded */
+      // Output already downloaded locally; only the archive copy failed.
+      if (isConfigured) toast.info("Output downloaded, but couldn't be archived to recent activity.");
     }
     refreshRuns();
   };
@@ -174,6 +180,7 @@ export default function ToolsPage() {
 
   const downloadRun = async (r: RunLog) => {
     if (!r.paths.length) {
+      toast.info("This output wasn't archived — re-run the tool to download it again.");
       openTool(r.toolId);
       return;
     }
@@ -231,10 +238,7 @@ export default function ToolsPage() {
               >
                 {c}
                 {cat === c && (
-                  <motion.span
-                    layoutId="tools-tab-underline"
-                    className="absolute -bottom-px left-0 right-0 h-0.5 rounded bg-primary-400"
-                  />
+                  <span className="absolute -bottom-px left-0 right-0 h-0.5 rounded bg-primary-400" />
                 )}
               </button>
             ))}
@@ -424,24 +428,6 @@ export default function ToolsPage() {
             )}
           </div>
 
-          {/* Feedback */}
-          <div className="rounded-[28px] border border-black/[0.04] p-4 text-center shadow-bento dark:border-white/[0.06]"
-            style={{ background: "linear-gradient(135deg,#FFF9E6,#FFFDF2)" }}
-          >
-            <p className="text-sm font-bold text-ink">Love Filey Tools?</p>
-            <div className="mt-2 flex justify-center gap-1">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <button
-                  key={i}
-                  aria-label={`${i} star`}
-                  className="cursor-pointer text-primary-500 transition hover:scale-110"
-                >
-                  <Star size={18} fill="currentColor" />
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px] text-brand-400">Tap to rate</p>
-          </div>
         </aside>
       </div>
 
@@ -487,13 +473,6 @@ function ToolMiniCard({
         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400">
           Use tool <ArrowRight size={11} />
         </span>
-        <Star
-          size={13}
-          className="cursor-pointer text-brand-300 hover:text-primary-500"
-          onClick={(e) => {
-            e.stopPropagation();
-          }}
-        />
       </div>
     </button>
   );

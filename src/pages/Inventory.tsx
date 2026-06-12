@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Layers,
   Tag,
-  Search,
   MoreHorizontal,
   Download,
   Upload,
@@ -40,6 +39,8 @@ import {
   Field,
   ShareToggle,
   ErrorBanner,
+  SearchInput,
+  FilterChip,
 } from "../components/ui";
 
 export default function Inventory() {
@@ -100,13 +101,28 @@ export default function Inventory() {
   const filtered = useMemo(
     () =>
       products.filter(
-        (p) =>
-          (cat === "all" || (p.category || "Unsorted") === cat) &&
-          (p.name.toLowerCase().includes(q.toLowerCase()) ||
-            p.sku.toLowerCase().includes(q.toLowerCase()) ||
-            ((p as any).batch_number || "").toLowerCase().includes(q.toLowerCase()) ||
-            ((p as any).barcode || "").toLowerCase().includes(q.toLowerCase())) &&
-          (!batchFilter || ((p as any).batch_number || "").toLowerCase().includes(batchFilter.toLowerCase()))
+        (p) => {
+          // Category / status chip
+          let matchCat = true;
+          if (cat === "__low__") {
+            matchCat = p.quantity > 0 && p.quantity <= p.reorder_level;
+          } else if (cat === "__out__") {
+            matchCat = p.quantity === 0;
+          } else if (cat !== "all") {
+            matchCat = (p.category || "Unsorted") === cat;
+          }
+          return (
+            matchCat &&
+            (p.name.toLowerCase().includes(q.toLowerCase()) ||
+              p.sku.toLowerCase().includes(q.toLowerCase()) ||
+              (p.batch_number || "").toLowerCase().includes(q.toLowerCase()) ||
+              (p.barcode || "").toLowerCase().includes(q.toLowerCase())) &&
+            (!batchFilter ||
+              (p.batch_number || "")
+                .toLowerCase()
+                .includes(batchFilter.toLowerCase()))
+          );
+        }
       ),
     [products, q, cat, batchFilter]
   );
@@ -125,15 +141,15 @@ export default function Inventory() {
       Array.from(
         new Set(
           products
-            .map((p) => (p as any).batch_number)
-            .filter((b: any) => b && b.trim())
+            .map((p) => p.batch_number)
+            .filter((b): b is string => !!b && !!b.trim())
         )
       ).sort(),
     [products]
   );
 
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="Inventory"
         subtitle="Products, stock levels, batch tracking & barcode scanning"
@@ -207,33 +223,44 @@ export default function Inventory() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="relative w-full max-w-xs">
-          <Search
-            size={16}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
-          />
-          <input
-            className="input pl-10"
-            placeholder="Search products, SKU, batch or barcode…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setCat("all")}
-            className={`chip ${cat === "all" ? "chip-active" : ""}`}
-          >
+        <SearchInput
+          className="w-full max-w-xs"
+          value={q}
+          onChange={setQ}
+          placeholder="Search products, SKU, batch or barcode…"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip active={cat === "all"} onClick={() => setCat("all")} count={products.length}>
             All
-          </button>
+          </FilterChip>
+          {lowStock.length > 0 && (
+            <FilterChip
+              active={cat === "__low__"}
+              onClick={() => setCat("__low__")}
+              count={lowStock.length}
+              tone="warn"
+            >
+              Low stock
+            </FilterChip>
+          )}
+          {outOfStock.length > 0 && (
+            <FilterChip
+              active={cat === "__out__"}
+              onClick={() => setCat("__out__")}
+              count={outOfStock.length}
+              tone="danger"
+            >
+              Out of stock
+            </FilterChip>
+          )}
           {categories.map((c) => (
-            <button
+            <FilterChip
               key={c}
+              active={cat === c}
               onClick={() => setCat(c)}
-              className={`chip ${cat === c ? "chip-active" : ""}`}
             >
               {c}
-            </button>
+            </FilterChip>
           ))}
         </div>
         {uniqueBatches.length > 0 && (
