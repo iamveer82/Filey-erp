@@ -5,39 +5,44 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary — Filey yellow
+        // Primary — trust blue (professional ERP/CRM accent).
+        // `primary-400` is the canonical action color used by .btn-primary,
+        // focus rings and active chips; darker steps drive hover/press.
         primary: {
-          50: "#FFFBEB",
-          100: "#FFF3C4",
-          200: "#FFE885",
-          300: "#FFDD47",
-          400: "#FFD600",
-          500: "#F5C400",
-          600: "#E0AE00",
-          700: "#B88C00",
-          800: "#8F6D00",
-          900: "#6B5200",
+          50: "#EFF6FF",
+          100: "#DBEAFE",
+          200: "#BFDBFE",
+          300: "#93C5FD",
+          400: "#2563EB",
+          500: "#1D4ED8",
+          600: "#1E40AF",
+          700: "#1E3A8A",
+          800: "#172B6B",
+          900: "#111E4D",
         },
-        // Secondary — warm amber accent
+        // Secondary — Filey amber, kept as a sparing highlight/accent only
+        // (badges, "new" markers) now that blue is the primary action color.
         secondary: {
           DEFAULT: "#FFBA3D",
-          400: "#FFBA3D",
+          400: "#FFD600",
           500: "#F5A623",
           600: "#E0900F",
         },
-        // `brand-*` is the neutral grey utility ramp (shadcn-style theme):
-        // light end = quiet surfaces / hairlines, mid/dark = readable text.
+        // `brand-*` is the neutral utility ramp (shadcn-style theme). Tuned to
+        // a cool *slate* (vs flat grey) so neutrals pair with the trust-blue
+        // primary and read more enterprise: light end = quiet surfaces /
+        // hairlines, mid/dark = readable text. Values track Tailwind slate.
         brand: {
-          50: "#F5F5F5",
-          100: "#EBEBEB",
-          200: "#E7E7EE",
-          300: "#D4D4D8",
-          400: "#9A9A9A",
-          500: "#6E6E6E",
-          600: "#525252",
-          700: "#3F3F3F",
-          800: "#1F1F1F",
-          900: "#0A0A0A",
+          50: "#F8FAFC",
+          100: "#F1F5F9",
+          200: "#E2E8F0",
+          300: "#CBD5E1",
+          400: "#94A3B8",
+          500: "#64748B",
+          600: "#475569",
+          700: "#334155",
+          800: "#1E293B",
+          900: "#0F172A",
         },
         // emerald-* kept as an alias so existing usages render success-green
         emerald: {
@@ -51,15 +56,17 @@ export default {
         warning: "#F59E0B",
         danger: "#E5484D",
         accentpurple: "#7C3AED",
-        ink: "#0A0A0A",
-        surface: "#F5F8FB",
-        background: "#FDFDFD",
-        canvas: "#FDFDFD",
-        hairline: "#E7E7EE",
-        chartdark: "#1F1F1F",
+        // Primary text — slate-900 (cool near-black) to match the slate ramp.
+        ink: "#0F172A",
+        surface: "#F1F5F9",
+        background: "#F8FAFC",
+        // App canvas — a faint cool white so white cards lift off it cleanly.
+        canvas: "#F8FAFC",
+        hairline: "#E2E8F0",
+        chartdark: "#1E293B",
         // shadcn-style aliases so pasted components (Folder, FileCard) work.
-        foreground: "#0A0A0A",
-        border: "#E7E7EE",
+        foreground: "#0F172A",
+        border: "#E2E8F0",
       },
       fontFamily: {
         // Single clean geometric sans across the UI (theme: Plus Jakarta Sans).
@@ -102,8 +109,8 @@ export default {
         "sheen-dark": "none",
       },
       backgroundImage: {
-        // `bg-cta` kept as a token but resolves to flat brand yellow.
-        cta: "linear-gradient(0deg, #FFD600, #FFD600)",
+        // `bg-cta` kept as a token but resolves to the flat primary blue.
+        cta: "linear-gradient(0deg, #2563EB, #2563EB)",
       },
       keyframes: {
         "fade-up": {

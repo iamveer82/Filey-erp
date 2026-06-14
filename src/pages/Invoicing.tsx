@@ -50,12 +50,18 @@ import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals } from "../lib/money";
+import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import ScanDocModal from "../components/ScanDocModal";
-import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, syncCustomTemplates, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateDesigner, {
+  loadCustomTemplates,
+  deleteCustomTemplate,
+  syncCustomTemplates,
+  type CustomTemplate,
+} from "../components/TemplateDesigner";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
   StampSigCard,
@@ -81,8 +87,19 @@ import {
 } from "../components/ui";
 
 type CustomColumn = { key: string; label: string };
-type Item = { description: string; qty: number; unit_price: number; unit: string; custom: Record<string, string> };
-type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & { items: Item[]; customColumns: CustomColumn[]; stamp?: StampSig; signature?: StampSig };
+type Item = {
+  description: string;
+  qty: number;
+  unit_price: number;
+  unit: string;
+  custom: Record<string, string>;
+};
+type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
+  items: Item[];
+  customColumns: CustomColumn[];
+  stamp?: StampSig;
+  signature?: StampSig;
+};
 
 const TEMPLATES = [
   { id: "minimal", name: "Minimal" },
@@ -106,10 +123,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
-function blankForm(c: CompanyProfile): Form {
-  const y = new Date().getFullYear();
+function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {
-    number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+    number: nextDocNumber({ prefix: "INV", existing }),
     status: "draft",
     doc_title: "Tax Invoice",
     template: c.default_template || "minimal",
@@ -136,8 +152,7 @@ function blankForm(c: CompanyProfile): Form {
   };
 }
 
-const totals = (f: Form) =>
-  invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
+const totals = (f: Form) => invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
 
 export default function Invoicing() {
   const { toast, confirm } = useUI();
@@ -151,12 +166,21 @@ export default function Invoicing() {
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
   const [search, setSearch] = useState("");
   const loadDocs = () =>
-    billing.listDocs().then(setDocs).catch(() => toast.error("Failed to load documents"));
+    billing
+      .listDocs()
+      .then(setDocs)
+      .catch(() => toast.error("Failed to load documents"));
   const loadRecurs = () =>
-    recurrences.list().then(setRecurs).catch(() => toast.error("Failed to load recurrences"));
+    recurrences
+      .list()
+      .then(setRecurs)
+      .catch(() => toast.error("Failed to load recurrences"));
 
   const reload = () => {
-    billing.getCompany().then(setCompany).catch(() => toast.error("Failed to load company profile"));
+    billing
+      .getCompany()
+      .then(setCompany)
+      .catch(() => toast.error("Failed to load company profile"));
     loadDocs();
     loadRecurs();
   };
@@ -182,13 +206,13 @@ export default function Invoicing() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company));
+      setForm(blankForm(company, docs.map((d) => d.number)));
       setParams({}, { replace: true });
     }
-  }, [params, company, form, setParams]);
+  }, [params, company, form, setParams, docs]);
 
   const newInvoice = () => {
-    if (company) setForm(blankForm(company));
+    if (company) setForm(blankForm(company, docs.map((d) => d.number)));
   };
 
   const editInvoice = async (id: number) => {
@@ -220,8 +244,34 @@ export default function Invoicing() {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
-        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0, scale: (d.stamp as any).scale ?? 100 } : undefined,
-        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0, scale: (d.signature as any).scale ?? 100 } : undefined,
+        stamp: d.stamp
+          ? {
+              data: d.stamp.data,
+              x: d.stamp.x ?? 75,
+              y: d.stamp.y ?? 70,
+              opacity: d.stamp.opacity ?? 30,
+              color: d.stamp.color ?? "#cc0000",
+              cropTop: d.stamp.cropTop ?? 0,
+              cropRight: d.stamp.cropRight ?? 0,
+              cropBottom: d.stamp.cropBottom ?? 0,
+              cropLeft: d.stamp.cropLeft ?? 0,
+              scale: (d.stamp as any).scale ?? 100,
+            }
+          : undefined,
+        signature: d.signature
+          ? {
+              data: d.signature.data,
+              x: d.signature.x ?? 75,
+              y: d.signature.y ?? 85,
+              opacity: d.signature.opacity ?? 35,
+              color: d.signature.color ?? "#0000cc",
+              cropTop: d.signature.cropTop ?? 0,
+              cropRight: d.signature.cropRight ?? 0,
+              cropBottom: d.signature.cropBottom ?? 0,
+              cropLeft: d.signature.cropLeft ?? 0,
+              scale: (d.signature as any).scale ?? 100,
+            }
+          : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -239,9 +289,8 @@ export default function Invoicing() {
   const duplicateInvoice = async (id: number) => {
     try {
       const d = await billing.getDoc(id);
-      const y = new Date().getFullYear();
       setForm({
-        number: `INV-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+        number: nextDocNumber({ prefix: "INV", existing: docs.map((x) => x.number) }),
         status: "draft",
         doc_title: d.doc_title || d.doc_type,
         template: d.template,
@@ -265,8 +314,34 @@ export default function Invoicing() {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
-        stamp: d.stamp ? { data: d.stamp.data, x: d.stamp.x ?? 75, y: d.stamp.y ?? 70, opacity: d.stamp.opacity ?? 30, color: d.stamp.color ?? "#cc0000", cropTop: d.stamp.cropTop ?? 0, cropRight: d.stamp.cropRight ?? 0, cropBottom: d.stamp.cropBottom ?? 0, cropLeft: d.stamp.cropLeft ?? 0, scale: (d.stamp as any).scale ?? 100 } : undefined,
-        signature: d.signature ? { data: d.signature.data, x: d.signature.x ?? 75, y: d.signature.y ?? 85, opacity: d.signature.opacity ?? 35, color: d.signature.color ?? "#0000cc", cropTop: d.signature.cropTop ?? 0, cropRight: d.signature.cropRight ?? 0, cropBottom: d.signature.cropBottom ?? 0, cropLeft: d.signature.cropLeft ?? 0, scale: (d.signature as any).scale ?? 100 } : undefined,
+        stamp: d.stamp
+          ? {
+              data: d.stamp.data,
+              x: d.stamp.x ?? 75,
+              y: d.stamp.y ?? 70,
+              opacity: d.stamp.opacity ?? 30,
+              color: d.stamp.color ?? "#cc0000",
+              cropTop: d.stamp.cropTop ?? 0,
+              cropRight: d.stamp.cropRight ?? 0,
+              cropBottom: d.stamp.cropBottom ?? 0,
+              cropLeft: d.stamp.cropLeft ?? 0,
+              scale: (d.stamp as any).scale ?? 100,
+            }
+          : undefined,
+        signature: d.signature
+          ? {
+              data: d.signature.data,
+              x: d.signature.x ?? 75,
+              y: d.signature.y ?? 85,
+              opacity: d.signature.opacity ?? 35,
+              color: d.signature.color ?? "#0000cc",
+              cropTop: d.signature.cropTop ?? 0,
+              cropRight: d.signature.cropRight ?? 0,
+              cropBottom: d.signature.cropBottom ?? 0,
+              cropLeft: d.signature.cropLeft ?? 0,
+              scale: (d.signature as any).scale ?? 100,
+            }
+          : undefined,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -284,8 +359,11 @@ export default function Invoicing() {
   const save = async () => {
     if (!form) return;
     // Validate
-    if (!form.number.trim()) { toast.error("Invoice number is required"); return; }
-    if (!form.items.length || form.items.every(i => !i.description.trim())) {
+    if (!form.number.trim()) {
+      toast.error("Invoice number is required");
+      return;
+    }
+    if (!form.items.length || form.items.every((i) => !i.description.trim())) {
       toast.error("Add at least one line item with a description");
       return;
     }
@@ -294,8 +372,10 @@ export default function Invoicing() {
       return;
     }
     // Check for duplicate invoice number
-    if (docs.some(d => d.number === form.number && d.id !== (form.id || 0))) {
-      toast.error(`Invoice number "${form.number}" already exists. Use a different number.`);
+    if (docs.some((d) => d.number === form.number && d.id !== (form.id || 0))) {
+      toast.error(
+        `Invoice number "${form.number}" already exists. Use a different number.`
+      );
       return;
     }
     setSaving(true);
@@ -307,7 +387,7 @@ export default function Invoicing() {
         // survive a reload (DB columns: invoice_docs.custom_columns,
         // invoice_doc_items.unit / .custom).
         custom_columns: form.customColumns,
-        items: form.items.map(it => ({
+        items: form.items.map((it) => ({
           description: it.description,
           qty: it.qty,
           unit_price: it.unit_price,
@@ -337,8 +417,11 @@ export default function Invoicing() {
   const setDocStatus = async (status: "draft" | "sent") => {
     if (!form) return;
     // Validate
-    if (!form.number.trim()) { toast.error("Invoice number is required"); return; }
-    if (!form.items.length || form.items.every(i => !i.description.trim())) {
+    if (!form.number.trim()) {
+      toast.error("Invoice number is required");
+      return;
+    }
+    if (!form.items.length || form.items.every((i) => !i.description.trim())) {
       toast.error("Add at least one line item with a description");
       return;
     }
@@ -347,8 +430,10 @@ export default function Invoicing() {
       return;
     }
     // Check for duplicate invoice number
-    if (docs.some(d => d.number === form.number && d.id !== (form.id || 0))) {
-      toast.error(`Invoice number "${form.number}" already exists. Use a different number.`);
+    if (docs.some((d) => d.number === form.number && d.id !== (form.id || 0))) {
+      toast.error(
+        `Invoice number "${form.number}" already exists. Use a different number.`
+      );
       return;
     }
     setSaving(true);
@@ -357,7 +442,7 @@ export default function Invoicing() {
         ...form,
         status,
         custom_columns: form.customColumns,
-        items: form.items.map(it => ({
+        items: form.items.map((it) => ({
           description: it.description,
           qty: it.qty,
           unit_price: it.unit_price,
@@ -441,9 +526,10 @@ export default function Invoicing() {
   ).length;
   const statCcy = company?.currency || "AED";
   const filteredDocs = search
-    ? docs.filter(d =>
-        d.number.toLowerCase().includes(search.toLowerCase()) ||
-        d.customer_name.toLowerCase().includes(search.toLowerCase())
+    ? docs.filter(
+        (d) =>
+          d.number.toLowerCase().includes(search.toLowerCase()) ||
+          d.customer_name.toLowerCase().includes(search.toLowerCase())
       )
     : docs;
 
@@ -454,10 +540,7 @@ export default function Invoicing() {
         subtitle="Create FTA tax invoices — pick a template, fill details, send"
         action={
           <div className="flex gap-2">
-            <button
-              className="btn-ghost"
-              onClick={() => setCompanyOpen(true)}
-            >
+            <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
               <Building2 size={16} /> Company
             </button>
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
@@ -498,7 +581,7 @@ export default function Invoicing() {
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
-          <p className="mb-2 flex items-center gap-2 font-bold text-ink">
+          <p className="mb-2 flex items-center gap-2 font-medium text-ink">
             <Repeat size={15} /> Recurring invoices
           </p>
           <ul className="space-y-1.5">
@@ -513,7 +596,7 @@ export default function Invoicing() {
                       {fmtDate(r.next_run)}
                     </span>
                     <button
-                      className="cursor-pointer text-xs font-semibold text-brand-400 hover:text-danger"
+                      className="cursor-pointer text-xs font-medium text-brand-400 hover:text-danger"
                       onClick={async () => {
                         const ok = await confirm({
                           title: "Cancel recurring invoice",
@@ -550,7 +633,11 @@ export default function Invoicing() {
 
       <DataTable<InvoiceDocSummary>
         rows={filteredDocs}
-        empty={search ? "No invoices match your search" : "No invoices yet — create your first one"}
+        empty={
+          search
+            ? "No invoices match your search"
+            : "No invoices yet — create your first one"
+        }
         rowKey={(d) => d.id}
         bulkActions={[
           {
@@ -610,33 +697,27 @@ export default function Invoicing() {
             label: "Invoice #",
             sortValue: (d) => d.number,
             render: (d) => (
-              <span className="font-mono text-xs font-semibold">
-                {d.number}
-              </span>
+              <span className="font-mono text-xs font-medium">{d.number}</span>
             ),
           },
           {
             key: "cust",
             label: "Customer",
             sortValue: (d) => d.customer_name,
-            render: (d) => (
-              <span className="font-semibold">{d.customer_name}</span>
-            ),
+            render: (d) => <span className="font-medium">{d.customer_name}</span>,
           },
           {
             key: "tpl",
             label: "Template",
             sortValue: (d) => d.template,
-            render: (d) => (
-              <span className="capitalize text-brand-500">{d.template}</span>
-            ),
+            render: (d) => <span className="text-brand-500">{d.template}</span>,
           },
           {
             key: "total",
             label: "Total",
             sortValue: (d) => d.total,
             render: (d) => (
-              <span className="font-semibold">{money(d.total, d.currency || "AED")}</span>
+              <span className="font-medium">{money(d.total, d.currency || "AED")}</span>
             ),
           },
           {
@@ -719,7 +800,13 @@ export default function Invoicing() {
                   aria-label="Delete"
                   className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
-                    if (!(await confirm({ title: "Delete invoice", message: `Delete ${d.number}? This cannot be undone.` }))) return;
+                    if (
+                      !(await confirm({
+                        title: "Delete invoice",
+                        message: `Delete ${d.number}? This cannot be undone.`,
+                      }))
+                    )
+                      return;
                     await billing.deleteDoc(d.id);
                     loadDocs();
                     toast.success(`Deleted ${d.number}`);
@@ -735,11 +822,7 @@ export default function Invoicing() {
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} />
 
-      <PaymentsModal
-        doc={payFor}
-        onClose={() => setPayFor(null)}
-        onSaved={loadDocs}
-      />
+      <PaymentsModal doc={payFor} onClose={() => setPayFor(null)} onSaved={loadDocs} />
     </div>
   );
 }
@@ -759,14 +842,15 @@ function PaymentsModal({
   const [rows, setRows] = useState<InvoicePayment[]>([]);
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState("bank transfer");
-  const [paidAt, setPaidAt] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
 
   const load = () => {
     if (!doc) return;
-    billing.payments(doc.id).then(setRows).catch(() => setRows([]));
+    billing
+      .payments(doc.id)
+      .then(setRows)
+      .catch(() => setRows([]));
   };
   useEffect(load, [doc?.id]);
 
@@ -791,7 +875,13 @@ function PaymentsModal({
   };
 
   const remove = async (id: number) => {
-    if (!(await confirm({ title: "Remove payment", message: "Remove this payment record? This cannot be undone." }))) return;
+    if (
+      !(await confirm({
+        title: "Remove payment",
+        message: "Remove this payment record? This cannot be undone.",
+      }))
+    )
+      return;
     try {
       await billing.removePayment(id);
       load();
@@ -806,21 +896,21 @@ function PaymentsModal({
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="rounded-xl bg-brand-50 px-3 py-2.5">
+        <div className="rounded-lg bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Total</p>
-          <p className="font-display font-bold text-ink tabular-nums">
+          <p className="font-display font-medium text-ink tabular-nums">
             {money(total, ccy)}
           </p>
         </div>
-        <div className="rounded-xl bg-success/10 px-3 py-2.5">
+        <div className="rounded-lg bg-success/10 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Paid</p>
-          <p className="font-display font-bold text-success tabular-nums">
+          <p className="font-display font-medium text-success tabular-nums">
             {money(paid, ccy)}
           </p>
         </div>
-        <div className="rounded-xl bg-primary-100 px-3 py-2.5">
+        <div className="rounded-lg bg-primary-100 px-3 py-2.5">
           <p className="text-[11px] text-brand-400">Balance</p>
-          <p className="font-display font-bold text-primary-700 tabular-nums">
+          <p className="font-display font-medium text-primary-700 tabular-nums">
             {money(balance, ccy)}
           </p>
         </div>
@@ -833,7 +923,7 @@ function PaymentsModal({
               key={p.id}
               className="flex items-center justify-between rounded-lg bg-white border border-brand-100 px-3 py-2 text-sm"
             >
-              <span className="tabular-nums font-semibold text-ink">
+              <span className="tabular-nums font-medium text-ink">
                 {money(Number(p.amount), ccy)}
               </span>
               <span className="text-brand-400 text-xs">
@@ -874,11 +964,7 @@ function PaymentsModal({
             <option value="other">Other</option>
           </select>
         </Field>
-        <button
-          className="btn-primary"
-          disabled={busy || amount <= 0}
-          onClick={add}
-        >
+        <button className="btn-primary" disabled={busy || amount <= 0} onClick={add}>
           <Plus size={15} /> Add
         </button>
       </div>
@@ -909,7 +995,11 @@ function InventoryImportModal({
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   useEffect(() => {
-    if (open) erp.products().then(setProducts).catch(() => toast.error("Failed to load products"));
+    if (open)
+      erp
+        .products()
+        .then(setProducts)
+        .catch(() => toast.error("Failed to load products"));
   }, [open]);
   const filtered = products.filter(
     (p) =>
@@ -932,13 +1022,13 @@ function InventoryImportModal({
             className="w-full flex items-center justify-between rounded-lg px-3 py-2 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left"
           >
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
+              <p className="text-sm font-medium text-ink truncate">{p.name}</p>
               <p className="text-[11px] text-brand-400 font-mono">
                 {p.sku}
                 {p.quantity === 0 ? " · out of stock" : ` · ${p.quantity} in stock`}
               </p>
             </div>
-            <span className="text-sm font-semibold text-ink">
+            <span className="text-sm font-medium text-ink">
               {money(p.unit_price, "AED")}
             </span>
           </button>
@@ -984,7 +1074,7 @@ function Editor({
   const downloadPdf = () => {
     if (invoiceRef.current) {
       // Capture the full A4 sheet (with padding), not just the inner div
-      const sheet = invoiceRef.current.closest('.invoice-print') as HTMLElement;
+      const sheet = invoiceRef.current.closest(".invoice-print") as HTMLElement;
       downloadElementAsPdf(sheet || invoiceRef.current, form.number || "invoice");
     } else window.print();
   };
@@ -993,26 +1083,35 @@ function Editor({
   const handleFinalize = async () => {
     await onFinalize();
     try {
-      const el = (invoiceRef.current?.closest(".invoice-print") as HTMLElement) || invoiceRef.current;
+      const el =
+        (invoiceRef.current?.closest(".invoice-print") as HTMLElement) ||
+        invoiceRef.current;
       if (el) {
         const base = form.number || "invoice";
-        const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () => elementToPdfBytes(el, base));
+        const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () =>
+          elementToPdfBytes(el, base)
+        );
         if (saved) toast.success("Saved a copy to My Files.");
       }
     } catch {
       /* archiving is a convenience — never block finalize on it */
     }
   };
-  const set = <K extends keyof Form>(k: K, v: Form[K]) =>
-    setForm({ ...form, [k]: v });
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v });
 
   const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const [customTemplates, setCustomTemplates] =
+    useState<CustomTemplate[]>(loadCustomTemplates);
   // Pull templates saved on the user's other devices (Supabase-backed).
   useEffect(() => {
-    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+    syncCustomTemplates()
+      .then(setCustomTemplates)
+      .catch(() => {});
   }, []);
-  const allTemplates = [...TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))];
+  const allTemplates = [
+    ...TEMPLATES,
+    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
+  ];
   const removeTpl = async (id: string, name: string) => {
     if (
       !(await confirm({
@@ -1029,15 +1128,16 @@ function Editor({
   };
 
   const setItem = (idx: number, patch: Partial<Item>) => {
-    const items = form.items.map((it, i) =>
-      i === idx ? { ...it, ...patch } : it
-    );
+    const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     setForm({ ...form, items });
   };
   const addItem = () =>
     setForm({
       ...form,
-      items: [...form.items, { description: "", qty: 1, unit_price: 0, unit: "", custom: {} }],
+      items: [
+        ...form.items,
+        { description: "", qty: 1, unit_price: 0, unit: "", custom: {} },
+      ],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
@@ -1052,16 +1152,20 @@ function Editor({
   const addCustomColumn = () => {
     const label = window.prompt("Column name:")?.trim();
     if (!label) return;
-    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `col_${Date.now()}`;
-    if (form.customColumns.some(c => c.key === key)) return;
+    const key =
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "") || `col_${Date.now()}`;
+    if (form.customColumns.some((c) => c.key === key)) return;
     setForm({ ...form, customColumns: [...form.customColumns, { key, label }] });
   };
 
   const removeCustomColumn = (key: string) => {
     setForm({
       ...form,
-      customColumns: form.customColumns.filter(c => c.key !== key),
-      items: form.items.map(it => {
+      customColumns: form.customColumns.filter((c) => c.key !== key),
+      items: form.items.map((it) => {
         const c = { ...it.custom };
         delete c[key];
         return { ...it, custom: c };
@@ -1084,7 +1188,9 @@ function Editor({
   const [bankX, setBankX] = useState(50);
   const [bankY, setBankY] = useState(93);
   useEffect(() => {
-    loadBankInfo().then(setBank).catch(() => {});
+    loadBankInfo()
+      .then(setBank)
+      .catch(() => {});
   }, []);
   // Append an inventory product as an invoice line item (fills description &
   // unit price); drops a leftover empty row so the first import replaces it.
@@ -1099,7 +1205,10 @@ function Editor({
     });
   };
   const loadCustomers = () =>
-    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
+    crm
+      .customers()
+      .then(setCustomers)
+      .catch(() => toast.error("Failed to load customers"));
   useEffect(() => {
     loadCustomers();
   }, []);
@@ -1114,9 +1223,7 @@ function Editor({
       // Prefer the dedicated TRN field; fall back to the legacy segment hack.
       customer_trn:
         c.trn ??
-        (c.segment?.startsWith("TRN:")
-          ? c.segment.slice(4).trim()
-          : form.customer_trn),
+        (c.segment?.startsWith("TRN:") ? c.segment.slice(4).trim() : form.customer_trn),
     });
 
   const [viewAll, setViewAll] = useState(false);
@@ -1129,14 +1236,19 @@ function Editor({
   // Close view modal on Escape
   useEffect(() => {
     if (!viewOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
 
   // Calculate page count for the full-screen preview
   useEffect(() => {
-    if (!viewOpen || !viewPreviewRef.current) { setPageCount(1); return; }
+    if (!viewOpen || !viewPreviewRef.current) {
+      setPageCount(1);
+      return;
+    }
     const el = viewPreviewRef.current;
     const measure = () => {
       const contentHeight = el.scrollHeight;
@@ -1179,9 +1291,7 @@ function Editor({
           `<p>Dear ${esc(form.customer_name || "customer")},</p>
            <p>Please find your invoice <b>${esc(form.number)}</b>.</p>
            <table style="width:100%;font-size:14px;margin:12px 0">
-             <tr><td>Subtotal</td><td style="text-align:right">${m(
-               t.subtotal
-             )}</td></tr>
+             <tr><td>Subtotal</td><td style="text-align:right">${m(t.subtotal)}</td></tr>
              ${
                t.discount
                  ? `<tr><td>Discount</td><td style="text-align:right">-${m(
@@ -1217,10 +1327,24 @@ function Editor({
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); onSave(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); saveAndSend(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "p") { e.preventDefault(); downloadPdf(); }
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        onSave();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        saveAndSend();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        downloadPdf();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1232,16 +1356,14 @@ function Editor({
       <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
         <div className="flex items-start gap-3">
           <button
-            className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
             onClick={onBack}
             aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-bold text-ink">
-              Create Invoice
-            </h1>
+            <h1 className="text-[28px] leading-9 font-medium text-ink">Create Invoice</h1>
             <p className="text-sm text-brand-500 mt-0.5">
               Create and send professional invoices to your customers
             </p>
@@ -1250,12 +1372,9 @@ function Editor({
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone={statusTone(form.status)}>{form.status}</Badge>
           {!form.id && (
-            <span className="text-xs font-semibold text-brand-400">Unsaved</span>
+            <span className="text-xs font-medium text-brand-400">Unsaved</span>
           )}
-          <button
-            className="btn-ghost"
-            onClick={() => setViewOpen(true)}
-          >
+          <button className="btn-ghost" onClick={() => setViewOpen(true)}>
             <Maximize2 size={15} /> View
           </button>
           <button
@@ -1390,20 +1509,25 @@ function Editor({
                           e.stopPropagation();
                           removeTpl(tpl.id, tpl.name);
                         }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
                       >
                         <Trash2 size={11} />
                       </span>
                     )}
-                    <TemplateTilePreview templateId={tpl.id} customTemplates={customTemplates} />
-                    <p className="text-xs font-semibold text-ink mt-2 capitalize flex items-center gap-1">
+                    <TemplateTilePreview
+                      templateId={tpl.id}
+                      customTemplates={customTemplates}
+                    />
+                    <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
                       {tpl.name}
                       {isFile ? (
                         <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
                           <Upload size={8} /> Uploaded
                         </span>
                       ) : isCustom ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">Custom</span>
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">
+                          Custom
+                        </span>
                       ) : null}
                     </p>
                   </button>
@@ -1422,9 +1546,7 @@ function Editor({
                       className="select"
                       value=""
                       onChange={(e) => {
-                        const c = customers.find(
-                          (x) => String(x.id) === e.target.value
-                        );
+                        const c = customers.find((x) => String(x.id) === e.target.value);
                         if (c) applyCustomer(c);
                       }}
                     >
@@ -1463,9 +1585,7 @@ function Editor({
                     rows={4}
                     placeholder="Street, City, Country"
                     value={form.customer_address ?? ""}
-                    onChange={(e) =>
-                      set("customer_address", e.target.value)
-                    }
+                    onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
                 <Field label="Customer Email / TRN">
@@ -1474,17 +1594,13 @@ function Editor({
                       className="input"
                       placeholder="Email"
                       value={form.customer_email ?? ""}
-                      onChange={(e) =>
-                        set("customer_email", e.target.value)
-                      }
+                      onChange={(e) => set("customer_email", e.target.value)}
                     />
                     <input
                       className="input"
                       placeholder="TRN"
                       value={form.customer_trn ?? ""}
-                      onChange={(e) =>
-                        set("customer_trn", e.target.value)
-                      }
+                      onChange={(e) => set("customer_trn", e.target.value)}
                     />
                   </div>
                 </Field>
@@ -1520,7 +1636,7 @@ function Editor({
                       onChange={(e) => set("number", e.target.value)}
                     />
                     <span
-                      className="grid place-items-center rounded-xl border border-brand-200 px-2.5 text-brand-400"
+                      className="grid place-items-center rounded-lg border border-brand-200 px-2.5 text-brand-400"
                       title="Numbering"
                     >
                       <Settings size={15} />
@@ -1573,7 +1689,7 @@ function Editor({
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-semibold text-brand-400">
+                  <tr className="text-left text-xs font-medium text-brand-400">
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
@@ -1583,13 +1699,21 @@ function Editor({
                         key={col.key}
                         className="py-2 px-2 text-right group relative cursor-grab active:cursor-grabbing"
                         draggable
-                        onDragStart={(e) => { e.dataTransfer.setData("text/plain", col.key); e.dataTransfer.effectAllowed = "move"; }}
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", col.key);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                        }}
                         onDrop={(e) => {
                           e.preventDefault();
                           const fromKey = e.dataTransfer.getData("text/plain");
                           if (fromKey && fromKey !== col.key) {
-                            const fromIdx = form.customColumns.findIndex(c => c.key === fromKey);
+                            const fromIdx = form.customColumns.findIndex(
+                              (c) => c.key === fromKey
+                            );
                             const toIdx = idx;
                             if (fromIdx >= 0) {
                               const next = [...form.customColumns];
@@ -1603,9 +1727,14 @@ function Editor({
                         <span className="text-[10px]">{col.label}</span>
                         <button
                           className="ml-1 opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger inline cursor-pointer"
-                          onClick={(e) => { e.stopPropagation(); removeCustomColumn(col.key); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeCustomColumn(col.key);
+                          }}
                           title="Remove column"
-                        >×</button>
+                        >
+                          ×
+                        </button>
                       </th>
                     ))}
                     <th className="py-2 px-2 w-32 text-right">Unit Price</th>
@@ -1625,9 +1754,7 @@ function Editor({
                           className="input"
                           placeholder="Item description"
                           value={it.description}
-                          onChange={(e) =>
-                            setItem(i, { description: e.target.value })
-                          }
+                          onChange={(e) => setItem(i, { description: e.target.value })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -1636,9 +1763,7 @@ function Editor({
                           className="input text-right !px-2"
                           value={it.qty || ""}
                           placeholder="0"
-                          onChange={(e) =>
-                            setItem(i, { qty: numInput(e.target.value) })
-                          }
+                          onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -1647,9 +1772,7 @@ function Editor({
                           placeholder="pcs"
                           value={it.unit || ""}
                           list="unit-suggestions"
-                          onChange={(e) =>
-                            setItem(i, { unit: e.target.value })
-                          }
+                          onChange={(e) => setItem(i, { unit: e.target.value })}
                         />
                       </td>
                       {form.customColumns.map((col) => (
@@ -1658,9 +1781,7 @@ function Editor({
                             className="input text-right !px-2 !py-1 text-xs"
                             placeholder={col.label}
                             value={it.custom?.[col.key] || ""}
-                            onChange={(e) =>
-                              setItemCustom(i, col.key, e.target.value)
-                            }
+                            onChange={(e) => setItemCustom(i, col.key, e.target.value)}
                           />
                         </td>
                       ))}
@@ -1680,7 +1801,7 @@ function Editor({
                           {form.tax_rate}%
                         </td>
                       )}
-                      <td className="py-2 px-2 text-right font-semibold text-ink">
+                      <td className="py-2 px-2 text-right font-medium text-ink">
                         {m((it.qty || 0) * (it.unit_price || 0))}
                       </td>
                       <td className="py-2">
@@ -1706,13 +1827,21 @@ function Editor({
                     key={col.key}
                     className="inline-flex items-center gap-0.5 bg-brand-50 border border-brand-200 rounded px-1.5 py-0.5 cursor-grab active:cursor-grabbing select-none"
                     draggable
-                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", col.key); e.dataTransfer.effectAllowed = "move"; }}
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", col.key);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    }}
                     onDrop={(e) => {
                       e.preventDefault();
                       const fromKey = e.dataTransfer.getData("text/plain");
                       if (fromKey && fromKey !== col.key) {
-                        const fromIdx = form.customColumns.findIndex(c => c.key === fromKey);
+                        const fromIdx = form.customColumns.findIndex(
+                          (c) => c.key === fromKey
+                        );
                         const toIdx = idx;
                         if (fromIdx >= 0) {
                           const next = [...form.customColumns];
@@ -1724,7 +1853,16 @@ function Editor({
                     }}
                   >
                     <span className="font-medium">{col.label}</span>
-                    <button className="text-brand-300 hover:text-danger ml-0.5 cursor-pointer" onClick={(e) => { e.stopPropagation(); removeCustomColumn(col.key); }} title="Remove">×</button>
+                    <button
+                      className="text-brand-300 hover:text-danger ml-0.5 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeCustomColumn(col.key);
+                      }}
+                      title="Remove"
+                    >
+                      ×
+                    </button>
                   </span>
                 ))}
               </div>
@@ -1801,44 +1939,41 @@ function Editor({
           {/* 5 · Additional settings */}
           <Step n={5} title="Additional Settings">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+              <div className="rounded-lg border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-medium text-sm">
                   <Settings size={15} /> Invoice Settings
                 </div>
                 <div className="mt-3 space-y-2">
                   <div>
-                    <p className="text-xs font-semibold text-brand-600 mb-1.5">
-                      Apply VAT
-                    </p>
+                    <p className="text-xs font-medium text-brand-600 mb-1.5">Apply VAT</p>
                     <div className="flex rounded-lg bg-brand-100 p-0.5">
-                      {([["Yes", true], ["No", false]] as const).map(
-                        ([lbl, on]) => {
-                          const active = (form.tax_rate || 0) > 0 === on;
-                          return (
-                            <button
-                              key={lbl}
-                              type="button"
-                              onClick={() =>
-                                set(
-                                  "tax_rate",
-                                  on
-                                    ? form.tax_rate > 0
-                                      ? form.tax_rate
-                                      : 5
-                                    : 0
-                                )
-                              }
-                              className={`flex-1 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
-                                active
-                                  ? "bg-white text-ink shadow-bento"
-                                  : "text-brand-500 hover:text-ink"
-                              }`}
-                            >
-                              {lbl}
-                            </button>
-                          );
-                        }
-                      )}
+                      {(
+                        [
+                          ["Yes", true],
+                          ["No", false],
+                        ] as const
+                      ).map(([lbl, on]) => {
+                        const active = (form.tax_rate || 0) > 0 === on;
+                        return (
+                          <button
+                            key={lbl}
+                            type="button"
+                            onClick={() =>
+                              set(
+                                "tax_rate",
+                                on ? (form.tax_rate > 0 ? form.tax_rate : 5) : 0
+                              )
+                            }
+                            className={`flex-1 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                              active
+                                ? "bg-white text-ink shadow-bento"
+                                : "text-brand-500 hover:text-ink"
+                            }`}
+                          >
+                            {lbl}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                   {(form.tax_rate || 0) > 0 && (
@@ -1861,7 +1996,7 @@ function Editor({
                       </option>
                     ))}
                   </select>
-                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-600 border border-brand-200 rounded-xl px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 text-xs font-medium text-brand-600 border border-brand-200 rounded-lg px-3 py-2">
                     Accent color
                     <ColorPicker
                       value={form.accent}
@@ -1870,8 +2005,8 @@ function Editor({
                   </div>
                 </div>
               </div>
-              <div className="rounded-xl border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+              <div className="rounded-lg border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-medium text-sm">
                   <StickyNote size={15} /> Notes
                 </div>
                 <textarea
@@ -1889,8 +2024,8 @@ function Editor({
                   onChange={(e) => set("terms", e.target.value)}
                 />
               </div>
-              <div className="rounded-xl border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+              <div className="rounded-lg border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-medium text-sm">
                   <Paperclip size={15} /> Logo / Attachment
                 </div>
                 <div className="mt-3">
@@ -1920,8 +2055,8 @@ function Editor({
                     </label>
                   )}
                   <p className="text-[11px] text-brand-400 mt-2">
-                    Tip: set this once in Settings → Company Details to
-                    auto-fill every invoice.
+                    Tip: set this once in Settings → Company Details to auto-fill every
+                    invoice.
                   </p>
                 </div>
               </div>
@@ -1930,14 +2065,36 @@ function Editor({
                 icon={<Stamp size={15} />}
                 value={form.stamp}
                 onChange={(v) => setForm({ ...form, stamp: v })}
-                defaults={{ data: "", x: 75, y: 70, opacity: 30, color: "#cc0000", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0, scale: 100 }}
+                defaults={{
+                  data: "",
+                  x: 75,
+                  y: 70,
+                  opacity: 30,
+                  color: "#cc0000",
+                  cropTop: 0,
+                  cropRight: 0,
+                  cropBottom: 0,
+                  cropLeft: 0,
+                  scale: 100,
+                }}
               />
               <StampSigCard
                 label="Signature"
                 icon={<PenTool size={15} />}
                 value={form.signature}
                 onChange={(v) => setForm({ ...form, signature: v })}
-                defaults={{ data: "", x: 75, y: 85, opacity: 35, color: "#0000cc", cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0, scale: 100 }}
+                defaults={{
+                  data: "",
+                  x: 75,
+                  y: 85,
+                  opacity: 35,
+                  color: "#0000cc",
+                  cropTop: 0,
+                  cropRight: 0,
+                  cropBottom: 0,
+                  cropLeft: 0,
+                  scale: 100,
+                }}
               />
             </div>
           </Step>
@@ -1962,8 +2119,8 @@ function Editor({
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
               <div>
-                <p className="font-bold text-ink flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
+                <p className="font-medium text-ink flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-medium">
                     4
                   </span>
                   Preview
@@ -1974,12 +2131,14 @@ function Editor({
               </div>
             </div>
 
-            <FitPreview
-              baseWidth={device === "desktop" ? 794 : 420}
-              zoom={zoom}
-            >
+            <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom}>
               <div ref={invoiceRef}>
-                <div style={{ position: "relative", minHeight: device === "desktop" ? 1027 : 498 }}>
+                <div
+                  style={{
+                    position: "relative",
+                    minHeight: device === "desktop" ? 1027 : 498,
+                  }}
+                >
                   {/* Stamp & Signature — draggable, watermark-style overlay */}
                   <StampSignatureLayer
                     stamp={form.stamp}
@@ -1993,7 +2152,14 @@ function Editor({
                   />
                   <InvoiceView form={form} />
                   {showBank && (
-                    <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                    <DraggableBlock
+                      x={bankX}
+                      y={bankY}
+                      onMove={(x, y) => {
+                        setBankX(x);
+                        setBankY(y);
+                      }}
+                    >
                       <BankDetailsBlock bank={bank} accent={form.accent} />
                     </DraggableBlock>
                   )}
@@ -2002,7 +2168,7 @@ function Editor({
             </FitPreview>
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+              <div className="flex items-center gap-1 rounded-lg bg-brand-50 p-1">
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
                     device === "desktop"
@@ -2034,7 +2200,7 @@ function Editor({
                 >
                   <Minus size={14} />
                 </button>
-                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                <span className="text-xs font-medium text-brand-600 w-10 text-center">
                   {zoom}%
                 </span>
                 <button
@@ -2046,17 +2212,10 @@ function Editor({
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  className="btn-ghost text-xs"
-                  onClick={onSave}
-                  disabled={saving}
-                >
+                <button className="btn-ghost text-xs" onClick={onSave} disabled={saving}>
                   <Save size={14} /> Save
                 </button>
-                <button
-                  className="btn-primary text-xs"
-                  onClick={downloadPdf}
-                >
+                <button className="btn-primary text-xs" onClick={downloadPdf}>
                   <Download size={14} /> PDF
                 </button>
               </div>
@@ -2066,27 +2225,30 @@ function Editor({
       </div>
 
       {viewOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4" onClick={() => setViewOpen(false)}>
-          <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
+          onClick={() => setViewOpen(false)}
+        >
+          <div
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-lg bg-white dark:bg-[#24262C] outline-none"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold text-ink">
+                <h2 className="text-lg font-medium text-ink">
                   {form.number || "Invoice preview"}
                 </h2>
-                <span className="text-xs font-semibold text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-medium text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
                   Page 1 of {pageCount}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  className="btn-ghost h-9 text-xs"
-                  onClick={downloadPdf}
-                >
+                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
                   <Download size={14} /> PDF
                 </button>
                 <button
                   onClick={() => setViewOpen(false)}
-                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer"
+                  className="grid h-9 w-9 place-items-center rounded-lg text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer"
                   aria-label="Close"
                 >
                   <X size={18} />
@@ -2095,7 +2257,10 @@ function Editor({
             </div>
             <div className="flex-1 overflow-auto p-6">
               <div className="mx-auto max-w-5xl">
-                <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]" ref={viewPreviewRef}>
+                <div
+                  className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]"
+                  ref={viewPreviewRef}
+                >
                   <div style={{ position: "relative", minHeight: 1059 }}>
                     <StampSignatureLayer
                       stamp={form.stamp}
@@ -2109,11 +2274,18 @@ function Editor({
                     />
                     <InvoiceView form={form} />
                     {showBank && (
-                      <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                      <DraggableBlock
+                        x={bankX}
+                        y={bankY}
+                        onMove={(x, y) => {
+                          setBankX(x);
+                          setBankY(y);
+                        }}
+                      >
                         <BankDetailsBlock bank={bank} accent={form.accent} />
                       </DraggableBlock>
                     )}
-                    </div>
+                  </div>
                 </div>
                 {pageCount > 1 && (
                   <p className="text-center text-xs text-brand-400 mt-3 font-medium">
@@ -2146,14 +2318,12 @@ function Step({
     <div className="card">
       <div className="flex items-start justify-between mb-4 gap-3">
         <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-bold shrink-0">
+          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-medium shrink-0">
             {n}
           </span>
           <div>
-            <p className="font-bold text-ink leading-tight">{title}</p>
-            {subtitle && (
-              <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>
-            )}
+            <p className="font-medium text-ink leading-tight">{title}</p>
+            {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
           </div>
         </div>
         {action}
@@ -2202,8 +2372,8 @@ function CustomerModal({
   return (
     <Modal open={open} onClose={onClose} title="Add Customer">
       <p className="text-xs text-brand-500 -mt-2 mb-4">
-        UAE FTA tax invoices require the customer's legal name, address and
-        15-digit TRN for B2B supplies.
+        UAE FTA tax invoices require the customer's legal name, address and 15-digit TRN
+        for B2B supplies.
       </p>
       <div className="space-y-3">
         <Field label="Company / Legal Name">
@@ -2256,9 +2426,7 @@ function CustomerModal({
           </Field>
         </div>
         {!trnValid && (
-          <p className="text-xs text-danger">
-            TRN must be exactly 15 digits.
-          </p>
+          <p className="text-xs text-danger">TRN must be exactly 15 digits.</p>
         )}
       </div>
       <div className="flex justify-end gap-2 mt-5">
@@ -2267,9 +2435,7 @@ function CustomerModal({
         </button>
         <button
           className="btn-primary"
-          disabled={
-            saving || (!f.company.trim() && !f.name.trim()) || !trnValid
-          }
+          disabled={saving || (!f.company.trim() && !f.name.trim()) || !trnValid}
           onClick={async () => {
             setSaving(true);
             const trn = f.trn.replace(/\s/g, "");
@@ -2279,22 +2445,21 @@ function CustomerModal({
               email: f.email || undefined,
               phone: f.phone || undefined,
               address: f.address || undefined,
-              segment: trn ? `TRN:${trn}` : undefined,
+              trn: trn || undefined,
             };
             try {
-              await crm.createCustomer(
+              // createCustomer returns the new row id. Use it for the FK
+              // instead of fabricating an { id: 0 } record (which persisted a
+              // wrong customer_id on the invoice until the user re-picked).
+              const id = await crm.createCustomer(
                 payload as Omit<CrmCustomer, "id" | "created_at">
               );
+              onSaved({ id, created_at: "", ...payload } as CrmCustomer);
             } catch (e) {
               toast.error(e instanceof Error ? e.message : "Failed to create customer");
+            } finally {
               setSaving(false);
-              return;
             }
-            onSaved({
-              id: 0,
-              created_at: "",
-              ...payload,
-            } as CrmCustomer);
           }}
         >
           {saving ? "Saving…" : "Save Customer"}
@@ -2313,22 +2478,18 @@ function InvoiceView({ form }: { form: Form }) {
 
   // Resolve custom templates to their base layout for rendering
   const templateId = form.template?.startsWith("custom-")
-    ? (loadCustomTemplates().find((ct) => ct.id === form.template)?.layout || "modern")
+    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.layout || "modern"
     : form.template;
 
   // Override accent color for custom templates
   const resolvedAccent = form.template?.startsWith("custom-")
-    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.accent || (form.accent || "#222222")
-    : (form.accent || "#222222");
+    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.accent ||
+      form.accent ||
+      "#222222"
+    : form.accent || "#222222";
   const a = resolvedAccent;
 
-  const Items = ({
-    headerBg,
-    bordered,
-  }: {
-    headerBg?: string;
-    bordered?: boolean;
-  }) => (
+  const Items = ({ headerBg, bordered }: { headerBg?: string; bordered?: boolean }) => (
     <table className="w-full text-sm border-collapse mt-2">
       <thead>
         <tr
@@ -2339,14 +2500,12 @@ function InvoiceView({ form }: { form: Form }) {
           <th className="text-right py-2 px-2 font-semibold w-14">Qty</th>
           <th className="text-right py-2 px-2 font-semibold w-14">Unit</th>
           {form.customColumns.map((col) => (
-            <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">{col.label}</th>
+            <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">
+              {col.label}
+            </th>
           ))}
-          <th className="text-right py-2 px-2 font-semibold w-24">
-            Unit Price
-          </th>
-          <th className="text-right py-2 px-2 font-semibold w-28">
-            Amount
-          </th>
+          <th className="text-right py-2 px-2 font-semibold w-24">Unit Price</th>
+          <th className="text-right py-2 px-2 font-semibold w-28">Amount</th>
         </tr>
       </thead>
       <tbody>
@@ -2360,7 +2519,12 @@ function InvoiceView({ form }: { form: Form }) {
             <td className="py-2 px-2 text-right">{it.qty}</td>
             <td className="py-2 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
             {form.customColumns.map((col) => (
-              <td key={col.key} className="py-2 px-2 text-right text-[10px] text-neutral-500">{it.custom?.[col.key] || "—"}</td>
+              <td
+                key={col.key}
+                className="py-2 px-2 text-right text-[10px] text-neutral-500"
+              >
+                {it.custom?.[col.key] || "—"}
+              </td>
             ))}
             <td className="py-2 px-2 text-right">{m(it.unit_price)}</td>
             <td className="py-2 px-2 text-right">
@@ -2376,9 +2540,7 @@ function InvoiceView({ form }: { form: Form }) {
     <div className="ml-auto w-72 mt-6 text-sm">
       <Row k="Subtotal" v={m(t.subtotal)} />
       {form.discount > 0 && <Row k="Discount" v={`- ${m(form.discount)}`} />}
-      {(form.tax_rate || 0) > 0 && (
-        <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />
-      )}
+      {(form.tax_rate || 0) > 0 && <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />}
       <div
         className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
         style={{ borderColor: a, color: a }}
@@ -2423,10 +2585,7 @@ function InvoiceView({ form }: { form: Form }) {
       const p = pos[k];
       if (!p) return null;
       return (
-        <div
-          className="absolute"
-          style={{ left: `${p.x}%`, top: `${p.y}%` }}
-        >
+        <div className="absolute" style={{ left: `${p.x}%`, top: `${p.y}%` }}>
           {children}
         </div>
       );
@@ -2447,26 +2606,49 @@ function InvoiceView({ form }: { form: Form }) {
 
         {/* Seller — Company Info */}
         <Section k="seller">
-          {form.logo && <img src={form.logo} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
+          {form.logo && (
+            <img
+              src={form.logo}
+              alt="logo"
+              style={{ height: 40 }}
+              className="object-contain mb-1.5"
+            />
+          )}
           <p className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
-          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.seller_address}</p>
-          {form.seller_trn && <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.seller_trn}</p>}
+          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
+            {form.seller_address}
+          </p>
+          {form.seller_trn && (
+            <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.seller_trn}</p>
+          )}
         </Section>
 
         {/* Header — Invoice title + number + dates */}
         <Section k="header">
-          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>{form.doc_title || "INVOICE"}</p>
+          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>
+            {form.doc_title || "INVOICE"}
+          </p>
           <p className="text-xs font-mono text-neutral-800 mt-0.5">{form.number}</p>
-          <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(form.issue_date)}</p>
-          {form.due_date && <p className="text-[10px] text-neutral-500">Due: {fmtDate(form.due_date)}</p>}
+          <p className="text-[10px] text-neutral-500 mt-0.5">
+            {fmtDate(form.issue_date)}
+          </p>
+          {form.due_date && (
+            <p className="text-[10px] text-neutral-500">Due: {fmtDate(form.due_date)}</p>
+          )}
         </Section>
 
         {/* Customer — Bill To */}
         <Section k="customer">
-          <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Bill To</p>
+          <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">
+            Bill To
+          </p>
           <p className="font-semibold text-xs text-neutral-900">{form.customer_name}</p>
-          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.customer_address}</p>
-          {form.customer_trn && <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.customer_trn}</p>}
+          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
+            {form.customer_address}
+          </p>
+          {form.customer_trn && (
+            <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.customer_trn}</p>
+          )}
         </Section>
 
         {/* Items table */}
@@ -2492,7 +2674,9 @@ function InvoiceView({ form }: { form: Form }) {
         {/* Footer — Notes/Terms */}
         <Section k="footer">
           {form.notes && <p className="text-[10px] text-neutral-600">{form.notes}</p>}
-          {form.terms && <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
+          {form.terms && (
+            <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>
+          )}
         </Section>
 
         {/* Badge */}
@@ -2517,16 +2701,11 @@ function InvoiceView({ form }: { form: Form }) {
               {form.seller_address}
             </p>
             {form.seller_trn && (
-              <p className="text-xs text-neutral-500">
-                TRN: {form.seller_trn}
-              </p>
+              <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
             )}
           </div>
           <div className="text-right">
-            <p
-              className="text-3xl font-extrabold tracking-tight"
-              style={{ color: a }}
-            >
+            <p className="text-3xl font-extrabold tracking-tight" style={{ color: a }}>
               {form.doc_title || "INVOICE"}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
@@ -2535,17 +2714,13 @@ function InvoiceView({ form }: { form: Form }) {
 
         <div className="flex justify-between mt-10 text-sm">
           <div>
-            <p className="text-xs uppercase tracking-wider text-neutral-400">
-              Bill To
-            </p>
+            <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
             <p className="font-semibold mt-1">{form.customer_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">
               {form.customer_address}
             </p>
             {form.customer_trn && (
-              <p className="text-xs text-neutral-500">
-                TRN: {form.customer_trn}
-              </p>
+              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
             )}
           </div>
           <div className="text-right text-xs text-neutral-500">
@@ -2573,27 +2748,23 @@ function InvoiceView({ form }: { form: Form }) {
             <Logo size={88} />
             <p className="font-bold text-xl">{form.seller_name}</p>
           </div>
-          <p className="text-2xl font-extrabold tracking-widest">{form.doc_title || "INVOICE"}</p>
+          <p className="text-2xl font-extrabold tracking-widest">
+            {form.doc_title || "INVOICE"}
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="border border-neutral-300 p-4">
-            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">
-              From
-            </p>
+            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">From</p>
             <p className="font-semibold">{form.seller_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">
               {form.seller_address}
             </p>
             {form.seller_trn && (
-              <p className="text-xs text-neutral-500">
-                TRN: {form.seller_trn}
-              </p>
+              <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
             )}
             {form.seller_email && (
-              <p className="text-xs text-neutral-500">
-                {form.seller_email}
-              </p>
+              <p className="text-xs text-neutral-500">{form.seller_email}</p>
             )}
           </div>
           <div className="border border-neutral-300 p-4">
@@ -2605,9 +2776,7 @@ function InvoiceView({ form }: { form: Form }) {
               {form.customer_address}
             </p>
             {form.customer_trn && (
-              <p className="text-xs text-neutral-500">
-                TRN: {form.customer_trn}
-              </p>
+              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
             )}
           </div>
         </div>
@@ -2615,8 +2784,7 @@ function InvoiceView({ form }: { form: Form }) {
         <div className="flex justify-between text-xs text-neutral-500 mt-4">
           <p className="font-mono">{form.number}</p>
           <p>
-            Issued {fmtDate(form.issue_date)} · Due{" "}
-            {fmtDate(form.due_date)}
+            Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
           </p>
         </div>
 
@@ -2648,9 +2816,7 @@ function InvoiceView({ form }: { form: Form }) {
         <SellerContact />
       </div>
       <div>
-        <p className="text-xs uppercase tracking-wider text-neutral-400">
-          Bill To
-        </p>
+        <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
         <p className="font-semibold mt-1">{form.customer_name}</p>
         <p className="text-xs text-neutral-500 whitespace-pre-line">
           {form.customer_address}
@@ -2687,7 +2853,10 @@ function InvoiceView({ form }: { form: Form }) {
   if (templateId === "corporate") {
     return (
       <div className="text-neutral-900">
-        <div className="flex justify-between items-start border-b-4 pb-5" style={{ borderColor: a }}>
+        <div
+          className="flex justify-between items-start border-b-4 pb-5"
+          style={{ borderColor: a }}
+        >
           <div className="flex items-center gap-3">
             <Logo size={96} />
             <div>
@@ -2700,13 +2869,13 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
-              {(form.doc_title || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")).toUpperCase()}
+              {(
+                form.doc_title || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")
+              ).toUpperCase()}
             </p>
             <p className="text-sm font-mono mt-1">{form.number}</p>
             {form.seller_trn && (
-              <p className="text-xs text-neutral-500 mt-1">
-                TRN {form.seller_trn}
-              </p>
+              <p className="text-xs text-neutral-500 mt-1">TRN {form.seller_trn}</p>
             )}
           </div>
         </div>
@@ -2724,12 +2893,8 @@ function InvoiceView({ form }: { form: Form }) {
             )}
           </div>
           <div className="bg-neutral-50 p-4 rounded text-right">
-            <p className="text-xs text-neutral-500">
-              Issued {fmtDate(form.issue_date)}
-            </p>
-            <p className="text-xs text-neutral-500">
-              Due {fmtDate(form.due_date)}
-            </p>
+            <p className="text-xs text-neutral-500">Issued {fmtDate(form.issue_date)}</p>
+            <p className="text-xs text-neutral-500">Due {fmtDate(form.due_date)}</p>
           </div>
         </div>
         <Items headerBg={a} />
@@ -2755,9 +2920,7 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
         <div className="flex justify-between mt-10 text-sm">
           <div>
-            <p className="text-[11px] uppercase tracking-widest text-neutral-400">
-              From
-            </p>
+            <p className="text-[11px] uppercase tracking-widest text-neutral-400">From</p>
             <p className="font-semibold mt-1">{form.seller_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">
               {form.seller_address}
@@ -2791,7 +2954,9 @@ function InvoiceView({ form }: { form: Form }) {
         >
           <div className="flex justify-between items-start">
             <Logo size={100} />
-            <p className="text-5xl font-extrabold tracking-tight">{form.doc_title || "INVOICE"}</p>
+            <p className="text-5xl font-extrabold tracking-tight">
+              {form.doc_title || "INVOICE"}
+            </p>
           </div>
           <div className="flex justify-between items-end mt-8">
             <div>
@@ -2807,9 +2972,7 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
         </div>
         <div className="text-sm">
-          <p className="text-xs uppercase tracking-wider text-neutral-400">
-            Bill To
-          </p>
+          <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
           <p className="font-semibold mt-1">{form.customer_name}</p>
           <p className="text-xs text-neutral-500 whitespace-pre-line">
             {form.customer_address}
@@ -2851,9 +3014,7 @@ function InvoiceView({ form }: { form: Form }) {
         <div className="mt-8 text-xs">
           <span className="text-neutral-400">{"// bill_to"}</span>
           <p className="font-bold text-sm mt-1">{form.customer_name}</p>
-          <p className="text-neutral-500 whitespace-pre-line">
-            {form.customer_address}
-          </p>
+          <p className="text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
         </div>
         <Items headerBg={a} />
         <Totals />
@@ -2878,10 +3039,7 @@ function InvoiceView({ form }: { form: Form }) {
               <SellerContact />
             </div>
           </div>
-          <p
-            className="text-4xl font-extrabold italic"
-            style={{ color: a }}
-          >
+          <p className="text-4xl font-extrabold italic" style={{ color: a }}>
             Invoice
           </p>
         </div>
@@ -2961,7 +3119,11 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
         <div
           className="mt-6 py-2 text-center text-sm font-semibold tracking-[0.25em]"
-          style={{ borderTop: `1px solid ${a}`, borderBottom: `1px solid ${a}`, color: a }}
+          style={{
+            borderTop: `1px solid ${a}`,
+            borderBottom: `1px solid ${a}`,
+            color: a,
+          }}
         >
           {form.doc_title || "INVOICE"} {form.number}
         </div>
@@ -2977,51 +3139,102 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- GREEN GOLD (UAE Manufacturing) ----
   if (templateId === "green-gold") {
     return (
-      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+      >
         {/* Top gold band */}
-        <div className="-mx-12 -mt-12 mb-0" style={{ background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)", height: 6 }} />
-        
+        <div
+          className="-mx-12 -mt-12 mb-0"
+          style={{
+            background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)",
+            height: 6,
+          }}
+        />
+
         {/* Header with logo */}
-        <div className="flex justify-between items-start mt-8 pb-6" style={{ borderBottom: `3px solid #D4A017` }}>
+        <div
+          className="flex justify-between items-start mt-8 pb-6"
+          style={{ borderBottom: `3px solid #D4A017` }}
+        >
           <div className="flex items-center gap-4">
             <Logo size={64} />
             <div>
-              <p className="font-extrabold text-xl tracking-tight" style={{ color: "#1B5E20" }}>{form.seller_name}</p>
-              <p className="text-xs text-neutral-500 whitespace-pre-line leading-relaxed">{form.seller_address}</p>
-              {form.seller_trn && <p className="text-[11px] text-neutral-400 mt-0.5">TRN: {form.seller_trn}</p>}
+              <p
+                className="font-extrabold text-xl tracking-tight"
+                style={{ color: "#1B5E20" }}
+              >
+                {form.seller_name}
+              </p>
+              <p className="text-xs text-neutral-500 whitespace-pre-line leading-relaxed">
+                {form.seller_address}
+              </p>
+              {form.seller_trn && (
+                <p className="text-[11px] text-neutral-400 mt-0.5">
+                  TRN: {form.seller_trn}
+                </p>
+              )}
             </div>
           </div>
           <div className="text-right">
-            <p className="text-4xl font-black tracking-tighter" style={{ color: "#D4A017" }}>{form.doc_title || "INVOICE"}</p>
+            <p
+              className="text-4xl font-black tracking-tighter"
+              style={{ color: "#D4A017" }}
+            >
+              {form.doc_title || "INVOICE"}
+            </p>
             <p className="text-sm font-mono text-neutral-600 mt-1">{form.number}</p>
             <div className="mt-3 pt-3" style={{ borderTop: "1px solid #E8D5A3" }}>
               <p className="text-[11px] text-neutral-500">{fmtDate(form.issue_date)}</p>
-              <p className="text-[11px] text-neutral-400">Due: {fmtDate(form.due_date)}</p>
+              <p className="text-[11px] text-neutral-400">
+                Due: {fmtDate(form.due_date)}
+              </p>
             </div>
           </div>
         </div>
 
         {/* Bill To + Company Info */}
         <div className="grid grid-cols-2 gap-8 mt-6">
-          <div className="rounded-lg p-4" style={{ background: "#F1F8E9", border: "1px solid #C8E6C9" }}>
-            <p className="text-[10px] uppercase tracking-[0.2em] font-semibold mb-2" style={{ color: "#1B5E20" }}>Bill To</p>
+          <div
+            className="rounded-lg p-4"
+            style={{ background: "#F1F8E9", border: "1px solid #C8E6C9" }}
+          >
+            <p
+              className="text-[10px] uppercase tracking-[0.2em] font-semibold mb-2"
+              style={{ color: "#1B5E20" }}
+            >
+              Bill To
+            </p>
             <p className="font-bold text-sm">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line leading-relaxed mt-1">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+            <p className="text-xs text-neutral-600 whitespace-pre-line leading-relaxed mt-1">
+              {form.customer_address}
+            </p>
+            {form.customer_trn && (
+              <p className="text-[10px] text-neutral-400 mt-1">
+                TRN: {form.customer_trn}
+              </p>
+            )}
           </div>
-          <div className="rounded-lg p-4" style={{ background: "#FFF8E1", border: "1px solid #FFE082" }}>
+          <div
+            className="rounded-lg p-4"
+            style={{ background: "#FFF8E1", border: "1px solid #FFE082" }}
+          >
             <div className="flex justify-between text-xs text-neutral-600">
-              <span>Invoice Date</span><span className="font-medium">{fmtDate(form.issue_date)}</span>
+              <span>Invoice Date</span>
+              <span className="font-medium">{fmtDate(form.issue_date)}</span>
             </div>
             <div className="flex justify-between text-xs text-neutral-600 mt-2">
-              <span>Due Date</span><span className="font-medium">{fmtDate(form.due_date)}</span>
+              <span>Due Date</span>
+              <span className="font-medium">{fmtDate(form.due_date)}</span>
             </div>
             <div className="flex justify-between text-xs text-neutral-600 mt-2">
-              <span>Reference</span><span className="font-mono font-medium">{form.number}</span>
+              <span>Reference</span>
+              <span className="font-mono font-medium">{form.number}</span>
             </div>
             {form.po_number && (
               <div className="flex justify-between text-xs text-neutral-600 mt-2">
-                <span>PO Number</span><span className="font-medium">{form.po_number}</span>
+                <span>PO Number</span>
+                <span className="font-medium">{form.po_number}</span>
               </div>
             )}
           </div>
@@ -3030,10 +3243,18 @@ function InvoiceView({ form }: { form: Form }) {
         <Items headerBg="#1B5E20" />
         <Totals />
         <Footer />
-        
+
         {/* Bottom gold band */}
-        <div className="-mx-12 mt-8" style={{ background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)", height: 3 }} />
-        <p className="text-center text-[10px] text-neutral-400 mt-3">Thank you for your business</p>
+        <div
+          className="-mx-12 mt-8"
+          style={{
+            background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)",
+            height: 3,
+          }}
+        />
+        <p className="text-center text-[10px] text-neutral-400 mt-3">
+          Thank you for your business
+        </p>
       </div>
     );
   }
@@ -3041,11 +3262,21 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- UAE PROFESSIONAL ----
   if (templateId === "uae") {
     return (
-      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+      >
         {/* UAE flag-inspired accent bar */}
         <div className="-mx-12 -mt-12 mb-8 flex" style={{ height: 4 }}>
           <div style={{ flex: 1, background: "#00732E" }} />
-          <div style={{ flex: 1, background: "#FFFFFF", borderLeft: "1px solid #ddd", borderRight: "1px solid #ddd" }} />
+          <div
+            style={{
+              flex: 1,
+              background: "#FFFFFF",
+              borderLeft: "1px solid #ddd",
+              borderRight: "1px solid #ddd",
+            }}
+          />
           <div style={{ flex: 1, background: "#000000" }} />
           <div style={{ width: 8, background: "#CE1126" }} />
         </div>
@@ -3054,12 +3285,19 @@ function InvoiceView({ form }: { form: Form }) {
           <div>
             <Logo size={56} />
             <p className="font-bold text-lg mt-2">{form.seller_name}</p>
-            <p className="text-[11px] text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
+            <p className="text-[11px] text-neutral-500 whitespace-pre-line">
+              {form.seller_address}
+            </p>
             <SellerContact />
           </div>
           <div className="text-right">
-            <div className="inline-block px-6 py-3 rounded-sm" style={{ background: "#1a1a1a" }}>
-              <p className="text-white text-2xl font-bold tracking-widest">{form.doc_title || "INVOICE"}</p>
+            <div
+              className="inline-block px-6 py-3 rounded-sm"
+              style={{ background: "#1a1a1a" }}
+            >
+              <p className="text-white text-2xl font-bold tracking-widest">
+                {form.doc_title || "INVOICE"}
+              </p>
             </div>
             <p className="text-sm font-mono mt-3">{form.number}</p>
             <p className="text-xs text-neutral-500 mt-1">{fmtDate(form.issue_date)}</p>
@@ -3068,21 +3306,38 @@ function InvoiceView({ form }: { form: Form }) {
 
         <div className="mt-8 grid grid-cols-2 gap-6">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-semibold">Bill To</p>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-semibold">
+              Bill To
+            </p>
             <p className="font-bold mt-2">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+            <p className="text-xs text-neutral-600 whitespace-pre-line">
+              {form.customer_address}
+            </p>
+            {form.customer_trn && (
+              <p className="text-[10px] text-neutral-400 mt-1">
+                TRN: {form.customer_trn}
+              </p>
+            )}
           </div>
           <div className="space-y-2 text-xs">
-            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+            <div
+              className="flex justify-between py-1.5 px-3 rounded"
+              style={{ background: "#f5f5f5" }}
+            >
               <span className="text-neutral-500">Date</span>
               <span className="font-medium">{fmtDate(form.issue_date)}</span>
             </div>
-            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+            <div
+              className="flex justify-between py-1.5 px-3 rounded"
+              style={{ background: "#f5f5f5" }}
+            >
               <span className="text-neutral-500">Due</span>
               <span className="font-medium">{fmtDate(form.due_date)}</span>
             </div>
-            <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
+            <div
+              className="flex justify-between py-1.5 px-3 rounded"
+              style={{ background: "#f5f5f5" }}
+            >
               <span className="text-neutral-500">Reference</span>
               <span className="font-mono font-medium">{form.number}</span>
             </div>
@@ -3099,15 +3354,32 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- INDUSTRIAL ----
   if (templateId === "industrial") {
     return (
-      <div className="text-neutral-900" style={{ fontFamily: "'IBM Plex Mono', 'Plus Jakarta Sans', monospace" }}>
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'IBM Plex Mono', 'Plus Jakarta Sans', monospace" }}
+      >
         {/* Industrial top bar with rivet-style circles */}
-        <div className="-mx-12 -mt-12 mb-8 flex items-center" style={{ background: "#2C3E50", height: 48 }}>
+        <div
+          className="-mx-12 -mt-12 mb-8 flex items-center"
+          style={{ background: "#2C3E50", height: 48 }}
+        >
           <div className="flex gap-2 px-4">
-            <div className="rounded-full" style={{ width: 10, height: 10, background: "#E74C3C" }} />
-            <div className="rounded-full" style={{ width: 10, height: 10, background: "#F39C12" }} />
-            <div className="rounded-full" style={{ width: 10, height: 10, background: "#2ECC71" }} />
+            <div
+              className="rounded-full"
+              style={{ width: 10, height: 10, background: "#E74C3C" }}
+            />
+            <div
+              className="rounded-full"
+              style={{ width: 10, height: 10, background: "#F39C12" }}
+            />
+            <div
+              className="rounded-full"
+              style={{ width: 10, height: 10, background: "#2ECC71" }}
+            />
           </div>
-          <p className="text-white font-bold tracking-[0.3em] text-sm uppercase mx-auto">Industrial Invoice</p>
+          <p className="text-white font-bold tracking-[0.3em] text-sm uppercase mx-auto">
+            Industrial Invoice
+          </p>
         </div>
 
         <div className="grid grid-cols-3 gap-6">
@@ -3115,23 +3387,48 @@ function InvoiceView({ form }: { form: Form }) {
             <div className="flex items-start gap-3">
               <Logo size={48} />
               <div>
-                <p className="font-extrabold text-lg tracking-tight" style={{ color: "#2C3E50" }}>{form.seller_name}</p>
-                <p className="text-[10px] text-neutral-500 whitespace-pre-line uppercase tracking-wide">{form.seller_address}</p>
-                {form.seller_trn && <p className="text-[9px] text-neutral-400 mt-0.5">TRN: {form.seller_trn}</p>}
+                <p
+                  className="font-extrabold text-lg tracking-tight"
+                  style={{ color: "#2C3E50" }}
+                >
+                  {form.seller_name}
+                </p>
+                <p className="text-[10px] text-neutral-500 whitespace-pre-line uppercase tracking-wide">
+                  {form.seller_address}
+                </p>
+                {form.seller_trn && (
+                  <p className="text-[9px] text-neutral-400 mt-0.5">
+                    TRN: {form.seller_trn}
+                  </p>
+                )}
               </div>
             </div>
-            <div className="mt-6 p-4 rounded" style={{ background: "#ECF0F1", borderLeft: "4px solid #E74C3C" }}>
-              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-neutral-500 mb-1">Bill To</p>
+            <div
+              className="mt-6 p-4 rounded"
+              style={{ background: "#ECF0F1", borderLeft: "4px solid #E74C3C" }}
+            >
+              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-neutral-500 mb-1">
+                Bill To
+              </p>
               <p className="font-bold">{form.customer_name}</p>
-              <p className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
-              {form.customer_trn && <p className="text-[10px] text-neutral-400">TRN: {form.customer_trn}</p>}
+              <p className="text-xs text-neutral-600 whitespace-pre-line">
+                {form.customer_address}
+              </p>
+              {form.customer_trn && (
+                <p className="text-[10px] text-neutral-400">TRN: {form.customer_trn}</p>
+              )}
             </div>
           </div>
           <div className="text-right">
             <div className="p-4 rounded" style={{ background: "#2C3E50", color: "#fff" }}>
               <p className="text-xs uppercase tracking-widest opacity-70">Document</p>
-              <p className="text-2xl font-black tracking-tighter mt-1">{form.doc_title || "INVOICE"}</p>
-              <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}>
+              <p className="text-2xl font-black tracking-tighter mt-1">
+                {form.doc_title || "INVOICE"}
+              </p>
+              <div
+                className="mt-3 pt-3"
+                style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}
+              >
                 <p className="text-xs font-mono">{form.number}</p>
                 <p className="text-[10px] opacity-70 mt-1">{fmtDate(form.issue_date)}</p>
                 <p className="text-[10px] opacity-70">Due: {fmtDate(form.due_date)}</p>
@@ -3143,9 +3440,11 @@ function InvoiceView({ form }: { form: Form }) {
         <Items headerBg="#2C3E50" bordered />
         <Totals />
         <Footer />
-        
+
         <div className="mt-8 pt-4 text-center" style={{ borderTop: "2px solid #2C3E50" }}>
-          <p className="text-[9px] text-neutral-400 uppercase tracking-[0.3em]">Industrial Grade Products</p>
+          <p className="text-[9px] text-neutral-400 uppercase tracking-[0.3em]">
+            Industrial Grade Products
+          </p>
         </div>
       </div>
     );
@@ -3154,20 +3453,46 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- EXECUTIVE ----
   if (templateId === "executive") {
     return (
-      <div className="text-neutral-900" style={{ fontFamily: "'Lora', 'Plus Jakarta Sans', Georgia, serif" }}>
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'Lora', 'Plus Jakarta Sans', Georgia, serif" }}
+      >
         {/* Premium dark header */}
-        <div className="-mx-12 -mt-12 mb-10 px-12 py-10" style={{ background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)", color: "#fff" }}>
+        <div
+          className="-mx-12 -mt-12 mb-10 px-12 py-10"
+          style={{
+            background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)",
+            color: "#fff",
+          }}
+        >
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <Logo size={72} />
               <div>
-                <p className="text-xl font-bold tracking-tight" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.seller_name}</p>
-                <p className="text-xs opacity-60 whitespace-pre-line mt-1 leading-relaxed">{form.seller_address}</p>
+                <p
+                  className="text-xl font-bold tracking-tight"
+                  style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+                >
+                  {form.seller_name}
+                </p>
+                <p className="text-xs opacity-60 whitespace-pre-line mt-1 leading-relaxed">
+                  {form.seller_address}
+                </p>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-sm uppercase tracking-[0.5em] opacity-50" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.doc_title || "Invoice"}</p>
-              <p className="text-4xl font-light mt-1 tracking-tight" style={{ color: "#C9A84C" }}>{form.number}</p>
+              <p
+                className="text-sm uppercase tracking-[0.5em] opacity-50"
+                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+              >
+                {form.doc_title || "Invoice"}
+              </p>
+              <p
+                className="text-4xl font-light mt-1 tracking-tight"
+                style={{ color: "#C9A84C" }}
+              >
+                {form.number}
+              </p>
             </div>
           </div>
         </div>
@@ -3176,18 +3501,36 @@ function InvoiceView({ form }: { form: Form }) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
-              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">Bill To</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">
+                Bill To
+              </p>
             </div>
-            <p className="font-bold text-base" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1 leading-relaxed">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+            <p
+              className="font-bold text-base"
+              style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            >
+              {form.customer_name}
+            </p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1 leading-relaxed">
+              {form.customer_address}
+            </p>
+            {form.customer_trn && (
+              <p className="text-[10px] text-neutral-400 mt-1">
+                TRN: {form.customer_trn}
+              </p>
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2 mb-3">
               <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
-              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">Details</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">
+                Details
+              </p>
             </div>
-            <div className="space-y-3 text-sm" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            <div
+              className="space-y-3 text-sm"
+              style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+            >
               <div className="flex justify-between">
                 <span className="text-neutral-400">Issued</span>
                 <span className="font-medium">{fmtDate(form.issue_date)}</span>
@@ -3211,9 +3554,15 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
         <Totals />
         <Footer />
-        
-        <div className="mt-10 pt-6 text-center" style={{ borderTop: `2px solid #C9A84C` }}>
-          <p className="text-[10px] text-neutral-400 tracking-widest uppercase" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+
+        <div
+          className="mt-10 pt-6 text-center"
+          style={{ borderTop: `2px solid #C9A84C` }}
+        >
+          <p
+            className="text-[10px] text-neutral-400 tracking-widest uppercase"
+            style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+          >
             Payment Terms: {form.terms || "Net 30"}
           </p>
         </div>
@@ -3224,23 +3573,42 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- FRESH ----
   if (templateId === "fresh") {
     return (
-      <div className="text-neutral-900" style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+      >
         {/* Playful top accent */}
-        <div className="-mx-12 -mt-12 mb-0" style={{ background: "linear-gradient(90deg, #667EEA 0%, #764BA2 50%, #F093FB 100%)", height: 5 }} />
+        <div
+          className="-mx-12 -mt-12 mb-0"
+          style={{
+            background: "linear-gradient(90deg, #667EEA 0%, #764BA2 50%, #F093FB 100%)",
+            height: 5,
+          }}
+        />
 
         <div className="flex justify-between items-start mt-8">
           <div>
             <Logo size={52} />
             <p className="font-extrabold text-xl mt-3" style={{ color: "#4C51BF" }}>
               {form.seller_name}
-              <span className="text-neutral-400 font-normal text-sm ml-2">{form.doc_title || "Invoice"}</span>
+              <span className="text-neutral-400 font-normal text-sm ml-2">
+                {form.doc_title || "Invoice"}
+              </span>
             </p>
             <SellerContact cls="text-neutral-400 text-[11px]" />
           </div>
           <div className="text-right">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: "#EBF4FF" }}>
+            <div
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full"
+              style={{ background: "#EBF4FF" }}
+            >
               <div className="w-2 h-2 rounded-full" style={{ background: "#667EEA" }} />
-              <span className="text-xs font-bold tracking-wider" style={{ color: "#4C51BF" }}>#{form.number}</span>
+              <span
+                className="text-xs font-bold tracking-wider"
+                style={{ color: "#4C51BF" }}
+              >
+                #{form.number}
+              </span>
             </div>
             <div className="mt-3 text-xs text-neutral-500">
               <p>Issued: {fmtDate(form.issue_date)}</p>
@@ -3249,20 +3617,43 @@ function InvoiceView({ form }: { form: Form }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-0 mt-8 rounded-2xl overflow-hidden" style={{ border: "1px solid #E8E8F0" }}>
+        <div
+          className="grid grid-cols-5 gap-0 mt-8 rounded-2xl overflow-hidden"
+          style={{ border: "1px solid #E8E8F0" }}
+        >
           <div className="col-span-3 p-5" style={{ background: "#FAFBFF" }}>
-            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400 mb-2">Bill To</p>
+            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400 mb-2">
+              Bill To
+            </p>
             <p className="font-bold text-base">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">TRN: {form.customer_trn}</p>}
+            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1">
+              {form.customer_address}
+            </p>
+            {form.customer_trn && (
+              <p className="text-[10px] text-neutral-400 mt-1">
+                TRN: {form.customer_trn}
+              </p>
+            )}
           </div>
-          <div className="col-span-2 p-5" style={{ background: "#4C51BF", color: "#fff" }}>
+          <div
+            className="col-span-2 p-5"
+            style={{ background: "#4C51BF", color: "#fff" }}
+          >
             <p className="text-[10px] uppercase tracking-wider opacity-60">Amount Due</p>
             <p className="text-3xl font-black mt-2 tracking-tight">{m(t.total)}</p>
-            <div className="mt-3 pt-3 space-y-1 text-xs" style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}>
-              <div className="flex justify-between"><span className="opacity-60">Subtotal</span><span>{m(t.subtotal)}</span></div>
+            <div
+              className="mt-3 pt-3 space-y-1 text-xs"
+              style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}
+            >
+              <div className="flex justify-between">
+                <span className="opacity-60">Subtotal</span>
+                <span>{m(t.subtotal)}</span>
+              </div>
               {(form.tax_rate || 0) > 0 && (
-                <div className="flex justify-between"><span className="opacity-60">VAT ({form.tax_rate}%)</span><span>{m(t.tax)}</span></div>
+                <div className="flex justify-between">
+                  <span className="opacity-60">VAT ({form.tax_rate}%)</span>
+                  <span>{m(t.tax)}</span>
+                </div>
               )}
             </div>
           </div>
@@ -3271,10 +3662,13 @@ function InvoiceView({ form }: { form: Form }) {
         <Items headerBg="#F7F8FC" />
         <Totals />
         <Footer />
-        
+
         <div className="mt-8 text-center">
           <p className="text-[11px] text-neutral-400">
-            Questions? Contact <span className="font-medium text-neutral-600">{form.seller_email || form.seller_name}</span>
+            Questions? Contact{" "}
+            <span className="font-medium text-neutral-600">
+              {form.seller_email || form.seller_name}
+            </span>
           </p>
         </div>
       </div>
@@ -3286,15 +3680,10 @@ function InvoiceView({ form }: { form: Form }) {
     <div className="text-neutral-900">
       <div className="flex justify-between items-end">
         <div>
-          <p
-            className="text-5xl font-extrabold tracking-tight"
-            style={{ color: a }}
-          >
+          <p className="text-5xl font-extrabold tracking-tight" style={{ color: a }}>
             {form.doc_title || "Invoice"}
           </p>
-          <p className="text-sm font-mono text-neutral-500 mt-2">
-            {form.number}
-          </p>
+          <p className="text-sm font-mono text-neutral-500 mt-2">{form.number}</p>
         </div>
         <div className="text-right">
           <Logo />
@@ -3302,37 +3691,27 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
       </div>
 
-      <div
-        className="h-1 w-full my-6"
-        style={{ background: a }}
-      />
+      <div className="h-1 w-full my-6" style={{ background: a }} />
 
       <div className="grid grid-cols-2 gap-8 text-sm">
         <div>
-          <p className="text-xs uppercase tracking-wider text-neutral-400">
-            From
-          </p>
+          <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
           <p className="font-semibold mt-1">{form.seller_name}</p>
           <p className="text-xs text-neutral-500 whitespace-pre-line">
             {form.seller_address}
           </p>
           {form.seller_trn && (
-            <p className="text-xs text-neutral-500">
-              TRN: {form.seller_trn}
-            </p>
+            <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
           )}
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wider text-neutral-400">
-            Bill To
-          </p>
+          <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
           <p className="font-semibold mt-1">{form.customer_name}</p>
           <p className="text-xs text-neutral-500 whitespace-pre-line">
             {form.customer_address}
           </p>
           <p className="text-xs text-neutral-500 mt-2">
-            Issued {fmtDate(form.issue_date)} · Due{" "}
-            {fmtDate(form.due_date)}
+            Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
           </p>
         </div>
       </div>
@@ -3426,11 +3805,12 @@ function CompanyModal({
             <select
               className="select"
               value={c.default_template}
-              onChange={(e) =>
-                setC({ ...c, default_template: e.target.value })
-              }
+              onChange={(e) => setC({ ...c, default_template: e.target.value })}
             >
-              {[...TEMPLATES, ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name }))].map((t) => (
+              {[
+                ...TEMPLATES,
+                ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
+              ].map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
@@ -3442,9 +3822,7 @@ function CompanyModal({
               type="color"
               className="input h-[38px] p-1"
               value={c.default_accent}
-              onChange={(e) =>
-                setC({ ...c, default_accent: e.target.value })
-              }
+              onChange={(e) => setC({ ...c, default_accent: e.target.value })}
             />
           </Field>
         </div>
@@ -3457,10 +3835,7 @@ function CompanyModal({
                 className="h-12 w-12 object-contain border border-brand-200 rounded-lg"
               />
             )}
-            <button
-              className="btn-ghost"
-              onClick={() => fileRef.current?.click()}
-            >
+            <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
               <Upload size={14} /> {c.logo ? "Replace" : "Upload"}
             </button>
             {c.logo && (

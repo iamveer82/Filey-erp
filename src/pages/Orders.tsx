@@ -16,6 +16,7 @@ import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { nextDocNumber } from "../lib/docNumber";
 import {
   PageHeader,
   DataTable,
@@ -34,17 +35,9 @@ import ProductPicker, { type CartLine } from "../components/ProductPicker";
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
 /** Next sequential order number for this year, derived from existing
- *  orders — random suffixes collide and confuse customers. */
-const nextOrderNumber = (existing: Order[]) => {
-  const y = new Date().getFullYear();
-  const max = existing.reduce((m, o) => {
-    const match = /^SO-(\d{4})-(\d+)$/.exec(o.order_number ?? "");
-    return match && Number(match[1]) === y
-      ? Math.max(m, parseInt(match[2], 10))
-      : m;
-  }, 0);
-  return `SO-${y}-${String(max + 1).padStart(4, "0")}`;
-};
+ * orders — random suffixes collide and confuse customers. */
+const nextOrderNumber = (existing: Order[]) =>
+  nextDocNumber({ prefix: "SO", existing: existing.map((o) => o.order_number ?? "") });
 
 export default function Orders() {
   const { toast, confirm } = useUI();
@@ -66,10 +59,7 @@ export default function Orders() {
 
   const load = () => {
     setError("");
-    return Promise.all([
-      erp.orders().then(setOrders),
-      erp.products().then(setProducts),
-    ])
+    return Promise.all([erp.orders().then(setOrders), erp.products().then(setProducts)])
       .catch((e) =>
         setError(`Could not load orders: ${e instanceof Error ? e.message : e}`)
       )
@@ -81,8 +71,7 @@ export default function Orders() {
   useLiveSync(load);
 
   const stats = useMemo(() => {
-    const by = (s: string[]) =>
-      orders.filter((o) => s.includes(o.status.toLowerCase()));
+    const by = (s: string[]) => orders.filter((o) => s.includes(o.status.toLowerCase()));
     return {
       completed: by(["delivered", "paid", "completed"]).length,
       progress: by(["confirmed", "draft", "processing"]).length,
@@ -91,23 +80,28 @@ export default function Orders() {
     };
   }, [orders]);
 
-  const [statusFilter, setStatusFilter] = useState<"all" | "progress" | "completed" | "returns">("all");
-  const filteredOrders = useMemo(
-    () => {
-      const ql = q.trim().toLowerCase();
-      return orders.filter((o) => {
-        if (ql && !o.order_number.toLowerCase().includes(ql) && !o.customer_name.toLowerCase().includes(ql)) {
-          return false;
-        }
-        if (statusFilter === "all") return true;
-        const st = o.status.toLowerCase();
-        if (statusFilter === "progress") return ["confirmed", "draft", "processing"].includes(st);
-        if (statusFilter === "completed") return ["delivered", "paid", "completed"].includes(st);
-        return ["returned", "cancelled"].includes(st);
-      });
-    },
-    [orders, statusFilter, q]
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "progress" | "completed" | "returns"
+  >("all");
+  const filteredOrders = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (
+        ql &&
+        !o.order_number.toLowerCase().includes(ql) &&
+        !o.customer_name.toLowerCase().includes(ql)
+      ) {
+        return false;
+      }
+      if (statusFilter === "all") return true;
+      const st = o.status.toLowerCase();
+      if (statusFilter === "progress")
+        return ["confirmed", "draft", "processing"].includes(st);
+      if (statusFilter === "completed")
+        return ["delivered", "paid", "completed"].includes(st);
+      return ["returned", "cancelled"].includes(st);
+    });
+  }, [orders, statusFilter, q]);
 
   return (
     <div>
@@ -116,7 +110,11 @@ export default function Orders() {
         subtitle="Sales orders & fulfilment status"
         action={
           <div className="flex gap-2">
-            <button className="btn-ghost" aria-label="Quick order" onClick={() => setOpen(true)}>
+            <button
+              className="btn-ghost"
+              aria-label="Quick order"
+              onClick={() => setOpen(true)}
+            >
               <Plus size={16} /> Quick order
             </button>
             <button
@@ -200,7 +198,7 @@ export default function Orders() {
         >
           Cancelled
         </FilterChip>
-        <span className="ml-auto text-xs font-semibold text-brand-400">
+        <span className="ml-auto text-xs font-medium text-brand-400">
           {filteredOrders.length} of {orders.length}
         </span>
       </div>
@@ -215,9 +213,7 @@ export default function Orders() {
             label: "Order #",
             sortValue: (o) => o.order_number,
             render: (o) => (
-              <span className="font-mono text-xs text-brand-500">
-                {o.order_number}
-              </span>
+              <span className="font-mono text-xs text-brand-500">{o.order_number}</span>
             ),
           },
           {
@@ -225,19 +221,20 @@ export default function Orders() {
             label: "Customer",
             sortValue: (o) => o.customer_name,
             render: (o) => (
-              <span className="font-semibold text-ink">
-                {o.customer_name}
-              </span>
+              <span className="font-medium text-ink">{o.customer_name}</span>
             ),
           },
-          { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
+          {
+            key: "total",
+            label: "Total",
+            sortValue: (o) => o.total,
+            render: (o) => aed(o.total),
+          },
           {
             key: "status",
             label: "Status",
             sortValue: (o) => o.status,
-            render: (o) => (
-              <Badge tone={statusTone(o.status)}>{o.status}</Badge>
-            ),
+            render: (o) => <Badge tone={statusTone(o.status)}>{o.status}</Badge>,
           },
           {
             key: "date",
@@ -255,9 +252,7 @@ export default function Orders() {
                   try {
                     await erp.shareOrder(o.id, next);
                     load();
-                    toast.success(
-                      next ? "Shared with team." : "Set to private."
-                    );
+                    toast.success(next ? "Shared with team." : "Set to private.");
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : String(e));
                   }
@@ -276,43 +271,45 @@ export default function Orders() {
               return (
                 <div className="flex items-center gap-1">
                   {next && (
-                  <button
-                    className="btn-ghost text-xs"
-                    aria-label={`Mark ${o.order_number} as ${next}`}
-                    onClick={async () => {
-                      // Cancelling returns reserved stock — make it deliberate.
-                      if (next === "cancelled") {
-                        const ok = await confirm({
-                          title: "Cancel order",
-                          message: `Cancel ${o.order_number}? Any stock it reserved is returned.`,
-                          confirmLabel: "Cancel order",
-                          danger: true,
-                        });
-                        if (!ok) return;
-                      }
-                      try {
-                        await erp.setOrderStatus(o.id, next);
-                        load();
-                      } catch (e) {
-                        toast.error(
-                          e instanceof Error ? e.message : "Failed to update order status"
-                        );
-                      }
-                    }}
-                  >
-                    → {next}
-                  </button>
+                    <button
+                      className="btn-ghost text-xs"
+                      aria-label={`Mark ${o.order_number} as ${next}`}
+                      onClick={async () => {
+                        // Cancelling returns reserved stock — make it deliberate.
+                        if (next === "cancelled") {
+                          const ok = await confirm({
+                            title: "Cancel order",
+                            message: `Cancel ${o.order_number}? Any stock it reserved is returned.`,
+                            confirmLabel: "Cancel order",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                        }
+                        try {
+                          await erp.setOrderStatus(o.id, next);
+                          load();
+                        } catch (e) {
+                          toast.error(
+                            e instanceof Error
+                              ? e.message
+                              : "Failed to update order status"
+                          );
+                        }
+                      }}
+                    >
+                      → {next}
+                    </button>
                   )}
                   <button
                     aria-label="Edit order"
-                    className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-brand-600 hover:bg-brand-100 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={() => setEditId(o.id)}
                   >
                     <Pencil size={15} />
                   </button>
                   <button
                     aria-label="Delete order"
-                    className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
                       const ok = await confirm({
                         title: "Delete order",
@@ -434,15 +431,12 @@ function EditOrderModal({
 
   const setLine = (i: number, patch: Partial<EditLine>) =>
     setLines((ls) => ls.map((l, x) => (x === i ? { ...l, ...patch } : l)));
-  const delLine = (i: number) =>
-    setLines((ls) => ls.filter((_, x) => x !== i));
+  const delLine = (i: number) => setLines((ls) => ls.filter((_, x) => x !== i));
   const addProduct = (p: Product) => {
     setLines((ls) => {
       const ex = ls.findIndex((l) => l.product_id === p.id);
       if (ex >= 0)
-        return ls.map((l, x) =>
-          x === ex ? { ...l, quantity: l.quantity + 1 } : l
-        );
+        return ls.map((l, x) => (x === ex ? { ...l, quantity: l.quantity + 1 } : l));
       return [
         ...ls,
         {
@@ -497,12 +491,7 @@ function EditOrderModal({
   );
 
   return (
-    <Modal
-      open={orderId != null}
-      onClose={onClose}
-      title="Edit order"
-      size="2xl"
-    >
+    <Modal open={orderId != null} onClose={onClose} title="Edit order" size="2xl">
       {loading ? (
         <p className="py-10 text-center text-sm text-brand-400">Loading…</p>
       ) : (
@@ -532,7 +521,7 @@ function EditOrderModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-bold text-ink">Line items</p>
+              <p className="text-sm font-medium text-ink">Line items</p>
               <button
                 className="btn-ghost text-xs"
                 onClick={() => setPickOpen((v) => !v)}
@@ -542,7 +531,7 @@ function EditOrderModal({
             </div>
 
             {pickOpen && (
-              <div className="mb-3 rounded-xl border border-brand-200 p-2 dark:border-[#3A3D45]">
+              <div className="mb-3 card p-2">
                 <div className="relative mb-2">
                   <Search
                     size={15}
@@ -561,17 +550,17 @@ function EditOrderModal({
                     <button
                       key={p.id}
                       onClick={() => addProduct(p)}
-                      className="w-full flex items-center justify-between rounded-lg px-3 py-2 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left"
+                      className="w-full flex items-center justify-between rounded px-3 py-2 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left"
                     >
                       <span className="min-w-0">
-                        <span className="block text-sm font-semibold text-ink truncate">
+                        <span className="block text-sm font-medium text-ink truncate">
                           {p.name}
                         </span>
                         <span className="block text-[11px] text-brand-400 font-mono">
                           {p.sku} · {p.quantity} in stock
                         </span>
                       </span>
-                      <span className="text-sm font-semibold text-ink">
+                      <span className="text-sm font-medium text-ink">
                         {aed(p.unit_price)}
                       </span>
                     </button>
@@ -586,10 +575,10 @@ function EditOrderModal({
             )}
 
             {lines.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-brand-200 dark:border-[#3A3D45] p-4">
+              <div className="card border-dashed p-4">
                 <p className="text-xs text-brand-400 mb-2">
-                  This order has no line items. Add products above, or set a
-                  total manually.
+                  This order has no line items. Add products above, or set a total
+                  manually.
                 </p>
                 <Field label={`Total (${getDisplayCurrency()})`}>
                   <input
@@ -605,7 +594,7 @@ function EditOrderModal({
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs font-semibold text-brand-400">
+                    <tr className="text-left text-xs font-medium text-brand-400">
                       <th className="py-1.5 px-2">Product</th>
                       <th className="py-1.5 px-2 w-20 text-right">Qty</th>
                       <th className="py-1.5 px-2 w-28 text-right">Price</th>
@@ -615,9 +604,12 @@ function EditOrderModal({
                   </thead>
                   <tbody>
                     {lines.map((l, i) => (
-                      <tr key={i} className="border-t border-brand-100 dark:border-white/10">
+                      <tr
+                        key={i}
+                        className="border-t border-brand-100 dark:border-white/10"
+                      >
                         <td className="py-1.5 px-2">
-                          <span className="font-semibold text-ink">{l.name}</span>
+                          <span className="font-medium text-ink">{l.name}</span>
                           {l.sku && (
                             <span className="block text-[11px] text-brand-400 font-mono">
                               {l.sku}
@@ -648,13 +640,13 @@ function EditOrderModal({
                             }
                           />
                         </td>
-                        <td className="py-1.5 px-2 text-right font-semibold text-ink">
+                        <td className="py-1.5 px-2 text-right font-medium text-ink">
                           {aed(l.quantity * l.unit_price)}
                         </td>
                         <td className="py-1.5">
                           <button
                             aria-label="Remove line"
-                            className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                            className="text-danger hover:bg-danger/10 rounded p-1.5 cursor-pointer"
                             onClick={() => delLine(i)}
                           >
                             <X size={14} />
@@ -669,14 +661,14 @@ function EditOrderModal({
           </div>
 
           {err && (
-            <p className="text-xs font-semibold text-danger bg-danger/10 rounded-xl px-3 py-2">
+            <p className="text-xs font-medium text-danger bg-danger/10 rounded-3xl px-3 py-2">
               {err}
             </p>
           )}
 
           <div className="flex items-center justify-between border-t border-brand-100 dark:border-white/10 pt-3">
-            <span className="text-sm font-semibold text-brand-500">Total</span>
-            <span className="text-base font-bold text-ink tabular-nums">
+            <span className="text-sm font-medium text-brand-500">Total</span>
+            <span className="text-base font-medium text-ink tabular-nums">
               {aed(effectiveTotal)}
             </span>
           </div>
@@ -761,16 +753,12 @@ function BuildOrderModal({
           />
         </Field>
         {err && (
-          <p className="text-xs font-semibold text-danger bg-danger/10 rounded-xl px-3 py-2 mt-2">
+          <p className="text-xs font-medium text-danger bg-danger/10 rounded-3xl px-3 py-2 mt-2">
             {err}
           </p>
         )}
       </div>
-      <ProductPicker
-        products={products}
-        onCheckout={checkout}
-        busy={busy}
-      />
+      <ProductPicker products={products} onCheckout={checkout} busy={busy} />
     </Modal>
   );
 }
@@ -819,9 +807,7 @@ function OrderModal({
             onChange={(e) => setF({ ...f, customer_name: e.target.value })}
           />
           {!f.customer_name.trim() && (
-            <p className="text-[11px] text-danger mt-1">
-              Customer name is required.
-            </p>
+            <p className="text-[11px] text-danger mt-1">Customer name is required.</p>
           )}
         </Field>
         <Field label={`Total (${getDisplayCurrency()})`}>

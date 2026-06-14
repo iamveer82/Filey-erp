@@ -16,6 +16,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, numInput } from "../lib/format";
+import { nextDocNumber } from "../lib/docNumber";
 import {
   PageHeader,
   MetricCard,
@@ -46,8 +47,8 @@ const DC_TEMPLATES = [
   { id: "corporate", name: "Corporate" },
 ];
 
-const dcNumber = () =>
-  `DC-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+const dcNumber = (existing: string[] = []) =>
+  nextDocNumber({ prefix: "DC", existing });
 const today = () => new Date().toISOString().slice(0, 10);
 
 type DcItem = { description: string; qty: number };
@@ -77,9 +78,9 @@ const DC_TYPES = [
   { id: "return", label: "Return Challan" },
 ];
 
-function blankDc(): DcForm {
+function blankDc(existing: string[] = []): DcForm {
   return {
-    number: dcNumber(),
+    number: dcNumber(existing),
     template: "standard",
     accent: "#222222",
     dc_type: "delivery",
@@ -118,10 +119,16 @@ interface DcRecord {
 }
 
 function loadDcs(): DcRecord[] {
-  try { return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]"); } catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
 }
 function saveDcs(records: DcRecord[]) {
-  try { localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records)); } catch {}
+  try {
+    localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records));
+  } catch {}
   // Write-through so challans follow the user across devices.
   void tools.setSetting(DC_SETTING_KEY, JSON.stringify(records)).catch(() => {});
 }
@@ -135,7 +142,9 @@ async function syncDcs(): Promise<DcRecord[]> {
       localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(remote));
       return remote;
     }
-  } catch { /* offline / not configured — fall back to local */ }
+  } catch {
+    /* offline / not configured — fall back to local */
+  }
   return loadDcs();
 }
 
@@ -145,11 +154,21 @@ export default function DeliveryChallan() {
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { syncDcs().then((r) => { setRecords(r); setLoading(false); }); }, []);
+  useEffect(() => {
+    syncDcs().then((r) => {
+      setRecords(r);
+      setLoading(false);
+    });
+  }, []);
   useLiveSync(() => setRecords(loadDcs()));
 
   const del = async (r: DcRecord) => {
-    const ok = await confirm({ title: "Delete challan", message: `Delete ${r.number}?`, confirmLabel: "Delete", danger: true });
+    const ok = await confirm({
+      title: "Delete challan",
+      message: `Delete ${r.number}?`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
     if (!ok) return;
     const next = records.filter((x) => x.id !== r.id);
     setRecords(next);
@@ -162,7 +181,10 @@ export default function DeliveryChallan() {
       <DcEditor
         form={form}
         setForm={setForm}
-        onBack={() => { setForm(null); setRecords(loadDcs()); }}
+        onBack={() => {
+          setForm(null);
+          setRecords(loadDcs());
+        }}
         onSave={() => {
           const next = loadDcs();
           const existing = next.findIndex((r) => r.number === form.number);
@@ -194,30 +216,87 @@ export default function DeliveryChallan() {
         title="Delivery"
         subtitle="Track delivery orders, goods received notes & returns"
         action={
-          <button className="btn-primary" onClick={() => setForm(blankDc())}>
+          <button
+            className="btn-primary"
+            onClick={() => setForm(blankDc(records.map((r) => r.number)))}
+          >
             <Plus size={16} /> New Challan
           </button>
         }
       />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <MetricCard label="Challans" value={String(records.length)} icon={<Truck size={20} />} />
-        <MetricCard label="Items Shipped" value={String(totalItems)} icon={<Boxes size={20} />} iconClass="bg-secondary/20 text-ink" />
-        <MetricCard label="Parties" value={String(parties)} icon={<Users size={20} />} iconClass="bg-info/15 text-info" />
+        <MetricCard
+          label="Challans"
+          value={String(records.length)}
+          icon={<Truck size={20} />}
+        />
+        <MetricCard
+          label="Items Shipped"
+          value={String(totalItems)}
+          icon={<Boxes size={20} />}
+          iconClass="bg-secondary/20 text-ink"
+        />
+        <MetricCard
+          label="Parties"
+          value={String(parties)}
+          icon={<Users size={20} />}
+          iconClass="bg-info/15 text-info"
+        />
       </div>
       <DataTable<DcRecord>
         rows={records}
         loading={loading}
         empty="No delivery challans yet — create your first one"
         columns={[
-          { key: "no", label: "Challan #", sortValue: (r) => r.number, render: (r) => <span className="font-mono text-xs font-semibold">{r.number}</span> },
-          { key: "type", label: "Type", sortValue: (r) => r.dc_type, render: (r) => <Badge tone={statusTone(r.dc_type)}>{typeLabel(r.dc_type)}</Badge> },
-          { key: "party", label: "Party", sortValue: (r) => r.party_name, render: (r) => <span className="font-semibold text-ink">{r.party_name || "—"}</span> },
-          { key: "items", label: "Items", sortValue: (r) => r.item_count, render: (r) => <span className="tabular-nums text-brand-600">{r.item_count}</span> },
-          { key: "date", label: "Date", sortValue: (r) => r.issue_date, render: (r) => <span className="text-brand-600">{fmtDate(r.issue_date)}</span> },
           {
-            key: "act", label: "",
+            key: "no",
+            label: "Challan #",
+            sortValue: (r) => r.number,
             render: (r) => (
-              <button aria-label={`Delete challan ${r.number}`} className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200" onClick={() => del(r)}>
+              <span className="font-mono text-xs font-medium">{r.number}</span>
+            ),
+          },
+          {
+            key: "type",
+            label: "Type",
+            sortValue: (r) => r.dc_type,
+            render: (r) => (
+              <Badge tone={statusTone(r.dc_type)}>{typeLabel(r.dc_type)}</Badge>
+            ),
+          },
+          {
+            key: "party",
+            label: "Party",
+            sortValue: (r) => r.party_name,
+            render: (r) => (
+              <span className="font-medium text-ink">{r.party_name || "—"}</span>
+            ),
+          },
+          {
+            key: "items",
+            label: "Items",
+            sortValue: (r) => r.item_count,
+            render: (r) => (
+              <span className="tabular-nums text-brand-600">{r.item_count}</span>
+            ),
+          },
+          {
+            key: "date",
+            label: "Date",
+            sortValue: (r) => r.issue_date,
+            render: (r) => (
+              <span className="text-brand-600">{fmtDate(r.issue_date)}</span>
+            ),
+          },
+          {
+            key: "act",
+            label: "",
+            render: (r) => (
+              <button
+                aria-label={`Delete challan ${r.number}`}
+                className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                onClick={() => del(r)}
+              >
                 <Trash2 size={15} />
               </button>
             ),
@@ -233,14 +312,22 @@ export default function DeliveryChallan() {
 /* ------------------------------------------------------------------ */
 
 function DcEditor({
-  form, setForm, onBack, onSave,
-}: { form: DcForm; setForm: (f: DcForm) => void; onBack: () => void; onSave: () => void }) {
+  form,
+  setForm,
+  onBack,
+  onSave,
+}: {
+  form: DcForm;
+  setForm: (f: DcForm) => void;
+  onBack: () => void;
+  onSave: () => void;
+}) {
   const { toast, confirm } = useUI();
   const dcRef = useRef<HTMLDivElement>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const downloadPdf = () => {
     if (dcRef.current) {
-      const sheet = dcRef.current.closest('.invoice-print') as HTMLElement;
+      const sheet = dcRef.current.closest(".invoice-print") as HTMLElement;
       downloadElementAsPdf(sheet || dcRef.current, form.number || "challan");
     } else window.print();
   };
@@ -251,94 +338,187 @@ function DcEditor({
     if (!el) return;
     try {
       const base = form.number || "challan";
-      const saved = await autoSaveDocument(`${base}.pdf`, "challan", () => elementToPdfBytes(el, base));
+      const saved = await autoSaveDocument(`${base}.pdf`, "challan", () =>
+        elementToPdfBytes(el, base)
+      );
       if (saved) toast.success("Saved a copy to My Files.");
-    } catch { /* archiving is a convenience — never block save */ }
+    } catch {
+      /* archiving is a convenience — never block save */
+    }
   };
-  const set = <K extends keyof DcForm>(k: K, v: DcForm[K]) => setForm({ ...form, [k]: v });
+  const set = <K extends keyof DcForm>(k: K, v: DcForm[K]) =>
+    setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const [customTemplates, setCustomTemplates] =
+    useState<CustomTemplate[]>(loadCustomTemplates);
   // Pull templates saved on the user's other devices (Supabase-backed).
   useEffect(() => {
-    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+    syncCustomTemplates()
+      .then(setCustomTemplates)
+      .catch(() => {});
   }, []);
-  const allTemplates = [...DC_TEMPLATES, ...customTemplates.map((t) => ({ id: t.id, name: t.name }))];
+  const allTemplates = [
+    ...DC_TEMPLATES,
+    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
+  ];
   const applyTemplate = (id: string) => {
     const ct = customTemplates.find((c) => c.id === id);
-    setForm({ ...form, template: id, ...(ct ? { accent: ct.accent, font: ct.font } : {}) });
+    setForm({
+      ...form,
+      template: id,
+      ...(ct ? { accent: ct.accent, font: ct.font } : {}),
+    });
   };
   const removeTpl = async (id: string, name: string) => {
-    if (!(await confirm({ title: "Delete template", message: `Delete custom template "${name}"? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
+    if (
+      !(await confirm({
+        title: "Delete template",
+        message: `Delete custom template "${name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
     setCustomTemplates(deleteCustomTemplate(id));
     if (form.template === id) set("template", "standard");
     toast.success("Template deleted.");
   };
   useEffect(() => {
     if (!viewOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
 
   const setItem = (idx: number, patch: Partial<DcItem>) => {
-    const items = form.items.map((it, i) => i === idx ? { ...it, ...patch } : it);
+    const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     setForm({ ...form, items });
   };
-  const addItem = () => setForm({ ...form, items: [...form.items, { description: "", qty: 1 }] });
-  const removeItem = (idx: number) => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+  const addItem = () =>
+    setForm({ ...form, items: [...form.items, { description: "", qty: 1 }] });
+  const removeItem = (idx: number) =>
+    setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
 
   const [viewAll, setViewAll] = useState(false);
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
-  const typeLabel = DC_TYPES.find((t) => t.id === form.dc_type)?.label || "Delivery Challan";
+  const typeLabel =
+    DC_TYPES.find((t) => t.id === form.dc_type)?.label || "Delivery Challan";
 
   return (
     <div>
       <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
         <div className="flex items-start gap-3">
-          <button className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5" onClick={onBack} aria-label="Back">
+          <button
+            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            onClick={onBack}
+            aria-label="Back"
+          >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-bold text-ink">{typeLabel}</h1>
-            <p className="text-sm text-brand-500 mt-0.5">Create delivery challans, goods received notes & returns</p>
+            <h1 className="text-[28px] leading-9 font-medium text-ink">{typeLabel}</h1>
+            <p className="text-sm text-brand-500 mt-0.5">
+              Create delivery challans, goods received notes & returns
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button className="btn-ghost" onClick={() => setViewOpen(true)}><Maximize2 size={15} /> View</button>
-          <button className="btn-ghost" onClick={downloadPdf}><Download size={15} /> PDF</button>
-          <button className="btn-ghost" onClick={handleSave}><Save size={15} /> Save</button>
+          <button className="btn-ghost" onClick={() => setViewOpen(true)}>
+            <Maximize2 size={15} /> View
+          </button>
+          <button className="btn-ghost" onClick={downloadPdf}>
+            <Download size={15} /> PDF
+          </button>
+          <button className="btn-ghost" onClick={handleSave}>
+            <Save size={15} /> Save
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
         <div className="no-print space-y-4">
           {/* Template */}
-          <Step n={1} title="Choose Template" action={
-            <div className="flex items-center gap-2">
-              <button className="btn-ghost text-xs" onClick={() => setViewAll((v) => !v)}>{viewAll ? "Show less" : "View all"}</button>
-              <button className="btn-ghost text-xs flex items-center gap-1" onClick={() => setDesigning(true)}><Plus size={13} /> Custom</button>
-            </div>
-          }>
-            <div className={viewAll ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3" : "flex gap-3 overflow-x-auto pb-1"}>
+          <Step
+            n={1}
+            title="Choose Template"
+            action={
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={() => setViewAll((v) => !v)}
+                >
+                  {viewAll ? "Show less" : "View all"}
+                </button>
+                <button
+                  className="btn-ghost text-xs flex items-center gap-1"
+                  onClick={() => setDesigning(true)}
+                >
+                  <Plus size={13} /> Custom
+                </button>
+              </div>
+            }
+          >
+            <div
+              className={
+                viewAll
+                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
+                  : "flex gap-3 overflow-x-auto pb-1"
+              }
+            >
               {shown.map((tpl) => {
                 const active = form.template === tpl.id;
                 const ct = customTemplates.find((c) => c.id === tpl.id);
                 const swatch = ct?.accent ?? "#222222";
                 return (
-                  <button key={tpl.id} onClick={() => applyTemplate(tpl.id)}
-                    className={`group relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}>
-                    {active && <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10"><Check size={11} strokeWidth={3} /></span>}
-                    {ct && <span role="button" tabIndex={0} aria-label={`Delete template ${tpl.name}`} onClick={(e) => { e.stopPropagation(); removeTpl(tpl.id, tpl.name); }} className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"><Trash2 size={11} /></span>}
-                    <div className="w-full h-14 rounded-lg flex items-center justify-center text-[9px] font-semibold capitalize" style={{ background: `${swatch}14`, color: swatch, borderTop: `3px solid ${swatch}` }}>{tpl.name}</div>
+                  <button
+                    key={tpl.id}
+                    onClick={() => applyTemplate(tpl.id)}
+                    className={`group relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}
+                  >
+                    {active && (
+                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
+                        <Check size={11} strokeWidth={3} />
+                      </span>
+                    )}
+                    {ct && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Delete template ${tpl.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTpl(tpl.id, tpl.name);
+                        }}
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                      >
+                        <Trash2 size={11} />
+                      </span>
+                    )}
+                    <div
+                      className="w-full h-14 rounded-lg flex items-center justify-center text-[9px] font-medium"
+                      style={{
+                        background: `${swatch}14`,
+                        color: swatch,
+                        borderTop: `3px solid ${swatch}`,
+                      }}
+                    >
+                      {tpl.name}
+                    </div>
                   </button>
                 );
               })}
             </div>
             <div className="flex items-center gap-3 mt-3 pt-3 border-t border-brand-100">
-              <span className="text-xs font-semibold text-brand-500">Accent</span>
+              <span className="text-xs font-medium text-brand-500">Accent</span>
               <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
-              <span className="text-xs font-semibold text-brand-500 ml-2">Font</span>
-              <select className="select h-8 text-xs flex-1" value={form.font} onChange={(e) => set("font", e.target.value)}>
+              <span className="text-xs font-medium text-brand-500 ml-2">Font</span>
+              <select
+                className="select h-8 text-xs flex-1"
+                value={form.font}
+                onChange={(e) => set("font", e.target.value)}
+              >
                 <option value="'Plus Jakarta Sans', system-ui, sans-serif">Sans</option>
                 <option value="'Lora', Georgia, serif">Serif</option>
                 <option value="'IBM Plex Mono', monospace">Mono</option>
@@ -351,32 +531,74 @@ function DcEditor({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <Field label="Challan Type">
-                  <select className="select" value={form.dc_type} onChange={(e) => set("dc_type", e.target.value as any)}>
-                    {DC_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  <select
+                    className="select"
+                    value={form.dc_type}
+                    onChange={(e) => set("dc_type", e.target.value as any)}
+                  >
+                    {DC_TYPES.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="Party Name">
-                  <input className="input" placeholder="Customer / Supplier name" value={form.party_name} onChange={(e) => set("party_name", e.target.value)} />
+                  <input
+                    className="input"
+                    placeholder="Customer / Supplier name"
+                    value={form.party_name}
+                    onChange={(e) => set("party_name", e.target.value)}
+                  />
                 </Field>
                 <Field label="Party Address">
-                  <textarea className="textarea" rows={2} value={form.party_address} onChange={(e) => set("party_address", e.target.value)} />
+                  <textarea
+                    className="textarea"
+                    rows={2}
+                    value={form.party_address}
+                    onChange={(e) => set("party_address", e.target.value)}
+                  />
                 </Field>
               </div>
               <div className="space-y-3">
                 <Field label="Challan Number">
-                  <input className="input" value={form.number} onChange={(e) => set("number", e.target.value)} />
+                  <input
+                    className="input"
+                    value={form.number}
+                    onChange={(e) => set("number", e.target.value)}
+                  />
                 </Field>
                 <Field label="Date">
-                  <input type="date" className="input" value={form.issue_date} onChange={(e) => set("issue_date", e.target.value)} />
+                  <input
+                    type="date"
+                    className="input"
+                    value={form.issue_date}
+                    onChange={(e) => set("issue_date", e.target.value)}
+                  />
                 </Field>
                 <Field label="Reference #">
-                  <input className="input" placeholder="Invoice / PO number" value={form.ref_number} onChange={(e) => set("ref_number", e.target.value)} />
+                  <input
+                    className="input"
+                    placeholder="Invoice / PO number"
+                    value={form.ref_number}
+                    onChange={(e) => set("ref_number", e.target.value)}
+                  />
                 </Field>
                 <Field label="Vehicle Number">
-                  <input className="input" placeholder="Optional" value={form.vehicle_number} onChange={(e) => set("vehicle_number", e.target.value)} />
+                  <input
+                    className="input"
+                    placeholder="Optional"
+                    value={form.vehicle_number}
+                    onChange={(e) => set("vehicle_number", e.target.value)}
+                  />
                 </Field>
                 <Field label="Driver Name">
-                  <input className="input" placeholder="Optional" value={form.driver_name} onChange={(e) => set("driver_name", e.target.value)} />
+                  <input
+                    className="input"
+                    placeholder="Optional"
+                    value={form.driver_name}
+                    onChange={(e) => set("driver_name", e.target.value)}
+                  />
                 </Field>
               </div>
             </div>
@@ -387,7 +609,7 @@ function DcEditor({
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-semibold text-brand-400">
+                  <tr className="text-left text-xs font-medium text-brand-400">
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
@@ -398,21 +620,54 @@ function DcEditor({
                   {form.items.map((it, i) => (
                     <tr key={i} className="border-t border-brand-100">
                       <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
-                      <td className="py-2 px-2"><input className="input" placeholder="Item description" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} /></td>
-                      <td className="py-2 px-2"><input type="number" className="input tabular-nums text-right" value={it.qty || ""} onChange={(e) => setItem(i, { qty: numInput(e.target.value) })} /></td>
-                      <td className="py-2 px-2">{form.items.length > 1 && <button aria-label="Remove" className="text-danger hover:bg-danger/10 rounded-lg p-1 cursor-pointer" onClick={() => removeItem(i)}><Trash2 size={14} /></button>}</td>
+                      <td className="py-2 px-2">
+                        <input
+                          className="input"
+                          placeholder="Item description"
+                          value={it.description}
+                          onChange={(e) => setItem(i, { description: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          className="input tabular-nums text-right"
+                          value={it.qty || ""}
+                          onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
+                        />
+                      </td>
+                      <td className="py-2 px-2">
+                        {form.items.length > 1 && (
+                          <button
+                            aria-label="Remove"
+                            className="text-danger hover:bg-danger/10 rounded-lg p-1 cursor-pointer"
+                            onClick={() => removeItem(i)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="mt-3"><button className="btn-ghost text-xs" onClick={addItem}><Plus size={14} /> Add item</button></div>
+            <div className="mt-3">
+              <button className="btn-ghost text-xs" onClick={addItem}>
+                <Plus size={14} /> Add item
+              </button>
+            </div>
           </Step>
 
           {/* Notes */}
           <Step n={4} title="Notes">
             <Field label="Notes / Remarks">
-              <textarea className="textarea" rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+              <textarea
+                className="textarea"
+                rows={3}
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+              />
             </Field>
           </Step>
         </div>
@@ -421,7 +676,16 @@ function DcEditor({
         <div className="sticky top-4">
           {designing && (
             <div className="mb-4">
-              <TemplateDesigner onSave={() => { setDesigning(false); setCustomTemplates(loadCustomTemplates()); }} onClose={() => { setDesigning(false); setCustomTemplates(loadCustomTemplates()); }} />
+              <TemplateDesigner
+                onSave={() => {
+                  setDesigning(false);
+                  setCustomTemplates(loadCustomTemplates());
+                }}
+                onClose={() => {
+                  setDesigning(false);
+                  setCustomTemplates(loadCustomTemplates());
+                }}
+              />
             </div>
           )}
           <DcPreview form={form} dcRef={dcRef} />
@@ -429,13 +693,24 @@ function DcEditor({
       </div>
 
       {viewOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4" onClick={() => setViewOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4"
+          onClick={() => setViewOpen(false)}
+        >
           <div className="my-4 w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white">{form.number}</h2>
+              <h2 className="text-lg font-medium text-white">{form.number}</h2>
               <div className="flex items-center gap-2">
-                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}><Download size={14} /> PDF</button>
-                <button onClick={() => setViewOpen(false)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-white hover:bg-white/20 cursor-pointer"><X size={18} /></button>
+                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
+                  <Download size={14} /> PDF
+                </button>
+                <button
+                  onClick={() => setViewOpen(false)}
+                  aria-label="Close"
+                  className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
               </div>
             </div>
             <DcPreview form={form} />
@@ -450,23 +725,44 @@ function DcEditor({
 /*  Preview                                                            */
 /* ------------------------------------------------------------------ */
 
-function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTMLDivElement | null> }) {
+function DcPreview({
+  form,
+  dcRef,
+}: {
+  form: DcForm;
+  dcRef?: React.RefObject<HTMLDivElement | null>;
+}) {
   const clean = (s: string) => s || "—";
   const totalQty = form.items.reduce((s, i) => s + i.qty, 0);
-  const typeLabel = DC_TYPES.find((t) => t.id === form.dc_type)?.label || "Delivery Challan";
+  const typeLabel =
+    DC_TYPES.find((t) => t.id === form.dc_type)?.label || "Delivery Challan";
   const a = form.accent || "#222222";
 
   return (
-    <div ref={dcRef} className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none" style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}>
+    <div
+      ref={dcRef}
+      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
+      style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
+    >
       <div className="p-8 min-h-[700px]">
         {/* Header */}
-        <div className="flex items-start justify-between pb-6 mb-6" style={{ borderBottom: `2px solid ${a}22` }}>
+        <div
+          className="flex items-start justify-between pb-6 mb-6"
+          style={{ borderBottom: `2px solid ${a}22` }}
+        >
           <div>
-            <h1 className="text-[26px] font-extrabold tracking-tight" style={{ color: a }}>{typeLabel}</h1>
+            <h1
+              className="text-[26px] font-extrabold tracking-tight"
+              style={{ color: a }}
+            >
+              {typeLabel}
+            </h1>
             <p className="text-sm text-brand-400 mt-1">#{form.number}</p>
           </div>
           <div className="text-right text-sm">
-            <p className="font-bold text-[15px]" style={{ color: a }}>{clean(form.company_name)}</p>
+            <p className="font-bold text-[15px]" style={{ color: a }}>
+              {clean(form.company_name)}
+            </p>
             <p className="text-brand-500">{clean(form.company_address)}</p>
             <p className="text-brand-500 mt-1 flex items-center gap-2 justify-end">
               <Calendar size={13} /> {form.issue_date}
@@ -478,14 +774,26 @@ function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTML
         <div className="mb-6 p-5 rounded-xl" style={{ backgroundColor: `${a}0A` }}>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-xs font-semibold text-brand-400 uppercase mb-1">To / Party</p>
+              <p className="text-xs font-semibold text-brand-400 uppercase mb-1">
+                To / Party
+              </p>
               <p className="font-bold text-[17px]">{clean(form.party_name)}</p>
               <p className="text-sm text-brand-500">{clean(form.party_address)}</p>
             </div>
             <div className="text-right">
-              {form.ref_number && <p className="text-sm text-brand-500">Ref: {form.ref_number}</p>}
-              {form.vehicle_number && <p className="text-sm text-brand-500 flex items-center gap-1 justify-end"><Truck size={13} /> {form.vehicle_number}</p>}
-              {form.driver_name && <p className="text-sm text-brand-500 flex items-center gap-1 justify-end"><Users size={13} /> {form.driver_name}</p>}
+              {form.ref_number && (
+                <p className="text-sm text-brand-500">Ref: {form.ref_number}</p>
+              )}
+              {form.vehicle_number && (
+                <p className="text-sm text-brand-500 flex items-center gap-1 justify-end">
+                  <Truck size={13} /> {form.vehicle_number}
+                </p>
+              )}
+              {form.driver_name && (
+                <p className="text-sm text-brand-500 flex items-center gap-1 justify-end">
+                  <Users size={13} /> {form.driver_name}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -493,28 +801,42 @@ function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTML
         {/* Items */}
         <table className="w-full text-sm mb-6">
           <thead>
-            <tr className="text-left text-xs font-semibold uppercase tracking-wider" style={{ color: a }}>
+            <tr
+              className="text-left text-xs font-semibold uppercase tracking-wider"
+              style={{ color: a }}
+            >
               <th className="pb-3 pr-2 w-6">#</th>
               <th className="pb-3 px-2">Description</th>
               <th className="pb-3 px-2 w-24 text-right">Qty</th>
             </tr>
           </thead>
           <tbody>
-            {form.items.filter(i => i.description.trim()).map((it, i) => (
-              <tr key={i} className="border-t border-brand-100">
-                <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
-                <td className="py-3 px-2 font-medium">{it.description}</td>
-                <td className="py-3 px-2 text-right font-semibold tabular-nums">{it.qty}</td>
-              </tr>
-            ))}
+            {form.items
+              .filter((i) => i.description.trim())
+              .map((it, i) => (
+                <tr key={i} className="border-t border-brand-100">
+                  <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
+                  <td className="py-3 px-2 font-medium">{it.description}</td>
+                  <td className="py-3 px-2 text-right font-semibold tabular-nums">
+                    {it.qty}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
 
         {/* Totals */}
-        <div className="flex justify-end mb-6 pt-4" style={{ borderTop: "2px solid #EAE4D6" }}>
+        <div
+          className="flex justify-end mb-6 pt-4"
+          style={{ borderTop: "2px solid #EAE4D6" }}
+        >
           <div className="text-right">
-            <p className="text-[28px] font-extrabold tabular-nums" style={{ color: a }}>{totalQty}</p>
-            <p className="text-xs text-brand-400 font-semibold uppercase">Total Quantity</p>
+            <p className="text-[28px] font-extrabold tabular-nums" style={{ color: a }}>
+              {totalQty}
+            </p>
+            <p className="text-xs text-brand-400 font-semibold uppercase">
+              Total Quantity
+            </p>
           </div>
         </div>
 
@@ -526,18 +848,27 @@ function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTML
         )}
 
         {/* Signatures */}
-        <div className="grid grid-cols-3 gap-6 mt-12 pt-6" style={{ borderTop: "2px solid #EAE4D6" }}>
+        <div
+          className="grid grid-cols-3 gap-6 mt-12 pt-6"
+          style={{ borderTop: "2px solid #EAE4D6" }}
+        >
           <div className="text-center">
             <p className="text-xs font-semibold text-brand-400 mb-8">Prepared By</p>
-            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1"><p className="text-[10px] text-brand-400">Signature</p></div>
+            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1">
+              <p className="text-[10px] text-brand-400">Signature</p>
+            </div>
           </div>
           <div className="text-center">
             <p className="text-xs font-semibold text-brand-400 mb-8">Received By</p>
-            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1"><p className="text-[10px] text-brand-400">Signature & Stamp</p></div>
+            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1">
+              <p className="text-[10px] text-brand-400">Signature & Stamp</p>
+            </div>
           </div>
           <div className="text-center">
             <p className="text-xs font-semibold text-brand-400 mb-8">Authorized By</p>
-            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1"><p className="text-[10px] text-brand-400">Signature</p></div>
+            <div style={{ borderTop: `1px solid ${a}22` }} className="pt-1">
+              <p className="text-[10px] text-brand-400">Signature</p>
+            </div>
           </div>
         </div>
       </div>
@@ -549,12 +880,24 @@ function DcPreview({ form, dcRef }: { form: DcForm; dcRef?: React.RefObject<HTML
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function Step({ n, title, action, children }: { n: number; title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Step({
+  n,
+  title,
+  action,
+  children,
+}: {
+  n: number;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="card p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">{n}</span>
+          <span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">
+            {n}
+          </span>
           <h3 className="font-bold text-ink">{title}</h3>
         </div>
         {action}

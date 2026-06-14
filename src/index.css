@@ -14,7 +14,7 @@
   *,
   ::before,
   ::after {
-    border-color: #e7e7ee;
+    border-color: #e2e8f0;
   }
   .dark *,
   .dark ::before,
@@ -68,15 +68,18 @@
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cfcfcf transparent;
+    scrollbar-color: #cbd5e1 transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #cfcfcf;
+    background: #cbd5e1;
     border-radius: 8px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
   }
   /* Every enabled control reads as clickable (a11y: cursor-pointer). */
   button:not(:disabled),
@@ -85,9 +88,10 @@
   summary {
     @apply cursor-pointer;
   }
-  /* design.md §10: 2px solid focus ring in text color, 2px offset. */
+  /* Accessible focus ring — 2px primary-blue ring, 2px offset. Blue (not ink)
+     so keyboard focus reads as an interactive affordance app-wide. */
   :focus-visible {
-    @apply outline-none ring-2 ring-ink ring-offset-2;
+    @apply outline-none ring-2 ring-primary-400 ring-offset-2;
   }
   /* design.md §7: Lucide icons at 1.75px stroke everywhere.
      CSS beats the inline stroke-width="2" presentation attribute. */
@@ -106,10 +110,11 @@
            transition-[box-shadow,border-color,transform] duration-200
            dark:bg-[#24262C] dark:border-[#3A3D45];
   }
-  /* Minimal: hover is a quiet shadow + border shift, no movement. */
+  /* Minimal: hover is a quiet shadow + a subtle primary-tinted border, no
+     movement — keeps data-dense screens calm while signalling interactivity. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-brand-300
+    @apply hover:shadow-bento-hover hover:border-primary-300/70
            cursor-pointer dark:hover:border-primary-500/50;
   }
   .card-dark {
@@ -209,7 +214,7 @@
         subtle press feedback. ── */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 h-10 rounded-xl
-           bg-primary-400 px-4 text-sm font-semibold text-ink select-none
+           bg-primary-400 px-4 text-sm font-semibold text-white select-none
            transition-colors duration-200 hover:bg-primary-500
            active:translate-y-px outline-none
            focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2
@@ -251,11 +256,11 @@
            text-ink placeholder:text-brand-400 shadow-sm shadow-black/5
            transition-[box-shadow,border-color] duration-200
            hover:border-brand-300
-           focus:outline-none focus:border-ink focus:ring-[3px] focus:ring-ink/10
+           focus:outline-none focus:border-primary-400 focus:ring-[3px] focus:ring-primary-400/15
            disabled:bg-brand-50 disabled:text-brand-400
            disabled:cursor-not-allowed disabled:opacity-60
            dark:bg-[#1A1B1E] dark:border-[#3A3D45] dark:text-[#F4F5F6]
-           dark:shadow-black/20 dark:focus:border-[#F4F5F6] dark:focus:ring-white/10
+           dark:shadow-black/20 dark:focus:border-primary-400 dark:focus:ring-primary-400/25
            dark:disabled:bg-[#24262C];
   }
   .input,
@@ -267,7 +272,7 @@
   }
   .select {
     @apply appearance-none bg-no-repeat pr-9 cursor-pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2392827a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     background-position: right 0.75rem center;
   }
   .field {
@@ -325,8 +330,8 @@
 
   /* ── Tables — sticky-friendly header, hover rows, aligned cells. ── */
   .th {
-    @apply text-left text-xs font-semibold uppercase tracking-wide
-           text-brand-400 px-4 py-3 bg-brand-50/60
+    @apply text-left text-[11px] font-semibold uppercase tracking-[0.06em]
+           text-brand-500 px-4 py-3 bg-brand-50
            dark:bg-white/5 dark:text-[#B6BAC1];
   }
   .td {
@@ -369,16 +374,26 @@
 .dark .text-brand-300 {
   color: #9aa0a8;
 }
-/* "Islands" that stay LIGHT in dark mode (yellow CTAs / accent card) keep dark
-   ink. Listing the surface class alongside `.text-ink` out-specifies the white
-   lift above, so dark text wins back there. Only ALWAYS-light surfaces belong
-   here — pastel tiles that flip to a dark background in dark mode are given a
-   `dark:` background in their component instead, so the white lift is correct. */
-.dark .text-ink.bg-primary-300,
-.dark .text-ink.bg-primary-400,
-.dark .text-ink.bg-cta,
+/* "Islands" that stay LIGHT in dark mode keep dark ink. Listing the surface
+   class alongside `.text-ink` out-specifies the white lift above, so dark text
+   wins back there. The primary action color is now a solid blue, so any text
+   sitting on it must be WHITE in both modes — those surfaces are handled
+   separately below and are NOT listed here. Only always-light surfaces (the
+   white accent card) keep dark ink. */
 .dark .card-accent .text-ink {
   color: #0a0a0a;
+}
+/* Text on the blue primary / CTA surfaces is always white (both modes), since
+   the surface itself stays a saturated blue regardless of theme. */
+.text-ink.bg-primary-300,
+.text-ink.bg-primary-400,
+.text-ink.bg-primary-500,
+.text-ink.bg-cta,
+.dark .text-ink.bg-primary-300,
+.dark .text-ink.bg-primary-400,
+.dark .text-ink.bg-primary-500,
+.dark .text-ink.bg-cta {
+  color: #ffffff;
 }
 
 /* ── Surface completions ─────────────────────────────────────────────────────

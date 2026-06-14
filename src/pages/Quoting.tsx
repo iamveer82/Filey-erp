@@ -37,6 +37,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, numInput, CURRENCIES, errMsg } from "../lib/format";
 import { quotationTotals } from "../lib/money";
+import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
@@ -56,7 +57,11 @@ import {
   type BankInfo,
 } from "../components/BankDetails";
 import TemplateTilePreview from "../components/TemplateTilePreview";
-import TemplateDesigner, { loadCustomTemplates, deleteCustomTemplate, type CustomTemplate } from "../components/TemplateDesigner";
+import TemplateDesigner, {
+  loadCustomTemplates,
+  deleteCustomTemplate,
+  type CustomTemplate,
+} from "../components/TemplateDesigner";
 
 interface Line {
   product: string;
@@ -78,18 +83,18 @@ const TEMPLATES = [
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
-const qtNo = () =>
-  `QT-${new Date().getFullYear()}-${String(
-    Math.floor(Math.random() * 900000) + 100000
-  )}`;
+const qtNo = (existing: string[] = []) =>
+  nextDocNumber({ prefix: "QT", existing });
 
-const lineAmount = (l: Line) =>
-  l.qty * l.rate * (1 - (l.discount || 0) / 100);
+const lineAmount = (l: Line) => l.qty * l.rate * (1 - (l.discount || 0) / 100);
 
 export default function Quoting() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [tpl, setTpl] = useState("clean");
+  // Existing quotation numbers, loaded on mount so we can issue the next
+  // sequential number (and never collide). Empty until the fetch resolves.
+  const [quoteNumbers, setQuoteNumbers] = useState<string[]>([]);
   const [number, setNumber] = useState(qtNo());
   const [date, setDate] = useState(today());
   const [valid, setValid] = useState(addDays(30));
@@ -97,9 +102,9 @@ export default function Quoting() {
   const [currency, setCurrency] = useState("USD");
   const [salesPerson, setSalesPerson] = useState("");
   const [lines, setLines] = useState<Line[]>([
-    { product: "", sku: "", qty: 1, rate: 0, discount: 0, tax: 12 },
+    { product: "", sku: "", qty: 1, rate: 0, discount: 0, tax: 5 },
   ]);
-  const [terms] = useState(
+  const [terms, setTerms] = useState(
     "1. This quotation is valid until the date mentioned above.\n2. Payment is due within 15 days from the date of invoice.\n3. All prices are inclusive of applicable taxes."
   );
   const [custModal, setCustModal] = useState(false);
@@ -113,7 +118,8 @@ export default function Quoting() {
   const [signature, setSignature] = useState<StampSig | undefined>(undefined);
   const [showBank, setShowBank] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const [customTemplates, setCustomTemplates] =
+    useState<CustomTemplate[]>(loadCustomTemplates);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewAll, setViewAll] = useState(false);
@@ -121,7 +127,9 @@ export default function Quoting() {
   // Close view modal on Escape
   useEffect(() => {
     if (!viewOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
@@ -129,6 +137,8 @@ export default function Quoting() {
   const [pageCount, setPageCount] = useState(1);
   const [savedNote, setSavedNote] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const navigate = useNavigate();
   const { toast, prompt, confirm } = useUI();
   const removeCustomTpl = async (id: string, name: string) => {
@@ -148,14 +158,17 @@ export default function Quoting() {
   const quoteRef = useRef<HTMLDivElement>(null);
   const downloadQuotePdf = () => {
     if (quoteRef.current) {
-      const sheet = quoteRef.current.closest('.invoice-print') as HTMLElement;
+      const sheet = quoteRef.current.closest(".invoice-print") as HTMLElement;
       downloadElementAsPdf(sheet || quoteRef.current, "quotation");
     } else window.print();
   };
 
   // Calculate page count for the full-screen preview
   useEffect(() => {
-    if (!viewOpen || !quotePreviewRef.current) { setPageCount(1); return; }
+    if (!viewOpen || !quotePreviewRef.current) {
+      setPageCount(1);
+      return;
+    }
     const el = quotePreviewRef.current;
     const measure = () => {
       const contentHeight = el.scrollHeight;
@@ -169,7 +182,10 @@ export default function Quoting() {
   }, [viewOpen, lines.length, tpl]);
 
   const loadTemplates = () =>
-    quoteTemplates.list().then(setSaved).catch(() => toast.error("Failed to load templates"));
+    quoteTemplates
+      .list()
+      .then(setSaved)
+      .catch(() => toast.error("Failed to load templates"));
 
   useEffect(() => {
     billing
@@ -179,21 +195,41 @@ export default function Quoting() {
         if (c?.currency) setCurrency(c.currency);
       })
       .catch(() => toast.error("Failed to load company profile"));
-    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
+    crm
+      .customers()
+      .then(setCustomers)
+      .catch(() => toast.error("Failed to load customers"));
     loadTemplates();
-    loadBankInfo().then(setBank).catch(() => {});
+    // Pull existing quote numbers so the first draft gets the next
+    // sequential number instead of a random placeholder.
+    quotes
+      .listDocs()
+      .then((ds) => {
+        const nums = ds.map((d) => d.number);
+        setQuoteNumbers(nums);
+        // Only adopt the sequential number if the user hasn't started
+        // editing (still on the initial placeholder, new quote).
+        if (!docId) setNumber(qtNo(nums));
+      })
+      .catch(() => {});
+    loadBankInfo()
+      .then(setBank)
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Live-sync only the shared lists — re-pulling company here would
   // stomp a currency the user picked while drafting this quote.
   useLiveSync(() => {
-    crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
+    crm
+      .customers()
+      .then(setCustomers)
+      .catch(() => toast.error("Failed to load customers"));
     loadTemplates();
   });
 
   const totals = useMemo(
-    () =>
-      quotationTotals(vat ? lines : lines.map((l) => ({ ...l, tax: 0 }))),
+    () => quotationTotals(vat ? lines : lines.map((l) => ({ ...l, tax: 0 }))),
     [lines, vat]
   );
 
@@ -212,6 +248,7 @@ export default function Quoting() {
       toast.error("Select a customer with an email address first.");
       return;
     }
+    setEmailing(true);
     try {
       await sendEmail({
         to,
@@ -227,9 +264,7 @@ export default function Quoting() {
              <tr><td>Discount</td><td style="text-align:right">-${m(
                totals.discount
              )}</td></tr>
-             <tr><td>Tax</td><td style="text-align:right">${m(
-               totals.tax
-             )}</td></tr>
+             <tr><td>Tax</td><td style="text-align:right">${m(totals.tax)}</td></tr>
              <tr><td><b>Total (${currency})</b></td><td style="text-align:right"><b>${m(
                totals.total
              )}</b></td></tr>
@@ -240,6 +275,8 @@ export default function Quoting() {
       toast.success(`Quotation emailed to ${to}`);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      setEmailing(false);
     }
   };
 
@@ -248,26 +285,28 @@ export default function Quoting() {
   const addLine = () =>
     setLines((ls) => [
       ...ls,
-      { product: "", sku: "", qty: 1, rate: 0, discount: 0, tax: 12 },
+      { product: "", sku: "", qty: 1, rate: 0, discount: 0, tax: 5 },
     ]);
-  const delLine = (i: number) =>
-    setLines((ls) => ls.filter((_, x) => x !== i));
+  const delLine = (i: number) => setLines((ls) => ls.filter((_, x) => x !== i));
 
   const accent =
-    tpl === "corporate"
-      ? "#222222"
-      : tpl === "classic"
-      ? "#4A453B"
-      : "#E0AE00";
+    tpl === "corporate" ? "#222222" : tpl === "classic" ? "#4A453B" : "#E0AE00";
 
   const saveDraft = async () => {
     // Validate
-    if (!number.trim()) { toast.error("Quotation number is required"); return; }
-    if (!lines.length || lines.every(l => !l.product.trim() && !(l as any).description?.trim())) {
-      toast.error("Add at least one line item with a product or description");
+    if (!number.trim()) {
+      toast.error("Quotation number is required");
       return;
     }
-    if (!customer?.company?.trim() && !customer?.name?.trim() && !customer?.email?.trim()) {
+    if (!lines.length || lines.every((l) => !l.product.trim())) {
+      toast.error("Add at least one line item with a product");
+      return;
+    }
+    if (
+      !customer?.company?.trim() &&
+      !customer?.name?.trim() &&
+      !customer?.email?.trim()
+    ) {
       toast.error("Customer name or email is required");
       return;
     }
@@ -300,19 +339,28 @@ export default function Quoting() {
         tax: vat ? l.tax : 0,
       })),
     };
+    setSavingDraft(true);
     try {
       const newId = await quotes.saveDoc(input);
       if (newId && newId > 0) setDocId(newId);
+      // Keep the in-memory list current so the next new quote numbers correctly.
+      setQuoteNumbers((prev) =>
+        prev.includes(number) ? prev : [...prev, number]
+      );
       setSavedNote(true);
       setTimeout(() => setSavedNote(false), 2500);
       // Archive the quotation PDF to My Files (deduped, best-effort).
       if (quoteRef.current) {
         const base = number || "quotation";
-        const saved = await autoSaveDocument(`${base}.pdf`, "quotation", () => elementToPdfBytes(quoteRef.current!, base));
+        const saved = await autoSaveDocument(`${base}.pdf`, "quotation", () =>
+          elementToPdfBytes(quoteRef.current!, base)
+        );
         if (saved) toast.success("Saved a copy to My Files.");
       }
     } catch (e) {
-      toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
+      toast.error(`Could not save: ${errMsg(e)}`);
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -328,9 +376,7 @@ export default function Quoting() {
       loadTemplates();
       toast.success("Template saved.");
     } catch (e) {
-      toast.error(
-        `Could not save template: ${e instanceof Error ? e.message : e}`
-      );
+      toast.error(`Could not save template: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -350,7 +396,7 @@ export default function Quoting() {
         if (!p) return null;
         return (
           <div
-            className="absolute bg-white/78 rounded-xl px-4 py-3 shadow-sm"
+            className="absolute bg-white/78 rounded-lg px-4 py-3"
             style={{ left: `${p.x}%`, top: `${p.y}%` }}
           >
             {children}
@@ -371,29 +417,50 @@ export default function Quoting() {
           />
 
           <Section k="seller">
-            {company?.logo && <img src={company.logo} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
-            <p className="font-bold text-sm text-neutral-900">{company?.name ?? "Your Company"}</p>
-            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{company?.address}</p>
-            {company?.email && <p className="text-[9px] text-neutral-500 mt-0.5">{company.email}</p>}
+            {company?.logo && (
+              <img
+                src={company.logo}
+                alt="logo"
+                style={{ height: 40 }}
+                className="object-contain mb-1.5"
+              />
+            )}
+            <p className="font-medium text-sm text-neutral-900">
+              {company?.name ?? "Your Company"}
+            </p>
+            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
+              {company?.address}
+            </p>
+            {company?.email && (
+              <p className="text-[9px] text-neutral-500 mt-0.5">{company.email}</p>
+            )}
           </Section>
 
           <Section k="header">
-            <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>QUOTATION</p>
+            <p className="text-2xl font-medium" style={{ color: ac }}>
+              QUOTATION
+            </p>
             <p className="text-xs font-mono text-neutral-800 mt-0.5">{number}</p>
             <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(date)}</p>
             <p className="text-[10px] text-neutral-500">Valid Until: {fmtDate(valid)}</p>
           </Section>
 
           <Section k="customer">
-            <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Bill To</p>
-            <p className="font-semibold text-xs text-neutral-900">{customer?.company || customer?.name || "Customer"}</p>
-            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{customer?.address}</p>
-            {customer?.email && <p className="text-[9px] text-neutral-500 mt-0.5">{customer.email}</p>}
+            <p className="text-[9px] text-neutral-500 mb-0.5">Bill To</p>
+            <p className="font-medium text-xs text-neutral-900">
+              {customer?.company || customer?.name || "Customer"}
+            </p>
+            <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
+              {customer?.address}
+            </p>
+            {customer?.email && (
+              <p className="text-[9px] text-neutral-500 mt-0.5">{customer.email}</p>
+            )}
           </Section>
 
           {pos.items && (
             <div
-              className="absolute bg-white/82 rounded-xl p-4 shadow-sm overflow-auto"
+              className="absolute bg-white/82 rounded-lg p-4 overflow-auto"
               style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
             >
               <table className="w-full text-xs border-collapse">
@@ -413,14 +480,14 @@ export default function Quoting() {
                     <tr key={i} className="border-b border-neutral-200">
                       <td className="py-2">{i + 1}</td>
                       <td className="py-2">
-                        <p className="font-semibold">{l.product || "—"}</p>
+                        <p className="font-medium">{l.product || "—"}</p>
                         <p className="text-neutral-400">{l.sku}</p>
                       </td>
                       <td className="py-2 text-right">{l.qty}</td>
                       <td className="py-2 text-right">{m(l.rate)}</td>
                       <td className="py-2 text-right">{l.discount}%</td>
                       {vat && <td className="py-2 text-right">{l.tax}%</td>}
-                      <td className="py-2 text-right font-semibold">{m(lineAmount(l))}</td>
+                      <td className="py-2 text-right font-medium">{m(lineAmount(l))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -430,14 +497,17 @@ export default function Quoting() {
 
           {pos.totals && (
             <div
-              className="absolute bg-white/80 rounded-xl px-4 py-2.5 shadow-sm"
+              className="absolute bg-white/80 rounded-lg px-4 py-2.5"
               style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
             >
               <div className="text-xs">
                 <Row k="Subtotal" v={m(totals.subtotal)} />
                 <Row k="Discount" v={`-${m(totals.discount)}`} tone="text-green-600" />
                 {vat && <Row k="Tax" v={m(totals.tax)} />}
-                <div className="flex justify-between py-2 mt-1 font-bold text-sm" style={{ borderTop: `2px solid ${ac}`, color: ac }}>
+                <div
+                  className="flex justify-between py-2 mt-1 font-medium text-sm"
+                  style={{ borderTop: `2px solid ${ac}`, color: ac }}
+                >
                   <span>Total ({currency})</span>
                   <span>{m(totals.total)}</span>
                 </div>
@@ -459,140 +529,116 @@ export default function Quoting() {
     }
 
     return (
-    <>
-      <div className="flex justify-between items-start">
-        <div className="flex items-center gap-2">
-          {company?.logo && (
-            <img
-              src={company.logo}
-              alt="logo"
-              className="h-9 object-contain"
-            />
-          )}
-          <span
-            className="text-lg font-bold"
-            style={{ color: accent }}
-          >
-            {company?.name ?? "Your Company"}
-          </span>
+      <>
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-2">
+            {company?.logo && (
+              <img src={company.logo} alt="logo" className="h-9 object-contain" />
+            )}
+            <span className="text-lg font-medium" style={{ color: accent }}>
+              {company?.name ?? "Your Company"}
+            </span>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-medium" style={{ color: accent }}>
+              QUOTATION
+            </p>
+            <p className="text-xs text-neutral-500 mt-1">{number}</p>
+          </div>
         </div>
-        <div className="text-right">
-          <p
-            className="text-2xl font-bold tracking-tight"
-            style={{ color: accent }}
-          >
-            QUOTATION
-          </p>
-          <p className="text-xs text-neutral-500 mt-1">{number}</p>
-        </div>
-      </div>
 
-      <div className="flex justify-between mt-6 text-xs">
-        <div>
-          <p className="uppercase tracking-wide text-neutral-400">From</p>
-          <p className="font-semibold text-sm mt-1">{company?.name}</p>
-          <p className="text-neutral-500 whitespace-pre-line">
-            {company?.address}
-          </p>
-          {company?.email && (
-            <p className="text-neutral-500">{company.email}</p>
-          )}
+        <div className="flex justify-between mt-6 text-xs">
+          <div>
+            <p className="text-neutral-400">From</p>
+            <p className="font-medium text-sm mt-1">{company?.name}</p>
+            <p className="text-neutral-500 whitespace-pre-line">{company?.address}</p>
+            {company?.email && <p className="text-neutral-500">{company.email}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-neutral-400">To</p>
+            <p className="font-medium text-sm mt-1">
+              {customer?.company || customer?.name || "Customer"}
+            </p>
+            <p className="text-neutral-500 whitespace-pre-line">{customer?.address}</p>
+            <p className="text-neutral-500 mt-2">Date: {fmtDate(date)}</p>
+            <p className="text-neutral-500">Valid Until: {fmtDate(valid)}</p>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="uppercase tracking-wide text-neutral-400">To</p>
-          <p className="font-semibold text-sm mt-1">
-            {customer?.company || customer?.name || "Customer"}
-          </p>
-          <p className="text-neutral-500 whitespace-pre-line">
-            {customer?.address}
-          </p>
-          <p className="text-neutral-500 mt-2">Date: {fmtDate(date)}</p>
-          <p className="text-neutral-500">Valid Until: {fmtDate(valid)}</p>
-        </div>
-      </div>
 
-      <table className="w-full text-xs mt-6 border-collapse">
-        <thead>
-          <tr style={{ color: accent }} className="border-b-2 text-left">
-            <th className="py-2">#</th>
-            <th className="py-2">Item</th>
-            <th className="py-2 text-right">Qty</th>
-            <th className="py-2 text-right">Rate</th>
-            <th className="py-2 text-right">Disc</th>
-            {vat && <th className="py-2 text-right">Tax</th>}
-            <th className="py-2 text-right">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((l, i) => (
-            <tr key={i} className="border-b border-neutral-200">
-              <td className="py-2">{i + 1}</td>
-              <td className="py-2">
-                <p className="font-semibold">{l.product || "—"}</p>
-                <p className="text-neutral-400">{l.sku}</p>
-              </td>
-              <td className="py-2 text-right">{l.qty}</td>
-              <td className="py-2 text-right">{m(l.rate)}</td>
-              <td className="py-2 text-right">{l.discount}%</td>
-              {vat && <td className="py-2 text-right">{l.tax}%</td>}
-              <td className="py-2 text-right font-semibold">
-                {m(lineAmount(l))}
-              </td>
+        <table className="w-full text-xs mt-6 border-collapse">
+          <thead>
+            <tr style={{ color: accent }} className="border-b-2 text-left">
+              <th className="py-2">#</th>
+              <th className="py-2">Item</th>
+              <th className="py-2 text-right">Qty</th>
+              <th className="py-2 text-right">Rate</th>
+              <th className="py-2 text-right">Disc</th>
+              {vat && <th className="py-2 text-right">Tax</th>}
+              <th className="py-2 text-right">Amount</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i} className="border-b border-neutral-200">
+                <td className="py-2">{i + 1}</td>
+                <td className="py-2">
+                  <p className="font-medium">{l.product || "—"}</p>
+                  <p className="text-neutral-400">{l.sku}</p>
+                </td>
+                <td className="py-2 text-right">{l.qty}</td>
+                <td className="py-2 text-right">{m(l.rate)}</td>
+                <td className="py-2 text-right">{l.discount}%</td>
+                {vat && <td className="py-2 text-right">{l.tax}%</td>}
+                <td className="py-2 text-right font-medium">{m(lineAmount(l))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
-      <div className="ml-auto w-60 mt-5 text-xs">
-        <Row k="Subtotal" v={m(totals.subtotal)} />
-        <Row
-          k="Discount"
-          v={`-${m(totals.discount)}`}
-          tone="text-green-600"
-        />
-        {vat && <Row k="Tax" v={m(totals.tax)} />}
-        <div
-          className="flex justify-between py-2 mt-1 font-bold text-sm"
-          style={{ borderTop: `2px solid ${accent}`, color: accent }}
-        >
-          <span>Total ({currency})</span>
-          <span>{m(totals.total)}</span>
+        <div className="ml-auto w-60 mt-5 text-xs">
+          <Row k="Subtotal" v={m(totals.subtotal)} />
+          <Row k="Discount" v={`-${m(totals.discount)}`} tone="text-green-600" />
+          {vat && <Row k="Tax" v={m(totals.tax)} />}
+          <div
+            className="flex justify-between py-2 mt-1 font-medium text-sm"
+            style={{ borderTop: `2px solid ${accent}`, color: accent }}
+          >
+            <span>Total ({currency})</span>
+            <span>{m(totals.total)}</span>
+          </div>
         </div>
-      </div>
 
-      <div className="mt-6 pt-3 border-t border-neutral-200">
-        <p className="text-xs font-semibold">Terms &amp; Conditions</p>
-        <p className="text-[11px] text-neutral-500 whitespace-pre-line mt-1">
-          {terms}
-        </p>
-        <p className="text-xs font-semibold mt-3">
-          Thank you for your business!
-        </p>
-      </div>
-    </>
-  );
+        <div className="mt-6 pt-3 border-t border-neutral-200">
+          <p className="text-xs font-medium">Terms &amp; Conditions</p>
+          <p className="text-[11px] text-neutral-500 whitespace-pre-line mt-1">{terms}</p>
+          <p className="text-xs font-medium mt-3">Thank you for your business!</p>
+        </div>
+      </>
+    );
   };
 
   return (
     <div className="animate-fade-up">
       <div className="flex items-start justify-between gap-3 flex-wrap mb-5">
         <div>
-          <h1 className="text-[28px] leading-9 font-bold text-ink">
-            Create Quotation
-          </h1>
+          <h1 className="text-[28px] leading-9 font-medium text-ink">Create Quotation</h1>
           <p className="text-sm text-brand-500 mt-0.5">
-            Create professional quotations in minutes and convert leads
-            faster
+            Create professional quotations in minutes and convert leads faster
           </p>
         </div>
         <div className="flex items-center gap-2">
           {savedNote && (
-            <span className="inline-flex items-center gap-1 text-sm font-semibold text-success">
+            <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
               <Check size={15} /> Draft saved
             </span>
           )}
-          <button className="btn-ghost" aria-label="Save Draft" onClick={saveDraft}>
-            <Save size={15} /> Save Draft
+          <button
+            className="btn-ghost"
+            aria-label="Save Draft"
+            onClick={saveDraft}
+            disabled={savingDraft}
+          >
+            <Save size={15} /> {savingDraft ? "Saving…" : "Save Draft"}
           </button>
           <button
             className="btn-ghost"
@@ -601,11 +647,20 @@ export default function Quoting() {
           >
             <Eye size={15} /> View
           </button>
-          <button className="btn-ghost" aria-label="Download PDF" onClick={downloadQuotePdf}>
+          <button
+            className="btn-ghost"
+            aria-label="Download PDF"
+            onClick={downloadQuotePdf}
+          >
             <Download size={15} /> PDF
           </button>
-          <button className="btn-ghost" aria-label="Email quotation" onClick={emailQuote}>
-            <Send size={15} /> Email
+          <button
+            className="btn-ghost"
+            aria-label="Email quotation"
+            onClick={emailQuote}
+            disabled={emailing}
+          >
+            <Send size={15} /> {emailing ? "Sending…" : "Email"}
           </button>
           {docId ? (
             <button
@@ -625,11 +680,14 @@ export default function Quoting() {
                 }
               }}
             >
-              <FileText size={15} />{" "}
-              {converting ? "Converting…" : "Convert to Invoice"}
+              <FileText size={15} /> {converting ? "Converting…" : "Convert to Invoice"}
             </button>
           ) : null}
-          <button className="btn-primary" aria-label="Generate PDF" onClick={downloadQuotePdf}>
+          <button
+            className="btn-primary"
+            aria-label="Generate PDF"
+            onClick={downloadQuotePdf}
+          >
             <Download size={15} /> Generate PDF
           </button>
         </div>
@@ -697,20 +755,25 @@ export default function Quoting() {
                           e.stopPropagation();
                           removeCustomTpl(t.id, t.name);
                         }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
                       >
                         <Trash2 size={11} />
                       </span>
                     )}
-                    <TemplateTilePreview templateId={t.id} customTemplates={customTemplates} />
-                    <p className="text-xs font-semibold text-ink mt-2 flex items-center gap-1">
+                    <TemplateTilePreview
+                      templateId={t.id}
+                      customTemplates={customTemplates}
+                    />
+                    <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
                       {t.name}
                       {isFile ? (
                         <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
                           <Upload size={8} /> Uploaded
                         </span>
                       ) : isCustom ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">Custom</span>
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">
+                          Custom
+                        </span>
                       ) : null}
                     </p>
                   </button>
@@ -733,8 +796,8 @@ export default function Quoting() {
                     onChange={(e) => setNumber(e.target.value)}
                   />
                   <button
-                    className="grid place-items-center rounded-xl border border-brand-200 px-2.5 text-brand-400 hover:bg-brand-50 cursor-pointer"
-                    onClick={() => setNumber(qtNo())}
+                    className="grid place-items-center rounded-lg border border-brand-200 px-2.5 text-brand-400 hover:bg-brand-50 cursor-pointer"
+                    onClick={() => setNumber(qtNo(quoteNumbers))}
                     title="Regenerate"
                   >
                     <RefreshCw size={15} />
@@ -764,9 +827,7 @@ export default function Quoting() {
                     value={customer?.id ?? ""}
                     onChange={(e) =>
                       setCustomer(
-                        customers.find(
-                          (c) => String(c.id) === e.target.value
-                        ) ?? null
+                        customers.find((c) => String(c.id) === e.target.value) ?? null
                       )
                     }
                   >
@@ -801,9 +862,19 @@ export default function Quoting() {
               <Field label="Sales Person">
                 <input
                   className="input"
-                  placeholder="Olivia Rhye"
+                  placeholder="Name of the salesperson"
                   value={salesPerson}
                   onChange={(e) => setSalesPerson(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="mt-4">
+              <Field label="Terms & Conditions">
+                <textarea
+                  className="input min-h-[96px] resize-y"
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  placeholder="Terms shown at the bottom of the quotation"
                 />
               </Field>
             </div>
@@ -815,26 +886,27 @@ export default function Quoting() {
             subtitle="Add products and their rates"
             action={
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-brand-500">
-                  VAT
-                </span>
+                <span className="text-xs font-medium text-brand-500">VAT</span>
                 <div className="flex rounded-lg bg-brand-100 p-0.5">
-                  {([["Yes", true], ["No", false]] as const).map(
-                    ([lbl, on]) => (
-                      <button
-                        key={lbl}
-                        type="button"
-                        onClick={() => setVat(on)}
-                        className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
-                          vat === on
-                            ? "bg-white text-ink shadow-bento"
-                            : "text-brand-500 hover:text-ink"
-                        }`}
-                      >
-                        {lbl}
-                      </button>
-                    )
-                  )}
+                  {(
+                    [
+                      ["Yes", true],
+                      ["No", false],
+                    ] as const
+                  ).map(([lbl, on]) => (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() => setVat(on)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                        vat === on
+                          ? "bg-white text-ink shadow-bento"
+                          : "text-brand-500 hover:text-ink"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
                 </div>
                 <button
                   type="button"
@@ -853,16 +925,14 @@ export default function Quoting() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-semibold text-brand-400">
+                  <tr className="text-left text-xs font-medium text-brand-400">
                     <th className="py-2 w-6">#</th>
                     <th className="py-2 px-2">Product</th>
                     <th className="py-2 px-2 w-24">SKU</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
                     <th className="py-2 px-2 w-28 text-right">Rate</th>
                     <th className="py-2 px-2 w-20 text-right">Disc%</th>
-                    {vat && (
-                      <th className="py-2 px-2 w-20 text-right">Tax%</th>
-                    )}
+                    {vat && <th className="py-2 px-2 w-20 text-right">Tax%</th>}
                     <th className="py-2 px-2 w-24 text-right">Total</th>
                     <th className="w-8" />
                   </tr>
@@ -876,18 +946,14 @@ export default function Quoting() {
                           className="input"
                           placeholder="Product name"
                           value={l.product}
-                          onChange={(e) =>
-                            setLine(i, { product: e.target.value })
-                          }
+                          onChange={(e) => setLine(i, { product: e.target.value })}
                         />
                       </td>
                       <td className="py-2 px-2">
                         <input
                           className="input"
                           value={l.sku}
-                          onChange={(e) =>
-                            setLine(i, { sku: e.target.value })
-                          }
+                          onChange={(e) => setLine(i, { sku: e.target.value })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -896,9 +962,7 @@ export default function Quoting() {
                           className="input text-right !px-2"
                           value={l.qty || ""}
                           placeholder="0"
-                          onChange={(e) =>
-                            setLine(i, { qty: numInput(e.target.value) })
-                          }
+                          onChange={(e) => setLine(i, { qty: numInput(e.target.value) })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -907,9 +971,7 @@ export default function Quoting() {
                           className="input text-right !px-2"
                           placeholder="0"
                           value={l.rate || ""}
-                          onChange={(e) =>
-                            setLine(i, { rate: numInput(e.target.value) })
-                          }
+                          onChange={(e) => setLine(i, { rate: numInput(e.target.value) })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -936,7 +998,7 @@ export default function Quoting() {
                           />
                         </td>
                       )}
-                      <td className="py-2 px-2 text-right font-semibold text-ink">
+                      <td className="py-2 px-2 text-right font-medium text-ink">
                         {m(lineAmount(l))}
                       </td>
                       <td className="py-2">
@@ -954,24 +1016,15 @@ export default function Quoting() {
               </table>
             </div>
             <div className="flex flex-wrap items-start justify-between gap-4 mt-4">
-              <button
-                className="btn-ghost"
-                onClick={() => setInvModal(true)}
-              >
+              <button className="btn-ghost" onClick={() => setInvModal(true)}>
                 <PackageSearch size={15} /> Import from Inventory
               </button>
               <div className="w-64 text-sm">
-                <p className="text-xs font-semibold text-brand-400 mb-2">
-                  Summary
-                </p>
+                <p className="text-xs font-medium text-brand-400 mb-2">Summary</p>
                 <Row k="Subtotal" v={m(totals.subtotal)} />
-                <Row
-                  k="Discount"
-                  v={`-${m(totals.discount)}`}
-                  tone="text-success"
-                />
+                <Row k="Discount" v={`-${m(totals.discount)}`} tone="text-success" />
                 {vat && <Row k="Tax" v={m(totals.tax)} />}
-                <div className="flex justify-between py-2 mt-1 border-t border-brand-200 font-bold text-ink">
+                <div className="flex justify-between py-2 mt-1 border-t border-brand-200 font-medium text-ink">
                   <span>Total ({currency})</span>
                   <span>{m(totals.total)}</span>
                 </div>
@@ -1018,8 +1071,8 @@ export default function Quoting() {
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
               <div>
-                <p className="font-bold text-ink flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-bold">
+                <p className="font-medium text-ink flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-medium">
                     5
                   </span>
                   Preview
@@ -1029,10 +1082,7 @@ export default function Quoting() {
                 </p>
               </div>
             </div>
-            <FitPreview
-              baseWidth={device === "desktop" ? 794 : 420}
-              zoom={zoom}
-            >
+            <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom}>
               <div ref={quoteRef} className="relative">
                 <StampSignatureLayer
                   stamp={stamp}
@@ -1095,22 +1145,23 @@ export default function Quoting() {
           </div>
 
           {viewOpen && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4" onClick={() => setViewOpen(false)}>
-              <div className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
+              onClick={() => setViewOpen(false)}
+            >
+              <div
+                className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-lg font-bold text-ink">
-                      Quotation preview
-                    </h2>
+                    <h2 className="text-lg font-bold text-ink">Quotation preview</h2>
                     <span className="text-xs font-semibold text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
                       Page 1 of {pageCount}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      className="btn-ghost h-9 text-xs"
-                      onClick={downloadQuotePdf}
-                    >
+                    <button className="btn-ghost h-9 text-xs" onClick={downloadQuotePdf}>
                       <Download size={14} /> PDF
                     </button>
                     <button
@@ -1124,7 +1175,10 @@ export default function Quoting() {
                 </div>
                 <div className="flex-1 overflow-auto p-6">
                   <div className="mx-auto max-w-5xl">
-                    <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white" ref={quotePreviewRef}>
+                    <div
+                      className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white"
+                      ref={quotePreviewRef}
+                    >
                       <div className="relative">
                         <StampSignatureLayer
                           stamp={stamp}
@@ -1154,25 +1208,15 @@ export default function Quoting() {
           <div className="card no-print">
             <div className="flex items-center justify-between mb-1">
               <p className="font-bold text-ink">Saved Templates</p>
-              <button
-                className="btn-ghost text-xs"
-                onClick={saveTemplate}
-              >
+              <button className="btn-ghost text-xs" onClick={saveTemplate}>
                 View all
               </button>
             </div>
-            <p className="text-xs text-brand-400 mb-3">
-              Manage your custom templates
-            </p>
+            <p className="text-xs text-brand-400 mb-3">Manage your custom templates</p>
             <div className="flex flex-wrap gap-2">
               {saved.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-brand-200 px-3 py-2"
-                >
-                  <p className="text-xs font-semibold text-ink">
-                    {s.name}
-                  </p>
+                <div key={s.id} className="rounded-xl border border-brand-200 px-3 py-2">
+                  <p className="text-xs font-semibold text-ink">{s.name}</p>
                   <p className="text-[10px] text-brand-400 flex items-center gap-1">
                     <CalendarDays size={10} />
                     {fmtDate(s.created_at)}
@@ -1196,7 +1240,10 @@ export default function Quoting() {
         onSaved={(c) => {
           setCustomer(c);
           setCustModal(false);
-          crm.customers().then(setCustomers).catch(() => toast.error("Failed to load customers"));
+          crm
+            .customers()
+            .then(setCustomers)
+            .catch(() => toast.error("Failed to load customers"));
         }}
       />
       <InventoryModal
@@ -1260,9 +1307,7 @@ function Step({
           </span>
           <div>
             <p className="font-bold text-ink leading-tight">{title}</p>
-            {subtitle && (
-              <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>
-            )}
+            {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
           </div>
         </div>
         {action}
@@ -1282,6 +1327,7 @@ function CustomerModal({
   onSaved: (c: CrmCustomer) => void;
 }) {
   const { toast } = useUI();
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState({
     company: "",
     name: "",
@@ -1358,28 +1404,33 @@ function CustomerModal({
         </button>
         <button
           className="btn-primary"
-          disabled={!f.company.trim() && !f.name.trim()}
+          disabled={saving || (!f.company.trim() && !f.name.trim())}
           onClick={async () => {
+            setSaving(true);
+            const trn = f.trn.replace(/\s/g, "");
             const payload = {
               name: f.name || f.company,
               company: f.company || undefined,
               email: f.email || undefined,
               phone: f.phone || undefined,
               address: f.address || undefined,
-              segment: f.trn ? `TRN:${f.trn}` : undefined,
+              trn: trn || undefined,
             };
             try {
-              await crm.createCustomer(
+              // createCustomer returns the new row id. Use it for the FK so
+              // the quote stores the correct customer_id instead of 0.
+              const id = await crm.createCustomer(
                 payload as Omit<CrmCustomer, "id" | "created_at">
               );
+              onSaved({ id, created_at: "", ...payload } as CrmCustomer);
             } catch (e) {
               toast.error(e instanceof Error ? e.message : "Failed to create customer");
-              return;
+            } finally {
+              setSaving(false);
             }
-            onSaved({ id: 0, created_at: "", ...payload } as CrmCustomer);
           }}
         >
-          Save Customer
+          {saving ? "Saving…" : "Save Customer"}
         </button>
       </div>
     </Modal>
@@ -1399,7 +1450,11 @@ function InventoryModal({
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   useEffect(() => {
-    if (open) erp.products().then(setProducts).catch(() => toast.error("Failed to load products"));
+    if (open)
+      erp
+        .products()
+        .then(setProducts)
+        .catch(() => toast.error("Failed to load products"));
   }, [open]);
   const filtered = products.filter(
     (p) =>
@@ -1425,15 +1480,11 @@ function InventoryModal({
               <p className="text-sm font-semibold text-ink">{p.name}</p>
               <p className="text-[11px] text-brand-400">{p.sku}</p>
             </div>
-            <span className="text-sm font-semibold text-ink">
-              {p.unit_price}
-            </span>
+            <span className="text-sm font-semibold text-ink">{p.unit_price}</span>
           </button>
         ))}
         {filtered.length === 0 && (
-          <p className="text-sm text-brand-400 text-center py-6">
-            No products found.
-          </p>
+          <p className="text-sm text-brand-400 text-center py-6">No products found.</p>
         )}
       </div>
       <div className="flex justify-end mt-4">

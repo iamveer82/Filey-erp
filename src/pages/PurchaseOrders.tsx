@@ -35,9 +35,8 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import { aed, fmtDate, num, numInput, errMsg } from "../lib/format";
-import {
-  invoiceTotals,
-} from "../lib/money";
+import { invoiceTotals } from "../lib/money";
+import { nextDocNumber } from "../lib/docNumber";
 import {
   PageHeader,
   MetricCard,
@@ -115,10 +114,9 @@ type LpoForm = {
   items: LpoItem[];
 };
 
-function blankLpo(c: CompanyProfile): LpoForm {
-  const y = new Date().getFullYear();
+function blankLpo(c: CompanyProfile, existing: string[] = []): LpoForm {
   return {
-    number: `LPO-${y}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+    number: nextDocNumber({ prefix: "LPO", existing }),
     status: "draft",
     template: c.default_template || "uae-standard",
     accent: c.default_accent || "#222222",
@@ -139,7 +137,8 @@ function blankLpo(c: CompanyProfile): LpoForm {
     expected_date: "",
     tax_rate: c.default_tax_rate ?? 5,
     notes: "Thank you for your business.",
-    terms: "1. Payment due within 30 days of invoice.\n2. Goods remain property of seller until paid in full.\n3. All prices are in AED unless otherwise stated.\n4. Delivery within 7-14 working days.",
+    terms:
+      "1. Payment due within 30 days of invoice.\n2. Goods remain property of seller until paid in full.\n3. All prices are in AED unless otherwise stated.\n4. Delivery within 7-14 working days.",
     items: [{ description: "", qty: 1, unit: "MT", unit_price: 0 }],
   };
 }
@@ -148,16 +147,28 @@ const STAMP_KEY = "filey_lpo_stamp";
 const SIGNATURE_KEY = "filey_lpo_signature";
 
 function loadSavedStamp(): string {
-  try { return localStorage.getItem(STAMP_KEY) || ""; } catch { return ""; }
+  try {
+    return localStorage.getItem(STAMP_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 function saveStamp(data: string) {
-  try { localStorage.setItem(STAMP_KEY, data); } catch {}
+  try {
+    localStorage.setItem(STAMP_KEY, data);
+  } catch {}
 }
 function loadSavedSignature(): string {
-  try { return localStorage.getItem(SIGNATURE_KEY) || ""; } catch { return ""; }
+  try {
+    return localStorage.getItem(SIGNATURE_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 function saveSignature(data: string) {
-  try { localStorage.setItem(SIGNATURE_KEY, data); } catch {}
+  try {
+    localStorage.setItem(SIGNATURE_KEY, data);
+  } catch {}
 }
 
 /* ------------------------------------------------------------------ */
@@ -174,7 +185,10 @@ export default function PurchaseOrders() {
   const [payFor, setPayFor] = useState<PoSummary | null>(null);
 
   useEffect(() => {
-    billing.getCompany().then(setCompany).catch(() => {});
+    billing
+      .getCompany()
+      .then(setCompany)
+      .catch(() => {});
   }, []);
 
   const load = () => {
@@ -182,11 +196,7 @@ export default function PurchaseOrders() {
       .list()
       .then(setRows)
       .catch((e) =>
-        setError(
-          `Could not load purchase orders: ${
-            e instanceof Error ? e.message : e
-          }`
-        )
+        setError(`Could not load purchase orders: ${e instanceof Error ? e.message : e}`)
       )
       .finally(() => setLoading(false));
   };
@@ -236,10 +246,7 @@ export default function PurchaseOrders() {
 
   const editPo = async (poId: number) => {
     try {
-      const [po, supps] = await Promise.all([
-        pos.get(poId),
-        suppliersApi.list(),
-      ]);
+      const [po, supps] = await Promise.all([pos.get(poId), suppliersApi.list()]);
       if (!po) return;
       const supplier = supps.find((s) => s.id === po.supplier_id);
       setLpoForm({
@@ -263,7 +270,7 @@ export default function PurchaseOrders() {
         company_signature: loadSavedSignature(),
         order_date: po.order_date || today(),
         expected_date: po.expected_date || "",
-        tax_rate: (po as any).tax_rate ?? (company?.default_tax_rate ?? 5),
+        tax_rate: (po as any).tax_rate ?? company?.default_tax_rate ?? 5,
         notes: po.notes || "",
         terms: "",
         items: po.items.map((i: any) => ({
@@ -325,7 +332,10 @@ export default function PurchaseOrders() {
             <button
               className="btn-primary"
               disabled={!company}
-              onClick={() => company && setLpoForm(blankLpo(company))}
+              onClick={() =>
+                company &&
+                setLpoForm(blankLpo(company, rows.map((r) => r.po_number)))
+              }
             >
               <Plus size={16} /> New LPO
             </button>
@@ -375,9 +385,7 @@ export default function PurchaseOrders() {
             label: "LPO #",
             sortValue: (r) => r.po_number,
             render: (r) => (
-              <span className="font-mono text-xs font-semibold">
-                {r.po_number}
-              </span>
+              <span className="font-mono text-xs font-medium">{r.po_number}</span>
             ),
           },
           {
@@ -385,9 +393,7 @@ export default function PurchaseOrders() {
             label: "Supplier",
             sortValue: (r) => r.supplier_name,
             render: (r) => (
-              <span className="font-semibold text-ink">
-                {r.supplier_name}
-              </span>
+              <span className="font-medium text-ink">{r.supplier_name}</span>
             ),
           },
           {
@@ -400,9 +406,7 @@ export default function PurchaseOrders() {
             key: "status",
             label: "Status",
             sortValue: (r) => r.status,
-            render: (r) => (
-              <Badge tone={statusTone(r.status)}>{r.status}</Badge>
-            ),
+            render: (r) => <Badge tone={statusTone(r.status)}>{r.status}</Badge>,
           },
           {
             key: "exp",
@@ -455,11 +459,7 @@ export default function PurchaseOrders() {
       />
 
       {payFor && (
-        <PoPaymentsModal
-          po={payFor}
-          onClose={() => setPayFor(null)}
-          onSaved={load}
-        />
+        <PoPaymentsModal po={payFor} onClose={() => setPayFor(null)} onSaved={load} />
       )}
     </div>
   );
@@ -521,28 +521,32 @@ function LPOEditor({
   const lpoRef = useRef<HTMLDivElement>(null);
   const downloadPdf = () => {
     if (lpoRef.current) {
-      const sheet = lpoRef.current.closest('.invoice-print') as HTMLElement;
+      const sheet = lpoRef.current.closest(".invoice-print") as HTMLElement;
       downloadElementAsPdf(sheet || lpoRef.current, form.number || "lpo");
     } else window.print();
   };
   // Save the LPO, then archive its PDF to My Files (deduped, best-effort).
   const handleSave = async () => {
-    const el = (lpoRef.current?.closest(".invoice-print") as HTMLElement) || lpoRef.current;
+    const el =
+      (lpoRef.current?.closest(".invoice-print") as HTMLElement) || lpoRef.current;
     onSave();
     if (!el) return;
     try {
       const base = form.number || "lpo";
-      const saved = await autoSaveDocument(`${base}.pdf`, "lpo", () => elementToPdfBytes(el, base));
+      const saved = await autoSaveDocument(`${base}.pdf`, "lpo", () =>
+        elementToPdfBytes(el, base)
+      );
       if (saved) toast.success("Saved a copy to My Files.");
-    } catch { /* archiving is a convenience — never block save */ }
+    } catch {
+      /* archiving is a convenience — never block save */
+    }
   };
   const set = <K extends keyof LpoForm>(k: K, v: LpoForm[K]) =>
     setForm({ ...form, [k]: v });
 
   const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(
-    loadCustomTemplates
-  );
+  const [customTemplates, setCustomTemplates] =
+    useState<CustomTemplate[]>(loadCustomTemplates);
   const [letterhead, setLetterhead] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [useLetterhead, setUseLetterhead] = useState(false);
   const [headerSpace, setHeaderSpace] = useState(DEFAULT_HEADER_SPACE);
@@ -575,9 +579,7 @@ function LPOEditor({
   };
 
   const setItem = (idx: number, patch: Partial<LpoItem>) => {
-    const items = form.items.map((it, i) =>
-      i === idx ? { ...it, ...patch } : it
-    );
+    const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     setForm({ ...form, items });
   };
   const addItem = () =>
@@ -632,14 +634,14 @@ function LPOEditor({
       <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
         <div className="flex items-start gap-3">
           <button
-            className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
             onClick={onBack}
             aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-bold text-ink">
+            <h1 className="text-[28px] leading-9 font-medium text-ink">
               Local Purchase Order
             </h1>
             <p className="text-sm text-brand-500 mt-0.5">
@@ -650,9 +652,7 @@ function LPOEditor({
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone={statusTone(form.status)}>{form.status}</Badge>
           {!form.id && (
-            <span className="text-xs font-semibold text-brand-400">
-              Unsaved
-            </span>
+            <span className="text-xs font-medium text-brand-400">Unsaved</span>
           )}
           <button
             className={`btn-ghost ${
@@ -670,8 +670,8 @@ function LPOEditor({
             {hasLetterhead(letterhead) ? (useLetterhead ? "On" : "Off") : ""}
           </button>
           {useLetterhead && hasLetterhead(letterhead) && (
-            <div className="flex items-center gap-1.5 rounded-xl border border-brand-200 bg-white px-2 py-1">
-              <label className="flex items-center gap-1 text-[11px] font-semibold text-brand-500">
+            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2 py-1">
+              <label className="flex items-center gap-1 text-[11px] font-medium text-brand-500">
                 Header
                 <input
                   type="number"
@@ -685,7 +685,7 @@ function LPOEditor({
                   title="Top space (px) so the body clears your letterhead header"
                 />
               </label>
-              <label className="flex items-center gap-1 text-[11px] font-semibold text-brand-500">
+              <label className="flex items-center gap-1 text-[11px] font-medium text-brand-500">
                 Footer
                 <input
                   type="number"
@@ -748,9 +748,7 @@ function LPOEditor({
               {shown.map((tpl) => {
                 const active = form.template === tpl.id;
                 const isCustom = tpl.id.startsWith("custom-");
-                const ct = isCustom
-                  ? customTemplates.find((c) => c.id === tpl.id)
-                  : null;
+                const ct = isCustom ? customTemplates.find((c) => c.id === tpl.id) : null;
                 const isFile = ct?.type === "file";
                 return (
                   <button
@@ -776,13 +774,13 @@ function LPOEditor({
                           e.stopPropagation();
                           removeTpl(tpl.id, tpl.name);
                         }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 shadow-sm transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
+                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
                       >
                         <Trash2 size={11} />
                       </span>
                     )}
                     <LpoTilePreview templateId={tpl.id} />
-                    <p className="text-xs font-semibold text-ink mt-2 capitalize flex items-center gap-1">
+                    <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
                       {tpl.name}
                       {isFile ? (
                         <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
@@ -810,9 +808,7 @@ function LPOEditor({
                       className="select"
                       value={form.supplier_id ? String(form.supplier_id) : ""}
                       onChange={(e) => {
-                        const s = suppliers.find(
-                          (x) => String(x.id) === e.target.value
-                        );
+                        const s = suppliers.find((x) => String(x.id) === e.target.value);
                         if (s) applySupplier(s);
                       }}
                     >
@@ -906,14 +902,20 @@ function LPOEditor({
                 <Field label="Company Stamp">
                   <StampUpload
                     value={form.company_stamp}
-                    onChange={(data) => { set("company_stamp", data); saveStamp(data); }}
+                    onChange={(data) => {
+                      set("company_stamp", data);
+                      saveStamp(data);
+                    }}
                     label="Upload Stamp"
                   />
                 </Field>
                 <Field label="Authorized Signature">
                   <SignatureUpload
                     value={form.company_signature}
-                    onChange={(data) => { set("company_signature", data); saveSignature(data); }}
+                    onChange={(data) => {
+                      set("company_signature", data);
+                      saveSignature(data);
+                    }}
                     label="Upload Signature"
                   />
                 </Field>
@@ -926,7 +928,7 @@ function LPOEditor({
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-semibold text-brand-400">
+                  <tr className="text-left text-xs font-medium text-brand-400">
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Item Name</th>
                     <th className="py-2 px-2 w-20 text-right">Qty</th>
@@ -945,9 +947,7 @@ function LPOEditor({
                           className="input"
                           placeholder="Item name"
                           value={it.description}
-                          onChange={(e) =>
-                            setItem(i, { description: e.target.value })
-                          }
+                          onChange={(e) => setItem(i, { description: e.target.value })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -955,9 +955,7 @@ function LPOEditor({
                           type="number"
                           className="input tabular-nums text-right"
                           value={it.qty || ""}
-                          onChange={(e) =>
-                            setItem(i, { qty: numInput(e.target.value) })
-                          }
+                          onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -965,9 +963,7 @@ function LPOEditor({
                           className="input text-right"
                           placeholder="MT"
                           value={it.unit}
-                          onChange={(e) =>
-                            setItem(i, { unit: e.target.value })
-                          }
+                          onChange={(e) => setItem(i, { unit: e.target.value })}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -982,7 +978,7 @@ function LPOEditor({
                           }
                         />
                       </td>
-                      <td className="py-2 px-2 text-right font-semibold tabular-nums">
+                      <td className="py-2 px-2 text-right font-medium tabular-nums">
                         {aed(it.qty * it.unit_price)}
                       </td>
                       <td className="py-2 px-2">
@@ -1007,7 +1003,7 @@ function LPOEditor({
               </button>
               <div className="text-right">
                 <span className="text-xs text-brand-400 mr-2">Total</span>
-                <span className="font-display text-lg font-bold text-ink tabular-nums">
+                <span className="font-display text-lg font-medium text-ink tabular-nums">
                   {aed(total)}
                 </span>
               </div>
@@ -1018,10 +1014,8 @@ function LPOEditor({
           <div className="card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-bold text-ink text-sm">Apply VAT</p>
-                <p className="text-xs text-brand-400">
-                  Add VAT to LPO total
-                </p>
+                <p className="font-medium text-ink text-sm">Apply VAT</p>
+                <p className="text-xs text-brand-400">Add VAT to LPO total</p>
               </div>
               <div className="flex rounded-lg bg-brand-100 p-0.5">
                 {(["Yes", "No"] as const).map((lbl) => {
@@ -1106,10 +1100,8 @@ function LPOEditor({
           <div className="card !p-4">
             <div className="no-print flex items-start justify-between mb-3">
               <div>
-                <p className="font-bold text-ink">Preview</p>
-                <p className="text-xs text-brand-400">
-                  This is how your LPO will look
-                </p>
+                <p className="font-medium text-ink">Preview</p>
+                <p className="text-xs text-brand-400">This is how your LPO will look</p>
               </div>
             </div>
 
@@ -1127,10 +1119,12 @@ function LPOEditor({
 
             {/* preview controls */}
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+              <div className="flex items-center gap-1 rounded-lg bg-brand-50 p-1">
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "desktop" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                    device === "desktop"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
                   }`}
                   onClick={() => setDevice("desktop")}
                   aria-label="Desktop preview"
@@ -1139,7 +1133,9 @@ function LPOEditor({
                 </button>
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "mobile" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                    device === "mobile"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
                   }`}
                   onClick={() => setDevice("mobile")}
                   aria-label="Mobile preview"
@@ -1155,7 +1151,7 @@ function LPOEditor({
                 >
                   <Minus size={14} />
                 </button>
-                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                <span className="text-xs font-medium text-brand-600 w-10 text-center">
                   {zoom}%
                 </span>
                 <button
@@ -1179,21 +1175,19 @@ function LPOEditor({
           onSaved={(s) => {
             applySupplier(s);
             setSupplierModal(false);
-            suppliersApi.list().then(setSuppliers).catch(() => {});
+            suppliersApi
+              .list()
+              .then(setSuppliers)
+              .catch(() => {});
           }}
         />
       )}
 
       {/* Full-screen view modal */}
       {viewOpen && (
-        <Modal
-          open
-          onClose={() => setViewOpen(false)}
-          title="LPO Preview"
-          size="full"
-        >
+        <Modal open onClose={() => setViewOpen(false)} title="LPO Preview" size="full">
           <div
-            className="bg-white rounded-xl overflow-y-auto"
+            className="bg-white rounded-lg overflow-y-auto"
             style={{ maxHeight: "85vh" }}
           >
             <LPOView
@@ -1239,7 +1233,10 @@ function LPOView({
 
   if (isFileTemplate && ct) {
     return (
-      <div ref={lpoRef} className="relative bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none">
+      <div
+        ref={lpoRef}
+        className="relative bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
+      >
         {ct && (ct as any).imageData && (
           <img
             src={(ct as any).imageData}
@@ -1301,23 +1298,33 @@ function LPOView({
                           <td className="py-2 px-2">{it.description}</td>
                           <td className="py-2 px-2 text-right tabular-nums">{it.qty}</td>
                           <td className="py-2 px-2 text-right">{it.unit || "—"}</td>
-                          <td className="py-2 px-2 text-right tabular-nums">{aed(it.unit_price)}</td>
-                          <td className="py-2 px-2 text-right font-semibold tabular-nums">{aed(it.qty * it.unit_price)}</td>
+                          <td className="py-2 px-2 text-right tabular-nums">
+                            {aed(it.unit_price)}
+                          </td>
+                          <td className="py-2 px-2 text-right font-semibold tabular-nums">
+                            {aed(it.qty * it.unit_price)}
+                          </td>
                         </tr>
                       ))}
                   </tbody>
                 </table>
                 <div className="flex justify-end mt-3">
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-ink tabular-nums">{aed(total)}</p>
+                    <p className="text-2xl font-bold text-ink tabular-nums">
+                      {aed(total)}
+                    </p>
                     <p className="text-xs text-brand-400">Total Amount (AED)</p>
                   </div>
                 </div>
               </div>
               {form.terms && (
                 <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                  <p className="font-semibold text-sm text-brand-400 mb-2">TERMS & CONDITIONS</p>
-                  <p className="text-sm text-brand-600 whitespace-pre-line">{form.terms}</p>
+                  <p className="font-semibold text-sm text-brand-400 mb-2">
+                    TERMS & CONDITIONS
+                  </p>
+                  <p className="text-sm text-brand-600 whitespace-pre-line">
+                    {form.terms}
+                  </p>
                 </div>
               )}
               {form.notes && (
@@ -1333,14 +1340,24 @@ function LPOView({
                   </div>
                 </div>
                 <div className="bg-white/88 rounded-xl p-6 shadow-sm text-center">
-                  <p className="text-sm font-semibold text-ink mb-4">Company Stamp & Signature</p>
+                  <p className="text-sm font-semibold text-ink mb-4">
+                    Company Stamp & Signature
+                  </p>
                   {form.company_stamp ? (
-                    <img src={form.company_stamp} alt="Company stamp" className="h-20 mx-auto object-contain mb-2" />
+                    <img
+                      src={form.company_stamp}
+                      alt="Company stamp"
+                      className="h-20 mx-auto object-contain mb-2"
+                    />
                   ) : (
                     <Stamp size={24} className="inline-block mb-2" />
                   )}
                   {form.company_signature && (
-                    <img src={form.company_signature} alt="Signature" className="h-12 mx-auto object-contain mb-2 opacity-80" />
+                    <img
+                      src={form.company_signature}
+                      alt="Signature"
+                      className="h-12 mx-auto object-contain mb-2 opacity-80"
+                    />
                   )}
                   <div className="border-t border-brand-200 pt-3">
                     <p className="text-xs text-brand-400">Company Stamp & Signature</p>
@@ -1372,161 +1389,198 @@ function LPOView({
         footerSpace={footerSpace}
         bodyPadding={32}
       >
-      <div style={styles.container}>
-        {/* Header — no logo, letterhead provides branding */}
-        <div
-          className="flex items-start justify-between pb-6 mb-6"
-          style={{ borderBottom: styles.headerBorder || "2px solid #EAE4D6" }}
-        >
-          <div>
-            <h1 style={styles.title} className="text-[28px] font-extrabold tracking-tight">
-              LOCAL PURCHASE ORDER
-            </h1>
-            <p className="text-sm text-brand-400 mt-1">
-              LPO #{form.number}
-            </p>
-          </div>
-          <div className="text-right text-sm">
-            <p className="font-bold text-[15px]" style={{ color: styles.accentColor }}>
-              {clean(form.company_name)}
-            </p>
-            <p className="text-brand-500 mt-0.5">{clean(form.company_address)}</p>
-            {form.company_trn && (
-              <p className="text-brand-500">TRN: {form.company_trn}</p>
-            )}
-            <p className="text-brand-500 mt-1">Date: {form.order_date}</p>
-            {form.expected_date && (
-              <p className="text-brand-500">
-                Expected: {form.expected_date}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Supplier */}
-        <div className="mb-6 p-5 rounded-xl" style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}>
-          <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
-            Supplier / Vendor
-          </p>
-          <p className="font-bold text-[17px] text-ink">
-            {clean(form.supplier_name)}
-          </p>
-          <p className="text-sm text-brand-500 mt-0.5">
-            {clean(form.supplier_address)}
-          </p>
-          {form.supplier_trn && (
-            <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>
-          )}
-        </div>
-
-        {/* Items table */}
-        <div className="mb-6">
-          <table className="w-full text-sm">
-            <thead>
-              <tr
-                className="text-left text-xs font-semibold uppercase tracking-wider"
-                style={{ color: styles.accentColor || "#6B6B6B" }}
-              >
-                <th className="pb-3 pr-2 w-6">#</th>
-                <th className="pb-3 px-2">Item</th>
-                <th className="pb-3 px-2 w-16 text-right">Qty</th>
-                <th className="pb-3 px-2 w-14 text-right">Unit</th>
-                <th className="pb-3 px-2 w-24 text-right">Cost</th>
-                <th className="pb-3 px-2 w-24 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {form.items
-                .filter((i) => i.description.trim())
-                .map((it, i) => (
-                  <tr
-                    key={i}
-                    className="border-t border-brand-100"
-                    style={{ borderColor: styles.borderColor || "#EAE4D6" }}
-                  >
-                    <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
-                    <td className="py-3 px-2 font-medium">{it.description}</td>
-                    <td className="py-3 px-2 text-right tabular-nums">{it.qty}</td>
-                    <td className="py-3 px-2 text-right">{it.unit || "—"}</td>
-                    <td className="py-3 px-2 text-right tabular-nums">{aed(it.unit_price)}</td>
-                    <td className="py-3 px-2 text-right font-semibold tabular-nums">{aed(it.qty * it.unit_price)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-
-          {/* Total */}
+        <div style={styles.container}>
+          {/* Header — no logo, letterhead provides branding */}
           <div
-            className="flex justify-end mt-4 pt-4"
+            className="flex items-start justify-between pb-6 mb-6"
+            style={{ borderBottom: styles.headerBorder || "2px solid #EAE4D6" }}
+          >
+            <div>
+              <h1
+                style={styles.title}
+                className="text-[28px] font-extrabold tracking-tight"
+              >
+                LOCAL PURCHASE ORDER
+              </h1>
+              <p className="text-sm text-brand-400 mt-1">LPO #{form.number}</p>
+            </div>
+            <div className="text-right text-sm">
+              <p className="font-bold text-[15px]" style={{ color: styles.accentColor }}>
+                {clean(form.company_name)}
+              </p>
+              <p className="text-brand-500 mt-0.5">{clean(form.company_address)}</p>
+              {form.company_trn && (
+                <p className="text-brand-500">TRN: {form.company_trn}</p>
+              )}
+              <p className="text-brand-500 mt-1">Date: {form.order_date}</p>
+              {form.expected_date && (
+                <p className="text-brand-500">Expected: {form.expected_date}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Supplier */}
+          <div
+            className="mb-6 p-5 rounded-xl"
+            style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}
+          >
+            <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
+              Supplier / Vendor
+            </p>
+            <p className="font-bold text-[17px] text-ink">{clean(form.supplier_name)}</p>
+            <p className="text-sm text-brand-500 mt-0.5">
+              {clean(form.supplier_address)}
+            </p>
+            {form.supplier_trn && (
+              <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>
+            )}
+          </div>
+
+          {/* Items table */}
+          <div className="mb-6">
+            <table className="w-full text-sm">
+              <thead>
+                <tr
+                  className="text-left text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: styles.accentColor || "#6B6B6B" }}
+                >
+                  <th className="pb-3 pr-2 w-6">#</th>
+                  <th className="pb-3 px-2">Item</th>
+                  <th className="pb-3 px-2 w-16 text-right">Qty</th>
+                  <th className="pb-3 px-2 w-14 text-right">Unit</th>
+                  <th className="pb-3 px-2 w-24 text-right">Cost</th>
+                  <th className="pb-3 px-2 w-24 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.items
+                  .filter((i) => i.description.trim())
+                  .map((it, i) => (
+                    <tr
+                      key={i}
+                      className="border-t border-brand-100"
+                      style={{ borderColor: styles.borderColor || "#EAE4D6" }}
+                    >
+                      <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
+                      <td className="py-3 px-2 font-medium">{it.description}</td>
+                      <td className="py-3 px-2 text-right tabular-nums">{it.qty}</td>
+                      <td className="py-3 px-2 text-right">{it.unit || "—"}</td>
+                      <td className="py-3 px-2 text-right tabular-nums">
+                        {aed(it.unit_price)}
+                      </td>
+                      <td className="py-3 px-2 text-right font-semibold tabular-nums">
+                        {aed(it.qty * it.unit_price)}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+
+            {/* Total */}
+            <div
+              className="flex justify-end mt-4 pt-4"
+              style={{ borderTop: "2px solid #EAE4D6" }}
+            >
+              <div className="text-right space-y-1 min-w-[200px]">
+                <div className="flex justify-between text-sm">
+                  <span className="text-brand-400">Subtotal</span>
+                  <span className="font-semibold tabular-nums">
+                    {aed(totals.subtotal)}
+                  </span>
+                </div>
+                {(form.tax_rate || 0) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-brand-400">VAT ({form.tax_rate}%)</span>
+                    <span className="font-semibold tabular-nums">{aed(totals.tax)}</span>
+                  </div>
+                )}
+                <div
+                  className="flex justify-between pt-2"
+                  style={{ borderTop: "2px solid #EAE4D6" }}
+                >
+                  <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">
+                    Total
+                  </span>
+                  <p
+                    className="text-[28px] font-extrabold tracking-tight tabular-nums"
+                    style={{ color: styles.accentColor || "#222222" }}
+                  >
+                    {aed(totals.total)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Terms */}
+          {form.terms && (
+            <div className="mb-6">
+              <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
+                Terms & Conditions
+              </p>
+              <p className="text-sm text-brand-600 whitespace-pre-line leading-relaxed">
+                {form.terms}
+              </p>
+            </div>
+          )}
+
+          {/* Notes */}
+          {form.notes && (
+            <div
+              className="mb-6 p-4 rounded-xl"
+              style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}
+            >
+              <p className="text-sm text-brand-600 italic">{form.notes}</p>
+            </div>
+          )}
+
+          {/* Signatures */}
+          <div
+            className="grid grid-cols-2 gap-8 mt-12 pt-6"
             style={{ borderTop: "2px solid #EAE4D6" }}
           >
-            <div className="text-right space-y-1 min-w-[200px]">
-              <div className="flex justify-between text-sm">
-                <span className="text-brand-400">Subtotal</span>
-                <span className="font-semibold tabular-nums">{aed(totals.subtotal)}</span>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-ink mb-4">For Supplier</p>
+              <div
+                style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }}
+                className="pt-3"
+              >
+                <p className="text-xs text-brand-400">Authorized Signature & Date</p>
               </div>
-              {(form.tax_rate || 0) > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-brand-400">VAT ({form.tax_rate}%)</span>
-                  <span className="font-semibold tabular-nums">{aed(totals.tax)}</span>
-                </div>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-ink mb-4">
+                Company Stamp & Signature
+              </p>
+              {form.company_stamp ? (
+                <img
+                  src={form.company_stamp}
+                  alt="Company stamp"
+                  className="h-24 mx-auto object-contain mb-2"
+                />
+              ) : (
+                <Building2
+                  size={28}
+                  className="mx-auto mb-2"
+                  style={{ color: styles.accentColor || "#6B6B6B" }}
+                />
               )}
-              <div className="flex justify-between pt-2" style={{ borderTop: "2px solid #EAE4D6" }}>
-                <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">Total</span>
-                <p
-                  className="text-[28px] font-extrabold tracking-tight tabular-nums"
-                  style={{ color: styles.accentColor || "#222222" }}
-                >
-                  {aed(totals.total)}
-                </p>
+              {form.company_signature && (
+                <img
+                  src={form.company_signature}
+                  alt="Authorized signature"
+                  className="h-14 mx-auto object-contain mb-2 opacity-80"
+                />
+              )}
+              <div
+                style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }}
+                className="pt-3"
+              >
+                <p className="text-xs text-brand-400">Authorized Signature</p>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Terms */}
-        {form.terms && (
-          <div className="mb-6">
-            <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
-              Terms & Conditions
-            </p>
-            <p className="text-sm text-brand-600 whitespace-pre-line leading-relaxed">
-              {form.terms}
-            </p>
-          </div>
-        )}
-
-        {/* Notes */}
-        {form.notes && (
-          <div className="mb-6 p-4 rounded-xl" style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}>
-            <p className="text-sm text-brand-600 italic">{form.notes}</p>
-          </div>
-        )}
-
-        {/* Signatures */}
-        <div className="grid grid-cols-2 gap-8 mt-12 pt-6" style={{ borderTop: "2px solid #EAE4D6" }}>
-          <div className="text-center">
-            <p className="text-sm font-semibold text-ink mb-4">For Supplier</p>
-            <div style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }} className="pt-3">
-              <p className="text-xs text-brand-400">Authorized Signature & Date</p>
-            </div>
-          </div>
-          <div className="text-center">
-            <p className="text-sm font-semibold text-ink mb-4">Company Stamp & Signature</p>
-            {form.company_stamp ? (
-              <img src={form.company_stamp} alt="Company stamp" className="h-24 mx-auto object-contain mb-2" />
-            ) : (
-              <Building2 size={28} className="mx-auto mb-2" style={{ color: styles.accentColor || "#6B6B6B" }} />
-            )}
-            {form.company_signature && (
-              <img src={form.company_signature} alt="Authorized signature" className="h-14 mx-auto object-contain mb-2 opacity-80" />
-            )}
-            <div style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }} className="pt-3">
-              <p className="text-xs text-brand-400">Authorized Signature</p>
-            </div>
-          </div>
-        </div>
-      </div>
       </LetterheadFrame>
     </div>
   );
@@ -1582,7 +1636,9 @@ function FrostedOverlayLpo({
         <p className="text-xs font-semibold text-brand-400 uppercase mb-1">Supplier</p>
         <p className="font-bold">{clean(form.supplier_name)}</p>
         <p className="text-sm text-brand-500">{clean(form.supplier_address)}</p>
-        {form.supplier_trn && <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>}
+        {form.supplier_trn && (
+          <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>
+        )}
       </div>
       <div style={boxStyle("items_table")}>
         <table className="w-full text-sm">
@@ -1596,21 +1652,33 @@ function FrostedOverlayLpo({
             </tr>
           </thead>
           <tbody>
-            {form.items.filter(i => i.description.trim()).map((it, i) => (
-              <tr key={i} className="border-b border-brand-100/50">
-                <td className="py-1.5">{it.description}</td>
-                <td className="py-1.5 text-right">{it.qty}</td>
-                <td className="py-1.5 text-right">{it.unit || "—"}</td>
-                <td className="py-1.5 text-right">{aed(it.unit_price)}</td>
-                <td className="py-1.5 text-right font-semibold">{aed(it.qty * it.unit_price)}</td>
-              </tr>
-            ))}
+            {form.items
+              .filter((i) => i.description.trim())
+              .map((it, i) => (
+                <tr key={i} className="border-b border-brand-100/50">
+                  <td className="py-1.5">{it.description}</td>
+                  <td className="py-1.5 text-right">{it.qty}</td>
+                  <td className="py-1.5 text-right">{it.unit || "—"}</td>
+                  <td className="py-1.5 text-right">{aed(it.unit_price)}</td>
+                  <td className="py-1.5 text-right font-semibold">
+                    {aed(it.qty * it.unit_price)}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
         <div className="text-right mt-2 space-y-1">
-          <div className="text-sm"><span className="text-brand-400">Subtotal</span> <span className="font-semibold tabular-nums ml-2">{aed(totals.subtotal)}</span></div>
+          <div className="text-sm">
+            <span className="text-brand-400">Subtotal</span>{" "}
+            <span className="font-semibold tabular-nums ml-2">
+              {aed(totals.subtotal)}
+            </span>
+          </div>
           {(form.tax_rate || 0) > 0 && (
-            <div className="text-sm"><span className="text-brand-400">VAT ({form.tax_rate}%)</span> <span className="font-semibold tabular-nums ml-2">{aed(totals.tax)}</span></div>
+            <div className="text-sm">
+              <span className="text-brand-400">VAT ({form.tax_rate}%)</span>{" "}
+              <span className="font-semibold tabular-nums ml-2">{aed(totals.tax)}</span>
+            </div>
           )}
           <div className="font-bold text-lg tabular-nums">{aed(totals.total)}</div>
         </div>
@@ -1639,10 +1707,7 @@ function FrostedOverlayLpo({
 /*  Template Styles                                                    */
 /* ------------------------------------------------------------------ */
 
-function getTemplateStyle(
-  tplId: string,
-  accent: string
-): any {
+function getTemplateStyle(tplId: string, accent: string): any {
   const a = accent || "#222222";
   switch (tplId) {
     case "uae-standard":
@@ -1669,7 +1734,12 @@ function getTemplateStyle(
       return {
         wrapper: { borderLeft: `6px solid ${a}` },
         container: {},
-        title: { color: a, textTransform: "uppercase", letterSpacing: "2px", fontSize: "20px" },
+        title: {
+          color: a,
+          textTransform: "uppercase",
+          letterSpacing: "2px",
+          fontSize: "20px",
+        },
         accentColor: a,
         headerBorder: `3px solid ${a}`,
         supplierBg: "#F7F7F7",
@@ -1679,7 +1749,13 @@ function getTemplateStyle(
       return {
         wrapper: {},
         container: {},
-        title: { color: "#FFFFFF", background: a, padding: "12px 20px", borderRadius: "8px", display: "inline-block" },
+        title: {
+          color: "#FFFFFF",
+          background: a,
+          padding: "12px 20px",
+          borderRadius: "8px",
+          display: "inline-block",
+        },
         accentColor: a,
         headerBorder: "none",
         supplierBg: `${a}0D`,
@@ -1767,7 +1843,10 @@ function PoPaymentsModal({
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    pos.payments(po.id).then(setRows).catch(() => setRows([]));
+    pos
+      .payments(po.id)
+      .then(setRows)
+      .catch(() => setRows([]));
   };
   useEffect(load, [po.id]);
 
@@ -1792,7 +1871,13 @@ function PoPaymentsModal({
   };
 
   const remove = async (id: number) => {
-    if (!(await confirm({ title: "Remove payment", message: "Remove this payment record? This cannot be undone." }))) return;
+    if (
+      !(await confirm({
+        title: "Remove payment",
+        message: "Remove this payment record? This cannot be undone.",
+      }))
+    )
+      return;
     try {
       await pos.removePayment(id);
       load();
@@ -1813,16 +1898,24 @@ function PoPaymentsModal({
           <p className="text-[10px] uppercase text-success/70">Paid</p>
           <p className="font-bold text-sm text-success tabular-nums">{aed(paid)}</p>
         </div>
-        <div className={`rounded-xl px-3 py-2.5 ${balance > 0 ? "bg-danger/10" : "bg-success/10"}`}>
+        <div
+          className={`rounded-xl px-3 py-2.5 ${balance > 0 ? "bg-danger/10" : "bg-success/10"}`}
+        >
           <p className="text-[10px] uppercase text-brand-400">Balance</p>
-          <p className={`font-bold text-sm tabular-nums ${balance > 0 ? "text-danger" : "text-success"}`}>{aed(balance)}</p>
+          <p
+            className={`font-bold text-sm tabular-nums ${balance > 0 ? "text-danger" : "text-success"}`}
+          >
+            {aed(balance)}
+          </p>
         </div>
       </div>
 
       {/* New payment form */}
       <div className="flex items-end gap-2 mb-4 p-3 bg-brand-50 rounded-xl">
         <div className="flex-1">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Amount (AED)</label>
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
+            Amount (AED)
+          </label>
           <input
             type="number"
             min={0}
@@ -1832,8 +1925,14 @@ function PoPaymentsModal({
           />
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Method</label>
-          <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
+            Method
+          </label>
+          <select
+            className="select"
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+          >
             <option>bank transfer</option>
             <option>cash</option>
             <option>cheque</option>
@@ -1841,17 +1940,30 @@ function PoPaymentsModal({
           </select>
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>
-          <input type="date" className="input" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
+            Date
+          </label>
+          <input
+            type="date"
+            className="input"
+            value={paidAt}
+            onChange={(e) => setPaidAt(e.target.value)}
+          />
         </div>
-        <button className="btn-primary shrink-0" disabled={busy || amount <= 0} onClick={add}>
+        <button
+          className="btn-primary shrink-0"
+          disabled={busy || amount <= 0}
+          onClick={add}
+        >
           {busy ? "…" : "Add"}
         </button>
       </div>
 
       {/* Payment list */}
       {rows.length === 0 ? (
-        <p className="text-center text-sm text-brand-400 py-4">No payments recorded yet.</p>
+        <p className="text-center text-sm text-brand-400 py-4">
+          No payments recorded yet.
+        </p>
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -1866,7 +1978,9 @@ function PoPaymentsModal({
             {rows.map((p) => (
               <tr key={p.id} className="border-b border-brand-50">
                 <td className="py-2">{fmtDate(p.paid_at)}</td>
-                <td className="py-2 text-right font-semibold tabular-nums">{aed(p.amount)}</td>
+                <td className="py-2 text-right font-semibold tabular-nums">
+                  {aed(p.amount)}
+                </td>
                 <td className="py-2 capitalize">{p.method || "—"}</td>
                 <td className="py-2">
                   <button
@@ -1912,9 +2026,7 @@ function Step({
           </span>
           <div>
             <h3 className="font-bold text-ink">{title}</h3>
-            {subtitle && (
-              <p className="text-xs text-brand-400">{subtitle}</p>
-            )}
+            {subtitle && <p className="text-xs text-brand-400">{subtitle}</p>}
           </div>
         </div>
         {action}
@@ -1976,25 +2088,52 @@ function SupplierQuickAdd({
     <Modal open={open} onClose={onClose} title="Quick Add Supplier" size="md">
       <div className="space-y-3">
         <Field label="Supplier Name *">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Company name"
+          />
         </Field>
         <Field label="Address">
-          <textarea className="textarea" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Dubai, UAE" />
+          <textarea
+            className="textarea"
+            rows={2}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Dubai, UAE"
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Email">
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </Field>
           <Field label="Phone">
-            <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input
+              className="input"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
           </Field>
         </div>
         <Field label="TRN">
-          <input className="input" value={trn} onChange={(e) => setTrn(e.target.value)} placeholder="Tax Registration Number" />
+          <input
+            className="input"
+            value={trn}
+            onChange={(e) => setTrn(e.target.value)}
+            placeholder="Tax Registration Number"
+          />
         </Field>
       </div>
       <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
         <button className="btn-primary" disabled={busy || !name.trim()} onClick={save}>
           {busy ? "Saving…" : "Add Supplier"}
         </button>
@@ -2044,7 +2183,11 @@ function StampUpload({
           <button
             aria-label="Remove stamp"
             className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white text-xs grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-            onClick={(e) => { e.stopPropagation(); onChange(""); saveStamp(""); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange("");
+              saveStamp("");
+            }}
           >
             ×
           </button>
@@ -2098,7 +2241,11 @@ function SignatureUpload({
           <button
             aria-label="Remove signature"
             className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white text-xs grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-            onClick={(e) => { e.stopPropagation(); onChange(""); saveSignature(""); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange("");
+              saveSignature("");
+            }}
           >
             ×
           </button>
