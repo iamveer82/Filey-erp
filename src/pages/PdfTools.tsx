@@ -36,6 +36,7 @@ import { downloadFile, type OutFile } from "../lib/pdfTools";
 import {
   PDF_TOOLS,
   toolById,
+  toolFlow,
   type Tool,
   ToolFields,
   defaultParams,
@@ -145,18 +146,10 @@ export default function ToolsPage() {
     refreshRuns();
   }, []);
 
-  const logRun = async (
-    toolId: string,
-    files: string[],
-    outputs: OutFile[]
-  ) => {
+  const logRun = async (toolId: string, files: string[], outputs: OutFile[]) => {
     const t = toolById(toolId);
     try {
-      const runId = await toolRuns.log(
-        toolId,
-        t?.name ?? toolId,
-        files[0] ?? "file"
-      );
+      const runId = await toolRuns.log(toolId, t?.name ?? toolId, files[0] ?? "file");
       if (typeof runId === "number" && runId > 0) {
         const total = outputs.reduce((s, o) => s + o.bytes.byteLength, 0);
         const room = await ensureRoom(total);
@@ -169,7 +162,8 @@ export default function ToolsPage() {
       }
     } catch {
       // Output already downloaded locally; only the archive copy failed.
-      if (isConfigured) toast.info("Output downloaded, but couldn't be archived to recent activity.");
+      if (isConfigured)
+        toast.info("Output downloaded, but couldn't be archived to recent activity.");
     }
     refreshRuns();
   };
@@ -190,17 +184,17 @@ export default function ToolsPage() {
         if (got) downloadFile({ name: fileNameOf(p), bytes: got.bytes });
       }
     } catch (e) {
-      toast.error(
-        `Could not download: ${e instanceof Error ? e.message : String(e)}`
-      );
+      toast.error(`Could not download: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
   const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
+  // Full set per tab — the grid shows the first 8 and "View all" reveals the
+  // rest. (Previously capped at 11, which silently hid most of the ~50 tools.)
   const filteredTools =
     cat === "All Tools"
-      ? PDF_TOOLS.slice(0, 11)
-      : PDF_TOOLS.filter((t) => t.cat === cat).slice(0, 11);
+      ? PDF_TOOLS
+      : PDF_TOOLS.filter((t) => t.cat === cat);
   const askFiley = () => window.dispatchEvent(new Event("filey:copilot:open"));
 
   if (active) {
@@ -224,7 +218,7 @@ export default function ToolsPage() {
         {/* ── Main column ─────────────────────────────────────────────────── */}
         <main className="min-w-0">
           {/* CATEGORY TABS */}
-          <div className="mb-4 flex gap-1 overflow-x-auto border-b border-brand-200/60 dark:border-[#3A3D45]">
+          <div className="mb-4 flex gap-1 overflow-x-auto border-b border-brand-200/60 dark:border-[#2C2C2E]">
             {cats.map((c) => (
               <button
                 key={c}
@@ -238,7 +232,7 @@ export default function ToolsPage() {
               >
                 {c}
                 {cat === c && (
-                  <span className="absolute -bottom-px left-0 right-0 h-0.5 rounded bg-primary-400" />
+                  <span className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-primary-400" />
                 )}
               </button>
             ))}
@@ -252,7 +246,8 @@ export default function ToolsPage() {
                 desc="Draw, type or upload — place &amp; download"
                 Icon={Signature}
                 badgeBg="bg-primary-400"
-                badgeFg="text-[#0A0A0A]"
+                badgeFg="text-white"
+                flow={{ from: "PDF", to: "PDF" }}
                 onUse={() => setParams({ tool: "esign" })}
               />
             )}
@@ -264,6 +259,7 @@ export default function ToolsPage() {
                 Icon={t.icon}
                 badgeBg="bg-primary-100 dark:bg-primary-400/15"
                 badgeFg="text-primary-700 dark:text-primary-300"
+                flow={toolFlow(t)}
                 onUse={() => openTool(t.id)}
               />
             ))}
@@ -300,15 +296,15 @@ export default function ToolsPage() {
         {/* ── Right AI panel ──────────────────────────────────────────────── */}
         <aside className="space-y-4 self-start lg:sticky lg:top-4">
           {/* Filey Assistant chat */}
-          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
+          <div className="card p-4">
             <div className="mb-3 flex items-center gap-2">
               <ColorOrb dimension="22px" />
-              <span className="text-sm font-bold text-ink">Filey Assistant</span>
-              <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-success">
+              <span className="text-sm font-medium text-ink">Filey Assistant</span>
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-medium text-success">
                 <span className="h-1.5 w-1.5 rounded-full bg-success" /> Online
               </span>
             </div>
-            <div className="rounded-2xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/5">
+            <div className="rounded-3xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/8">
               Hi {firstName} 👋
               <br />
               What would you like to do today?
@@ -324,7 +320,7 @@ export default function ToolsPage() {
                   key={s}
                   aria-label={s}
                   onClick={askFiley}
-                  className="flex w-full items-center justify-between rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-semibold text-brand-600 transition hover:border-primary-300 hover:text-ink dark:border-[#3A3D45] dark:bg-[#24262C] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="flex w-full items-center justify-between rounded-3xl border border-brand-200 bg-white px-3 py-2 text-xs font-medium text-brand-600 transition hover:border-primary-300 hover:text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   {s} <ChevronRight size={12} />
                 </button>
@@ -336,8 +332,8 @@ export default function ToolsPage() {
           </div>
 
           {/* Smart recommendations */}
-          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
-            <p className="mb-3 text-sm font-bold text-ink">Smart suggestions</p>
+          <div className="card p-4">
+            <p className="mb-3 text-sm font-medium text-ink">Smart suggestions</p>
             <div className="space-y-1.5">
               {[
                 {
@@ -349,7 +345,7 @@ export default function ToolsPage() {
                 },
                 {
                   Icon: FileText,
-                  color: "#FFD600",
+                  color: "#2563EB",
                   title: "Compress large reports",
                   desc: "Shrink heavy PDFs in seconds",
                   onClick: () => openTool("compress"),
@@ -365,17 +361,21 @@ export default function ToolsPage() {
                 <button
                   key={r.title}
                   onClick={r.onClick}
-                  className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+                  className="flex w-full items-center gap-3 rounded-3xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
                 >
                   <span
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-3xl"
                     style={{ background: r.color + "22", color: r.color }}
                   >
                     <r.Icon size={16} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-bold text-ink">{r.title}</span>
-                    <span className="block truncate text-[11px] text-brand-400">{r.desc}</span>
+                    <span className="block truncate text-xs font-medium text-ink">
+                      {r.title}
+                    </span>
+                    <span className="block truncate text-[11px] text-brand-400">
+                      {r.desc}
+                    </span>
                   </span>
                   <ChevronRight size={14} className="shrink-0 text-brand-300" />
                 </button>
@@ -384,10 +384,10 @@ export default function ToolsPage() {
           </div>
 
           {/* Recent activity */}
-          <div className="rounded-[28px] border border-black/[0.04] bg-white p-4 shadow-bento dark:border-white/[0.06] dark:bg-[#1E2025]">
+          <div className="card p-4">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-bold text-ink">Recent activity</p>
-              <span className="text-[10px] font-semibold text-brand-400">
+              <p className="text-sm font-medium text-ink">Recent activity</p>
+              <span className="text-[10px] font-medium text-brand-400">
                 {mb(used)} / {mb(STORAGE_QUOTA_BYTES)}
               </span>
             </div>
@@ -401,7 +401,7 @@ export default function ToolsPage() {
                   <li key={r.id} className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-semibold text-ink">
+                      <span className="block truncate text-xs font-medium text-ink">
                         {r.toolName}
                       </span>
                       <span className="block truncate text-[10px] text-brand-400">
@@ -427,7 +427,6 @@ export default function ToolsPage() {
               </ul>
             )}
           </div>
-
         </aside>
       </div>
 
@@ -448,6 +447,7 @@ function ToolMiniCard({
   Icon,
   badgeBg,
   badgeFg,
+  flow,
   onUse,
 }: {
   name: string;
@@ -455,22 +455,36 @@ function ToolMiniCard({
   Icon: typeof Sparkles;
   badgeBg: string;
   badgeFg: string;
+  /** Input→output formats shown as a chip, e.g. { from: "DOCX", to: "PDF" }. */
+  flow?: { from: string; to: string };
   onUse: () => void;
 }) {
   return (
     <button
       onClick={onUse}
-      className="group flex flex-col gap-2 rounded-2xl border border-brand-200/80 bg-white p-4 text-left shadow-bento transition-shadow hover:shadow-bento-hover dark:border-[#3A3D45] dark:bg-[#1E2025] cursor-pointer"
+      className="group flex flex-col gap-2 rounded-3xl border border-brand-200 bg-white p-4 text-left transition-colors hover:bg-brand-50 hover:border-primary-300 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] cursor-pointer"
     >
-      <span
-        className={`grid h-12 w-12 place-items-center rounded-2xl transition-colors ${badgeBg} ${badgeFg}`}
-      >
-        <Icon size={22} />
-      </span>
-      <p className="mt-1 text-[15px] font-bold leading-tight text-ink">{name}</p>
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={`grid h-12 w-12 place-items-center rounded-md transition-colors ${badgeBg} ${badgeFg}`}
+        >
+          <Icon size={22} />
+        </span>
+        {flow && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-500 dark:border-[#3A3D45] dark:bg-white/5"
+            title={`${flow.from} to ${flow.to}`}
+          >
+            {flow.from}
+            <ArrowRight size={10} className="text-primary-400" />
+            {flow.to}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-[15px] font-medium leading-tight text-ink">{name}</p>
       <p className="line-clamp-2 text-xs text-brand-500">{desc}</p>
       <div className="mt-auto flex items-center justify-between pt-2">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-400">
           Use tool <ArrowRight size={11} />
         </span>
       </div>
@@ -479,7 +493,7 @@ function ToolMiniCard({
 }
 
 /* ── Per-tool workspace: sticky back nav, tool card, upload, live preview,
-   options panel, run button. Minimal + professional. ───────────────────── */
+ options panel, run button. Minimal + professional. ───────────────────── */
 function PdfToolWorkspace({
   tool,
   onBack,
@@ -492,9 +506,7 @@ function PdfToolWorkspace({
   const { toast } = useUI();
   const { user } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
-  const [params, setParams] = useState<Record<string, string>>(() =>
-    defaultParams(tool)
-  );
+  const [params, setParams] = useState<Record<string, string>>(() => defaultParams(tool));
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
   const [savingFiles, setSavingFiles] = useState(false);
@@ -504,7 +516,9 @@ function PdfToolWorkspace({
     setSavingFiles(true);
     try {
       for (const o of outs) await saveOutput(o, tool.name);
-      toast.success(`Saved ${outs.length} file${outs.length > 1 ? "s" : ""} to My Files.`);
+      toast.success(
+        `Saved ${outs.length} file${outs.length > 1 ? "s" : ""} to My Files.`
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -513,7 +527,8 @@ function PdfToolWorkspace({
   };
   const Icon = tool.icon;
   const first = files[0];
-  const firstIsPdf = !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
+  const firstIsPdf =
+    !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
   const replaceFirstFile = (f: File) =>
     setFiles((prev) => (prev.length ? [f, ...prev.slice(1)] : [f]));
 
@@ -533,7 +548,9 @@ function PdfToolWorkspace({
       setOuts(result);
       for (const o of result) downloadFile(o);
       onComplete(tool.id, tool.name, files[0].name, result);
-      toast.success(`Done — ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`);
+      toast.success(
+        `Done — ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -543,27 +560,54 @@ function PdfToolWorkspace({
 
   return (
     <div className="animate-fade-up">
-      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-brand-200 bg-white/85 px-4 py-3 backdrop-blur-md dark:border-[#3A3D45] dark:bg-[#15161A]/85">
+      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-brand-200 bg-white px-4 py-3 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
         <button onClick={onBack} className="btn-ghost h-9">
           <ArrowLeft size={14} /> All tools
         </button>
-        <span className="hidden h-5 w-px bg-brand-200 dark:bg-[#3A3D45] sm:block" />
-        <span className="truncate text-sm font-bold text-ink">{tool.name}</span>
+        <span className="hidden h-5 w-px bg-brand-200 dark:bg-[#2C2C2E] sm:block" />
+        <span className="truncate text-sm font-medium text-ink">{tool.name}</span>
         {canSave && (
-          <button onClick={saveToMyFiles} disabled={savingFiles} className="btn-ghost ml-auto h-9 text-xs">
-            {savingFiles ? <Loader2 size={14} className="animate-spin" /> : <FolderPlus size={14} />}
+          <button
+            onClick={saveToMyFiles}
+            disabled={savingFiles}
+            className="btn-ghost ml-auto h-9 text-xs"
+          >
+            {savingFiles ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <FolderPlus size={14} />
+            )}
             Save to My Files
           </button>
         )}
-        <span className={`hidden text-xs text-brand-400 sm:inline ${canSave ? "" : "ml-auto"}`}>{tool.cat}</span>
+        <span
+          className={`hidden text-xs text-brand-400 sm:inline ${canSave ? "" : "ml-auto"}`}
+        >
+          {tool.cat}
+        </span>
       </div>
 
       <div className="card mb-4 flex flex-wrap items-center gap-3">
-        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
           <Icon size={22} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-base font-bold text-ink">{tool.name}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-base font-medium text-ink">{tool.name}</p>
+            {(() => {
+              const fl = toolFlow(tool);
+              return (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-500 dark:border-[#3A3D45] dark:bg-white/5"
+                  title={`${fl.from} to ${fl.to}`}
+                >
+                  {fl.from}
+                  <ArrowRight size={10} className="text-primary-400" />
+                  {fl.to}
+                </span>
+              );
+            })()}
+          </div>
           <p className="line-clamp-2 text-xs text-brand-500">{tool.desc}</p>
         </div>
         <label className="btn-primary cursor-pointer">
@@ -591,13 +635,13 @@ function PdfToolWorkspace({
             }}
           />
           {!!outs.length && (
-            <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
               ✓ Signed document downloaded.
             </div>
           )}
         </div>
       ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#3A3D45] dark:bg-[#1E2025] dark:hover:bg-white/5">
+        <label className="grid h-72 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5">
           <div>
             <Upload size={22} className="mx-auto mb-1 text-brand-300" />
             Drop or choose {tool.multi ? "files" : "a file"} to preview here
@@ -626,12 +670,20 @@ function PdfToolWorkspace({
         <div className="card min-h-[480px]">
           <OrganizeStudio
             file={files[0]}
-            action={tool.id === "split" ? "split" : tool.id === "extract" ? "extract" : "organize"}
+            action={
+              tool.id === "split"
+                ? "split"
+                : tool.id === "extract"
+                  ? "extract"
+                  : "organize"
+            }
             onApply={(outsList) => {
               setOuts(outsList);
               outsList.forEach(downloadFile);
               onComplete(tool.id, tool.name, files[0].name, outsList);
-              toast.success(`${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`);
+              toast.success(
+                `${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`
+              );
             }}
           />
         </div>
@@ -673,10 +725,10 @@ function PdfToolWorkspace({
               tool.interactive === "image-watermark"
                 ? "watermark"
                 : tool.interactive === "logo"
-                ? "logo"
-                : tool.interactive === "background"
-                ? "background"
-                : "stamp"
+                  ? "logo"
+                  : tool.interactive === "background"
+                    ? "background"
+                    : "stamp"
             }
             onApply={(out) => {
               setOuts([out]);
@@ -686,7 +738,7 @@ function PdfToolWorkspace({
             }}
           />
           {!!outs.length && (
-            <div className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
               ✓ Stamped PDF downloaded.
             </div>
           )}
@@ -695,8 +747,12 @@ function PdfToolWorkspace({
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="card min-h-[480px]">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-brand-500">
-                {firstIsPdf ? (LIVE_PREVIEW_TOOLS.has(tool.id) ? "Live Preview" : "Editor") : "Preview"}
+              <p className="text-xs font-medium text-brand-500">
+                {firstIsPdf
+                  ? LIVE_PREVIEW_TOOLS.has(tool.id)
+                    ? "Live Preview"
+                    : "Editor"
+                  : "Preview"}
               </p>
               {!firstIsPdf && files.length > 1 && (
                 <span className="text-[11px] text-brand-400">
@@ -726,14 +782,18 @@ function PdfToolWorkspace({
             )}
           </div>
           <aside className="card space-y-3 self-start lg:sticky lg:top-20">
-            <p className="text-sm font-bold text-ink">Options</p>
+            <p className="text-sm font-medium text-ink">Options</p>
             <ToolFields tool={tool} params={params} setParams={setParams} />
             <button onClick={run} disabled={running} className="btn-primary w-full">
-              {running ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {running ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Sparkles size={15} />
+              )}
               Run {tool.name}
             </button>
             {!!outs.length && (
-              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-semibold text-success">
+              <div className="rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
                 ✓ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
               </div>
             )}
@@ -743,7 +803,6 @@ function PdfToolWorkspace({
           </aside>
         </div>
       )}
-
     </div>
   );
 }
@@ -773,7 +832,10 @@ function FilePreview({ file }: { file: File }) {
           const r = new FileReader();
           r.onload = () => !dead && setImg(String(r.result || ""));
           r.readAsDataURL(file);
-        } else if (file.type.startsWith("text/") || /\.(txt|csv|json|md)$/i.test(file.name)) {
+        } else if (
+          file.type.startsWith("text/") ||
+          /\.(txt|csv|json|md)$/i.test(file.name)
+        ) {
           const t = await file.text();
           if (!dead) setText(t.slice(0, 4000));
         }
@@ -790,12 +852,12 @@ function FilePreview({ file }: { file: File }) {
       <img
         src={img}
         alt={file.name}
-        className="mx-auto max-h-[640px] rounded-lg border border-brand-200 dark:border-[#3A3D45]"
+        className="mx-auto max-h-[640px] rounded-3xl border border-brand-200 dark:border-[#2C2C2E]"
       />
     );
   if (text)
     return (
-      <pre className="max-h-[640px] overflow-auto rounded-lg border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#3A3D45] dark:bg-white/5 dark:text-[#DDE0E4]">
+      <pre className="max-h-[640px] overflow-auto rounded-3xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#2C2C2E] dark:bg-white/8 dark:text-[#DDE0E4]">
         {text}
       </pre>
     );
@@ -803,8 +865,10 @@ function FilePreview({ file }: { file: File }) {
     <div className="grid h-64 place-items-center text-sm text-brand-400">
       <div className="text-center">
         <FileText size={28} className="mx-auto text-brand-300" />
-        <p className="mt-1 font-semibold text-ink">{file.name}</p>
-        <p className="text-xs">Preview not available for this format — Run will still process it.</p>
+        <p className="mt-1 text-ink">{file.name}</p>
+        <p className="text-xs">
+          Preview not available for this format — Run will still process it.
+        </p>
       </div>
     </div>
   );

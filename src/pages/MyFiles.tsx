@@ -6,7 +6,6 @@ import {
   Download,
   Trash2,
   Loader2,
-  FileText,
   ArrowLeft,
   Pencil,
   Share2,
@@ -14,9 +13,11 @@ import {
   X,
   ChevronRight,
 } from "lucide-react";
+import { FileIcon } from "../components/BrandIcon";
 import {
   useFiles,
   fileUrl,
+  downloadUrl,
   shareFileLink,
   FILE_FOLDERS,
   folderOf,
@@ -30,8 +31,8 @@ const fmtSize = (n: number) =>
   n < 1024
     ? `${n} B`
     : n < 1024 * 1024
-    ? `${(n / 1024).toFixed(0)} KB`
-    : `${(n / 1024 / 1024).toFixed(1)} MB`;
+      ? `${(n / 1024).toFixed(0)} KB`
+      : `${(n / 1024 / 1024).toFixed(1)} MB`;
 const fmtDate = (t: number) =>
   new Date(t).toLocaleDateString(undefined, {
     day: "numeric",
@@ -87,7 +88,7 @@ export default function MyFiles() {
   const download = async (f: SavedFile) => {
     setBusyId(f.id);
     try {
-      const url = await fileUrl(f);
+      const url = await downloadUrl(f);
       if (!url) throw new Error("Could not create a download link.");
       const a = document.createElement("a");
       a.href = url;
@@ -130,8 +131,7 @@ export default function MyFiles() {
     if (next == null || !next.trim() || next.trim() === base) return;
     try {
       const finalName = await rename(f, next);
-      if (preview?.id === f.id)
-        setPreview((p) => (p ? { ...p, name: finalName } : p));
+      if (preview?.id === f.id) setPreview((p) => (p ? { ...p, name: finalName } : p));
       toast.success("File renamed.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -207,17 +207,17 @@ export default function MyFiles() {
       <div className="animate-fade-up">
         <div className="mb-5 flex items-center gap-3">
           <button
-            className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+            className="rounded-3xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
             onClick={() => setOpenFolder(null)}
             aria-label="Back to folders"
           >
             <ArrowLeft size={18} />
           </button>
-          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
             <FolderOpen size={20} />
           </span>
           <div>
-            <h1 className="text-lg font-bold text-ink">{meta.label}</h1>
+            <h1 className="text-lg font-medium text-ink">{meta.label}</h1>
             <p className="text-xs text-brand-500">
               {folderFiles.length} document{folderFiles.length === 1 ? "" : "s"}
             </p>
@@ -231,11 +231,11 @@ export default function MyFiles() {
               className="card group flex items-center gap-3 py-3 cursor-pointer hover:border-primary-300 transition-colors"
               onClick={() => setPreview(f)}
             >
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-500 dark:bg-white/5">
-                <FileText size={18} />
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
+                <FileIcon name={f.name} className="h-[18px] w-[18px]" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-ink" title={f.name}>
+                <p className="truncate text-sm font-medium text-ink" title={f.name}>
                   {f.name}
                 </p>
                 <p className="text-xs text-brand-400">
@@ -280,10 +280,10 @@ export default function MyFiles() {
       {!files.length ? (
         <div className="card grid place-items-center py-16 text-center">
           <FolderOpen size={28} className="mb-2 text-brand-300" />
-          <p className="text-sm font-semibold text-ink">No saved files yet</p>
+          <p className="text-sm font-medium text-ink">No saved files yet</p>
           <p className="mt-1 text-xs text-brand-500">
-            Generate an invoice, quotation or other document — a copy is filed
-            here automatically.
+            Generate an invoice, quotation or other document — a copy is filed here
+            automatically.
           </p>
         </div>
       ) : (
@@ -292,13 +292,13 @@ export default function MyFiles() {
             <button
               key={d.key}
               onClick={() => setOpenFolder(d.key)}
-              className="card group flex items-center gap-3 text-left hover:border-primary-300 hover:shadow-bento-hover transition-all cursor-pointer"
+              className="card group flex items-center gap-3 text-left hover:border-primary-300 transition-all cursor-pointer"
             >
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
                 <Folder size={22} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-ink">{d.label}</p>
+                <p className="truncate text-sm font-medium text-ink">{d.label}</p>
                 <p className="text-xs text-brand-400">
                   {d.files.length} document{d.files.length === 1 ? "" : "s"}
                 </p>
@@ -318,11 +318,12 @@ export default function MyFiles() {
 function Header() {
   return (
     <div className="mb-5 flex items-center gap-3">
-      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+      <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
         <FolderOpen size={20} />
       </span>
       <div>
-        <h1 className="text-lg font-bold text-ink">My Files</h1>
+        <p className="text-[10px] font-medium text-brand-400">Files</p>
+        <h1 className="text-lg font-medium text-ink">My Files</h1>
         <p className="text-xs text-brand-500">
           Every document you generate, filed by type
         </p>
@@ -383,19 +384,19 @@ function FilePreviewPage({
   editable: boolean;
 }) {
   const [url, setUrl] = useState<string | null>(null);
-  const [err, setErr] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     setUrl(null);
-    setErr(false);
+    setErr(null);
     fileUrl(file)
       .then((u) => {
         if (!alive) return;
         if (u) setUrl(u);
-        else setErr(true);
+        else setErr("This file is no longer available.");
       })
-      .catch(() => alive && setErr(true));
+      .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
@@ -408,14 +409,14 @@ function FilePreviewPage({
     <div className="animate-fade-up flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
-          className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+          className="rounded-3xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
           onClick={onBack}
           aria-label="Back"
         >
           <ArrowLeft size={18} />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-bold text-ink" title={file.name}>
+          <h1 className="truncate text-base font-medium text-ink" title={file.name}>
             {file.name}
           </h1>
           <p className="text-xs text-brand-400">
@@ -443,14 +444,13 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-2xl border border-brand-200 bg-brand-100 dark:border-[#3A3D45] dark:bg-[#1B1C20]">
+      <div className="flex-1 overflow-hidden rounded-3xl border border-brand-200 bg-brand-100 dark:border-[#2C2C2E] dark:bg-[#1B1C20]">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>
               <X size={26} className="mx-auto mb-2 text-danger" />
-              <p className="text-sm font-semibold text-ink">
-                Could not load a preview
-              </p>
+              <p className="text-sm font-medium text-ink">Could not load a preview</p>
+              <p className="mt-1 text-xs text-brand-500 max-w-sm">{err}</p>
               <button className="btn-ghost mt-3" onClick={onDownload}>
                 <Download size={15} /> Download instead
               </button>
@@ -462,7 +462,11 @@ function FilePreviewPage({
           </div>
         ) : isImage ? (
           <div className="grid h-full place-items-center overflow-auto p-4">
-            <img src={url} alt={file.name} className="max-h-full max-w-full object-contain" />
+            <img
+              src={url}
+              alt={file.name}
+              className="max-h-full max-w-full object-contain"
+            />
           </div>
         ) : isPdf ? (
           <iframe
@@ -473,8 +477,11 @@ function FilePreviewPage({
         ) : (
           <div className="grid h-full place-items-center text-center px-6">
             <div>
-              <FileText size={26} className="mx-auto mb-2 text-brand-400" />
-              <p className="text-sm font-semibold text-ink">
+              <FileIcon
+                name={file.name}
+                className="mx-auto mb-2 h-7 w-7 text-brand-400"
+              />
+              <p className="text-sm font-medium text-ink">
                 Preview not available for this file type
               </p>
               <button className="btn-ghost mt-3" onClick={onDownload}>

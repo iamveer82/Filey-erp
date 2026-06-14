@@ -32,7 +32,8 @@ const MIME: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
-const mimeOf = (name: string) => MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+const mimeOf = (name: string) =>
+  MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
 
 const newId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
@@ -58,7 +59,9 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
   const mime = mimeOf(out.name);
   const path = `${uid}/${id}/${out.name}`;
   const blob = new Blob([out.bytes.slice()], { type: mime });
-  const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  const up = await supabase.storage
+    .from(BUCKET)
+    .upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
   const ins = await supabase.from("user_files").insert({
     id,
@@ -77,12 +80,12 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
 }
 
 /** Auto-save a generated document (invoice, receipt, challan, …) to My Files.
- *  Idempotent by name+tool so re-saving the same document doesn't pile up
- *  duplicates. The PDF is produced lazily via `gen` — only when the user is
- *  signed in and no copy exists yet — so callers can fire this on every save
- *  without paying the render cost each time. Best-effort: silently no-ops when
- *  signed out or offline and never throws. Returns true when a new file was
- *  actually written. `name` should include the extension (e.g. "INV-001.pdf"). */
+ * Idempotent by name+tool so re-saving the same document doesn't pile up
+ * duplicates. The PDF is produced lazily via `gen` — only when the user is
+ * signed in and no copy exists yet — so callers can fire this on every save
+ * without paying the render cost each time. Best-effort: silently no-ops when
+ * signed out or offline and never throws. Returns true when a new file was
+ * actually written. `name` should include the extension (e.g. "INV-001.pdf"). */
 export async function autoSaveDocument(
   name: string,
   tool: string,
@@ -119,15 +122,32 @@ export async function listFiles(): Promise<SavedFile[]> {
   }));
 }
 
-/** Short-lived signed URL for downloading/previewing a saved file. */
+/** Short-lived signed URL for previewing a saved file *inline* (so PDFs and
+ * images render in the in-app viewer instead of being force-downloaded).
+ * Throws on failure so the caller can show the real reason rather than a
+ * blank "could not load" state. */
 export async function fileUrl(f: SavedFile): Promise<string | null> {
   if (!supabase) return null;
-  const { data } = await supabase.storage.from(BUCKET).createSignedUrl(f.storagePath, 120);
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(f.storagePath, 300);
+  if (error) throw new Error(error.message || "Could not open this file.");
+  return data?.signedUrl ?? null;
+}
+
+/** Signed URL that forces a download (Content-Disposition: attachment) using
+ * the file's display name — used by the explicit Download action. */
+export async function downloadUrl(f: SavedFile): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(f.storagePath, 300, { download: f.name });
+  if (error) throw new Error(error.message || "Could not create a download link.");
   return data?.signedUrl ?? null;
 }
 
 /** Rename a saved file (metadata only — the storage object keeps its path;
- *  downloads use the display name, so the new name is what the user sees). */
+ * downloads use the display name, so the new name is what the user sees). */
 export async function renameFile(f: SavedFile, newName: string): Promise<string> {
   let name = newName.trim();
   if (!name) throw new Error("Name cannot be empty.");
@@ -155,7 +175,7 @@ export async function shareFileLink(
 }
 
 /** Document folders surfaced in My Files, mapped from each file's `tool` key.
- *  Anything not listed (or with no tool) lands in "Other files". */
+ * Anything not listed (or with no tool) lands in "Other files". */
 export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
   { key: "invoice", label: "Invoices", route: "/invoicing" },
   { key: "quotation", label: "Quotations", route: "/quoting" },

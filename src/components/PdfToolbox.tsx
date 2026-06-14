@@ -70,9 +70,9 @@ import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
 
 /* ── Typed option schema ───────────────────────────────────────────────────
-   Each tool declares its options as `fields`. A single <ToolFields> renderer
-   turns them into proper controls (select / number / colour / slider / image
-   upload) everywhere — workspace, modal runner and tool browser. ─────────── */
+ Each tool declares its options as `fields`. A single <ToolFields> renderer
+ turns them into proper controls (select / number / colour / slider / image
+ upload) everywhere — workspace, modal runner and tool browser. ─────────── */
 export type FieldType =
   | "text"
   | "textarea"
@@ -118,7 +118,7 @@ export interface Tool {
   accept: string;
   fields: FieldSpec[];
   /** Tools with their own interactive workspace (live preview, drag, etc.)
-   *  instead of the standard options-panel + Run flow. */
+   * instead of the standard options-panel + Run flow. */
   interactive?:
     | "stamp"
     | "text-stamp"
@@ -131,6 +131,54 @@ export interface Tool {
     | "redact"
     | "rotate";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
+  /** Optional explicit input→output label, e.g. { from: "DOCX", to: "PDF" }.
+   * When omitted it is inferred from `accept`, `cat` and `name` by
+   * `toolFlow()`. Used to render the "FROM → TO" chip on each tool card so
+   * users can see at a glance what a tool converts. */
+  flow?: { from: string; to: string };
+}
+
+/** Human label for a tool's input format, inferred from its `accept` string. */
+function inputLabel(accept: string): string {
+  const a = accept.toLowerCase();
+  if (a.includes("pdf")) return "PDF";
+  if (a.includes("image")) return "Image";
+  if (a.includes("heic")) return "HEIC";
+  if (a.includes("photoshop") || a.includes("psd")) return "PSD";
+  if (a.includes("csv")) return "CSV";
+  if (a.includes("json")) return "JSON";
+  if (a.includes("markdown") || a.includes(".md")) return "MD";
+  if (a.includes("text") || a.includes(".txt")) return "Text";
+  if (a.includes("word") || a.includes(".docx")) return "DOCX";
+  if (a.includes("sheet") || a.includes(".xlsx")) return "XLSX";
+  if (a.includes("presentation") || a.includes(".pptx")) return "PPTX";
+  return "File";
+}
+
+/** Human label for a tool's output, inferred from category + name. */
+function outputLabel(t: Tool): string {
+  const n = t.name.toLowerCase();
+  // Honour an explicit "X → Y" or "X to Y" arrow already in the name.
+  const m = t.name.match(/(?:→|to)\s*([A-Za-z/]+)\s*$/i);
+  if (m && t.cat === "From PDF") return m[1].toUpperCase().replace("PDF/A", "PDF/A");
+  if (t.cat === "To PDF") return "PDF";
+  if (t.cat === "From PDF") {
+    if (n.includes("image")) return "Images";
+    if (n.includes("text")) return "Text";
+    if (n.includes("json")) return "JSON";
+    if (n.includes("csv") || n.includes("table")) return "CSV";
+    if (n.includes("info") || n.includes("dimension")) return "Report";
+    return "Export";
+  }
+  if (t.cat === "Data") return "Data";
+  // Organize / Edit / Optimize / Secure keep the PDF, transformed.
+  return "PDF";
+}
+
+/** Returns the input→output flow labels for a tool's card chip. */
+export function toolFlow(t: Tool): { from: string; to: string } {
+  if (t.flow) return t.flow;
+  return { from: inputLabel(t.accept), to: outputLabel(t) };
 }
 
 /* Reusable option lists */
@@ -380,8 +428,22 @@ export const PDF_TOOLS: Tool[] = [
           { value: "png", label: "PNG (lossless)" },
         ],
       },
-      { key: "imgQuality", label: "Quality", type: "range", default: "80", min: 1, max: 100, step: 1 },
-      { key: "imgMaxW", label: "Max width px (0 = keep)", type: "number", default: "0", min: 0 },
+      {
+        key: "imgQuality",
+        label: "Quality",
+        type: "range",
+        default: "80",
+        min: 1,
+        max: 100,
+        step: 1,
+      },
+      {
+        key: "imgMaxW",
+        label: "Max width px (0 = keep)",
+        type: "number",
+        default: "0",
+        min: 0,
+      },
     ],
     run: (f, p) =>
       Promise.all(
@@ -433,7 +495,15 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Optimize",
     accept: "application/pdf",
     fields: [
-      { key: "rasterScale", label: "Quality (× DPI) — 1–4", type: "number", default: "2", min: 1, max: 4, step: 1 },
+      {
+        key: "rasterScale",
+        label: "Quality (× DPI) — 1–4",
+        type: "number",
+        default: "2",
+        min: 1,
+        max: 4,
+        step: 1,
+      },
       {
         key: "rasterGray",
         label: "Grayscale",
@@ -486,7 +556,14 @@ export const PDF_TOOLS: Tool[] = [
       },
       { key: "numPos", label: "Position", type: "select", default: "bc", options: POS_6 },
       { key: "numStart", label: "Start at", type: "number", default: "1", min: 0 },
-      { key: "numSize", label: "Font size", type: "number", default: "10", min: 6, max: 48 },
+      {
+        key: "numSize",
+        label: "Font size",
+        type: "number",
+        default: "10",
+        min: 6,
+        max: 48,
+      },
       { key: "numColor", label: "Colour", type: "color", default: "#595959" },
     ],
     run: async (f, p) => [
@@ -507,7 +584,13 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Edit",
     accept: "application/pdf",
     fields: [
-      { key: "text", label: "Watermark text", type: "text", default: "DRAFT", placeholder: "DRAFT" },
+      {
+        key: "text",
+        label: "Watermark text",
+        type: "text",
+        default: "DRAFT",
+        placeholder: "DRAFT",
+      },
       {
         key: "wmLayout",
         label: "Layout",
@@ -519,8 +602,23 @@ export const PDF_TOOLS: Tool[] = [
           { value: "tile", label: "Tiled (repeat)" },
         ],
       },
-      { key: "wmOpacity", label: "Opacity", type: "range", default: "0.18", min: 0.02, max: 1, step: 0.02 },
-      { key: "wmSize", label: "Font size (0 = auto)", type: "number", default: "0", min: 0, max: 200 },
+      {
+        key: "wmOpacity",
+        label: "Opacity",
+        type: "range",
+        default: "0.18",
+        min: 0.02,
+        max: 1,
+        step: 0.02,
+      },
+      {
+        key: "wmSize",
+        label: "Font size (0 = auto)",
+        type: "number",
+        default: "0",
+        min: 0,
+        max: 200,
+      },
       { key: "wmColor", label: "Colour", type: "color", default: "#999999" },
     ],
     run: async (f, p) => [
@@ -595,9 +693,7 @@ export const PDF_TOOLS: Tool[] = [
         ],
       },
     ],
-    run: async (f, p) => [
-      await pdf.nupPdf(f[0], (num(p.n, 2) === 4 ? 4 : 2) as 2 | 4),
-    ],
+    run: async (f, p) => [await pdf.nupPdf(f[0], (num(p.n, 2) === 4 ? 4 : 2) as 2 | 4)],
   },
   {
     id: "pdf-info",
@@ -704,7 +800,10 @@ export const PDF_TOOLS: Tool[] = [
       },
     ],
     run: async (f, p) => [
-      await pdf.posterizePdf(f[0], (([2,3,4].includes(num(p.tiles, 2)) ? num(p.tiles, 2) : 2) as 2 | 3 | 4)),
+      await pdf.posterizePdf(
+        f[0],
+        ([2, 3, 4].includes(num(p.tiles, 2)) ? num(p.tiles, 2) : 2) as 2 | 3 | 4
+      ),
     ],
   },
   {
@@ -726,7 +825,15 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Edit",
     accept: "application/pdf",
     fields: [
-      { key: "marginPct", label: "Trim percent", type: "range", default: "5", min: 0, max: 40, step: 1 },
+      {
+        key: "marginPct",
+        label: "Trim percent",
+        type: "range",
+        default: "5",
+        min: 0,
+        max: 40,
+        step: 1,
+      },
     ],
     run: async (f, p) => [await pdf.cropPdf(f[0], num(p.marginPct, 5))],
   },
@@ -738,10 +845,22 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Edit",
     accept: "application/pdf",
     fields: [
-      { key: "header", label: "Header text", type: "text", placeholder: "Top of each page" },
-      { key: "footer", label: "Footer text", type: "text", placeholder: "Bottom of each page" },
+      {
+        key: "header",
+        label: "Header text",
+        type: "text",
+        placeholder: "Top of each page",
+      },
+      {
+        key: "footer",
+        label: "Footer text",
+        type: "text",
+        placeholder: "Bottom of each page",
+      },
     ],
-    run: async (f, p) => [await pdf.addHeaderFooter(f[0], p.header || "", p.footer || "")],
+    run: async (f, p) => [
+      await pdf.addHeaderFooter(f[0], p.header || "", p.footer || ""),
+    ],
   },
   {
     id: "stamp",
@@ -889,8 +1008,20 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Edit",
     accept: "application/pdf",
     fields: [
-      { key: "deg", label: "Angle (degrees)", type: "number", default: "45", min: -360, max: 360 },
-      { key: "ranges", label: "Pages (optional)", type: "text", placeholder: "all pages" },
+      {
+        key: "deg",
+        label: "Angle (degrees)",
+        type: "number",
+        default: "45",
+        min: -360,
+        max: 360,
+      },
+      {
+        key: "ranges",
+        label: "Pages (optional)",
+        type: "text",
+        placeholder: "all pages",
+      },
     ],
     run: async (f, p) => [
       await pdf.rotateCustom(f[0], num(p.deg, 45), p.ranges || undefined),
@@ -960,7 +1091,9 @@ export const PDF_TOOLS: Tool[] = [
     icon: PaintBucket,
     cat: "Edit",
     accept: "application/pdf",
-    fields: [{ key: "bg", label: "Background colour", type: "color", default: "#FFF8E1" }],
+    fields: [
+      { key: "bg", label: "Background colour", type: "color", default: "#FFF8E1" },
+    ],
     run: async (f, p) => [await pdf.backgroundColor(f[0], p.bg || "#ffffff")],
   },
   {
@@ -991,7 +1124,15 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Optimize",
     accept: "application/pdf",
     fields: [
-      { key: "rScale", label: "Quality (× DPI) — 1–4", type: "number", default: "2", min: 1, max: 4, step: 1 },
+      {
+        key: "rScale",
+        label: "Quality (× DPI) — 1–4",
+        type: "number",
+        default: "2",
+        min: 1,
+        max: 4,
+        step: 1,
+      },
     ],
     run: async (f, p) => [await pdf.rasterizePdf(f[0], num(p.rScale, 2))],
   },
@@ -1012,7 +1153,8 @@ export const PDF_TOOLS: Tool[] = [
     desc: "Convert a .docx document to PDF (text & structure)",
     icon: FileType2,
     cat: "To PDF",
-    accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    accept:
+      ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     fields: [],
     run: async (f) => [await pdf.wordToPdf(f[0])],
   },
@@ -1022,7 +1164,8 @@ export const PDF_TOOLS: Tool[] = [
     desc: "Convert a .xlsx / .xls spreadsheet to a PDF table",
     icon: Sheet,
     cat: "To PDF",
-    accept: ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+    accept:
+      ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
     fields: [],
     run: async (f) => [await pdf.excelToPdf(f[0])],
   },
@@ -1032,7 +1175,8 @@ export const PDF_TOOLS: Tool[] = [
     desc: "Convert a .pptx deck to PDF (slide text)",
     icon: Presentation,
     cat: "To PDF",
-    accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    accept:
+      ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation",
     fields: [],
     run: async (f) => [await pdf.pptToPdf(f[0])],
   },
@@ -1138,8 +1282,18 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Secure",
     accept: "application/pdf",
     fields: [
-      { key: "userPassword", label: "Open password", type: "password", placeholder: "required to open" },
-      { key: "ownerPassword", label: "Owner password (optional)", type: "password", placeholder: "for full control" },
+      {
+        key: "userPassword",
+        label: "Open password",
+        type: "password",
+        placeholder: "required to open",
+      },
+      {
+        key: "ownerPassword",
+        label: "Owner password (optional)",
+        type: "password",
+        placeholder: "for full control",
+      },
     ],
     run: async (f, p) => [
       await pdf.encryptPdf(f[0], {
@@ -1156,7 +1310,12 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Secure",
     accept: "application/pdf",
     fields: [
-      { key: "password", label: "Password", type: "password", placeholder: "current password" },
+      {
+        key: "password",
+        label: "Password",
+        type: "password",
+        placeholder: "current password",
+      },
     ],
     run: async (f, p) => [await pdf.decryptPdf(f[0], p.password || "")],
   },
@@ -1168,7 +1327,12 @@ export const PDF_TOOLS: Tool[] = [
     cat: "Secure",
     accept: "application/pdf",
     fields: [
-      { key: "ownerPassword", label: "Owner password", type: "password", placeholder: "required" },
+      {
+        key: "ownerPassword",
+        label: "Owner password",
+        type: "password",
+        placeholder: "required",
+      },
       { key: "allowPrint", label: "Allow printing", type: "toggle", default: "yes" },
       { key: "allowCopy", label: "Allow copying text", type: "toggle", default: "yes" },
       { key: "allowModify", label: "Allow editing", type: "toggle", default: "no" },
@@ -1197,7 +1361,7 @@ export const PDF_TOOLS: Tool[] = [
         key: "spec",
         label: "Outline",
         type: "textarea",
-        default: "Cover | 1\nChapter 1 | 2\n  Section 1.1 | 3\nChapter 2 | 5",
+        default: "Cover | 1\nChapter 1 | 2\n Section 1.1 | 3\nChapter 2 | 5",
         hint: "One bookmark per line as “Title | page”. Indent with spaces to nest.",
       },
     ],
@@ -1236,7 +1400,7 @@ export const PDF_TOOLS: Tool[] = [
         key: "data",
         label: "Field data (JSON)",
         type: "textarea",
-        default: '{\n  "Name": "Ada Lovelace",\n  "Agree": true\n}',
+        default: '{\n "Name": "Ada Lovelace",\n "Agree": true\n}',
         hint: 'Object of { "Field Name": value }. Run “List Form Fields” to get names.',
       },
     ],
@@ -1291,7 +1455,9 @@ export const PDF_TOOLS: Tool[] = [
     interactive: "background",
     fields: [],
     run: async () => {
-      throw new Error("Open “Letterhead / Background” to place your image on the live preview.");
+      throw new Error(
+        "Open “Letterhead / Background” to place your image on the live preview."
+      );
     },
   },
   {
@@ -1441,7 +1607,7 @@ function FieldControl({
           type="color"
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-12 cursor-pointer rounded-lg border border-brand-200 bg-white p-0.5 dark:border-[#3A3D45] dark:bg-[#24262C]"
+          className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-white p-0.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]"
         />
         <input
           className="input flex-1"
@@ -1464,7 +1630,7 @@ function FieldControl({
           onChange={(e) => onChange(e.target.value)}
           className="flex-1 accent-primary-500 cursor-pointer"
         />
-        <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums text-brand-500">
+        <span className="w-12 shrink-0 text-right text-xs font-medium tabular-nums text-brand-500">
           {(f.max ?? 1) <= 1 ? `${Math.round(parseFloat(value || "0") * 100)}%` : value}
         </span>
       </div>
@@ -1477,12 +1643,12 @@ function FieldControl({
         type="button"
         onClick={() => onChange(on ? "no" : "yes")}
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          on ? "bg-primary-500" : "bg-brand-300 dark:bg-[#3A3D45]"
+          on ? "bg-primary-500" : "bg-brand-300 dark:bg-[#2C2C2E]"
         }`}
         aria-pressed={on}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
             on ? "translate-x-[22px]" : "translate-x-0.5"
           }`}
         />
@@ -1530,7 +1696,11 @@ function FieldControl({
           }}
         />
         {value && (
-          <img src={value} alt="Signature preview" className="ml-2 h-6 w-6 rounded object-contain" />
+          <img
+            src={value}
+            alt="Signature preview"
+            className="ml-2 h-6 w-6 rounded object-contain"
+          />
         )}
       </label>
     );
