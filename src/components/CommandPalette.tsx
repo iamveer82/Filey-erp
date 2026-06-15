@@ -227,7 +227,7 @@ export default function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-full max-w-lg overflow-hidden rounded-3xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-brand-200 px-4 dark:border-[#2C2C2E]">
@@ -284,7 +284,7 @@ export default function CommandPalette() {
                         : "hover:bg-brand-50 dark:hover:bg-white/5"
                     }`}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-500 dark:bg-white/8">
                       {it.icon}
                     </span>
                     <span className="min-w-0 flex-1">

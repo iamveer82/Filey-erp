@@ -258,7 +258,7 @@ export default function ToolsPage() {
                 desc={t.desc}
                 Icon={t.icon}
                 badgeBg="bg-primary-100 dark:bg-primary-400/15"
-                badgeFg="text-primary-700 dark:text-primary-300"
+                badgeFg="text-ink dark:text-primary-300"
                 flow={toolFlow(t)}
                 onUse={() => openTool(t.id)}
               />
@@ -304,7 +304,7 @@ export default function ToolsPage() {
                 <span className="h-1.5 w-1.5 rounded-full bg-success" /> Online
               </span>
             </div>
-            <div className="rounded-3xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/8">
+            <div className="rounded-2xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/8">
               Hi {firstName} 👋
               <br />
               What would you like to do today?
@@ -320,7 +320,7 @@ export default function ToolsPage() {
                   key={s}
                   aria-label={s}
                   onClick={askFiley}
-                  className="flex w-full items-center justify-between rounded-3xl border border-brand-200 bg-white px-3 py-2 text-xs font-medium text-brand-600 transition hover:border-primary-300 hover:text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="flex w-full items-center justify-between rounded-2xl border border-brand-200 bg-white px-3 py-2 text-xs font-medium text-brand-500 transition hover:border-primary-300 hover:text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   {s} <ChevronRight size={12} />
                 </button>
@@ -361,10 +361,10 @@ export default function ToolsPage() {
                 <button
                   key={r.title}
                   onClick={r.onClick}
-                  className="flex w-full items-center gap-3 rounded-3xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+                  className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
                 >
                   <span
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-3xl"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl"
                     style={{ background: r.color + "22", color: r.color }}
                   >
                     <r.Icon size={16} />
@@ -462,7 +462,7 @@ function ToolMiniCard({
   return (
     <button
       onClick={onUse}
-      className="group flex flex-col gap-2 rounded-3xl border border-brand-200 bg-white p-4 text-left transition-colors hover:bg-brand-50 hover:border-primary-300 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] cursor-pointer"
+      className="group flex flex-col gap-2 rounded-2xl border border-brand-200 bg-white p-4 text-left transition-colors hover:bg-brand-50 hover:border-primary-300 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] cursor-pointer"
     >
       <div className="flex items-center justify-between gap-2">
         <span
@@ -588,7 +588,7 @@ function PdfToolWorkspace({
       </div>
 
       <div className="card mb-4 flex flex-wrap items-center gap-3">
-        <span className="grid h-12 w-12 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
           <Icon size={22} />
         </span>
         <div className="min-w-0 flex-1">
@@ -641,7 +641,7 @@ function PdfToolWorkspace({
           )}
         </div>
       ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5">
+        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5">
           <div>
             <Upload size={22} className="mx-auto mb-1 text-brand-300" />
             Drop or choose {tool.multi ? "files" : "a file"} to preview here
@@ -852,12 +852,12 @@ function FilePreview({ file }: { file: File }) {
       <img
         src={img}
         alt={file.name}
-        className="mx-auto max-h-[640px] rounded-3xl border border-brand-200 dark:border-[#2C2C2E]"
+        className="mx-auto max-h-[640px] rounded-2xl border border-brand-200 dark:border-[#2C2C2E]"
       />
     );
   if (text)
     return (
-      <pre className="max-h-[640px] overflow-auto rounded-3xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#2C2C2E] dark:bg-white/8 dark:text-[#DDE0E4]">
+      <pre className="max-h-[640px] overflow-auto rounded-2xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#2C2C2E] dark:bg-white/8 dark:text-[#DDE0E4]">
         {text}
       </pre>
     );

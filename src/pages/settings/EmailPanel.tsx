@@ -112,7 +112,7 @@ export default function EmailPanel() {
           passwords) — not your normal password.
         </p>
         {!hasDesktop && (
-          <p className="text-xs font-medium text-warning bg-warning/10 rounded-3xl px-3 py-2 mb-4">
+          <p className="text-xs font-medium text-warning bg-warning/10 rounded-2xl px-3 py-2 mb-4">
             You can save settings here, but email is only sent from the Filey desktop app.
           </p>
         )}
@@ -175,7 +175,7 @@ export default function EmailPanel() {
             <Send size={14} /> {test.busy ? "Sending…" : "Send test"}
           </button>
           {test.msg && (
-            <span className="text-xs font-medium text-brand-600">{test.msg}</span>
+            <span className="text-xs font-medium text-brand-500">{test.msg}</span>
           )}
         </div>
       </div>
@@ -215,7 +215,7 @@ export default function EmailPanel() {
               <Send size={15} /> {sending.busy ? "Sending…" : "Send email"}
             </button>
             {sending.msg && (
-              <span className="text-xs font-medium text-brand-600">{sending.msg}</span>
+              <span className="text-xs font-medium text-brand-500">{sending.msg}</span>
             )}
           </div>
         </div>

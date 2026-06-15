@@ -110,7 +110,7 @@ export default function BankAccounts() {
             key: "acct",
             label: "Account",
             render: (a) => (
-              <span className="text-sm text-brand-600">{a.account_name}</span>
+              <span className="text-sm text-brand-500">{a.account_name}</span>
             ),
           },
           {
@@ -150,7 +150,7 @@ export default function BankAccounts() {
             render: (a) => (
               <button
                 aria-label={`Delete ${a.bank_name} account`}
-                className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
                 onClick={() => del(a)}
               >
                 <Trash2 size={15} />

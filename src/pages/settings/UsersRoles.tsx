@@ -108,7 +108,7 @@ export default function UsersRoles() {
     <div className="space-y-4">
       <div className="card">
         <div className="flex items-start gap-3">
-          <div className="rounded-3xl bg-primary-100 text-primary-700 p-2.5">
+          <div className="rounded-2xl bg-primary-100 text-ink p-2.5">
             <Building size={20} />
           </div>
           <div className="flex-1 min-w-0">
@@ -188,7 +188,7 @@ export default function UsersRoles() {
                     </span>
                     <button
                       aria-label="Revoke invitation"
-                      className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer"
+                      className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer"
                       onClick={async () => {
                         const ok = await confirm({
                           title: "Revoke invitation",
@@ -233,7 +233,7 @@ export default function UsersRoles() {
                   className="flex items-center justify-between gap-3 border-b border-brand-100 dark:border-[#2C2C2E] py-3 last:border-0"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-sm font-medium dark:bg-primary-400/15 dark:text-primary-300">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-100 text-ink text-sm font-medium dark:bg-primary-400/15 dark:text-primary-300">
                       {(m.name || m.email || "?").charAt(0).toUpperCase()}
                     </span>
                     <div className="min-w-0">

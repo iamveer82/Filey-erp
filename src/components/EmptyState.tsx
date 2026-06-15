@@ -24,7 +24,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-3xl border border-dashed border-brand-200 bg-surface px-6 py-10 text-center dark:border-[#2C2C2E] dark:bg-[#1C1C1E]",
+        "flex flex-col items-center justify-center rounded-2xl border border-dashed border-brand-200 bg-surface px-6 py-10 text-center dark:border-[#2C2C2E] dark:bg-[#1C1C1E]",
         className
       )}
     >
@@ -51,7 +51,7 @@ export function EmptyState({
           {secondaryAction && (
             <button
               onClick={secondaryAction.onClick}
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 dark:text-[#B6BAC1] dark:hover:bg-white/10"
+              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-brand-500 transition-colors hover:bg-brand-50 dark:text-[#B6BAC1] dark:hover:bg-white/10"
             >
               {secondaryAction.label}
             </button>

@@ -84,6 +84,7 @@ import {
   Modal,
   Field,
   ShareToggle,
+  SearchInput,
 } from "../components/ui";
 
 type CustomColumn = { key: string; label: string };
@@ -581,7 +582,7 @@ export default function Invoicing() {
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
-          <p className="mb-2 flex items-center gap-2 font-medium text-ink">
+          <p className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink">
             <Repeat size={15} /> Recurring invoices
           </p>
           <ul className="space-y-1.5">
@@ -591,12 +592,12 @@ export default function Invoicing() {
                 const base = docs.find((d) => d.id === r.base_invoice_id);
                 return (
                   <li key={r.id} className="flex items-center justify-between text-sm">
-                    <span className="text-brand-600">
+                    <span className="text-brand-500">
                       {base?.number ?? `#${r.base_invoice_id}`} · {r.interval} · next{" "}
                       {fmtDate(r.next_run)}
                     </span>
                     <button
-                      className="cursor-pointer text-xs font-medium text-brand-400 hover:text-danger"
+                      className="cursor-pointer text-xs font-medium text-brand-500 hover:text-danger transition-colors"
                       onClick={async () => {
                         const ok = await confirm({
                           title: "Cancel recurring invoice",
@@ -623,11 +624,11 @@ export default function Invoicing() {
       )}
 
       <div className="mb-4">
-        <input
-          className="input max-w-xs"
-          placeholder="Search invoices by number or customer…"
+        <SearchInput
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="Search invoices by number or customer…"
+          className="max-w-xs"
         />
       </div>
 
@@ -737,7 +738,7 @@ export default function Invoicing() {
                     {overdue ? "overdue" : d.status}
                   </Badge>
                   {(d.paid ?? 0) > 0 && (d.balance ?? 0) > 0 && (
-                    <p className="text-[11px] text-brand-400 mt-0.5 tabular-nums">
+                    <p className="text-[11px] text-brand-500 mt-0.5 tabular-nums">
                       {money(d.balance ?? 0, d.currency || "AED")} due
                     </p>
                   )}
@@ -777,28 +778,28 @@ export default function Invoicing() {
                 <button
                   aria-label="Payments"
                   title="Record payment"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => setPayFor(d)}
                 >
                   <CreditCard size={15} />
                 </button>
                 <button
                   aria-label="Edit"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => editInvoice(d.id)}
                 >
                   <Pencil size={15} />
                 </button>
                 <button
                   aria-label="Duplicate"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => duplicateInvoice(d.id)}
                 >
                   <Copy size={15} />
                 </button>
                 <button
                   aria-label="Delete"
-                  className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
                     if (
                       !(await confirm({
@@ -895,22 +896,22 @@ function PaymentsModal({
   const ccy = doc.currency || "AED";
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="rounded-lg bg-brand-50 px-3 py-2.5">
-          <p className="text-[11px] text-brand-400">Total</p>
-          <p className="font-display font-medium text-ink tabular-nums">
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="rounded-xl bg-brand-50 px-3 py-2.5">
+          <p className="text-[11px] text-brand-500">Total</p>
+          <p className="font-medium font-medium text-ink tabular-nums">
             {money(total, ccy)}
           </p>
         </div>
-        <div className="rounded-lg bg-success/10 px-3 py-2.5">
-          <p className="text-[11px] text-brand-400">Paid</p>
-          <p className="font-display font-medium text-success tabular-nums">
+        <div className="rounded-xl bg-success/10 px-3 py-2.5">
+          <p className="text-[11px] text-brand-500">Paid</p>
+          <p className="font-medium font-medium text-success tabular-nums">
             {money(paid, ccy)}
           </p>
         </div>
-        <div className="rounded-lg bg-primary-100 px-3 py-2.5">
-          <p className="text-[11px] text-brand-400">Balance</p>
-          <p className="font-display font-medium text-primary-700 tabular-nums">
+        <div className="rounded-xl bg-primary-100 px-3 py-2.5">
+          <p className="text-[11px] text-brand-500">Balance</p>
+          <p className="font-medium font-medium text-ink tabular-nums">
             {money(balance, ccy)}
           </p>
         </div>
@@ -921,18 +922,18 @@ function PaymentsModal({
           {rows.map((p) => (
             <li
               key={p.id}
-              className="flex items-center justify-between rounded-lg bg-white border border-brand-100 px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm dark:bg-[#1A1B1E] dark:border-[#2A2C33]"
             >
               <span className="tabular-nums font-medium text-ink">
                 {money(Number(p.amount), ccy)}
               </span>
-              <span className="text-brand-400 text-xs">
+              <span className="text-xs text-brand-500">
                 {p.method ?? "—"} · {fmtDate(p.paid_at)}
               </span>
               <button
                 aria-label="Remove payment"
                 onClick={() => remove(p.id)}
-                className="text-brand-300 hover:text-danger cursor-pointer"
+                className="text-brand-400 hover:text-danger cursor-pointer transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -1008,22 +1009,22 @@ function InventoryImportModal({
   );
   return (
     <Modal open={open} onClose={onClose} title="Import from Inventory">
-      <input
-        className="input mb-3"
-        placeholder="Search products or SKU…"
+      <SearchInput
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={setQ}
+        placeholder="Search products or SKU…"
+        className="mb-3"
       />
       <div className="max-h-72 overflow-y-auto space-y-1">
         {filtered.map((p) => (
           <button
             key={p.id}
             onClick={() => onPick(p)}
-            className="w-full flex items-center justify-between rounded-lg px-3 py-2 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left"
+            className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left transition-colors"
           >
             <div className="min-w-0">
               <p className="text-sm font-medium text-ink truncate">{p.name}</p>
-              <p className="text-[11px] text-brand-400 font-mono">
+              <p className="text-[11px] text-brand-500 font-medium">
                 {p.sku}
                 {p.quantity === 0 ? " · out of stock" : ` · ${p.quantity} in stock`}
               </p>
@@ -1034,7 +1035,7 @@ function InventoryImportModal({
           </button>
         ))}
         {filtered.length === 0 && (
-          <p className="text-sm text-brand-400 text-center py-6">
+          <p className="text-sm text-brand-500 text-center py-6">
             No products found. Add them in Inventory first.
           </p>
         )}
@@ -1353,17 +1354,17 @@ function Editor({
   return (
     <div>
       {/* header bar */}
-      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
+      <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div className="flex items-start gap-3">
           <button
-            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
             onClick={onBack}
             aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-medium text-ink">Create Invoice</h1>
+            <h1 className="text-[28px] leading-9 font-semibold text-ink">Create Invoice</h1>
             <p className="text-sm text-brand-500 mt-0.5">
               Create and send professional invoices to your customers
             </p>
@@ -1401,7 +1402,7 @@ function Editor({
           </button>
           {form.status === "draft" ? (
             <button
-              className="btn-primary !bg-success !text-white"
+              className="btn-primary"
               onClick={handleFinalize}
               disabled={saving}
               title="Finalize — posts to Orders & Accounting, saves a PDF to My Files, and shows in reports & the dashboard"
@@ -1487,50 +1488,50 @@ function Editor({
                 const isFile = ct?.type === "file";
                 return (
                   <button
-                    key={tpl.id}
-                    onClick={() => set("template", tpl.id)}
-                    className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
-                      active
-                        ? "border-primary-400 bg-primary-50 shadow-glow"
-                        : "border-brand-200 bg-white hover:border-primary-300"
-                    }`}
-                  >
-                    {active && (
-                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
-                        <Check size={11} strokeWidth={3} />
-                      </span>
-                    )}
-                    {isCustom && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Delete template ${tpl.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeTpl(tpl.id, tpl.name);
-                        }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
-                      >
-                        <Trash2 size={11} />
-                      </span>
-                    )}
-                    <TemplateTilePreview
-                      templateId={tpl.id}
-                      customTemplates={customTemplates}
-                    />
-                    <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
-                      {tpl.name}
-                      {isFile ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
-                          <Upload size={8} /> Uploaded
+                      key={tpl.id}
+                      onClick={() => set("template", tpl.id)}
+                      className={`group relative shrink-0 w-32 rounded-2xl border-2 p-2 text-left transition-all cursor-pointer ${
+                        active
+                          ? "border-primary-400 bg-primary-50 "
+                          : "border-brand-100 bg-white hover:border-primary-300"
+                      }`}
+                    >
+                      {active && (
+                        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
+                          <Check size={11} strokeWidth={3} />
                         </span>
-                      ) : isCustom ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">
-                          Custom
+                      )}
+                      {isCustom && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Delete template ${tpl.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTpl(tpl.id, tpl.name);
+                          }}
+                          className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer shadow-sm border border-brand-100"
+                        >
+                          <Trash2 size={11} />
                         </span>
-                      ) : null}
-                    </p>
-                  </button>
+                      )}
+                      <TemplateTilePreview
+                        templateId={tpl.id}
+                        customTemplates={customTemplates}
+                      />
+                      <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
+                        {tpl.name}
+                        {isFile ? (
+                          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
+                            <Upload size={8} /> Uploaded
+                          </span>
+                        ) : isCustom ? (
+                          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-primary-100 text-primary-700 font-medium">
+                            Custom
+                          </span>
+                        ) : null}
+                      </p>
+                    </button>
                 );
               })}
             </div>
@@ -1636,7 +1637,7 @@ function Editor({
                       onChange={(e) => set("number", e.target.value)}
                     />
                     <span
-                      className="grid place-items-center rounded-lg border border-brand-200 px-2.5 text-brand-400"
+                      className="grid place-items-center rounded-xl border border-brand-200 px-2.5 text-brand-400"
                       title="Numbering"
                     >
                       <Settings size={15} />
@@ -1689,7 +1690,7 @@ function Editor({
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs font-medium text-brand-400">
+                  <tr className="text-left text-xs font-semibold text-brand-500">
                     <th className="py-2 pr-2 w-6">#</th>
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
@@ -1726,7 +1727,7 @@ function Editor({
                       >
                         <span className="text-[10px]">{col.label}</span>
                         <button
-                          className="ml-1 opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger inline cursor-pointer"
+                          className="ml-1 opacity-0 group-hover:opacity-100 text-brand-400 hover:text-danger inline cursor-pointer transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             removeCustomColumn(col.key);
@@ -1748,7 +1749,7 @@ function Editor({
                 <tbody>
                   {form.items.map((it, i) => (
                     <tr key={i} className="border-t border-brand-100">
-                      <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
+                      <td className="py-2 pr-2 text-brand-500">{i + 1}</td>
                       <td className="py-2 px-2">
                         <input
                           className="input"
@@ -1807,7 +1808,7 @@ function Editor({
                       <td className="py-2">
                         <button
                           aria-label="Remove line"
-                          className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                          className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
                           onClick={() => removeItem(i)}
                         >
                           <Trash2 size={14} />
@@ -1820,12 +1821,12 @@ function Editor({
             </div>
             {/* Custom column management */}
             {form.customColumns.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1 mt-2 text-xs text-brand-400">
+              <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-brand-500">
                 <span className="mr-1">Custom fields (drag to reorder):</span>
                 {form.customColumns.map((col, idx) => (
                   <span
                     key={col.key}
-                    className="inline-flex items-center gap-0.5 bg-brand-50 border border-brand-200 rounded px-1.5 py-0.5 cursor-grab active:cursor-grabbing select-none"
+                    className="inline-flex items-center gap-0.5 bg-brand-50 border border-brand-200 rounded-lg px-2 py-1 cursor-grab active:cursor-grabbing select-none transition-colors hover:bg-brand-100"
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData("text/plain", col.key);
@@ -1852,9 +1853,9 @@ function Editor({
                       }
                     }}
                   >
-                    <span className="font-medium">{col.label}</span>
+                    <span className="font-medium text-xs text-ink">{col.label}</span>
                     <button
-                      className="text-brand-300 hover:text-danger ml-0.5 cursor-pointer"
+                      className="text-brand-400 hover:text-danger ml-0.5 cursor-pointer transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         removeCustomColumn(col.key);
@@ -1880,7 +1881,7 @@ function Editor({
               <button
                 type="button"
                 onClick={() => setShowBank((v) => !v)}
-                className={`btn-ghost text-xs ${showBank ? "!bg-primary-100 !text-primary-700" : ""}`}
+                className={`btn-ghost text-xs ${showBank ? "!bg-brand-50 !text-ink" : ""}`}
                 title="Show your saved bank details on this invoice"
               >
                 <Landmark size={13} /> Bank details: {showBank ? "On" : "Off"}
@@ -1938,15 +1939,15 @@ function Editor({
 
           {/* 5 · Additional settings */}
           <Step n={5} title="Additional Settings">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-lg border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-medium text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-2xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Settings size={15} /> Invoice Settings
                 </div>
                 <div className="mt-3 space-y-2">
                   <div>
-                    <p className="text-xs font-medium text-brand-600 mb-1.5">Apply VAT</p>
-                    <div className="flex rounded-lg bg-brand-100 p-0.5">
+                    <p className="text-xs font-semibold text-brand-500 mb-1.5">Apply VAT</p>
+                    <div className="flex rounded-xl bg-brand-50 p-0.5">
                       {(
                         [
                           ["Yes", true],
@@ -1964,7 +1965,7 @@ function Editor({
                                 on ? (form.tax_rate > 0 ? form.tax_rate : 5) : 0
                               )
                             }
-                            className={`flex-1 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                            className={`flex-1 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
                               active
                                 ? "bg-white text-ink shadow-bento"
                                 : "text-brand-500 hover:text-ink"
@@ -1996,7 +1997,7 @@ function Editor({
                       </option>
                     ))}
                   </select>
-                  <div className="flex items-center justify-between gap-2 text-xs font-medium text-brand-600 border border-brand-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 border border-brand-200 rounded-xl px-3 py-2">
                     Accent color
                     <ColorPicker
                       value={form.accent}
@@ -2005,8 +2006,8 @@ function Editor({
                   </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-medium text-sm">
+              <div className="rounded-2xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <StickyNote size={15} /> Notes
                 </div>
                 <textarea
@@ -2024,8 +2025,8 @@ function Editor({
                   onChange={(e) => set("terms", e.target.value)}
                 />
               </div>
-              <div className="rounded-lg border border-brand-200 p-4">
-                <div className="flex items-center gap-2 text-ink font-medium text-sm">
+              <div className="rounded-2xl border border-brand-200 p-4">
+                <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Paperclip size={15} /> Logo / Attachment
                 </div>
                 <div className="mt-3">
@@ -2034,7 +2035,7 @@ function Editor({
                       <img
                         src={form.logo}
                         alt="logo"
-                        className="h-12 w-12 object-contain border border-brand-200 rounded-lg bg-white"
+                        className="h-12 w-12 object-contain border border-brand-200 rounded-xl bg-white"
                       />
                       <button
                         className="btn-ghost text-xs"
@@ -2054,7 +2055,7 @@ function Editor({
                       />
                     </label>
                   )}
-                  <p className="text-[11px] text-brand-400 mt-2">
+                  <p className="text-[11px] text-brand-500 mt-2">
                     Tip: set this once in Settings → Company Details to auto-fill every
                     invoice.
                   </p>
@@ -2119,13 +2120,13 @@ function Editor({
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
               <div>
-                <p className="font-medium text-ink flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-medium">
+                <p className="font-semibold text-ink flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold">
                     4
                   </span>
                   Preview
                 </p>
-                <p className="text-xs text-brand-400 mt-0.5 ml-8">
+                <p className="text-xs text-brand-500 mt-0.5 ml-8">
                   This is how your invoice will look
                 </p>
               </div>
@@ -2168,12 +2169,12 @@ function Editor({
             </FitPreview>
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-lg bg-brand-50 p-1">
+              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
                 <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
+                  className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
                     device === "desktop"
                       ? "bg-primary-100 text-primary-700"
-                      : "text-brand-400"
+                      : "text-brand-500 hover:text-ink"
                   }`}
                   onClick={() => setDevice("desktop")}
                   aria-label="Desktop preview"
@@ -2181,10 +2182,10 @@ function Editor({
                   <Monitor size={15} />
                 </button>
                 <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
+                  className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
                     device === "mobile"
                       ? "bg-primary-100 text-primary-700"
-                      : "text-brand-400"
+                      : "text-brand-500 hover:text-ink"
                   }`}
                   onClick={() => setDevice("mobile")}
                   aria-label="Mobile preview"
@@ -2194,17 +2195,17 @@ function Editor({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
                   onClick={() => setZoom((z) => Math.max(50, z - 10))}
                   aria-label="Zoom out"
                 >
                   <Minus size={14} />
                 </button>
-                <span className="text-xs font-medium text-brand-600 w-10 text-center">
+                <span className="text-xs font-semibold text-brand-500 w-10 text-center">
                   {zoom}%
                 </span>
                 <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
                   onClick={() => setZoom((z) => Math.min(150, z + 10))}
                   aria-label="Zoom in"
                 >
@@ -2230,15 +2231,15 @@ function Editor({
           onClick={() => setViewOpen(false)}
         >
           <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-lg bg-white dark:bg-[#24262C] outline-none"
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] outline-none shadow-bento-hover"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-medium text-ink">
+                <h2 className="text-lg font-semibold text-ink">
                   {form.number || "Invoice preview"}
                 </h2>
-                <span className="text-xs font-medium text-brand-400 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
                   Page 1 of {pageCount}
                 </span>
               </div>
@@ -2248,7 +2249,7 @@ function Editor({
                 </button>
                 <button
                   onClick={() => setViewOpen(false)}
-                  className="grid h-9 w-9 place-items-center rounded-lg text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer"
+                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
                   aria-label="Close"
                 >
                   <X size={18} />
@@ -2288,7 +2289,7 @@ function Editor({
                   </div>
                 </div>
                 {pageCount > 1 && (
-                  <p className="text-center text-xs text-brand-400 mt-3 font-medium">
+                  <p className="text-center text-xs text-brand-500 mt-3 font-medium">
                     Page 1 of {pageCount} — scroll to see all pages
                   </p>
                 )}
@@ -2318,12 +2319,12 @@ function Step({
     <div className="card">
       <div className="flex items-start justify-between mb-4 gap-3">
         <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-medium shrink-0">
+          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold shrink-0">
             {n}
           </span>
           <div>
-            <p className="font-medium text-ink leading-tight">{title}</p>
-            {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
+            <p className="font-semibold text-ink leading-tight">{title}</p>
+            {subtitle && <p className="text-xs text-brand-500 mt-0.5">{subtitle}</p>}
           </div>
         </div>
         {action}
@@ -2628,7 +2629,7 @@ function InvoiceView({ form }: { form: Form }) {
           <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>
             {form.doc_title || "INVOICE"}
           </p>
-          <p className="text-xs font-mono text-neutral-800 mt-0.5">{form.number}</p>
+          <p className="text-xs font-medium text-neutral-800 mt-0.5">{form.number}</p>
           <p className="text-[10px] text-neutral-500 mt-0.5">
             {fmtDate(form.issue_date)}
           </p>
@@ -2708,7 +2709,7 @@ function InvoiceView({ form }: { form: Form }) {
             <p className="text-3xl font-extrabold tracking-tight" style={{ color: a }}>
               {form.doc_title || "INVOICE"}
             </p>
-            <p className="text-sm font-mono mt-1">{form.number}</p>
+            <p className="text-sm font-medium mt-1">{form.number}</p>
           </div>
         </div>
 
@@ -2782,7 +2783,7 @@ function InvoiceView({ form }: { form: Form }) {
         </div>
 
         <div className="flex justify-between text-xs text-neutral-500 mt-4">
-          <p className="font-mono">{form.number}</p>
+          <p className="font-medium">{form.number}</p>
           <p>
             Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
           </p>
@@ -2830,7 +2831,7 @@ function InvoiceView({ form }: { form: Form }) {
 
   const Meta = () => (
     <div className="flex justify-between text-xs text-neutral-500 mt-4">
-      <p className="font-mono">{form.number}</p>
+      <p className="font-medium">{form.number}</p>
       <p>
         Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
       </p>
@@ -2873,7 +2874,7 @@ function InvoiceView({ form }: { form: Form }) {
                 form.doc_title || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")
               ).toUpperCase()}
             </p>
-            <p className="text-sm font-mono mt-1">{form.number}</p>
+            <p className="text-sm font-medium mt-1">{form.number}</p>
             {form.seller_trn && (
               <p className="text-xs text-neutral-500 mt-1">TRN {form.seller_trn}</p>
             )}
@@ -2966,7 +2967,7 @@ function InvoiceView({ form }: { form: Form }) {
               </p>
             </div>
             <div className="text-right text-sm">
-              <p className="font-mono">{form.number}</p>
+              <p className="font-medium">{form.number}</p>
               <p className="opacity-80">Due {fmtDate(form.due_date)}</p>
             </div>
           </div>
@@ -2988,7 +2989,7 @@ function InvoiceView({ form }: { form: Form }) {
   // ---- TECH ----
   if (templateId === "tech") {
     return (
-      <div className="text-neutral-900 font-mono">
+      <div className="text-neutral-900 font-medium">
         <div className="flex justify-between items-start">
           <div>
             <Logo size={80} />
@@ -3058,7 +3059,7 @@ function InvoiceView({ form }: { form: Form }) {
               </p>
             </div>
             <div className="text-right text-xs text-neutral-500">
-              <p className="font-mono">{form.number}</p>
+              <p className="font-medium">{form.number}</p>
               <p>Issued {fmtDate(form.issue_date)}</p>
               <p>Due {fmtDate(form.due_date)}</p>
             </div>
@@ -3084,7 +3085,7 @@ function InvoiceView({ form }: { form: Form }) {
         <div className="border-t-2 border-dashed border-neutral-300 my-4" />
         <div className="flex justify-between text-xs">
           <span className="text-neutral-500">{form.doc_title || "Invoice"}</span>
-          <span className="font-mono">{form.number}</span>
+          <span className="font-medium">{form.number}</span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-neutral-500">Date</span>
@@ -3183,7 +3184,7 @@ function InvoiceView({ form }: { form: Form }) {
             >
               {form.doc_title || "INVOICE"}
             </p>
-            <p className="text-sm font-mono text-neutral-600 mt-1">{form.number}</p>
+            <p className="text-sm font-medium text-neutral-600 mt-1">{form.number}</p>
             <div className="mt-3 pt-3" style={{ borderTop: "1px solid #E8D5A3" }}>
               <p className="text-[11px] text-neutral-500">{fmtDate(form.issue_date)}</p>
               <p className="text-[11px] text-neutral-400">
@@ -3229,7 +3230,7 @@ function InvoiceView({ form }: { form: Form }) {
             </div>
             <div className="flex justify-between text-xs text-neutral-600 mt-2">
               <span>Reference</span>
-              <span className="font-mono font-medium">{form.number}</span>
+              <span className="font-medium font-medium">{form.number}</span>
             </div>
             {form.po_number && (
               <div className="flex justify-between text-xs text-neutral-600 mt-2">
@@ -3299,7 +3300,7 @@ function InvoiceView({ form }: { form: Form }) {
                 {form.doc_title || "INVOICE"}
               </p>
             </div>
-            <p className="text-sm font-mono mt-3">{form.number}</p>
+            <p className="text-sm font-medium mt-3">{form.number}</p>
             <p className="text-xs text-neutral-500 mt-1">{fmtDate(form.issue_date)}</p>
           </div>
         </div>
@@ -3339,7 +3340,7 @@ function InvoiceView({ form }: { form: Form }) {
               style={{ background: "#f5f5f5" }}
             >
               <span className="text-neutral-500">Reference</span>
-              <span className="font-mono font-medium">{form.number}</span>
+              <span className="font-medium font-medium">{form.number}</span>
             </div>
           </div>
         </div>
@@ -3429,7 +3430,7 @@ function InvoiceView({ form }: { form: Form }) {
                 className="mt-3 pt-3"
                 style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}
               >
-                <p className="text-xs font-mono">{form.number}</p>
+                <p className="text-xs font-medium">{form.number}</p>
                 <p className="text-[10px] opacity-70 mt-1">{fmtDate(form.issue_date)}</p>
                 <p className="text-[10px] opacity-70">Due: {fmtDate(form.due_date)}</p>
               </div>
@@ -3542,7 +3543,7 @@ function InvoiceView({ form }: { form: Form }) {
               {form.po_number && (
                 <div className="flex justify-between">
                   <span className="text-neutral-400">PO #</span>
-                  <span className="font-mono font-medium text-xs">{form.po_number}</span>
+                  <span className="font-medium font-medium text-xs">{form.po_number}</span>
                 </div>
               )}
             </div>
@@ -3683,7 +3684,7 @@ function InvoiceView({ form }: { form: Form }) {
           <p className="text-5xl font-extrabold tracking-tight" style={{ color: a }}>
             {form.doc_title || "Invoice"}
           </p>
-          <p className="text-sm font-mono text-neutral-500 mt-2">{form.number}</p>
+          <p className="text-sm font-medium text-neutral-500 mt-2">{form.number}</p>
         </div>
         <div className="text-right">
           <Logo />
@@ -3832,7 +3833,7 @@ function CompanyModal({
               <img
                 src={c.logo}
                 alt="logo"
-                className="h-12 w-12 object-contain border border-brand-200 rounded-lg"
+                className="h-12 w-12 object-contain border border-brand-200 rounded-xl"
               />
             )}
             <button className="btn-ghost" onClick={() => fileRef.current?.click()}>

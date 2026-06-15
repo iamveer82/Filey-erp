@@ -16,7 +16,7 @@ export default function SetupNotice() {
           </div>
         </div>
 
-        <ol className="text-sm text-brand-600 space-y-3 list-decimal pl-5">
+        <ol className="text-sm text-brand-500 space-y-3 list-decimal pl-5">
           <li>
             Create a free project at{" "}
             <span className="font-medium text-ink">supabase.com</span>.
@@ -40,7 +40,7 @@ export default function SetupNotice() {
               .env
             </code>
             :
-            <pre className="mt-2 bg-ink text-white text-xs rounded-3xl p-3 overflow-x-auto">
+            <pre className="mt-2 bg-ink text-white text-xs rounded-2xl p-3 overflow-x-auto">
               {`VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
             </pre>

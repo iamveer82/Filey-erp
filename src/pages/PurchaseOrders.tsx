@@ -385,7 +385,7 @@ export default function PurchaseOrders() {
             label: "LPO #",
             sortValue: (r) => r.po_number,
             render: (r) => (
-              <span className="font-mono text-xs font-medium">{r.po_number}</span>
+              <span className="font-medium text-xs font-medium">{r.po_number}</span>
             ),
           },
           {
@@ -422,7 +422,7 @@ export default function PurchaseOrders() {
                 <button
                   aria-label="Record payment"
                   title="Record payment"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-500 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
                   onClick={() => setPayFor(r)}
                 >
                   <CreditCard size={15} />
@@ -430,7 +430,7 @@ export default function PurchaseOrders() {
                 <button
                   aria-label="Edit"
                   title="Edit PO"
-                  className="text-brand-600 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-500 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
                   onClick={() => editPo(r.id)}
                 >
                   <Pencil size={15} />
@@ -656,7 +656,7 @@ function LPOEditor({
           )}
           <button
             className={`btn-ghost ${
-              useLetterhead ? "!bg-primary-100 !text-primary-700" : ""
+              useLetterhead ? "!bg-primary-100 !text-ink" : ""
             }`}
             disabled={!hasLetterhead(letterhead)}
             title={
@@ -756,7 +756,7 @@ function LPOEditor({
                     onClick={() => set("template", tpl.id)}
                     className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
                       active
-                        ? "border-primary-400 bg-primary-50 shadow-glow"
+                        ? "border-primary-400 bg-brand-50 "
                         : "border-brand-200 bg-white hover:border-primary-300"
                     }`}
                   >
@@ -787,7 +787,7 @@ function LPOEditor({
                           <Upload size={8} /> Uploaded
                         </span>
                       ) : isCustom ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-primary-700 font-medium">
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-ink font-medium">
                           Custom
                         </span>
                       ) : null}
@@ -1003,7 +1003,7 @@ function LPOEditor({
               </button>
               <div className="text-right">
                 <span className="text-xs text-brand-400 mr-2">Total</span>
-                <span className="font-display text-lg font-medium text-ink tabular-nums">
+                <span className="font-medium text-lg font-medium text-ink tabular-nums">
                   {aed(total)}
                 </span>
               </div>
@@ -1123,7 +1123,7 @@ function LPOEditor({
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
                     device === "desktop"
-                      ? "bg-primary-100 text-primary-700"
+                      ? "bg-primary-100 text-ink"
                       : "text-brand-400"
                   }`}
                   onClick={() => setDevice("desktop")}
@@ -1134,7 +1134,7 @@ function LPOEditor({
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
                     device === "mobile"
-                      ? "bg-primary-100 text-primary-700"
+                      ? "bg-primary-100 text-ink"
                       : "text-brand-400"
                   }`}
                   onClick={() => setDevice("mobile")}
@@ -1151,7 +1151,7 @@ function LPOEditor({
                 >
                   <Minus size={14} />
                 </button>
-                <span className="text-xs font-medium text-brand-600 w-10 text-center">
+                <span className="text-xs font-medium text-brand-500 w-10 text-center">
                   {zoom}%
                 </span>
                 <button
@@ -1261,7 +1261,7 @@ function LPOView({
                     <p className="text-brand-500">TRN: {clean(form.company_trn)}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-mono font-bold text-lg">{form.number}</p>
+                    <p className="font-medium font-bold text-lg">{form.number}</p>
                     <p className="text-brand-500">Date: {form.order_date}</p>
                     {form.expected_date && (
                       <p className="text-brand-500">Expected: {form.expected_date}</p>
@@ -1322,7 +1322,7 @@ function LPOView({
                   <p className="font-semibold text-sm text-brand-400 mb-2">
                     TERMS & CONDITIONS
                   </p>
-                  <p className="text-sm text-brand-600 whitespace-pre-line">
+                  <p className="text-sm text-brand-500 whitespace-pre-line">
                     {form.terms}
                   </p>
                 </div>
@@ -1518,7 +1518,7 @@ function LPOView({
               <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
                 Terms & Conditions
               </p>
-              <p className="text-sm text-brand-600 whitespace-pre-line leading-relaxed">
+              <p className="text-sm text-brand-500 whitespace-pre-line leading-relaxed">
                 {form.terms}
               </p>
             </div>
@@ -1530,7 +1530,7 @@ function LPOView({
               className="mb-6 p-4 rounded-xl"
               style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}
             >
-              <p className="text-sm text-brand-600 italic">{form.notes}</p>
+              <p className="text-sm text-brand-500 italic">{form.notes}</p>
             </div>
           )}
 
@@ -1626,7 +1626,7 @@ function FrostedOverlayLpo({
       </div>
       <div style={boxStyle("lpo_header")}>
         <h1 className="text-xl font-extrabold">LOCAL PURCHASE ORDER</h1>
-        <p className="font-mono text-lg font-bold mt-1">{form.number}</p>
+        <p className="font-medium text-lg font-bold mt-1">{form.number}</p>
         <p className="text-sm text-brand-500">Date: {form.order_date}</p>
         {form.expected_date && (
           <p className="text-sm text-brand-500">Expected: {form.expected_date}</p>
@@ -1694,7 +1694,7 @@ function FrostedOverlayLpo({
         {form.terms && (
           <div className="mb-2">
             <p className="text-xs font-semibold text-brand-400 uppercase">Terms</p>
-            <p className="text-sm text-brand-600 whitespace-pre-line">{form.terms}</p>
+            <p className="text-sm text-brand-500 whitespace-pre-line">{form.terms}</p>
           </div>
         )}
         {form.notes && <p className="text-sm text-brand-500 italic">{form.notes}</p>}

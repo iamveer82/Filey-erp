@@ -149,7 +149,7 @@ export default function BillingPanel() {
             </ul>
             <div className="mt-4">
               {p.id === sub.plan ? (
-                <span className="pill bg-primary-100 text-primary-700">Current plan</span>
+                <span className="pill bg-primary-100 text-ink">Current plan</span>
               ) : p.id === "free" ? (
                 <span className="text-xs text-brand-400">
                   Downgrade in the billing portal
@@ -172,7 +172,7 @@ export default function BillingPanel() {
         <p className="mb-3 font-medium text-ink">Usage</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {Object.entries(stats).map(([k, v]) => (
-            <div key={k} className="rounded-3xl border border-brand-200 p-3 text-center">
+            <div key={k} className="rounded-2xl border border-brand-200 p-3 text-center">
               <p className="text-2xl font-medium text-ink">{v}</p>
               <p className="mt-0.5 text-[11px] text-brand-400">{k}</p>
             </div>

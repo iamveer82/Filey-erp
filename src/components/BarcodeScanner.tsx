@@ -156,7 +156,7 @@ export default function BarcodeScanner({
     <Modal open={open} onClose={onClose} title={title} size="lg">
       <div className="space-y-4">
         {/* Camera view */}
-        <div className="relative bg-black rounded-3xl overflow-hidden aspect-[4/3]">
+        <div className="relative bg-black rounded-2xl overflow-hidden aspect-[4/3]">
           {error ? (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-white text-sm p-4 text-center">
               <div>
@@ -177,7 +177,7 @@ export default function BarcodeScanner({
               />
               {/* Scanning overlay */}
               <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-[15%] border-2 border-primary-400/60 rounded-3xl">
+                <div className="absolute inset-[15%] border-2 border-primary-400/60 rounded-2xl">
                   <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-primary-400 rounded-tl-xl" />
                   <div className="absolute top-0 right-0 w-8 h-8 border-t-3 border-r-3 border-primary-400 rounded-tr-xl" />
                   <div className="absolute bottom-0 left-0 w-8 h-8 border-b-3 border-l-3 border-primary-400 rounded-bl-xl" />

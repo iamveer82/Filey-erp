@@ -33,7 +33,7 @@ function Segmented<T extends string>({
 }) {
   return (
     <div
-      className="flex rounded-3xl bg-brand-100 dark:bg-white/8 p-1 gap-1"
+      className="flex rounded-xl bg-brand-100 dark:bg-white/8 p-1 gap-1"
       role="tablist"
     >
       {options.map((o) => {
@@ -377,7 +377,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-3xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -409,7 +409,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showConfirm ? "Hide password" : "Show password"}
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-3xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>

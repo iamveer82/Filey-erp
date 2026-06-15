@@ -14,22 +14,17 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "../lib/format";
-import FitText from "./FitText";
-import { SpotlightCard } from "./SpotlightCard";
-import { MagicCard } from "./MagicCard";
-import { ShimmerButton } from "./ShimmerButton";
+import { Card as CardPrimitive } from "./Card";
 
 /** Design-token skeleton placeholder with shimmer animation. */
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-lg bg-brand-100 dark:bg-white/10",
+        "rounded-xl bg-brand-100 dark:bg-white/10",
         className
       )}
-    >
-      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/8" />
-    </div>
+    />
   );
 }
 
@@ -71,7 +66,7 @@ export function ShareToggle({
           : "Private to you — click to share with your team"
       }
       className={cn(
-        "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold cursor-pointer transition-colors",
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors",
         shared
           ? "bg-info/15 text-info hover:bg-info/25"
           : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/10 dark:text-[#B6BAC1] dark:hover:bg-white/15"
@@ -95,7 +90,7 @@ export function PageHeader({
   return (
     <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
       <div>
-        <h1 className="text-[28px] leading-9 font-bold text-ink">{title}</h1>
+        <h1 className="text-[28px] leading-9 font-semibold text-ink">{title}</h1>
         {subtitle && <p className="text-sm text-brand-500 mt-1">{subtitle}</p>}
       </div>
       {action}
@@ -115,9 +110,9 @@ export function Card({
   hover?: boolean;
 }) {
   return (
-    <MagicCard className={cn(hover && "cursor-pointer", className)}>
-      <div className="p-5">{children}</div>
-    </MagicCard>
+    <CardPrimitive className={cn("p-5", hover && "cursor-pointer", className)}>
+      {children}
+    </CardPrimitive>
   );
 }
 
@@ -150,7 +145,7 @@ export function MetricCard({
   value,
   delta,
   icon,
-  iconClass = "bg-primary-100 text-primary-700",
+  iconClass = "bg-primary-100 text-ink",
   rawValue,
   formatValue,
 }: {
@@ -163,26 +158,24 @@ export function MetricCard({
   formatValue?: (n: number) => string;
 }) {
   return (
-    <SpotlightCard>
-      <div className="p-5">
-        <div className="flex items-start gap-3">
-          {icon && (
-            <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>{icon}</div>
-          )}
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-brand-500">{label}</p>
-            <FitText className="font-display text-ink mt-1 tabular-nums" basePx={24}>
-              {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
-            </FitText>
-          </div>
-        </div>
-        {delta !== undefined && (
-          <div className="mt-3">
-            <Delta value={delta} />
-          </div>
+    <CardPrimitive className="p-5">
+      <div className="flex items-start gap-3">
+        {icon && (
+          <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>{icon}</div>
         )}
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-brand-500">{label}</p>
+          <p className="text-[24px] leading-8 font-semibold text-ink mt-1 tabular-nums">
+            {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
+          </p>
+        </div>
       </div>
-    </SpotlightCard>
+      {delta !== undefined && (
+        <div className="mt-3">
+          <Delta value={delta} />
+        </div>
+      )}
+    </CardPrimitive>
   );
 }
 
@@ -201,15 +194,13 @@ export function InfoCard({
   tone?: "default" | "accent" | "dark";
 }) {
   return (
-    <SpotlightCard className={className}>
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="font-display font-bold text-ink text-sm">{title}</p>
-          {action}
-        </div>
-        {children}
+    <CardPrimitive className={cn("p-4", className)}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-semibold text-ink text-sm">{title}</p>
+        {action}
       </div>
-    </SpotlightCard>
+      {children}
+    </CardPrimitive>
   );
 }
 
@@ -235,7 +226,7 @@ export function StatCard({
           {hint && <p className="text-xs text-brand-400 mt-1">{hint}</p>}
         </div>
         {icon && (
-          <div className="rounded-xl p-2.5 bg-primary-100 text-primary-700">{icon}</div>
+          <div className="rounded-xl p-2.5 bg-primary-100 text-ink">{icon}</div>
         )}
       </div>
     </div>
@@ -323,7 +314,6 @@ export function DataTable<T>({
   const [editVal, setEditVal] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [scrolled, setScrolled] = useState(false);
 
   const sortFn = sort && columns.find((c) => c.key === sort.key)?.sortValue;
   const sorted = useMemo(() => {
@@ -340,15 +330,6 @@ export function DataTable<T>({
     setSort((s) =>
       s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
     );
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => setScrolled(el.scrollTop > 0);
-    el.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => el.removeEventListener("scroll", onScroll);
-  }, []);
 
   const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
   const allChecked =
@@ -385,7 +366,7 @@ export function DataTable<T>({
                 disabled={running}
                 onClick={() => runBulk(a)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors",
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium cursor-pointer transition-colors",
                   a.danger
                     ? "text-danger hover:bg-danger/10"
                     : "text-brand-700 hover:bg-white dark:hover:bg-white/10"
@@ -407,9 +388,7 @@ export function DataTable<T>({
       <div
         ref={scrollRef}
         className={cn(
-          "overflow-x-auto",
-          scrolled &&
-            "shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+          "overflow-x-auto"
         )}
       >
         <table className="w-full">
@@ -436,7 +415,7 @@ export function DataTable<T>({
                       {c.label}
                       <span
                         className={cn(
-                          "text-[10px] transition-all duration-200 inline-block",
+                          "text-xs transition-all duration-200 inline-block",
                           sort?.key === c.key
                             ? "text-ink dark:text-[#F4F5F6]"
                             : "text-brand-400",
@@ -783,7 +762,7 @@ export function StockBreakdownCard({
   );
 }
 
-export { MagicCard, ShimmerButton, SpotlightCard };
+export { CardPrimitive as MagicCard, CardPrimitive as ShimmerButton, CardPrimitive as SpotlightCard };
 
 /** Professional empty-state placeholder shown when a list/table is empty.
  *  Includes an icon, title, description and optional CTA button. */

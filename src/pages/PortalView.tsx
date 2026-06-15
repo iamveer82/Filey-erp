@@ -118,9 +118,9 @@ export default function PortalView() {
 
   return (
     <div className="min-h-screen bg-[#F7F3EA] dark:bg-[#1C1C1E] px-4 py-10">
-      <div className="mx-auto max-w-3xl rounded-3xl border border-brand-200 dark:border-[#2C2C2E] bg-white dark:bg-[#1C1C1E] p-8 text-ink dark:text-[#F4F5F6]">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-brand-200 dark:border-[#2C2C2E] bg-white dark:bg-[#1C1C1E] p-8 text-ink dark:text-[#F4F5F6]">
         {(paid || doc.status === "paid") && (
-          <div className="mb-4 rounded-3xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
+          <div className="mb-4 rounded-2xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
             Payment received — thank you!
           </div>
         )}
@@ -141,7 +141,7 @@ export default function PortalView() {
           <div className="text-right">
             <p className="text-xs text-brand-400 dark:text-[#9AA0A8]">Invoice</p>
             <p className="text-lg font-medium">{doc.number}</p>
-            <span className="mt-1 inline-block rounded-full bg-brand-100 dark:bg-white/12 px-2.5 py-0.5 text-[11px] font-medium text-brand-600 dark:text-[#DDE0E4]">
+            <span className="mt-1 inline-block rounded-full bg-brand-100 dark:bg-white/12 px-2.5 py-0.5 text-[11px] font-medium text-brand-500 dark:text-[#DDE0E4]">
               {doc.status}
             </span>
           </div>
@@ -208,7 +208,7 @@ export default function PortalView() {
             <button
               onClick={pay}
               disabled={paying}
-              className="rounded-3xl bg-[#FFD600] px-5 py-2.5 text-sm font-medium text-[#0A0A0A] transition-[filter] hover:brightness-95 disabled:opacity-60"
+              className="rounded-2xl bg-[#FFD600] px-5 py-2.5 text-sm font-medium text-[#0A0A0A] transition-[filter] hover:brightness-95 disabled:opacity-60"
             >
               {paying ? "Redirecting…" : `Pay ${money(total, ccy)}`}
             </button>
@@ -233,7 +233,7 @@ export default function PortalView() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between text-brand-600 dark:text-[#DDE0E4]">
+    <div className="flex justify-between text-brand-500 dark:text-[#DDE0E4]">
       <span>{k}</span>
       <span className="tabular-nums">{v}</span>
     </div>

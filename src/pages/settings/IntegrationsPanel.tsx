@@ -41,9 +41,9 @@ export default function IntegrationsPanel() {
         {rows.map((r) => (
           <div
             key={r.n}
-            className="flex items-center gap-3 rounded-3xl border border-brand-200 px-4 py-3"
+            className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3"
           >
-            <span className="rounded-3xl bg-primary-100 text-primary-700 p-2">
+            <span className="rounded-2xl bg-primary-100 text-ink p-2">
               {r.icon}
             </span>
             <div className="flex-1 min-w-0">

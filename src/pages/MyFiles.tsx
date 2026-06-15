@@ -207,13 +207,13 @@ export default function MyFiles() {
       <div className="animate-fade-up">
         <div className="mb-5 flex items-center gap-3">
           <button
-            className="rounded-3xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+            className="rounded-2xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
             onClick={() => setOpenFolder(null)}
             aria-label="Back to folders"
           >
             <ArrowLeft size={18} />
           </button>
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
             <FolderOpen size={20} />
           </span>
           <div>
@@ -231,7 +231,7 @@ export default function MyFiles() {
               className="card group flex items-center gap-3 py-3 cursor-pointer hover:border-primary-300 transition-colors"
               onClick={() => setPreview(f)}
             >
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-500 dark:bg-white/8">
                 <FileIcon name={f.name} className="h-[18px] w-[18px]" />
               </span>
               <div className="min-w-0 flex-1">
@@ -294,7 +294,7 @@ export default function MyFiles() {
               onClick={() => setOpenFolder(d.key)}
               className="card group flex items-center gap-3 text-left hover:border-primary-300 transition-all cursor-pointer"
             >
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
                 <Folder size={22} />
               </span>
               <div className="min-w-0 flex-1">
@@ -318,7 +318,7 @@ export default function MyFiles() {
 function Header() {
   return (
     <div className="mb-5 flex items-center gap-3">
-      <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+      <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
         <FolderOpen size={20} />
       </span>
       <div>
@@ -409,7 +409,7 @@ function FilePreviewPage({
     <div className="animate-fade-up flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
-          className="rounded-3xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+          className="rounded-2xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
           onClick={onBack}
           aria-label="Back"
         >
@@ -444,7 +444,7 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-3xl border border-brand-200 bg-brand-100 dark:border-[#2C2C2E] dark:bg-[#1B1C20]">
+      <div className="flex-1 overflow-hidden rounded-2xl border border-brand-200 bg-brand-100 dark:border-[#2C2C2E] dark:bg-[#1B1C20]">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>

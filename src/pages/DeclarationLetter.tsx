@@ -539,11 +539,11 @@ function DeclarationEditor({
           <div className="card">
             <p className="font-medium text-ink mb-1">Declaration Text</p>
             <p className="text-xs text-brand-400 mb-3">
-              Tokens like <code className="font-mono">{"{company}"}</code>,{" "}
-              <code className="font-mono">{"{trn}"}</code>,{" "}
-              <code className="font-mono">{"{lpo}"}</code>,{" "}
-              <code className="font-mono">{"{qty}"}</code>,{" "}
-              <code className="font-mono">{"{amount}"}</code> auto-fill from the fields
+              Tokens like <code className="font-medium">{"{company}"}</code>,{" "}
+              <code className="font-medium">{"{trn}"}</code>,{" "}
+              <code className="font-medium">{"{lpo}"}</code>,{" "}
+              <code className="font-medium">{"{qty}"}</code>,{" "}
+              <code className="font-medium">{"{amount}"}</code> auto-fill from the fields
               above.
             </p>
             <textarea
@@ -738,7 +738,7 @@ function DeclarationEditor({
                 >
                   <Minus size={14} />
                 </button>
-                <span className="text-xs font-semibold text-brand-600 w-10 text-center">
+                <span className="text-xs font-semibold text-brand-500 w-10 text-center">
                   {zoom}%
                 </span>
                 <button

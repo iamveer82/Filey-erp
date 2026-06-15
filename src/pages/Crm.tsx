@@ -307,7 +307,7 @@ export default function Crm() {
                 {funnel.map((f) => (
                   <li key={f.label}>
                     <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="flex items-center gap-2 text-brand-600">
+                      <span className="flex items-center gap-2 text-brand-500">
                         <span className={`w-2 h-2 rounded-full ${f.c}`} />
                         {f.label}
                       </span>
@@ -388,8 +388,8 @@ export default function Crm() {
                           <p className="font-medium text-ink">{c.company || c.name}</p>
                           <p className="text-[11px] text-brand-400">{c.name}</p>
                         </td>
-                        <td className="py-2.5 text-brand-600">{c.email ?? "—"}</td>
-                        <td className="py-2.5 text-right text-brand-600">{orders}</td>
+                        <td className="py-2.5 text-brand-500">{c.email ?? "—"}</td>
+                        <td className="py-2.5 text-right text-brand-500">{orders}</td>
                         <td className="py-2.5 text-right font-medium text-ink">
                           {aed(spent)}
                         </td>

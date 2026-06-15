@@ -110,7 +110,7 @@ export default function People() {
       </div>
 
       {!loading && emps.length === 0 && (
-        <div className="empty-gradient rounded-3xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
+        <div className="empty-gradient rounded-2xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
           <svg
             width="100"
             height="80"
@@ -254,7 +254,7 @@ export default function People() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${e.name}`}
-                    className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
+                    className="rounded-2xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>

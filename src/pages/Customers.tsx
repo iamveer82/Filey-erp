@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  Users,
   Plus,
   Trash2,
   Pencil,
   Mail,
-  Search,
   BadgeCheck,
   ArrowRight,
   AlarmClock,
@@ -28,10 +26,21 @@ import {
   MetricCard,
   DataTable,
   Modal,
+  EmptyState,
+  Badge,
   Field,
   ErrorBanner,
-  Badge,
+  FilterChip,
+  SearchInput,
+  InfoCard,
 } from "../components/ui";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "../components/Tabs";
+import { Users } from "lucide-react";
 
 // Local re-export so the form doesn't need a separate import.
 const toE164Local = (raw: string): string | null => {
@@ -201,23 +210,16 @@ export default function Customers() {
           label="With email"
           value={num(rows.filter((c) => c.email).length)}
           icon={<Mail size={20} />}
-          iconClass="text-secondary-500"
         />
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
-          <Search
-            size={16}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
-          />
-          <input
-            className="input pl-10"
-            placeholder="Search name, company, TRN…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </div>
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          placeholder="Search name, company, TRN…"
+          className="w-full max-w-xs"
+        />
 
         {segments.length > 0 && (
           <select
@@ -277,8 +279,7 @@ export default function Customers() {
             key: "trn",
             label: "TRN",
             sortValue: (c) => c.trn ?? "",
-            render: (c) =>
-              c.trn ? <span className="font-mono text-xs">{c.trn}</span> : "—",
+            render: (c) => (c.trn ? <span className="text-xs tabular-nums">{c.trn}</span> : "—"),
           },
           {
             key: "email",
@@ -332,7 +333,7 @@ export default function Customers() {
               <div className="flex items-center justify-end gap-1">
                 <button
                   aria-label="Edit"
-                  className="rounded p-1 text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
                   onClick={() => {
                     setEdit(c);
                     setOpen(true);
@@ -342,7 +343,7 @@ export default function Customers() {
                 </button>
                 <button
                   aria-label="Delete"
-                  className="rounded-full p-1 text-danger hover:bg-danger/8 cursor-pointer"
+                  className="rounded-full p-1.5 text-danger hover:bg-danger/8 cursor-pointer"
                   onClick={async () => {
                     const ok = await confirm({
                       title: "Delete customer",
@@ -360,7 +361,7 @@ export default function Customers() {
                 </button>
                 <button
                   onClick={() => setDetail(c)}
-                  className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-primary-700 hover:bg-primary-50 dark:text-primary-300 dark:hover:bg-primary-400/10 cursor-pointer"
+                  className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-brand-500 hover:bg-brand-100 dark:text-brand-300 dark:hover:bg-white/10 cursor-pointer"
                 >
                   View <ArrowRight size={11} />
                 </button>
@@ -389,115 +390,100 @@ export default function Customers() {
         title={detail?.company || detail?.name || "Customer"}
         size="lg"
       >
-        <div className="space-y-4">
-          <div className="flex items-center gap-4 border-b border-brand-200 pb-2 dark:border-[#2C2C2E]">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="mb-4 w-full">
             {[
               { id: "overview", label: "Overview", icon: <Info size={12} /> },
               { id: "activity", label: "Activity", icon: <Activity size={12} /> },
               { id: "invoices", label: "Invoices", icon: <FileText size={12} /> },
             ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors",
-                  activeTab === t.id
-                    ? "bg-brand-100 text-ink dark:bg-white/10"
-                    : "text-brand-500 hover:text-ink"
-                )}
-              >
+              <TabsTrigger key={t.id} value={t.id}>
                 {t.icon}
                 {t.label}
-              </button>
+              </TabsTrigger>
             ))}
-          </div>
+          </TabsList>
 
-          {activeTab === "overview" && detail && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-[11px] text-brand-500 mb-1.5">Segment</p>
-                {detail.segment ? (
-                  <Badge tone="info">{detail.segment}</Badge>
-                ) : (
-                  <span className="text-brand-400">—</span>
-                )}
-              </div>
-              <div>
-                <p className="text-[11px] text-brand-500 mb-1.5">Details</p>
-                {[
-                  { label: "Name", value: detail.name },
-                  { label: "Company", value: detail.company },
-                  { label: "TRN", value: detail.trn, mono: true },
-                  { label: "Email", value: detail.email, mono: true },
-                  { label: "Phone", value: detail.phone, mono: true },
-                  { label: "Phone (E.164)", value: detail.phone_e164, mono: true },
-                  { label: "Address", value: detail.address },
-                  {
-                    label: "Created",
-                    value: (detail as any).created_at
-                      ? new Date((detail as any).created_at).toLocaleDateString()
-                      : null,
-                  },
-                ].map(({ label, value, mono }) =>
-                  value ? (
-                    <div
-                      key={label}
-                      className="flex justify-between py-1 border-b border-brand-200/50 last:border-0 dark:border-[#2C2C2E]/50"
-                    >
-                      <span className="text-[11px] text-brand-500">{label}</span>
-                      <span className={cn("text-sm text-ink", mono && "font-mono")}>
-                        {value}
-                      </span>
-                    </div>
-                  ) : null
-                )}
-              </div>
-            </div>
-          )}
+          <TabsContent value="overview" className="space-y-4">
+            {detail && (
+              <>
+                <InfoCard title="Segment">
+                  {detail.segment ? (
+                    <Badge tone="info">{detail.segment}</Badge>
+                  ) : (
+                    <span className="text-brand-400">—</span>
+                  )}
+                </InfoCard>
+                <InfoCard title="Details">
+                  <dl className="space-y-1">
+                    {[
+                      { label: "Name", value: detail.name },
+                      { label: "Company", value: detail.company },
+                      { label: "TRN", value: detail.trn, mono: true },
+                      { label: "Email", value: detail.email, mono: true },
+                      { label: "Phone", value: detail.phone, mono: true },
+                      { label: "Phone (E.164)", value: detail.phone_e164, mono: true },
+                      { label: "Address", value: detail.address },
+                      {
+                        label: "Created",
+                        value: (detail as any).created_at
+                          ? new Date((detail as any).created_at).toLocaleDateString()
+                          : null,
+                      },
+                    ].map(({ label, value, mono }) =>
+                      value ? (
+                        <div
+                          key={label}
+                          className="flex justify-between py-1 border-b border-brand-200/50 last:border-0 dark:border-[#2C2C2E]/50"
+                        >
+                          <dt className="text-[11px] text-brand-500">{label}</dt>
+                          <dd className={cn("text-sm text-ink", mono && "tabular-nums")}>
+                            {value}
+                          </dd>
+                        </div>
+                      ) : null
+                    )}
+                  </dl>
+                </InfoCard>
+              </>
+            )}
+          </TabsContent>
 
-          {activeTab === "activity" && (
-            <div className="flex flex-col items-center justify-center text-center py-12">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-50 dark:bg-white/8 mb-3">
-                <Activity size={18} className="text-brand-400" />
-              </div>
-              <p className="text-[13px] text-brand-700">No recent activity</p>
-              <p className="text-[11px] text-brand-400 mt-0.5 max-w-xs">
-                Notes, calls and emails with this customer will appear here.
-              </p>
-            </div>
-          )}
+          <TabsContent value="activity">
+            <EmptyState
+              icon={Activity}
+              title="No recent activity"
+              description="Notes, calls and emails with this customer will appear here."
+            />
+          </TabsContent>
 
-          {activeTab === "invoices" && (
-            <div className="flex flex-col items-center justify-center text-center py-12">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-50 dark:bg-white/8 mb-3">
-                <FileText size={18} className="text-brand-400" />
-              </div>
-              <p className="text-[13px] text-brand-700">No invoices yet</p>
-              <p className="text-[11px] text-brand-400 mt-0.5 max-w-xs">
-                Invoices issued to this customer will be listed here.
-              </p>
-            </div>
-          )}
+          <TabsContent value="invoices">
+            <EmptyState
+              icon={FileText}
+              title="No invoices yet"
+              description="Invoices issued to this customer will be listed here."
+            />
+          </TabsContent>
+        </Tabs>
 
-          <div className="flex justify-end gap-2 pt-4 border-t border-brand-200 dark:border-[#2C2C2E]">
-            <button
-              onClick={() => detail && nav(`/customers/${detail.id}`)}
-              className="btn-ghost"
-            >
-              Full page
-            </button>
-            <button
-              onClick={() => {
-                if (!detail) return;
-                setEdit(detail);
-                setOpen(true);
-                setDetail(null);
-              }}
-              className="btn-primary"
-            >
-              Edit
-            </button>
-          </div>
+        <div className="flex justify-end gap-2 pt-4 border-t border-brand-200 dark:border-[#2C2C2E]">
+          <button
+            onClick={() => detail && nav(`/customers/${detail.id}`)}
+            className="btn-ghost"
+          >
+            Full page
+          </button>
+          <button
+            onClick={() => {
+              if (!detail) return;
+              setEdit(detail);
+              setOpen(true);
+              setDetail(null);
+            }}
+            className="btn-primary"
+          >
+            Edit
+          </button>
         </div>
       </Modal>
     </div>
@@ -665,7 +651,7 @@ function CustomerModal({
       </div>
 
       {/* User-defined custom fields (Odoo Studio). Only renders
- when at least one field is defined. */}
+      when at least one field is defined. */}
       {customDefs.length > 0 && (
         <div className="mt-4 border-t border-brand-200 dark:border-[#2C2C2E] pt-3">
           <p className="text-[11px] font-medium text-brand-500 mb-2">Custom fields</p>
@@ -766,28 +752,5 @@ function CustomerModal({
         </button>
       </div>
     </Modal>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`h-9 rounded-full px-3 text-xs font-medium transition-colors ${
-        active
-          ? "bg-primary-500 text-[#0A0A0A]"
-          : "bg-brand-100 text-brand-600 hover:bg-brand-200 dark:bg-white/8 dark:text-[#C9CDD3] dark:hover:bg-white/10"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

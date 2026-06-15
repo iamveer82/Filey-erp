@@ -85,7 +85,7 @@ export default function DealDrawer({
           </div>
           <button
             onClick={onClose}
-            className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5"
+            className="rounded-2xl p-1.5 text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5"
             aria-label="Close"
           >
             <X size={18} />
@@ -113,7 +113,7 @@ export default function DealDrawer({
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                   s.id === opp.stage
                     ? "bg-primary-500 text-[#0A0A0A]"
-                    : "bg-brand-100 text-brand-600 hover:bg-brand-200 dark:bg-white/8 dark:text-[#C9CDD3] dark:hover:bg-white/10"
+                    : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/8 dark:text-[#C9CDD3] dark:hover:bg-white/10"
                 }`}
               >
                 {s.label}

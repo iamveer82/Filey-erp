@@ -21,17 +21,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, num } from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
-import {
-  PageHeader,
-  MetricCard,
-  Card,
-  Badge,
-  DataTable,
-  Modal,
-  Field,
-  ShareToggle,
-  ErrorBanner,
-} from "../components/ui";
+import { Button, Card, Field, Badge, DataTable, Modal, MetricCard, PageHeader, ShareToggle, ErrorBanner } from "../components/primitives";
 
 interface CategoryGroup {
   name: string;
@@ -98,11 +88,12 @@ export default function Suppliers() {
         subtitle="Vendor records & sourcing performance"
         action={
           <div className="flex gap-2 flex-wrap">
-            <button className="btn-ghost" onClick={() => setManageOpen(true)}>
+            <Button variant="outline" size="md" onClick={() => setManageOpen(true)}>
               <Sliders size={15} /> Customize fields
-            </button>
-            <button
-              className="btn-primary"
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
               aria-label="New supplier"
               onClick={() => {
                 setEdit(null);
@@ -110,7 +101,7 @@ export default function Suppliers() {
               }}
             >
               <Plus size={16} /> New Supplier
-            </button>
+            </Button>
           </div>
         }
       />
@@ -132,24 +123,25 @@ export default function Suppliers() {
           label="Suppliers"
           value={num(suppliers.length)}
           icon={<Users size={20} />}
+          iconClass="bg-primary-100 text-ink"
         />
         <MetricCard
           label="Sourced SKUs"
           value={num(products.length)}
           icon={<Boxes size={20} />}
-          iconClass="text-secondary-500"
+          iconClass="bg-primary-100 text-ink"
         />
         <MetricCard
           label="Sourcing Value"
           value={aed(totalValue)}
           icon={<Package size={20} />}
-          iconClass="text-info"
+          iconClass="bg-primary-100 text-ink"
         />
         <MetricCard
           label="At Reorder"
           value={num(totalLow)}
           icon={<AlertTriangle size={20} />}
-          iconClass="text-danger"
+          iconClass="bg-danger/15 text-danger"
         />
       </div>
 
@@ -208,7 +200,7 @@ export default function Suppliers() {
               <div className="flex gap-1">
                 <button
                   aria-label="Edit"
-                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-3xl p-1.5 cursor-pointer"
+                  className="text-brand-700 hover:bg-brand-50 dark:hover:bg-white/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => {
                     setEdit(s);
                     setOpen(true);
@@ -218,7 +210,7 @@ export default function Suppliers() {
                 </button>
                 <button
                   aria-label="Delete"
-                  className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer"
+                  className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
                     const ok = await confirm({
                       title: "Delete supplier",
@@ -242,9 +234,9 @@ export default function Suppliers() {
       <p className="mt-8 mb-3 text-xs font-medium text-brand-500">By product category</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {groups.map((g) => (
-          <Card key={g.name} hover className="flex flex-col gap-4">
+          <Card key={g.name} className="flex flex-col gap-4 hover:border-primary-300 transition-colors duration-200">
             <div className="flex items-start justify-between">
-              <div className="rounded-3xl bg-brand-50 dark:bg-white/8 text-primary-700 dark:text-primary-300 p-3">
+              <div className="rounded-xl bg-primary-100 text-ink p-3">
                 <Package size={22} />
               </div>
               {g.low > 0 ? (
@@ -254,19 +246,19 @@ export default function Suppliers() {
               )}
             </div>
             <div>
-              <p className="text-lg font-medium text-ink">{g.name}</p>
+              <p className="text-lg font-semibold text-ink">{g.name}</p>
               <p className="text-sm text-brand-500 mt-0.5">
                 {g.skus} SKU{g.skus === 1 ? "" : "s"} sourced
               </p>
             </div>
-            <div className="mt-auto pt-3 border-t border-brand-100 dark:border-[#2C2C2E] flex items-center justify-between">
+            <div className="mt-auto pt-3 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
               <span className="text-xs font-medium text-brand-500">Sourcing value</span>
-              <span className="text-sm font-medium text-ink">{aed(g.value)}</span>
+              <span className="text-sm font-semibold text-ink">{aed(g.value)}</span>
             </div>
           </Card>
         ))}
         {groups.length === 0 && (
-          <Card className="col-span-full text-center text-sm text-brand-400">
+          <Card className="col-span-full text-center text-sm text-brand-500">
             No supplier groups yet — add products with categories to see sourcing
             performance.
           </Card>
@@ -410,12 +402,12 @@ function SupplierModal({
         </Field>
       </div>
       <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
+        <Button variant="outline" onClick={onClose}>
           Cancel
-        </button>
-        <button className="btn-primary" onClick={save}>
+        </Button>
+        <Button variant="primary" onClick={save}>
           Save Supplier
-        </button>
+        </Button>
       </div>
     </Modal>
   );

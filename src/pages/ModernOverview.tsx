@@ -38,20 +38,22 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { num, aed, fmtDate, cn } from "../lib/format";
 import {
+  MetricCard,
   InfoCard,
+  Card,
   Badge,
   Skeleton,
   ErrorBanner,
   Timeline,
   TimelineItem,
 } from "../components/ui";
+import type { LucideIcon } from "lucide-react";
 import AiSummaryCard from "../components/AiSummaryCard";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
-   A clean, Odoo/Linear-style dashboard. NOT drag-drop. Sections are fixed
-   and ordered: Hero KPIs → Orders trend + Activity → Inventory + Alerts
-   → Money + Customers + AI briefing.
-   Data loaders mirror the old Overview — no schema or API changes.            */
+   Minimal iOS-style dashboard. NOT drag-drop. Sections are fixed and ordered:
+   Hero KPIs → Orders trend + Activity → Inventory + Alerts → Money + Customers
+   + AI briefing. Data loaders mirror the old Overview — no schema/API changes. */
 
 type Period = "today" | "week" | "month" | "quarter" | "year";
 
@@ -285,10 +287,7 @@ export default function ModernOverview() {
       {/* Header */}
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-brand-400">
-            Dashboard
-          </p>
-          <h1 className="font-display text-[28px] leading-9 font-bold text-ink mt-1">
+          <h1 className="text-[28px] leading-9 font-semibold text-ink">
             Good {greeting()}, Virendra
           </h1>
           <p className="text-sm text-brand-500 mt-1">
@@ -298,32 +297,21 @@ export default function ModernOverview() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setEditing((v) => !v)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border text-sm font-medium px-3.5 py-2 transition-colors cursor-pointer",
-              editing
-                ? "border-primary-500 text-primary-600 bg-primary-50 dark:bg-primary-400/10"
-                : "border-brand-200 hover:bg-brand-50 dark:border-white/10 dark:hover:bg-white/5 text-ink"
-            )}
+            className={cn("chip", editing && "chip-active")}
           >
             <Layout size={15} /> {editing ? "Done" : "Edit cards"}
           </button>
-          <button
-            onClick={() => nav("/invoicing")}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-3.5 py-2 transition-colors cursor-pointer"
-          >
+          <button onClick={() => nav("/invoicing")} className="btn-primary">
             <Plus size={15} /> New invoice
           </button>
-          <button
-            onClick={() => nav("/purchase-orders")}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-brand-200 hover:bg-brand-50 dark:border-white/10 dark:hover:bg-white/5 text-ink text-sm font-semibold px-3.5 py-2 transition-colors cursor-pointer"
-          >
+          <button onClick={() => nav("/purchase-orders")} className="btn-ghost">
             <Plus size={15} /> Purchase order
           </button>
         </div>
       </div>
 
       {editing && (
-        <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-3 dark:bg-primary-400/8 dark:border-primary-500/20">
+        <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-3 dark:bg-primary-400/10 dark:border-primary-500/20">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-medium text-ink">Visible cards</p>
             <button
@@ -343,12 +331,7 @@ export default function ModernOverview() {
                 <button
                   key={id}
                   onClick={() => toggle(id)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                    on
-                      ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-400/10 dark:text-primary-300"
-                      : "border-brand-200 text-brand-500 hover:text-ink dark:border-[#2C2C2E]"
-                  )}
+                  className={cn("chip", on && "chip-active")}
                 >
                   {on ? <Eye size={13} /> : <EyeOff size={13} />}
                   {id[0].toUpperCase() + id.slice(1)}
@@ -370,59 +353,57 @@ export default function ModernOverview() {
             Key performance indicators
           </h2>
 
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Revenue (issued)"
             value={revenue.total}
             format={aed}
-            icon={<Receipt size={16} />}
-            tone="primary"
-            sub={`${revenue.count} invoice${revenue.count === 1 ? "" : "s"}`}
+            icon={<Receipt size={18} />}
+            iconClass="bg-primary-100 text-ink"
           />
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Collected"
             value={revenue.collected}
             format={aed}
-            icon={<Banknote size={16} />}
-            tone="success"
-            sub="Cash in"
+            icon={<Banknote size={18} />}
+            iconClass="bg-success/15 text-success"
           />
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Outstanding"
             value={revenue.outstanding}
             format={aed}
-            icon={<Clock size={16} />}
-            tone="danger"
-            sub="Receivables"
+            icon={<Clock size={18} />}
+            iconClass="bg-danger/15 text-danger"
           />
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Net profit"
             value={profit.net}
             format={aed}
-            icon={<TrendingUp size={16} />}
-            tone={profit.net >= 0 ? "success" : "danger"}
-            sub="Revenue − expenses"
+            icon={<TrendingUp size={18} />}
+            iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
           />
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Open orders"
             value={orderStats.progress}
             format={(n) => num(n)}
-            icon={<ShoppingCart size={16} />}
-            tone="warning"
-            sub={`${orderStats.total} total`}
+            icon={<ShoppingCart size={18} />}
+            iconClass="bg-warning/15 text-warning"
           />
-          <KpiTile
+          <KpiMetric
             loading={loading}
             label="Products"
             value={stockBreakdown.total}
             format={(n) => num(n)}
-            icon={<PackageOpen size={16} />}
-            tone={stockBreakdown.low > 0 || stockBreakdown.out > 0 ? "danger" : "primary"}
-            sub={`${stockBreakdown.low} low · ${stockBreakdown.out} out`}
+            icon={<PackageOpen size={18} />}
+            iconClass={
+              stockBreakdown.low > 0 || stockBreakdown.out > 0
+                ? "bg-danger/15 text-danger"
+                : "bg-primary-100 text-ink"
+            }
           />
         </section>
       )}
@@ -433,13 +414,13 @@ export default function ModernOverview() {
           className="lg:col-span-2"
           title="Orders over time"
           action={
-            <div className="flex items-center gap-1 p-0.5 rounded-xl bg-brand-100 dark:bg-white/10">
+            <div className="flex items-center gap-1 p-0.5 rounded-full bg-brand-100 dark:bg-white/10">
               {(["today", "week", "month", "quarter", "year"] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
                   className={cn(
-                    "px-2.5 py-1 text-[11px] font-semibold rounded-[10px] transition-colors",
+                    "px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors",
                     period === p
                       ? "bg-white text-ink shadow-sm dark:bg-[#3A3D45]"
                       : "text-brand-500 hover:text-ink"
@@ -456,27 +437,31 @@ export default function ModernOverview() {
           ) : (
             <>
               <div className="flex items-baseline gap-3 mb-2">
-                <span className="text-2xl font-medium font-display text-ink tabular-nums">
+                <span className="text-2xl font-semibold text-ink tabular-nums">
                   {orderStats.total}
                 </span>
                 <span className="text-sm text-brand-500">orders in window</span>
               </div>
               <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success px-2 py-0.5 text-[11px] font-semibold">
-                  <CheckCircle2 size={10} /> {orderStats.completed} done
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 text-warning px-2 py-0.5 text-[11px] font-semibold">
-                  <Clock size={10} /> {orderStats.progress} in progress
-                </span>
-                {orderStats.overdue > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 text-danger px-2 py-0.5 text-[11px] font-semibold">
-                    <AlertCircleIcon size={10} /> {orderStats.overdue} overdue
+                <Badge tone="success">
+                  <span className="inline-flex items-center gap-1">
+                    <CheckCircle2 size={10} /> {orderStats.completed} done
                   </span>
+                </Badge>
+                <Badge tone="warn">
+                  <span className="inline-flex items-center gap-1">
+                    <Clock size={10} /> {orderStats.progress} in progress
+                  </span>
+                </Badge>
+                {orderStats.overdue > 0 && (
+                  <Badge tone="danger">
+                    <span className="inline-flex items-center gap-1">
+                      <AlertCircleIcon size={10} /> {orderStats.overdue} overdue
+                    </span>
+                  </Badge>
                 )}
                 {orderStats.returns > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#B6BAC1] px-2 py-0.5 text-[11px] font-semibold">
-                    {orderStats.returns} returns
-                  </span>
+                  <Badge tone="neutral">{orderStats.returns} returns</Badge>
                 )}
               </div>
               <div className="flex-1 min-h-0">
@@ -556,26 +541,10 @@ export default function ModernOverview() {
             <div className="space-y-3">
               <StockBar
                 rows={[
-                  {
-                    label: "In stock",
-                    value: stockBreakdown.inStock,
-                    tone: "bg-success",
-                  },
-                  {
-                    label: "Low stock",
-                    value: stockBreakdown.low,
-                    tone: "bg-warning",
-                  },
-                  {
-                    label: "Out of stock",
-                    value: stockBreakdown.out,
-                    tone: "bg-danger",
-                  },
-                  {
-                    label: "Slow moving",
-                    value: stockBreakdown.dead,
-                    tone: "bg-brand-300",
-                  },
+                  { label: "In stock", value: stockBreakdown.inStock, tone: "bg-success" },
+                  { label: "Low stock", value: stockBreakdown.low, tone: "bg-warning" },
+                  { label: "Out of stock", value: stockBreakdown.out, tone: "bg-danger" },
+                  { label: "Slow moving", value: stockBreakdown.dead, tone: "bg-brand-300" },
                 ]}
                 total={Math.max(1, stockBreakdown.total)}
               />
@@ -585,8 +554,7 @@ export default function ModernOverview() {
                   label="Categories"
                   value={num(new Set(products.map((p) => p.category || "Unsorted")).size)}
                 />
-                <Mini
-                  label="Value"
+                <Mini label="Value"
                   value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))}
                 />
               </div>
@@ -622,14 +590,14 @@ export default function ModernOverview() {
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-brand-100">
+            <ul className="divide-y divide-brand-100 dark:divide-[#3A3D45]">
               {lowStock.slice(0, 6).map((p) => (
                 <li
                   key={p.id}
-                  className="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-brand-50 -mx-2 px-2 rounded-lg"
+                  className="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-brand-50 -mx-2 px-2 rounded-2xl"
                   onClick={() => nav("/inventory")}
                 >
-                  <div className="rounded-lg p-1.5 bg-warning/15 text-warning shrink-0">
+                  <div className="rounded-2xl p-1.5 bg-warning/15 text-warning shrink-0">
                     <PackageOpen size={14} />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -639,12 +607,8 @@ export default function ModernOverview() {
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-sm font-bold text-ink tabular-nums">
-                      {p.quantity}
-                    </p>
-                    <p className="text-[11px] text-brand-400">
-                      reorder {p.reorder_level}
-                    </p>
+                    <p className="text-base font-semibold text-ink tabular-nums">{p.quantity}</p>
+                    <p className="text-[11px] text-brand-400">reorder {p.reorder_level}</p>
                   </div>
                 </li>
               ))}
@@ -705,21 +669,21 @@ export default function ModernOverview() {
                 </div>
                 <div className="flex items-center gap-3 mt-2 text-[10px] text-brand-500">
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-sm bg-success" /> Collected
+                    <span className="w-2 h-2 rounded-full bg-success" /> Collected
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-sm bg-warning" /> Outstanding
+                    <span className="w-2 h-2 rounded-full bg-warning" /> Outstanding
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-sm bg-danger" /> Expenses
+                    <span className="w-2 h-2 rounded-full bg-danger" /> Expenses
                   </span>
                 </div>
               </div>
-              <div className="pt-2 mt-2 border-t border-brand-200 flex items-center justify-between">
-                <span className="text-sm font-bold text-ink">Net</span>
+              <div className="pt-2 mt-2 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
+                <span className="text-sm font-semibold text-ink">Net</span>
                 <span
                   className={cn(
-                    "text-lg font-extrabold tabular-nums",
+                    "text-lg font-bold tabular-nums",
                     profit.net >= 0 ? "text-success" : "text-danger"
                   )}
                 >
@@ -739,12 +703,12 @@ export default function ModernOverview() {
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <Tile
-                icon={<Users size={14} className="text-primary-500" />}
+                Icon={Users}
                 label="Customers"
                 value={num(customers.length)}
               />
               <Tile
-                icon={<FileText size={14} className="text-info" />}
+                Icon={FileText}
                 label="Open quotes"
                 value={num(
                   quotations.filter((q) => (q.status || "").toLowerCase() !== "accepted")
@@ -752,7 +716,7 @@ export default function ModernOverview() {
                 )}
               />
               <Tile
-                icon={<ShoppingCart size={14} className="text-warning" />}
+                Icon={ShoppingCart}
                 label="Open POs"
                 value={num(
                   posList.filter((p) =>
@@ -761,7 +725,7 @@ export default function ModernOverview() {
                 )}
               />
               <Tile
-                icon={<Truck size={14} className="text-success" />}
+                Icon={Truck}
                 label="In progress"
                 value={num(orderStats.progress)}
               />
@@ -784,16 +748,10 @@ export default function ModernOverview() {
             Add your first product or create an invoice to populate the dashboard.
           </p>
           <div className="mt-4 flex items-center gap-2">
-            <button
-              onClick={() => nav("/invoicing")}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary-500 hover:bg-primary-600 text-white text-sm font-semibold px-3.5 py-2 transition-colors cursor-pointer"
-            >
+            <button onClick={() => nav("/invoicing")} className="btn-primary">
               <Plus size={15} /> New invoice
             </button>
-            <button
-              onClick={() => nav("/inventory")}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-brand-200 hover:bg-brand-50 dark:border-white/10 dark:hover:bg-white/5 text-ink text-sm font-semibold px-3.5 py-2 transition-colors cursor-pointer"
-            >
+            <button onClick={() => nav("/inventory")} className="btn-ghost">
               Add product
             </button>
           </div>
@@ -803,53 +761,35 @@ export default function ModernOverview() {
   );
 }
 
-/* ── Small primitives (local — no global pollution) ─────────────────────── */
+/* ── Small presentation helpers (use shared tokens, no card styles) ─────── */
 
-type Tone = "primary" | "success" | "danger" | "warning";
-
-function KpiTile({
+function KpiMetric({
   loading,
   label,
   value,
   format,
   icon,
-  tone,
-  sub,
+  iconClass = "bg-primary-100 text-ink",
 }: {
   loading: boolean;
   label: string;
   value: number;
   format: (n: number) => string;
   icon: ReactNode;
-  tone: Tone;
-  sub?: string;
+  iconClass?: string;
 }) {
-  const toneClass: Record<Tone, string> = {
-    primary: "bg-primary-100 text-primary-700",
-    success: "bg-success/15 text-success",
-    danger: "bg-danger/15 text-danger",
-    warning: "bg-warning/15 text-warning",
-  };
-  return (
-    <div className="rounded-xl border border-brand-200/80 p-3.5 bg-white shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C] cursor-default">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-brand-500">{label}</p>
-          {loading ? (
-            <Skeleton className="h-6 w-24 mt-1.5" />
-          ) : (
-            <p className="text-xl font-bold font-display text-ink mt-1 tabular-nums">
-              {format(value)}
-            </p>
-          )}
-          {sub && (
-            <p className="text-[10.5px] text-brand-400 mt-0.5 leading-tight">{sub}</p>
-          )}
+  const formatted = format(value);
+  if (loading) {
+    return (
+      <Card className="p-4">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-20" />
         </div>
-        <div className={cn("rounded-lg p-1.5 shrink-0", toneClass[tone])}>{icon}</div>
-      </div>
-    </div>
-  );
+      </Card>
+    );
+  }
+  return <MetricCard label={label} value={formatted} icon={icon} iconClass={iconClass} />;
 }
 
 function StockBar({
@@ -861,7 +801,7 @@ function StockBar({
 }) {
   return (
     <div>
-      <div className="flex h-2 rounded-full overflow-hidden bg-brand-100">
+      <div className="flex h-2 rounded-full overflow-hidden bg-brand-100 dark:bg-white/5">
         {rows.map((r) =>
           r.value > 0 ? (
             <div
@@ -876,7 +816,7 @@ function StockBar({
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-3">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center gap-1.5">
-            <span className={cn("w-2 h-2 rounded-sm shrink-0", r.tone)} />
+            <span className={cn("w-2 h-2 rounded-full shrink-0", r.tone)} />
             <span className="text-xs text-brand-500 truncate">{r.label}</span>
             <span className="ml-auto text-xs font-semibold text-ink tabular-nums">
               {num(r.value)}
@@ -890,11 +830,9 @@ function StockBar({
 
 function Mini({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-brand-50 dark:bg-white/5 px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wider font-semibold text-brand-400">
-        {label}
-      </p>
-      <p className="text-sm font-bold text-ink tabular-nums mt-0.5 truncate">{value}</p>
+    <div className="rounded-2xl bg-brand-50 dark:bg-white/5 px-3 py-2 min-w-0">
+      <p className="text-xs font-medium text-brand-500">{label}</p>
+      <p className="text-sm font-semibold text-ink tabular-nums mt-0.5">{value}</p>
     </div>
   );
 }
@@ -918,16 +856,14 @@ function MoneyRow({
   );
 }
 
-function Tile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Tile({ Icon, label, value }: { Icon: LucideIcon; label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-brand-50 dark:bg-white/5 px-3 py-2.5">
+    <div className="rounded-2xl bg-brand-50 dark:bg-white/5 px-3 py-2.5 min-w-0">
       <div className="flex items-center gap-1.5">
-        {icon}
-        <p className="text-[10px] uppercase tracking-wider font-semibold text-brand-400">
-          {label}
-        </p>
+        <Icon size={14} className="text-ink" />
+        <p className="text-xs font-medium text-brand-500">{label}</p>
       </div>
-      <p className="text-base font-bold text-ink tabular-nums mt-1">{value}</p>
+      <p className="text-base font-semibold text-ink tabular-nums mt-1">{value}</p>
     </div>
   );
 }

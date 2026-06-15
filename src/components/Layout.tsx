@@ -413,7 +413,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
                       railMode ? "justify-center px-0" : "px-3",
                       isActive
-                        ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
+                        ? "bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
                         : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
                     )
                   }
@@ -422,7 +422,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     <>
                       <span
                         className={cn(
-                          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-500 transition-opacity duration-200",
+                          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-400 transition-opacity duration-200",
                           isActive ? "opacity-100" : "opacity-0"
                         )}
                       />
@@ -502,7 +502,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {/* Current-page context — keeps users oriented (Odoo/Tally style) */}
             {pageMeta && (
               <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]">
                   <pageMeta.icon size={18} />
                 </span>
                 <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
@@ -535,7 +535,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     {/* Quick actions (command palette) */}
                     {cmdHits.length > 0 && (
                       <div className="mb-1">
-                        <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                        <p className="px-3 pt-2 pb-1 text-[13px] font-medium text-brand-400">
                           Actions
                         </p>
                         {cmdHits.map((c) => (
@@ -544,7 +544,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                             onClick={() => go(c.to)}
                             className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                           >
-                            <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-primary-700">
+                            <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary-100 text-ink">
                               <Command size={13} />
                             </span>
                             <span className="text-sm font-semibold text-ink">
@@ -564,7 +564,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                         if (items.length === 0) return null;
                         return (
                           <div key={g} className="mb-1 last:mb-0">
-                            <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                            <p className="px-3 pt-2 pb-1 text-[13px] font-medium text-brand-400">
                               {g}
                             </p>
                             {items.map((h, i) => (
@@ -583,7 +583,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                                     </span>
                                   )}
                                 </span>
-                                <span className="shrink-0 text-[10px] font-semibold text-brand-300">
+                                <span className="shrink-0 text-[12px] font-medium text-brand-400">
                                   {g}
                                 </span>
                               </button>
@@ -593,7 +593,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       })
                     )}
                   </div>
-                  <div className="flex items-center justify-between border-t border-brand-100 dark:border-[#2A2C33] px-3 py-2 text-[11px] text-brand-400">
+                  <div className="flex items-center justify-between border-t border-brand-200 dark:border-[#2A2C33] px-3 py-2 text-xs text-brand-400">
                     <span>
                       Press <b className="font-semibold">⌘K</b> to focus
                     </span>
@@ -667,7 +667,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                             await notifsApi.markAllRead();
                             loadInbox();
                           }}
-                          className="text-xs font-semibold text-primary-700 hover:underline cursor-pointer"
+                          className="text-xs font-semibold text-brand-700 hover:text-ink cursor-pointer"
                         >
                           Mark all read
                         </button>
@@ -694,13 +694,13 @@ export default function Layout({ children }: { children: ReactNode }) {
                               "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors cursor-pointer",
                               n.read
                                 ? "hover:bg-brand-50 dark:hover:bg-white/5"
-                                : "bg-primary-50/60 hover:bg-primary-100 dark:bg-primary-400/10 dark:hover:bg-primary-400/20"
+                                : "bg-brand-50/60 hover:bg-brand-100 dark:bg-white/5 dark:hover:bg-white/10"
                             )}
                           >
                             <span
                               className={cn(
                                 "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                                n.read ? "bg-brand-200" : "bg-primary-500"
+                                n.read ? "bg-brand-300" : "bg-primary-400"
                               )}
                             />
                             <span className="min-w-0">
@@ -753,7 +753,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       <span className="block text-sm font-semibold text-ink tracking-tight">
                         {name}
                       </span>
-                      <span className="block max-w-[150px] truncate text-[11px] text-brand-400 tracking-tight">
+                      <span className="block max-w-[150px] truncate text-xs text-brand-400">
                         {profile?.email ?? profile?.company ?? "Admin"}
                       </span>
                     </span>

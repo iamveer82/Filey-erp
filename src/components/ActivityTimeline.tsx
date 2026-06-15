@@ -127,9 +127,9 @@ export default function ActivityTimeline({ relatedTo }: { relatedTo: string }) {
             return (
               <div
                 key={a.id}
-                className="flex items-start gap-2.5 rounded-3xl border border-brand-200 p-2.5 dark:border-[#2C2C2E]"
+                className="flex items-start gap-2.5 rounded-2xl border border-brand-200 p-2.5 dark:border-[#2C2C2E]"
               >
-                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
+                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-500 dark:bg-white/8">
                   <Icon size={14} />
                 </span>
                 <div className="min-w-0 flex-1">

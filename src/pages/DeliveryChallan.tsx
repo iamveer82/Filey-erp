@@ -281,7 +281,7 @@ export default function DeliveryChallan() {
             label: "Items",
             sortValue: (r) => r.item_count,
             render: (r) => (
-              <span className="tabular-nums text-brand-600">{r.item_count}</span>
+              <span className="tabular-nums text-brand-500">{r.item_count}</span>
             ),
           },
           {
@@ -289,7 +289,7 @@ export default function DeliveryChallan() {
             label: "Date",
             sortValue: (r) => r.issue_date,
             render: (r) => (
-              <span className="text-brand-600">{fmtDate(r.issue_date)}</span>
+              <span className="text-brand-500">{fmtDate(r.issue_date)}</span>
             ),
           },
           {
@@ -848,7 +848,7 @@ function DcPreview({
         {/* Notes */}
         {form.notes && (
           <div className="mb-6 p-4 rounded-xl" style={{ backgroundColor: `${a}0A` }}>
-            <p className="text-sm text-brand-600">{form.notes}</p>
+            <p className="text-sm text-brand-500">{form.notes}</p>
           </div>
         )}
 

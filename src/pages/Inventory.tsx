@@ -33,6 +33,8 @@ import { aed, num, numInput, cn, getDisplayCurrency, fmtDate } from "../lib/form
 import {
   PageHeader,
   MetricCard,
+  InfoCard,
+  Card,
   DataTable,
   Badge,
   Modal,
@@ -201,12 +203,13 @@ export default function Inventory() {
           label="Total SKUs"
           value={num(products.length)}
           icon={<Boxes size={20} />}
+          iconClass="bg-primary-100 text-ink"
         />
         <MetricCard
           label="Inventory Value"
           value={aed(invValue)}
           icon={<Layers size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
+          iconClass="bg-primary-100 text-ink"
         />
         <MetricCard
           label="Low Stock"
@@ -218,7 +221,7 @@ export default function Inventory() {
           label="Categories"
           value={num(categories.length)}
           icon={<Tag size={20} />}
-          iconClass="bg-info/15 text-info"
+          iconClass="bg-primary-100 text-ink"
         />
       </div>
 
@@ -272,7 +275,7 @@ export default function Inventory() {
               onChange={(e) => setBatchFilter(e.target.value)}
             >
               <option value="">All batches</option>
-              {uniqueBatches.map((b: any) => (
+              {uniqueBatches.map((b: string) => (
                 <option key={b} value={b}>
                   {b}
                 </option>
@@ -280,7 +283,7 @@ export default function Inventory() {
             </select>
           </div>
         )}
-        <span className="ml-auto text-xs font-semibold text-brand-400">
+        <span className="ml-auto text-xs font-medium text-brand-500">
           {filtered.length} of {products.length}
         </span>
       </div>
@@ -292,14 +295,15 @@ export default function Inventory() {
       )}
 
       {showAlerts && (
-        <div className="card mb-4 border-danger/30 bg-danger/5 dark:bg-danger/5">
+        <InfoCard title="Stock Alerts" className="mb-4">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={18} className="text-danger" />
-            <h3 className="text-sm font-bold text-ink">Stock Alerts</h3>
-            <Badge tone="danger">{outOfStock.length} out</Badge>
-            <Badge tone="warn">{lowStock.length - outOfStock.length} low</Badge>
+            <div className="flex items-center gap-2">
+              <Badge tone="danger">{outOfStock.length} out</Badge>
+              <Badge tone="warn">{lowStock.length - outOfStock.length} low</Badge>
+            </div>
             <button
-              className="ml-auto text-xs font-semibold text-primary-600 hover:underline"
+              className="ml-auto text-xs font-medium text-brand-500 hover:text-ink"
               onClick={() => {
                 setCat("all");
                 setQ("");
@@ -308,22 +312,19 @@ export default function Inventory() {
               View all inventory
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {lowStock.slice(0, 6).map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50/60 dark:border-[#3A3D45] dark:bg-white/[0.03] px-3 py-2"
-              >
+              <Card key={p.id} className="p-3 flex items-center justify-between gap-3" hover>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-ink truncate">
                     {p.name}
                   </p>
-                  <p className="text-[11px] text-brand-500 font-mono">
+                  <p className="text-[11px] text-brand-500 font-medium">
                     {p.sku}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-bold text-ink">
+                  <span className="text-sm font-semibold text-ink">
                     {p.quantity}
                   </span>
                   {p.quantity === 0 ? (
@@ -332,15 +333,15 @@ export default function Inventory() {
                     <Badge tone="warn">Low</Badge>
                   )}
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
           {lowStock.length > 6 && (
-            <p className="text-xs text-brand-400 mt-2">
+            <p className="text-xs text-brand-500 mt-3">
               +{lowStock.length - 6} more items need attention
             </p>
           )}
-        </div>
+        </InfoCard>
       )}
 
       <DataTable<Product>
@@ -357,8 +358,8 @@ export default function Inventory() {
                 for (const p of sel) await shareRecord("products", p.id, true);
                 load();
                 toast.success(`Shared ${sel.length}.`);
-              } catch (e: any) {
-                toast.error(e?.message || "Failed to share products");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Failed to share products");
               }
             },
           },
@@ -370,8 +371,8 @@ export default function Inventory() {
                 for (const p of sel) await shareRecord("products", p.id, false);
                 load();
                 toast.success(`Set ${sel.length} private.`);
-              } catch (e: any) {
-                toast.error(e?.message || "Failed to set products private");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Failed to set products private");
               }
             },
           },
@@ -391,8 +392,8 @@ export default function Inventory() {
                 for (const p of sel) await erp.deleteProduct(p.id);
                 load();
                 toast.success(`Deleted ${sel.length}.`);
-              } catch (e: any) {
-                toast.error(e?.message || "Failed to delete products");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Failed to delete products");
               }
             },
           },
@@ -403,7 +404,7 @@ export default function Inventory() {
             label: "SKU",
             sortValue: (p) => p.sku,
             render: (p) => (
-              <span className="font-mono text-xs text-brand-500">{p.sku}</span>
+              <span className="text-xs text-brand-500 font-medium">{p.sku}</span>
             ),
           },
           {
@@ -418,14 +419,14 @@ export default function Inventory() {
             key: "batch",
             label: "Batch",
             render: (p) => {
-              const bn = (p as any).batch_number as string | undefined;
-              const exp = (p as any).expiry_date as string | undefined;
+              const bn = p.batch_number as string | undefined;
+              const exp = p.expiry_date as string | undefined;
               if (!bn) return <span className="text-brand-400">—</span>;
               return (
                 <span className="flex flex-col">
-                  <span className="text-xs font-mono font-semibold">{bn}</span>
+                  <span className="text-xs font-medium">{bn}</span>
                   {exp && (
-                    <span className="text-[10px] text-brand-400 flex items-center gap-1">
+                    <span className="text-[10px] text-brand-500 flex items-center gap-1">
                       <Calendar size={9} />
                       {fmtDate(exp)}
                       {new Date(exp) < new Date() && (
@@ -484,7 +485,7 @@ export default function Inventory() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${p.name}`}
-                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
+                    className="rounded-full p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>
@@ -828,7 +829,7 @@ function ProductModal({
 
       <div className="mt-4 border-t border-brand-100 dark:border-white/10 pt-4">
         <div className="flex items-center justify-between mb-2">
-          <label className="text-xs font-bold text-ink">Custom fields</label>
+          <label className="text-[13px] font-medium text-brand-500">Custom fields</label>
           <button
             type="button"
             className="btn-ghost !h-7 !px-2 text-xs"
@@ -838,7 +839,7 @@ function ProductModal({
           </button>
         </div>
         {customFields.length === 0 ? (
-          <p className="text-[11px] text-brand-400">
+          <p className="text-[11px] text-brand-500">
             Add your own attributes (e.g. Color, Material, Voltage, Origin).
           </p>
         ) : (
@@ -860,7 +861,7 @@ function ProductModal({
                 <button
                   type="button"
                   aria-label="Remove field"
-                  className="rounded-lg p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger transition-colors duration-200"
+                  className="rounded-full p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger transition-colors duration-200"
                   onClick={() => removeField(i)}
                 >
                   <Trash2 size={15} />

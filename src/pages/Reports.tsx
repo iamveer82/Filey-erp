@@ -271,10 +271,10 @@ export default function Reports() {
             <p className="text-3xl font-medium">{aed(invoiceRevenue)}</p>
             <p className="text-sm font-medium text-ink/60 mt-1">Total Revenue</p>
           </div>
-          <div className="rounded-3xl border border-brand-200 bg-brand-50 p-6 text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#F4F5F6]">
+          <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#F4F5F6]">
             <div className="flex items-center justify-between mb-3">
-              <Receipt size={22} className="text-brand-600 dark:text-[#DDE0E4]" />
-              <span className="pill bg-brand-100 dark:bg-white/12 text-brand-600 dark:text-[#DDE0E4] text-[11px]">
+              <Receipt size={22} className="text-brand-500 dark:text-[#DDE0E4]" />
+              <span className="pill bg-brand-100 dark:bg-white/12 text-brand-500 dark:text-[#DDE0E4] text-[11px]">
                 Expenses + Payroll
               </span>
             </div>
@@ -355,7 +355,7 @@ export default function Reports() {
           </h2>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-600">Revenue</span>
+              <span className="font-medium text-brand-500">Revenue</span>
               <span className="font-medium tabular-nums">{aed(invoiceRevenue)}</span>
             </div>
             <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
@@ -368,7 +368,7 @@ export default function Reports() {
             </div>
 
             <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-600">Cost of Goods (POs)</span>
+              <span className="font-medium text-brand-500">Cost of Goods (POs)</span>
               <span className="font-medium tabular-nums">({aed(poValue)})</span>
             </div>
             <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
@@ -381,7 +381,7 @@ export default function Reports() {
             </div>
 
             <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-600">Operating Expenses</span>
+              <span className="font-medium text-brand-500">Operating Expenses</span>
               <span className="font-medium tabular-nums">
                 ({aed(totalExpenses + payrollCost)})
               </span>
@@ -395,7 +395,7 @@ export default function Reports() {
               <span className="tabular-nums">{aed(payrollCost)}</span>
             </div>
 
-            <div className="flex justify-between py-3 mt-1 rounded-3xl bg-brand-50 px-3">
+            <div className="flex justify-between py-3 mt-1 rounded-2xl bg-brand-50 px-3">
               <span className="font-medium text-ink text-base">Net Profit / (Loss)</span>
               <span
                 className={`font-medium text-base tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}

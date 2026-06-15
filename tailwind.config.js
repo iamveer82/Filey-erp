@@ -9,22 +9,21 @@ export default {
         // `primary-400` is the canonical action color used by .btn-primary,
         // focus rings and active chips; darker steps drive hover/press.
         primary: {
-          50: "#EFF6FF",
-          100: "#DBEAFE",
-          200: "#BFDBFE",
-          300: "#93C5FD",
-          400: "#2563EB",
-          500: "#1D4ED8",
-          600: "#1E40AF",
-          700: "#1E3A8A",
-          800: "#172B6B",
-          900: "#111E4D",
+          50: "#FFFBE6",
+          100: "#FFF5C2",
+          200: "#FFEB8A",
+          300: "#FFE152",
+          400: "#FFD600",
+          500: "#E5C100",
+          600: "#CCAC00",
+          700: "#998100",
+          800: "#665600",
+          900: "#332B00",
         },
-        // Secondary — Filey amber, kept as a sparing highlight/accent only
-        // (badges, "new" markers) now that blue is the primary action color.
+        // Secondary — amber accent for subtle highlights.
         secondary: {
           DEFAULT: "#FFBA3D",
-          400: "#FFD600",
+          400: "#FFBA3D",
           500: "#F5A623",
           600: "#E0900F",
         },
@@ -109,8 +108,8 @@ export default {
         "sheen-dark": "none",
       },
       backgroundImage: {
-        // `bg-cta` kept as a token but resolves to the flat primary blue.
-        cta: "linear-gradient(0deg, #2563EB, #2563EB)",
+        // `bg-cta` resolves to the flat primary yellow.
+        cta: "linear-gradient(0deg, #FFD600, #FFD600)",
       },
       keyframes: {
         "fade-up": {

@@ -213,7 +213,7 @@ export default function Orders() {
             label: "Order #",
             sortValue: (o) => o.order_number,
             render: (o) => (
-              <span className="font-mono text-xs text-brand-500">{o.order_number}</span>
+              <span className="font-medium text-xs text-brand-500">{o.order_number}</span>
             ),
           },
           {
@@ -302,14 +302,14 @@ export default function Orders() {
                   )}
                   <button
                     aria-label="Edit order"
-                    className="text-brand-600 hover:bg-brand-100 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-brand-500 hover:bg-brand-100 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={() => setEditId(o.id)}
                   >
                     <Pencil size={15} />
                   </button>
                   <button
                     aria-label="Delete order"
-                    className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
                       const ok = await confirm({
                         title: "Delete order",
@@ -556,7 +556,7 @@ function EditOrderModal({
                         <span className="block text-sm font-medium text-ink truncate">
                           {p.name}
                         </span>
-                        <span className="block text-[11px] text-brand-400 font-mono">
+                        <span className="block text-[11px] text-brand-400 font-medium">
                           {p.sku} · {p.quantity} in stock
                         </span>
                       </span>
@@ -611,7 +611,7 @@ function EditOrderModal({
                         <td className="py-1.5 px-2">
                           <span className="font-medium text-ink">{l.name}</span>
                           {l.sku && (
-                            <span className="block text-[11px] text-brand-400 font-mono">
+                            <span className="block text-[11px] text-brand-400 font-medium">
                               {l.sku}
                             </span>
                           )}
@@ -661,7 +661,7 @@ function EditOrderModal({
           </div>
 
           {err && (
-            <p className="text-xs font-medium text-danger bg-danger/10 rounded-3xl px-3 py-2">
+            <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2">
               {err}
             </p>
           )}
@@ -753,7 +753,7 @@ function BuildOrderModal({
           />
         </Field>
         {err && (
-          <p className="text-xs font-medium text-danger bg-danger/10 rounded-3xl px-3 py-2 mt-2">
+          <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2 mt-2">
             {err}
           </p>
         )}

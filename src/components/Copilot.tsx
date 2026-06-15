@@ -328,7 +328,7 @@ export default function Copilot() {
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
       {open && (
-        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
           {/* header */}
           <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3 dark:border-[#2C2C2E]">
             <button
@@ -339,7 +339,7 @@ export default function Copilot() {
             >
               <ColorOrb dimension="22px" tones={tones} />
             </button>
-            <span className="truncate font-display text-sm font-medium text-ink">
+            <span className="truncate font-medium text-sm font-medium text-ink">
               {view === "history" ? "Chats" : persona.assistantName || "Filey"}
             </span>
             {ready && persona.onboarded && (
@@ -348,7 +348,7 @@ export default function Copilot() {
                   onClick={startNewChat}
                   aria-label="New chat"
                   title="New chat"
-                  className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="rounded-2xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   <Plus size={16} />
                 </button>
@@ -529,13 +529,13 @@ export default function Copilot() {
                             e.stopPropagation();
                             setMenuFor((m) => (m === c.id ? null : c.id));
                           }}
-                          className="rounded-3xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
+                          className="rounded-2xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
                         >
                           <MoreHorizontal size={16} />
                         </span>
                       </button>
                       {menuFor === c.id && (
-                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-3xl border border-brand-200 bg-white py-1 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-2xl border border-brand-200 bg-white py-1 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
                           <MenuItem
                             icon={<Pencil size={14} />}
                             label="Rename"
@@ -577,7 +577,7 @@ export default function Copilot() {
               ))
             )}
             {busy && view === "chat" && (
-              <div className="mr-auto w-fit rounded-3xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
+              <div className="mr-auto w-fit rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
                 Thinking…
               </div>
             )}
@@ -597,7 +597,7 @@ export default function Copilot() {
                 </p>
               )}
               {file && (
-                <div className="mb-2 flex items-center gap-2 rounded-3xl bg-brand-50 px-2.5 py-1.5 text-xs dark:bg-white/8">
+                <div className="mb-2 flex items-center gap-2 rounded-2xl bg-brand-50 px-2.5 py-1.5 text-xs dark:bg-white/8">
                   <Paperclip size={13} className="shrink-0 text-brand-400" />
                   <span className="flex-1 truncate text-ink">{file.name}</span>
                   <button
@@ -621,7 +621,7 @@ export default function Copilot() {
                   onClick={() => fileRef.current?.click()}
                   aria-label="Attach a PDF or image"
                   title="Attach a PDF or image"
-                  className="grid h-10 w-9 shrink-0 place-items-center rounded-3xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="grid h-10 w-9 shrink-0 place-items-center rounded-2xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   <Paperclip size={17} />
                 </button>
@@ -654,7 +654,7 @@ export default function Copilot() {
         className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5 transition-colors"
       >
         <ColorOrb dimension="32px" tones={tones} />
-        <span className="font-display text-sm font-medium text-ink">Ask AI</span>
+        <span className="font-medium text-sm font-medium text-ink">Ask AI</span>
       </button>
     </div>
   );

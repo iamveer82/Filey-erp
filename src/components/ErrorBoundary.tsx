@@ -25,7 +25,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
           <p className="text-sm text-brand-500 mt-2">
             The app hit an unexpected error. Your data is safe — reload to continue.
           </p>
-          <pre className="text-[11px] text-brand-400 bg-brand-50 rounded-3xl p-3 mt-3 overflow-x-auto text-left">
+          <pre className="text-[11px] text-brand-400 bg-brand-50 rounded-2xl p-3 mt-3 overflow-x-auto text-left">
             {this.state.error.message}
           </pre>
           <div className="flex gap-2 justify-center mt-4">

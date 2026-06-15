@@ -45,7 +45,7 @@ export const DialogContent = forwardRef<
     >
       {children}
       <DialogPrimitive.Close
-        className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-3xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer transition-colors dark:hover:bg-white/10"
+        className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-2xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer transition-colors dark:hover:bg-white/10"
         aria-label="Close"
       >
         <X size={16} />
@@ -75,7 +75,7 @@ export const DialogTitle = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-lg font-display font-medium text-ink leading-none", className)}
+    className={cn("text-lg font-medium font-medium text-ink leading-none", className)}
     {...props}
   />
 ));

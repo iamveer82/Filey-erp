@@ -193,14 +193,14 @@ export default function EmailTemplates() {
               <div className="flex items-center gap-1">
                 <button
                   aria-label={`Duplicate ${t.name}`}
-                  className="text-brand-600 hover:bg-brand-100 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-brand-500 hover:bg-brand-100 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => duplicate(t)}
                 >
                   <Copy size={15} />
                 </button>
                 <button
                   aria-label={`Delete ${t.name}`}
-                  className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                  className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => del(t)}
                 >
                   <Trash2 size={15} />
@@ -300,7 +300,7 @@ function TemplateModal({
             placeholder="Dear {{customer}},&#10;&#10;Your invoice {{number}} for {{amount}} is due.&#10;&#10;Thank you,&#10;{{company}}"
           />
         </Field>
-        <div className="text-xs text-brand-400 bg-brand-50 rounded-3xl p-3">
+        <div className="text-xs text-brand-400 bg-brand-50 rounded-2xl p-3">
           <p className="font-medium mb-1">Available placeholders:</p>
           <code className="text-[11px]">{`{{customer}} {{company}} {{number}} {{amount}} {{date}} {{due_date}} {{items}} {{link}}`}</code>
         </div>

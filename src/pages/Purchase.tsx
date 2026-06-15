@@ -95,7 +95,7 @@ export default function Purchase() {
           label="Categories"
           value={num(byCat.length)}
           icon={<ShoppingCart size={20} />}
-          iconClass="bg-primary-100 text-primary-700"
+          iconClass="bg-primary-100 text-ink"
         />
       </div>
 
@@ -107,7 +107,7 @@ export default function Purchase() {
               return (
                 <li key={c}>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-brand-600 font-medium">{c}</span>
+                    <span className="text-brand-500 font-medium">{c}</span>
                     <span className="font-medium text-ink">{aed(v)}</span>
                   </div>
                   <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 dark:bg-white/12 overflow-hidden">
@@ -161,7 +161,7 @@ export default function Purchase() {
                 render: (e) => (
                   <button
                     aria-label="Delete purchase"
-                    className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
                       if (
                         !(await confirm({

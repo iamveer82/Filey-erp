@@ -148,7 +148,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
               } ${clickable ? "cursor-pointer hover:" : ""}`}
             >
               {t.avatar ? (
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-[11px] font-medium">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-ink text-[11px] font-medium">
                   {t.avatar}
                 </span>
               ) : (
@@ -182,7 +182,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closeConfirm(false)}
         >
           <div
-            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#1C1C1E] p-6"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#1C1C1E] p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="font-medium text-ink text-lg">{confirmState.title}</p>
@@ -211,7 +211,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closePrompt(null)}
         >
           <form
-            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#1C1C1E] p-6"
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#1C1C1E] p-6"
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
