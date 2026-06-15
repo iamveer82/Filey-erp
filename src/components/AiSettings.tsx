@@ -20,13 +20,48 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { label: "OpenAI", provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { label: "Anthropic (Claude)", provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-6" },
-  { label: "OpenRouter (any model)", provider: "openai", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
-  { label: "Groq", provider: "openai", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
-  { label: "Moonshot (Kimi)", provider: "openai", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
-  { label: "DeepSeek", provider: "openai", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  { label: "Ollama (local)", provider: "openai", baseUrl: "http://localhost:11434/v1", model: "llama3.1" },
+  {
+    label: "OpenAI",
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  },
+  {
+    label: "Anthropic (Claude)",
+    provider: "anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-sonnet-4-6",
+  },
+  {
+    label: "OpenRouter (any model)",
+    provider: "openai",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openai/gpt-4o-mini",
+  },
+  {
+    label: "Groq",
+    provider: "openai",
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: "llama-3.3-70b-versatile",
+  },
+  {
+    label: "Moonshot (Kimi)",
+    provider: "openai",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "moonshot-v1-8k",
+  },
+  {
+    label: "DeepSeek",
+    provider: "openai",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+  },
+  {
+    label: "Ollama (local)",
+    provider: "openai",
+    baseUrl: "http://localhost:11434/v1",
+    model: "llama3.1",
+  },
 ];
 
 export default function AiSettings() {
@@ -60,32 +95,42 @@ export default function AiSettings() {
   return (
     <div className="card max-w-2xl space-y-5">
       <header className="flex items-start gap-3">
-        <span className="rounded-xl bg-primary-100 text-primary-700 p-2.5 dark:bg-primary-400/15 dark:text-primary-300">
+        <span className="rounded-full bg-primary-100 text-primary-700 p-2.5 dark:bg-primary-400/15 dark:text-primary-300">
           <Sparkles size={18} />
         </span>
         <div>
-          <p className="font-bold text-ink">AI Assistant</p>
+          <p className="font-medium text-ink">AI Assistant</p>
           <p className="text-sm text-brand-500">
             Bring your own AI model to power smart features across Filey.
           </p>
         </div>
       </header>
 
-      <div className="rounded-xl border border-brand-200 bg-brand-50 p-3.5 text-xs text-brand-700 leading-relaxed">
-        <p className="font-semibold mb-1">What this powers:</p>
+      <div className="rounded-3xl border border-brand-200 bg-brand-50 p-3.5 text-xs text-brand-700 leading-relaxed">
+        <p className="font-medium mb-1">What this powers:</p>
         <ul className="space-y-0.5 list-disc pl-4">
-          <li><strong>Ask AI</strong> — chat about your business data (inventory, orders, invoices)</li>
-          <li><strong>Document scanning</strong> — extract data from receipts, invoices, and scanned PDFs</li>
-          <li><strong>AI Briefing</strong> — daily summary on your dashboard</li>
+          <li>
+            <strong>Ask AI</strong> — chat about your business data (inventory, orders,
+            invoices)
+          </li>
+          <li>
+            <strong>Document scanning</strong> — extract data from receipts, invoices, and
+            scanned PDFs
+          </li>
+          <li>
+            <strong>AI Briefing</strong> — daily summary on your dashboard
+          </li>
         </ul>
-        <p className="mt-2 text-brand-500">Just pick a preset, paste your API key, and test the connection.</p>
+        <p className="mt-2 text-brand-500">
+          Just pick a preset, paste your API key, and test the connection.
+        </p>
       </div>
 
-      <div className="flex items-start gap-2 rounded-xl border border-success/30 bg-success/10 px-3 py-2.5 text-xs font-medium text-success">
+      <div className="flex items-start gap-2 rounded-full border border-success/30 bg-success/10 px-3 py-2.5 text-xs font-medium text-success">
         <ShieldCheck size={15} className="mt-0.5 shrink-0" />
         <span>
-          Your key is stored only in this browser and is sent straight to your
-          provider — it never reaches Filey's servers.
+          Your key is stored only in this browser and is sent straight to your provider —
+          it never reaches Filey's servers.
         </span>
       </div>
 
@@ -163,7 +208,11 @@ export default function AiSettings() {
           disabled={testing || !cfg.apiKey.trim()}
           className="btn-primary"
         >
-          {testing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+          {testing ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <Sparkles size={15} />
+          )}
           Test connection
         </button>
         {cfg.apiKey && (

@@ -97,17 +97,13 @@ export function UIProvider({ children }: { children: ReactNode }) {
 
   const confirm = useCallback(
     (opts: ConfirmOpts) =>
-      new Promise<boolean>((resolve) =>
-        setConfirmState({ ...opts, resolve })
-      ),
+      new Promise<boolean>((resolve) => setConfirmState({ ...opts, resolve })),
     []
   );
 
   const prompt = useCallback(
     (opts: PromptOpts) =>
-      new Promise<string | null>((resolve) =>
-        setPromptState({ ...opts, resolve })
-      ),
+      new Promise<string | null>((resolve) => setPromptState({ ...opts, resolve })),
     []
   );
 
@@ -121,9 +117,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
   };
 
   const TOAST_STYLE: Record<ToastKind, string> = {
-    success: "text-success bg-white dark:bg-[#24262C] border-success/30",
-    error: "text-danger bg-white dark:bg-[#24262C] border-danger/30",
-    info: "text-brand-700 dark:text-[#DDE0E4] bg-white dark:bg-[#24262C] border-brand-200 dark:border-[#3A3D45]",
+    success: "text-success bg-white dark:bg-[#1C1C1E] border-success/30",
+    error: "text-danger bg-white dark:bg-[#1C1C1E] border-danger/30",
+    info: "text-brand-700 dark:text-[#DDE0E4] bg-white dark:bg-[#1C1C1E] border-brand-200 dark:border-[#2C2C2E]",
   };
   const TOAST_ICON: Record<ToastKind, ReactNode> = {
     success: <CheckCircle2 size={16} className="text-success" />,
@@ -147,21 +143,19 @@ export function UIProvider({ children }: { children: ReactNode }) {
                 if (t.to) window.location.hash = `#${t.to}`;
                 if (clickable) dismiss(t.id);
               }}
-              className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 shadow-bento text-sm font-semibold animate-fade-up ${
+              className={`flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm font-medium animate-fade-up ${
                 TOAST_STYLE[t.kind]
-              } ${clickable ? "cursor-pointer hover:shadow-bento-hover" : ""}`}
+              } ${clickable ? "cursor-pointer hover:" : ""}`}
             >
               {t.avatar ? (
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-[11px] font-bold">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700 text-[11px] font-medium">
                   {t.avatar}
                 </span>
               ) : (
                 <span className="mt-px shrink-0">{TOAST_ICON[t.kind]}</span>
               )}
               <span className="min-w-0">
-                {t.title && (
-                  <span className="block text-ink font-bold">{t.title}</span>
-                )}
+                {t.title && <span className="block text-ink font-medium">{t.title}</span>}
                 <span className="block text-ink/90 dark:text-white/80 font-normal break-words">
                   {t.message}
                 </span>
@@ -188,14 +182,12 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closeConfirm(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover p-6"
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#1C1C1E] p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="font-bold text-ink text-lg">{confirmState.title}</p>
+            <p className="font-medium text-ink text-lg">{confirmState.title}</p>
             {confirmState.message && (
-              <p className="text-sm text-brand-500 mt-1.5">
-                {confirmState.message}
-              </p>
+              <p className="text-sm text-brand-500 mt-1.5">{confirmState.message}</p>
             )}
             <div className="flex justify-end gap-2 mt-5">
               <button className="btn-ghost" onClick={() => closeConfirm(false)}>
@@ -219,14 +211,14 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closePrompt(null)}
         >
           <form
-            className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover p-6"
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#1C1C1E] p-6"
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
               closePrompt(promptInput.current?.value ?? "");
             }}
           >
-            <p className="font-bold text-ink text-lg">{promptState.title}</p>
+            <p className="font-medium text-ink text-lg">{promptState.title}</p>
             {promptState.label && (
               <label className="label mt-3">{promptState.label}</label>
             )}

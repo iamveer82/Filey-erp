@@ -99,7 +99,7 @@ export const FileCard = ({ formatFile }: FileCardProps) => {
     filePlaceholder = (
       <div className="space-y-1.5">
         <div className="flex items-center gap-1">
-          <div className="text-foreground/30 text-[10px] font-bold">#</div>
+          <div className="text-foreground/30 text-[10px] font-medium">#</div>
           <div className="bg-foreground/20 h-0.5 w-6 rounded-full" />
         </div>
         <div className="space-y-1">
@@ -347,7 +347,7 @@ export const FileCard = ({ formatFile }: FileCardProps) => {
     <div aria-hidden className="relative size-fit">
       <div
         className={cn(
-          "absolute -right-2 bottom-1.5 z-2 rounded px-1.5 py-0.5 text-[8px] font-medium uppercase",
+          "absolute -right-2 bottom-1.5 z-2 rounded px-1.5 py-0.5 text-[8px] font-medium ",
           colorBannerClass
         )}
       >
@@ -355,7 +355,7 @@ export const FileCard = ({ formatFile }: FileCardProps) => {
       </div>
       <div
         className={cn(
-          "ring-border relative z-1 space-y-3 rounded-md bg-white p-2 ring-1 dark:bg-[#24262C]",
+          "ring-border relative z-1 space-y-3 rounded-md bg-white p-2 ring-1 dark:bg-[#1C1C1E]",
           sizeClass
         )}
       >

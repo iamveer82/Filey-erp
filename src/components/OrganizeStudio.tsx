@@ -20,8 +20,8 @@ import { cn } from "../lib/format";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Visual page editor for the "techy" page tools. Dual mode:
- *   grid  → all pages as thumbnails with per-page actions
- *   focus → single large page with nav (prev/next), rotate, delete/restore
+ * grid → all pages as thumbnails with per-page actions
+ * focus → single large page with nav (prev/next), rotate, delete/restore
  */
 
 type Action = "organize" | "extract" | "split";
@@ -77,7 +77,8 @@ export default function OrganizeStudio({
           tc.width = tvp.width;
           tc.height = tvp.height;
           const tctx = tc.getContext("2d");
-          if (tctx) await p.render({ canvas: tc, canvasContext: tctx, viewport: tvp }).promise;
+          if (tctx)
+            await p.render({ canvas: tc, canvasContext: tctx, viewport: tvp }).promise;
           out.push({ index: n - 1, thumb: tctx ? tc.toDataURL("image/png") : "" });
           // full preview
           const fvp = p.getViewport({ scale: 1.2 });
@@ -85,7 +86,8 @@ export default function OrganizeStudio({
           fc.width = fvp.width;
           fc.height = fvp.height;
           const fctx = fc.getContext("2d");
-          if (fctx) await p.render({ canvas: fc, canvasContext: fctx, viewport: fvp }).promise;
+          if (fctx)
+            await p.render({ canvas: fc, canvasContext: fctx, viewport: fvp }).promise;
           fulls[n - 1] = fctx ? fc.toDataURL("image/png") : "";
         }
         if (dead) return;
@@ -98,12 +100,15 @@ export default function OrganizeStudio({
         if (!dead) setLoading(false);
       }
     })();
-    return () => { dead = true; };
+    return () => {
+      dead = true;
+    };
   }, [file]);
 
   const thumbFor = (i: number) => thumbs.find((t) => t.index === i)?.thumb ?? "";
   const fullFor = (i: number) => fullImgs[i] ?? "";
-  const rotate = (i: number) => setRotated((r) => ({ ...r, [i]: ((r[i] ?? 0) + 90) % 360 }));
+  const rotate = (i: number) =>
+    setRotated((r) => ({ ...r, [i]: ((r[i] ?? 0) + 90) % 360 }));
 
   const toggle = (set: Set<number>, i: number) => {
     const next = new Set(set);
@@ -137,14 +142,26 @@ export default function OrganizeStudio({
       } else if (action === "extract") {
         const sel = [...selected].sort((a, b) => a - b);
         if (!sel.length) throw new Error("Select at least one page to extract.");
-        outs = [await organizePages(file, sel.map((i) => ({ index: i, rotate: rotated[i] })))];
+        outs = [
+          await organizePages(
+            file,
+            sel.map((i) => ({ index: i, rotate: rotated[i] }))
+          ),
+        ];
       } else {
         const kept = order.filter((i) => !deleted.has(i));
         if (!kept.length) throw new Error("That would remove every page.");
-        outs = [await organizePages(file, kept.map((i) => ({ index: i, rotate: rotated[i] })))];
+        outs = [
+          await organizePages(
+            file,
+            kept.map((i) => ({ index: i, rotate: rotated[i] }))
+          ),
+        ];
       }
       onApply(outs);
-      toast.success(`Done — ${outs.length} file${outs.length > 1 ? "s" : ""} downloaded.`);
+      toast.success(
+        `Done — ${outs.length} file${outs.length > 1 ? "s" : ""} downloaded.`
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -160,15 +177,15 @@ export default function OrganizeStudio({
     action === "split"
       ? `Click the scissors after a page to cut. ${parts} part${parts > 1 ? "s" : ""}.`
       : action === "extract"
-      ? `Click pages to select. ${selected.size} selected.`
-      : `Drag to reorder · rotate · delete · click a page to focus. ${keptCount} page${keptCount === 1 ? "" : "s"} kept.`;
+        ? `Click pages to select. ${selected.size} selected.`
+        : `Drag to reorder · rotate · delete · click a page to focus. ${keptCount} page${keptCount === 1 ? "" : "s"} kept.`;
 
   const applyLabel =
     action === "split"
       ? `Split into ${parts} files & download`
       : action === "extract"
-      ? `Extract ${selected.size} page${selected.size === 1 ? "" : "s"} & download`
-      : "Apply & download";
+        ? `Extract ${selected.size} page${selected.size === 1 ? "" : "s"} & download`
+        : "Apply & download";
 
   const focusIdx = focusPage != null ? display.indexOf(focusPage) : -1;
 
@@ -197,14 +214,14 @@ export default function OrganizeStudio({
           >
             <Grid3X3 size={13} /> All pages
           </button>
-          <span className="text-xs font-semibold text-brand-500">
+          <span className="text-xs font-medium text-brand-500">
             {focusIdx + 1} / {total}
             {isDel && <span className="ml-1 text-danger">· Deleted</span>}
           </span>
         </div>
 
         {/* Page preview */}
-        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-[#3A3D45]">
+        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]">
           {fullFor(i) ? (
             <img
               src={fullFor(i)}
@@ -214,11 +231,13 @@ export default function OrganizeStudio({
               draggable={false}
             />
           ) : (
-            <div className="grid h-64 place-items-center"><Loader2 size={20} className="animate-spin text-brand-400" /></div>
+            <div className="grid h-64 place-items-center">
+              <Loader2 size={20} className="animate-spin text-brand-400" />
+            </div>
           )}
           {isDel && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="rounded-xl bg-danger/20 px-4 py-2 text-lg font-bold text-danger">
+              <span className="rounded-full bg-danger/20 px-4 py-2 text-lg font-medium text-danger">
                 DELETED
               </span>
             </div>
@@ -226,7 +245,7 @@ export default function OrganizeStudio({
         </div>
 
         {/* Navigation bar */}
-        <div className="mx-auto flex items-center gap-3 rounded-xl border border-brand-200 bg-white px-4 py-2.5 shadow-sm dark:border-[#3A3D45] dark:bg-[#1E2025]">
+        <div className="mx-auto flex items-center gap-3 rounded-3xl border border-brand-200 bg-white px-4 py-2.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
           <button
             onClick={() => navTo(-1)}
             disabled={!canPrev}
@@ -236,7 +255,7 @@ export default function OrganizeStudio({
             <ChevronLeft size={16} /> Prev
           </button>
 
-          <span className="min-w-[60px] text-center text-sm font-bold text-ink tabular-nums">
+          <span className="min-w-[60px] text-center text-sm font-medium text-ink tabular-nums">
             {focusIdx + 1} / {total}
           </span>
 
@@ -279,7 +298,7 @@ export default function OrganizeStudio({
 
   return (
     <div>
-      <p className="mb-3 text-xs font-semibold text-brand-500">{hint}</p>
+      <p className="mb-3 text-xs font-medium text-brand-500">{hint}</p>
 
       {loading ? (
         <div className="grid h-72 place-items-center text-sm text-brand-400">
@@ -312,18 +331,24 @@ export default function OrganizeStudio({
                     else if (action === "organize") setFocusPage(i);
                   }}
                   className={cn(
-                    "group relative w-full overflow-hidden rounded-lg border bg-white p-1 dark:bg-[#1E2025] transition-all duration-150",
-                    action === "organize" ? "cursor-pointer hover:ring-2 hover:ring-primary-400/40" : "",
+                    "group relative w-full overflow-hidden rounded-lg border bg-white p-1 dark:bg-[#1C1C1E] transition-all duration-150",
+                    action === "organize"
+                      ? "cursor-pointer hover:ring-2 hover:ring-primary-400/40"
+                      : "",
                     action === "extract" ? "cursor-pointer" : "",
                     overIdx === i ? "border-primary-400 ring-2 ring-primary-400/40" : "",
                     isSel ? "border-primary-500 ring-2 ring-primary-500/50" : "",
-                    isDel ? "opacity-40 ring-2 ring-danger/30" : "border-brand-200 dark:border-[#3A3D45]",
+                    isDel
+                      ? "opacity-40 ring-2 ring-danger/30"
+                      : "border-brand-200 dark:border-[#2C2C2E]"
                   )}
                 >
-                  <span className={cn(
-                    "absolute left-1 top-1 z-10 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-bold",
-                    isDel ? "bg-danger text-white" : "bg-primary-500 text-[#0A0A0A]"
-                  )}>
+                  <span
+                    className={cn(
+                      "absolute left-1 top-1 z-10 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-bold",
+                      isDel ? "bg-danger text-white" : "bg-primary-500 text-[#0A0A0A]"
+                    )}
+                  >
                     {action === "organize" ? pos + 1 : i + 1}
                   </span>
                   {isDel && (
@@ -349,7 +374,10 @@ export default function OrganizeStudio({
                     <div className="mt-1 flex items-center justify-center gap-1">
                       <button
                         aria-label="Rotate 90°"
-                        onClick={(e) => { e.stopPropagation(); rotate(i); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          rotate(i);
+                        }}
                         title="Rotate 90°"
                         className="grid h-6 w-6 place-items-center rounded text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10"
                       >
@@ -357,7 +385,10 @@ export default function OrganizeStudio({
                       </button>
                       <button
                         aria-label={isDel ? "Restore page" : "Delete page"}
-                        onClick={(e) => { e.stopPropagation(); toggleDelete(i); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleDelete(i);
+                        }}
                         title={isDel ? "Restore page" : "Delete page"}
                         className={cn(
                           "grid h-6 w-6 place-items-center rounded hover:bg-brand-100 dark:hover:bg-white/10",
@@ -391,7 +422,12 @@ export default function OrganizeStudio({
         </div>
       )}
 
-      <button onClick={apply} disabled={busy || loading} className="btn-primary mt-4 w-full" aria-label="Apply changes and download">
+      <button
+        onClick={apply}
+        disabled={busy || loading}
+        className="btn-primary mt-4 w-full"
+        aria-label="Apply changes and download"
+      >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
         {applyLabel}
       </button>

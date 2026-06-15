@@ -32,9 +32,14 @@ async function toItem(file: File): Promise<Item> {
     c.height = vp.height;
     const ctx = c.getContext("2d");
     if (ctx) await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
-    return { id: uid(), file, thumb: ctx ? c.toDataURL("image/png") : "", pages: pdf.numPages };
+    return {
+      id: uid(),
+      file,
+      thumb: ctx ? c.toDataURL("image/png") : "",
+      pages: pdf.numPages,
+    };
   } catch (e) {
-    console.warn('Failed to load PDF:', e);
+    console.warn("Failed to load PDF:", e);
     return { id: uid(), file, thumb: "", pages: 0 };
   }
 }
@@ -111,7 +116,7 @@ export default function MergeStudio({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-brand-500">
+        <p className="text-xs font-medium text-brand-500">
           {items.length} file{items.length === 1 ? "" : "s"} · {totalPages} page
           {totalPages === 1 ? "" : "s"} — drag to reorder
         </p>
@@ -127,7 +132,7 @@ export default function MergeStudio({
                 try {
                   await addMore(e.target.files);
                 } catch (e) {
-                  console.warn('Failed to add PDF:', e);
+                  console.warn("Failed to add PDF:", e);
                 }
               })();
               e.target.value = "";
@@ -154,13 +159,13 @@ export default function MergeStudio({
               dragId.current = null;
               setOverId(null);
             }}
-            className={`group relative cursor-grab rounded-xl border bg-white p-2 active:cursor-grabbing dark:bg-[#1E2025] ${
+            className={`group relative cursor-grab rounded-xl border bg-white p-2 active:cursor-grabbing dark:bg-[#1C1C1E] ${
               overId === it.id
                 ? "border-primary-400 ring-2 ring-primary-400/40"
-                : "border-brand-200 dark:border-[#3A3D45]"
+                : "border-brand-200 dark:border-[#2C2C2E]"
             }`}
           >
-            <span className="absolute left-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-primary-500 text-[11px] font-bold text-[#0A0A0A]">
+            <span className="absolute left-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-primary-500 text-[11px] font-medium text-[#0A0A0A]">
               {i + 1}
             </span>
             <button
@@ -171,16 +176,23 @@ export default function MergeStudio({
             >
               <X size={11} />
             </button>
-            <div className="grid h-32 place-items-center overflow-hidden rounded-lg bg-brand-50 dark:bg-black/20">
+            <div className="grid h-32 place-items-center overflow-hidden rounded-3xl bg-brand-50 dark:bg-black/20">
               {it.thumb ? (
-                <img src={it.thumb} alt={`Page thumbnail`} className="max-h-full max-w-full object-contain" />
+                <img
+                  src={it.thumb}
+                  alt={`Page thumbnail`}
+                  className="max-h-full max-w-full object-contain"
+                />
               ) : (
                 <Loader2 size={16} className="animate-spin text-brand-400" />
               )}
             </div>
             <div className="mt-1.5 flex items-center gap-1">
               <GripVertical size={12} className="shrink-0 text-brand-400" />
-              <span className="truncate text-[11px] text-brand-600 dark:text-[#C9CDD3]" title={it.file.name}>
+              <span
+                className="truncate text-[11px] text-brand-600 dark:text-[#C9CDD3]"
+                title={it.file.name}
+              >
                 {it.file.name}
               </span>
             </div>
@@ -188,7 +200,7 @@ export default function MergeStudio({
           </div>
         ))}
         {!items.length && (
-          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-brand-300 text-sm text-brand-400 dark:border-[#3A3D45]">
+          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 text-sm text-brand-400 dark:border-[#2C2C2E]">
             <span>
               <Upload size={18} className="mx-auto mb-1" /> Add PDFs to merge
             </span>

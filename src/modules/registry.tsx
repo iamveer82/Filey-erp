@@ -53,6 +53,7 @@ const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
 const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
 const BankAccounts = lazy(() => import("../pages/BankAccounts"));
 const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
+// const SmsTemplates = lazy(() => import("../pages/SmsTemplates"));
 
 export interface AppModule {
   id: string;
@@ -276,4 +277,13 @@ export const MODULES: AppModule[] = [
     to: "/email-templates",
     Component: EmailTemplates,
   },
+  /* {
+    id: "sms-templates",
+    label: "SMS Templates",
+    short: "SMS",
+    desc: "Reusable SMS templates with placeholders + 6-digit OTP",
+    icon: MessageSquare,
+    to: "/sms-templates",
+    Component: SmsTemplates,
+  }, */
 ];

@@ -1,10 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { tools, org } from "./api";
 import { useAuth } from "./auth";
 import { MODULES, type AppModule } from "../modules/registry";
@@ -38,12 +32,16 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
           try {
             const arr = JSON.parse(row.value);
             if (Array.isArray(arr)) setDisabled(arr.map(String));
-          } catch {
+          } catch (e) {
+            console.warn("Failed to parse disabled modules setting", e);
             /* ignore bad value */
           }
         }
       })
-      .catch((e) => { console.error("Failed to load module settings:", e); return []; })
+      .catch((e) => {
+        console.error("Failed to load module settings:", e);
+        return [];
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -56,11 +54,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
       .members()
       .then((ms) => {
         const me = ms.find((m) => m.user_id === user.id);
-        if (
-          me &&
-          !["owner", "admin"].includes(me.role) &&
-          Array.isArray(me.modules)
-        ) {
+        if (me && !["owner", "admin"].includes(me.role) && Array.isArray(me.modules)) {
           setAllowed(me.modules);
         } else {
           setAllowed(null);
@@ -80,17 +74,15 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 
   const persist = (next: string[]) => {
     setDisabled(next);
-    tools.setSetting(KEY, JSON.stringify(next)).catch((e) => console.error("Failed to persist module settings:", e));
+    tools
+      .setSetting(KEY, JSON.stringify(next))
+      .catch((e) => console.error("Failed to persist module settings:", e));
   };
 
   const toggle = (id: string) => {
     const m = MODULES.find((x) => x.id === id);
     if (m?.core) return;
-    persist(
-      disabled.includes(id)
-        ? disabled.filter((x) => x !== id)
-        : [...disabled, id]
-    );
+    persist(disabled.includes(id) ? disabled.filter((x) => x !== id) : [...disabled, id]);
   };
 
   const value: ModulesValue = {
@@ -104,8 +96,14 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+const defaultValue: ModulesValue = {
+  loading: false,
+  modules: MODULES,
+  isEnabled: () => true,
+  enabledModules: () => MODULES,
+  toggle: () => {},
+};
+
 export function useModules(): ModulesValue {
-  const c = useContext(Ctx);
-  if (!c) throw new Error("useModules must be used within ModulesProvider");
-  return c;
+  return useContext(Ctx) ?? defaultValue;
 }

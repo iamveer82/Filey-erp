@@ -25,7 +25,7 @@ const EMPTY: Dataset = {
 };
 
 /** Loads the searchable/alertable datasets once. The api layer already
- *  caches these, so this stays cheap and shares across hooks. */
+ * caches these, so this stays cheap and shares across hooks. */
 function useDataset(): Dataset {
   const [data, setData] = useState<Dataset>(EMPTY);
   useEffect(() => {
@@ -53,7 +53,7 @@ export type SearchHit = {
 };
 
 /** Global cross-module search: nav pages + live products / orders /
- *  invoices / customers, substring-matched. */
+ * invoices / customers, substring-matched. */
 export function useGlobalSearch(query: string): SearchHit[] {
   const { products, orders, invoices, customers } = useDataset();
   return useMemo(() => {
@@ -112,7 +112,7 @@ export type Notif = {
 };
 
 /** Derives actionable notifications from live data: low/out stock,
- *  overdue unpaid invoices, draft orders. */
+ * overdue unpaid invoices, draft orders. */
 export function useNotifications(): Notif[] {
   const { products, invoices, orders } = useDataset();
   return useMemo(() => {

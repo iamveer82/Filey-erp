@@ -41,7 +41,12 @@ export default function FitText({
     <div
       ref={ref}
       className={className}
-      style={{ fontSize: `${px}px`, lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden" }}
+      style={{
+        fontSize: `${px}px`,
+        lineHeight: 1.15,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
     >
       {text}
     </div>

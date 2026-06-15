@@ -34,7 +34,9 @@ export default function ScanDocModal({
   const onFile = async (file?: File | null) => {
     if (!file) return;
     if (!aiReady()) {
-      toast.error("Connect an AI model first (Settings → AI Assistant). A vision-capable model is required.");
+      toast.error(
+        "Connect an AI model first (Settings → AI Assistant). A vision-capable model is required."
+      );
       return;
     }
     setFileName(file.name);
@@ -53,7 +55,14 @@ export default function ScanDocModal({
 
   const patchItem = (i: number, patch: Partial<InvoiceItem>) =>
     setData((d) =>
-      d ? { ...d, items: (d.items ?? []).map((it, idx) => (idx === i ? { ...it, ...patch } : it)) } : d
+      d
+        ? {
+            ...d,
+            items: (d.items ?? []).map((it, idx) =>
+              idx === i ? { ...it, ...patch } : it
+            ),
+          }
+        : d
     );
 
   const createDraft = async () => {
@@ -114,13 +123,13 @@ export default function ScanDocModal({
     >
       {!data ? (
         <div className="space-y-3">
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
             {busy ? (
               <Loader2 size={28} className="animate-spin text-primary-500" />
             ) : (
               <Upload size={28} className="text-brand-400" />
             )}
-            <span className="text-sm font-semibold text-ink">
+            <span className="text-sm font-medium text-ink">
               {busy ? "Reading the document…" : fileName || "Upload a PDF or image"}
             </span>
             <span className="text-xs text-brand-400">
@@ -202,11 +211,24 @@ export default function ScanDocModal({
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-ghost" onClick={reset} aria-label="Scan another document">
+            <button
+              className="btn-ghost"
+              onClick={reset}
+              aria-label="Scan another document"
+            >
               Scan another
             </button>
-            <button className="btn-primary" onClick={createDraft} disabled={creating} aria-label="Create draft invoice from scan">
-              {creating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            <button
+              className="btn-primary"
+              onClick={createDraft}
+              disabled={creating}
+              aria-label="Create draft invoice from scan"
+            >
+              {creating ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Sparkles size={15} />
+              )}
               Create draft invoice
             </button>
           </div>

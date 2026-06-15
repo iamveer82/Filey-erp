@@ -39,20 +39,21 @@ view, animation that draws the eye away from content.
 
 ## 2. Colors
 
-| Token | Value | Role |
-|---|---|---|
-| `primary-400` | `#FFD600` | Brand yellow — primary buttons, active nav |
-| `primary-100/700` | tints/shades | Accent chips, active text on tint |
-| `brand-50…900` | neutral gray ramp | Surfaces, hairlines, text hierarchy |
-| `ink` | `#0A0A0A` | Primary text |
-| `canvas` / `background` | `#FDFDFD` | Page background (flat — no washes) |
-| `surface` | `#F5F8FB` | Sidebar / quiet grouped surfaces |
-| `success` | `#3FB984` | Positive status |
-| `warning` | `#F59E0B` | Caution status |
-| `danger` | `#E5484D` | Errors, destructive actions |
-| `info` | `#0EA5E9` | Informational status |
+| Token                   | Value             | Role                                       |
+| ----------------------- | ----------------- | ------------------------------------------ |
+| `primary-400`           | `#FFD600`         | Brand yellow — primary buttons, active nav |
+| `primary-100/700`       | tints/shades      | Accent chips, active text on tint          |
+| `brand-50…900`          | neutral gray ramp | Surfaces, hairlines, text hierarchy        |
+| `ink`                   | `#0A0A0A`         | Primary text                               |
+| `canvas` / `background` | `#FDFDFD`         | Page background (flat — no washes)         |
+| `surface`               | `#F5F8FB`         | Sidebar / quiet grouped surfaces           |
+| `success`               | `#3FB984`         | Positive status                            |
+| `warning`               | `#F59E0B`         | Caution status                             |
+| `danger`                | `#E5484D`         | Errors, destructive actions                |
+| `info`                  | `#0EA5E9`         | Informational status                       |
 
 Rules:
+
 - White cards on a flat near-white canvas. No background gradients or washes.
 - Status colors are for status only (badges, deltas, semantic icons) — never decoration.
 - Charts: dark ink stroke (`#0A0A0A`, 2px) with 6% ink fill; grid `#E7E7EE`; ticks `#9A9A9A`. No gradient fills, no yellow charts.
@@ -62,14 +63,14 @@ Rules:
 **Plus Jakarta Sans** for everything (weights 400–800). `font-mono` (IBM Plex
 Mono) for document numbers / code only.
 
-| Style | Size / Line | Weight |
-|---|---|---|
-| Page title | 28 / 36 | 700 |
-| Section header | 16–18 | 700 |
-| Card title | 15–16 | 700 |
-| Body / table data | 14 / 22 | 400–500 |
-| Caption / meta | 11–12 | 400–600 |
-| Stat number | 24 | 700, `tabular-nums` |
+| Style             | Size / Line | Weight              |
+| ----------------- | ----------- | ------------------- |
+| Page title        | 28 / 36     | 700                 |
+| Section header    | 16–18       | 700                 |
+| Card title        | 15–16       | 700                 |
+| Body / table data | 14 / 22     | 400–500             |
+| Caption / meta    | 11–12       | 400–600             |
+| Stat number       | 24          | 700, `tabular-nums` |
 
 Eyebrow labels: 10–11px, semibold, uppercase, tracked, `brand-400`.
 

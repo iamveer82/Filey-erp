@@ -121,14 +121,17 @@ interface DcRecord {
 function loadDcs(): DcRecord[] {
   try {
     return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]");
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load delivery challans", e);
     return [];
   }
 }
 function saveDcs(records: DcRecord[]) {
   try {
     localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records));
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to save delivery challans", e);
+  }
   // Write-through so challans follow the user across devices.
   void tools.setSetting(DC_SETTING_KEY, JSON.stringify(records)).catch(() => {});
 }
@@ -142,7 +145,8 @@ async function syncDcs(): Promise<DcRecord[]> {
       localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(remote));
       return remote;
     }
-  } catch {
+  } catch (e) {
+    console.warn("Failed to sync delivery challans from server", e);
     /* offline / not configured — fall back to local */
   }
   return loadDcs();
@@ -342,7 +346,8 @@ function DcEditor({
         elementToPdfBytes(el, base)
       );
       if (saved) toast.success("Saved a copy to My Files.");
-    } catch {
+    } catch (e) {
+      console.warn("Failed to archive delivery challan PDF", e);
       /* archiving is a convenience — never block save */
     }
   };

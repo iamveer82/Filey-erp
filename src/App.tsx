@@ -14,6 +14,7 @@ import FileyLoader from "./components/FileyLoader";
 import Copilot from "./components/Copilot";
 import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
+import { Toaster } from "./components/Toaster";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
@@ -27,7 +28,7 @@ function Splash() {
 function ModuleDisabled({ name }: { name: string }) {
   return (
     <div className="card max-w-md mx-auto mt-10 text-center">
-      <p className="text-lg font-bold text-ink">{name} is disabled</p>
+      <p className="text-lg font-medium text-ink">{name} is disabled</p>
       <p className="text-sm text-brand-500 mt-2">
         Enable this module from <b>Settings → Apps</b> to use it.
       </p>
@@ -49,9 +50,7 @@ function AppRoutes() {
             <Route
               key={m.id}
               path={m.to}
-              element={
-                isEnabled(m.id) ? <Page /> : <ModuleDisabled name={m.label} />
-              }
+              element={isEnabled(m.id) ? <Page /> : <ModuleDisabled name={m.label} />}
             />
           );
         })}
@@ -69,11 +68,7 @@ function Gate() {
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
   if (!user)
-    return showLogin ? (
-      <Login />
-    ) : (
-      <Landing onGetStarted={() => setShowLogin(true)} />
-    );
+    return showLogin ? <Login /> : <Landing onGetStarted={() => setShowLogin(true)} />;
   // Signed in but still fetching the profile — show the splash, not the
   // profile-setup form (which would otherwise flash for existing users).
   if (profileLoading) return <Splash />;
@@ -88,6 +83,7 @@ function Gate() {
         <Copilot />
         <CommandPalette />
         <OverdueReminder />
+        <Toaster />
       </HashRouter>
     </ModulesProvider>
   );

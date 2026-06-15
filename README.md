@@ -111,14 +111,14 @@ are core and always on). Adding a new mini-app is a single registry entry.
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Vite dev server (browser) |
-| `npm run tauri dev` | Desktop app in dev |
-| `npm run build` | Typecheck + production web build |
-| `npm test` | Unit & component tests (Vitest) |
-| `npm run typecheck` | TypeScript only |
-| `npm run tauri build` | Desktop installers |
+| Command               | What it does                     |
+| --------------------- | -------------------------------- |
+| `npm run dev`         | Vite dev server (browser)        |
+| `npm run tauri dev`   | Desktop app in dev               |
+| `npm run build`       | Typecheck + production web build |
+| `npm test`            | Unit & component tests (Vitest)  |
+| `npm run typecheck`   | TypeScript only                  |
+| `npm run tauri build` | Desktop installers               |
 
 ## Status & roadmap
 

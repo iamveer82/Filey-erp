@@ -13,6 +13,7 @@ import {
 import Logo from "../components/Logo";
 import PeekingCharacters from "../components/PeekingCharacters";
 import { FormField } from "../components/ui";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
 
 type Mode = "signin" | "signup";
@@ -31,7 +32,10 @@ function Segmented<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex rounded-xl bg-brand-100 dark:bg-white/5 p-1 gap-1" role="tablist">
+    <div
+      className="flex rounded-3xl bg-brand-100 dark:bg-white/8 p-1 gap-1"
+      role="tablist"
+    >
       {options.map((o) => {
         const active = o.v === value;
         return (
@@ -43,9 +47,9 @@ function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(o.v)}
             className={
-              "flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
+              "flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
               (active
-                ? "bg-white text-ink shadow-bento dark:bg-[#3A3D45] dark:text-[#F4F5F6]"
+                ? "bg-white text-ink dark:bg-[#2C2C2E] dark:text-[#F4F5F6]"
                 : "text-brand-500 hover:text-ink")
             }
           >
@@ -58,13 +62,8 @@ function Segmented<T extends string>({
 }
 
 export default function Login() {
-  const {
-    signInWithPassword,
-    signUpWithPassword,
-    sendLoginOtp,
-    verifyOtp,
-    resendOtp,
-  } = useAuth();
+  const { signInWithPassword, signUpWithPassword, sendLoginOtp, verifyOtp, resendOtp } =
+    useAuth();
 
   const [screen, setScreen] = useState<Screen>("form");
   const [mode, setMode] = useState<Mode>("signin");
@@ -88,13 +87,14 @@ export default function Login() {
   // Inline validation
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const setFieldError = (field: string, err: string) =>
-    setFieldErrors((prev) => (err ? { ...prev, [field]: err } : { ...prev, [field]: "" }));
+    setFieldErrors((prev) =>
+      err ? { ...prev, [field]: err } : { ...prev, [field]: "" }
+    );
   const clearFieldErrors = () => setFieldErrors({});
 
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
-  const idPlaceholder =
-    channel === "email" ? "you@company.com" : "+9715XXXXXXXX";
+  const idPlaceholder = channel === "email" ? "you@company.com" : "+9715XXXXXXXX";
 
   const reset = (keepIdentifier = true) => {
     setErr(null);
@@ -118,9 +118,15 @@ export default function Login() {
       setFieldError("identifier", `${idLabel} is required`);
       hasError = true;
     } else if (channel === "phone" && !/^\+\d{8,15}$/.test(identifier.trim())) {
-      setFieldError("identifier", "Enter phone in international format, e.g. +971****4567");
+      setFieldError(
+        "identifier",
+        "Enter phone in international format, e.g. +971****4567"
+      );
       hasError = true;
-    } else if (channel === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier.trim())) {
+    } else if (
+      channel === "email" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier.trim())
+    ) {
       setFieldError("identifier", "Enter a valid email address");
       hasError = true;
     }
@@ -211,10 +217,10 @@ export default function Login() {
       role={kind === "err" ? "alert" : "status"}
       aria-live="polite"
       className={
-        "flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold " +
+        "flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs font-medium " +
         (kind === "err"
           ? "text-danger bg-danger/10"
-          : "text-brand-700 bg-brand-100 dark:text-[#DDE0E4] dark:bg-white/10")
+          : "text-brand-700 bg-brand-100 dark:text-[#DDE0E4] dark:bg-white/12")
       }
     >
       {kind === "err" ? (
@@ -227,9 +233,9 @@ export default function Login() {
   );
 
   return (
-    <div className="min-h-full grid lg:grid-cols-2 bg-background dark:bg-[#1A1B1E]">
+    <div className="min-h-full grid lg:grid-cols-2 bg-background dark:bg-[#1C1C1E]">
       {/* ── Brand panel with playful characters ── */}
-      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-gradient-to-br from-[#15161A] via-[#201d24] to-[#2a2620] text-white">
+      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-ink text-white">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.05]"
@@ -242,16 +248,16 @@ export default function Login() {
 
         <div className="relative flex items-center gap-3">
           <Logo size={56} />
-          <p className="text-2xl font-bold">Filey</p>
+          <p className="text-2xl font-medium">Filey</p>
         </div>
 
         <div className="relative">
-          <h2 className="text-[32px] leading-[1.15] font-bold max-w-md">
+          <h2 className="text-[32px] leading-[1.15] font-medium max-w-md">
             Run your whole business from one calm place.
           </h2>
-          <p className="text-white/55 mt-3 max-w-sm">
-            Inventory, orders, invoicing and CRM — fast and beautifully
-            simple. (Mind the password — they're watching.)
+          <p className="text-white/60 mt-3 max-w-sm">
+            Inventory, orders, invoicing and CRM — fast and beautifully simple. (Mind the
+            password — they're watching.)
           </p>
         </div>
 
@@ -269,16 +275,14 @@ export default function Login() {
         <div className="w-full max-w-sm">
           <div className="flex lg:hidden flex-col items-center mb-8">
             <Logo size={104} />
-            <h1 className="text-2xl font-bold text-ink mt-3">Filey</h1>
+            <h1 className="text-2xl font-medium text-ink mt-3">Filey</h1>
           </div>
 
           {screen === "form" ? (
             <form onSubmit={submitForm} className="space-y-4">
               <div className="mb-2">
-                <h1 className="text-2xl font-bold text-ink">
-                  {mode === "signin"
-                    ? "Welcome back"
-                    : "Create your account"}
+                <h1 className="text-2xl font-medium text-ink">
+                  {mode === "signin" ? "Welcome back" : "Create your account"}
                 </h1>
                 <p className="text-sm text-brand-500 mt-1">
                   {mode === "signin"
@@ -303,7 +307,11 @@ export default function Login() {
               <FormField
                 label={idLabel}
                 error={fieldErrors.identifier}
-                hint={channel === "phone" ? "International format, e.g. +9715XXXXXXXX" : undefined}
+                hint={
+                  channel === "phone"
+                    ? "International format, e.g. +9715XXXXXXXX"
+                    : undefined
+                }
                 required
               >
                 <div className="relative">
@@ -353,9 +361,7 @@ export default function Login() {
                       className="input pl-10 pr-10"
                       type={showPw ? "text" : "password"}
                       autoComplete={
-                        mode === "signup"
-                          ? "new-password"
-                          : "current-password"
+                        mode === "signup" ? "new-password" : "current-password"
                       }
                       value={password}
                       onChange={(e) => {
@@ -371,7 +377,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-3xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -380,11 +386,7 @@ export default function Login() {
               )}
 
               {mode === "signup" && (
-                <FormField
-                  label="Confirm password"
-                  error={fieldErrors.confirm}
-                  required
-                >
+                <FormField label="Confirm password" error={fieldErrors.confirm} required>
                   <div className="relative">
                     <Lock
                       size={16}
@@ -405,17 +407,11 @@ export default function Login() {
                     <button
                       type="button"
                       tabIndex={-1}
-                      aria-label={
-                        showConfirm ? "Hide password" : "Show password"
-                      }
+                      aria-label={showConfirm ? "Hide password" : "Show password"}
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-3xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
                     >
-                      {showConfirm ? (
-                        <EyeOff size={16} />
-                      ) : (
-                        <Eye size={16} />
-                      )}
+                      {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </FormField>
@@ -445,15 +441,15 @@ export default function Login() {
                 {busy
                   ? "Please wait…"
                   : mode === "signup"
-                  ? "Create account"
-                  : method === "otp"
-                  ? "Send code"
-                  : "Sign in"}
+                    ? "Create account"
+                    : method === "otp"
+                      ? "Send code"
+                      : "Sign in"}
               </button>
 
               <button
                 type="button"
-                className="text-xs font-semibold text-brand-500 hover:text-ink w-full text-center cursor-pointer"
+                className="text-xs font-medium text-brand-500 hover:text-ink w-full text-center cursor-pointer"
                 onClick={() => {
                   setMode(mode === "signin" ? "signup" : "signin");
                   setMethod("password");
@@ -475,46 +471,36 @@ export default function Login() {
                   setErr(null);
                   setMsg(null);
                 }}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-ink cursor-pointer"
               >
                 <ArrowLeft size={14} /> Back
               </button>
 
               <div>
-                <h1 className="text-2xl font-bold text-ink">
-                  Enter the code
-                </h1>
+                <h1 className="text-2xl font-medium text-ink">Enter the code</h1>
                 <p className="text-sm text-brand-500 mt-1">
-                  Sent to{" "}
-                  <span className="font-semibold text-ink">
-                    {identifier}
-                  </span>
+                  Sent to <span className="font-medium text-ink">{identifier}</span>
                 </p>
               </div>
 
               <FormField label="6-digit code" required>
-                <input
-                  id="otp"
-                  className="input !h-14 text-center text-2xl font-bold tracking-[0.6em]"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]*"
+                <InputOTP
                   maxLength={6}
                   value={token}
-                  onChange={(e) =>
-                    setToken(e.target.value.replace(/\D/g, "").slice(0, 6))
-                  }
-                  autoFocus
-                />
+                  onChange={(v) => setToken(v.replace(/\D/g, "").slice(0, 6))}
+                >
+                  <InputOTPGroup>
+                    {[0, 1, 2, 3, 4, 5].map((i) => (
+                      <InputOTPSlot key={i} index={i} />
+                    ))}
+                  </InputOTPGroup>
+                </InputOTP>
               </FormField>
 
               {err && <Msg kind="err">{err}</Msg>}
               {msg && <Msg kind="msg">{msg}</Msg>}
 
-              <button
-                className="btn-primary w-full"
-                disabled={busy || token.length < 6}
-              >
+              <button className="btn-primary w-full" disabled={busy || token.length < 6}>
                 {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy ? "Verifying…" : "Verify"}
               </button>
@@ -523,7 +509,7 @@ export default function Login() {
                 type="button"
                 disabled={busy}
                 onClick={resend}
-                className="text-xs font-semibold text-brand-500 hover:text-ink w-full text-center cursor-pointer disabled:opacity-50"
+                className="text-xs font-medium text-brand-500 hover:text-ink w-full text-center cursor-pointer disabled:opacity-50"
               >
                 Resend code
               </button>

@@ -159,7 +159,11 @@ export default function ESignStudio({
           c.height = vp.height;
           const ctx = c.getContext("2d")!;
           await page.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
-          pages.push({ img: c.toDataURL("image/png"), width: vp.width, height: vp.height });
+          pages.push({
+            img: c.toDataURL("image/png"),
+            width: vp.width,
+            height: vp.height,
+          });
         }
       } else if (file.type.startsWith("image/")) {
         const url = URL.createObjectURL(file);
@@ -173,8 +177,9 @@ export default function ESignStudio({
       }
       setDocPages(pages);
       setCurrentPage(0);
-    } catch {
+    } catch (e) {
       toast.error("Failed to load document.");
+      console.warn("Failed to load document:", e);
     } finally {
       setLoading(false);
     }
@@ -251,7 +256,18 @@ export default function ESignStudio({
       sign.src = signSrc;
     };
     img.src = page.img;
-  }, [docPages, currentPage, mode, signImg, signX, signY, signScale, docFile, onApply, toast]);
+  }, [
+    docPages,
+    currentPage,
+    mode,
+    signImg,
+    signX,
+    signY,
+    signScale,
+    docFile,
+    onApply,
+    toast,
+  ]);
 
   // Auto-applied preview canvas: show a live composite on previewRef
   useEffect(() => {
@@ -340,21 +356,32 @@ export default function ESignStudio({
     <div className="space-y-4">
       {/* Mode selector */}
       <div className="flex flex-wrap gap-2">
-        {([
+        {[
           { id: "draw-only" as Mode, label: "Make a Sign", desc: "Draw your signature" },
-          { id: "upload-both" as Mode, label: "Upload Doc + Sign", desc: "Combine document & signature" },
-          { id: "upload-draw" as Mode, label: "Upload Doc + Draw", desc: "Draw sign on document" },
-        ]).map((m) => (
+          {
+            id: "upload-both" as Mode,
+            label: "Upload Doc + Sign",
+            desc: "Combine document & signature",
+          },
+          {
+            id: "upload-draw" as Mode,
+            label: "Upload Doc + Draw",
+            desc: "Draw sign on document",
+          },
+        ].map((m) => (
           <button
             key={m.id}
-            onClick={() => { reset(); setMode(m.id); }}
+            onClick={() => {
+              reset();
+              setMode(m.id);
+            }}
             className={`flex-1 min-w-[140px] rounded-xl border-2 p-3 text-left transition-all cursor-pointer ${
               mode === m.id
                 ? "border-primary-500 bg-primary-50 dark:bg-primary-500/10"
-                : "border-brand-200 hover:border-brand-300 bg-white dark:bg-white/5"
+                : "border-brand-200 hover:border-brand-300 bg-white dark:bg-white/8"
             }`}
           >
-            <p className="text-sm font-bold text-ink">{m.label}</p>
+            <p className="text-sm font-medium text-ink">{m.label}</p>
             <p className="text-[11px] text-brand-400">{m.desc}</p>
           </button>
         ))}
@@ -364,16 +391,16 @@ export default function ESignStudio({
       {mode === "draw-only" && (
         <div className="card space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 rounded-lg bg-brand-100 p-1">
+            <div className="flex items-center gap-1 rounded-3xl bg-brand-100 p-1">
               <button
                 onClick={() => setDrawTool("pen")}
-                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "pen" ? "bg-white shadow-sm text-ink" : "text-brand-400"}`}
+                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
               >
                 <PenLine size={16} />
               </button>
               <button
                 onClick={() => setDrawTool("eraser")}
-                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "eraser" ? "bg-white shadow-sm text-ink" : "text-brand-400"}`}
+                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "eraser" ? "bg-white text-ink" : "text-brand-400"}`}
               >
                 <Eraser size={16} />
               </button>
@@ -388,7 +415,7 @@ export default function ESignStudio({
             <select
               value={drawWidth}
               onChange={(e) => setDrawWidth(Number(e.target.value))}
-              className="text-xs border border-brand-200 rounded-lg px-2 py-1.5 bg-white"
+              className="text-xs border border-brand-200 rounded-3xl px-2 py-1.5 bg-white"
             >
               <option value={2}>Thin</option>
               <option value={4}>Medium</option>
@@ -399,7 +426,7 @@ export default function ESignStudio({
               <RotateCcw size={14} /> Clear
             </button>
           </div>
-          <div className="rounded-xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
+          <div className="rounded-3xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
             <canvas
               ref={canvasRef}
               onMouseDown={startDraw}
@@ -414,15 +441,11 @@ export default function ESignStudio({
             />
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={applySign}
-              disabled={!hasDrawing}
-              className="btn-primary"
-            >
+            <button onClick={applySign} disabled={!hasDrawing} className="btn-primary">
               <Download size={14} /> Download Signature
             </button>
             {done && (
-              <span className="flex items-center gap-1 text-xs font-semibold text-success">
+              <span className="flex items-center gap-1 text-xs font-medium text-success">
                 <Check size={14} /> Done
               </span>
             )}
@@ -435,9 +458,9 @@ export default function ESignStudio({
         <div className="card space-y-3">
           {/* Document upload */}
           {!docPages.length ? (
-            <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-brand-200 p-10 cursor-pointer hover:border-brand-400 transition-colors">
+            <label className="flex flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-brand-200 p-10 cursor-pointer hover:border-brand-400 transition-colors">
               <Upload size={32} className="text-brand-400" />
-              <p className="text-sm font-semibold text-brand-600">Upload Document</p>
+              <p className="text-sm font-medium text-brand-600">Upload Document</p>
               <p className="text-xs text-brand-400">PDF or image (PNG, JPG, WebP)</p>
               <input
                 type="file"
@@ -454,7 +477,7 @@ export default function ESignStudio({
             <>
               {/* Document preview with signature overlay */}
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-ink flex items-center gap-2">
+                <p className="text-sm font-medium text-ink flex items-center gap-2">
                   <FileText size={16} /> {docFile?.name ?? "Document"}
                 </p>
                 <div className="flex items-center gap-1">
@@ -469,7 +492,9 @@ export default function ESignStudio({
                     {currentPage + 1} / {docPages.length}
                   </span>
                   <button
-                    onClick={() => setCurrentPage((p) => Math.min(docPages.length - 1, p + 1))}
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(docPages.length - 1, p + 1))
+                    }
                     disabled={currentPage >= docPages.length - 1}
                     className="btn-ghost p-1"
                   >
@@ -479,14 +504,14 @@ export default function ESignStudio({
               </div>
 
               {/* Preview canvas */}
-              <div className="rounded-xl border border-brand-200 overflow-auto bg-gray-100 p-4 flex justify-center">
+              <div className="rounded-3xl border border-brand-200 overflow-auto bg-gray-100 p-4 flex justify-center">
                 <canvas
                   ref={previewRef}
                   onMouseDown={handlePreviewMouseDown}
                   onMouseMove={handlePreviewMouseMove}
                   onMouseUp={() => setDragging(false)}
                   onMouseLeave={() => setDragging(false)}
-                  className="cursor-crosshair shadow-lg rounded"
+                  className="cursor-crosshair rounded"
                   style={{ maxWidth: "100%" }}
                 />
               </div>
@@ -506,7 +531,9 @@ export default function ESignStudio({
                   onChange={(e) => setSignScale(Number(e.target.value))}
                   className="flex-1 h-1 accent-brand-500 cursor-pointer"
                 />
-                <span className="font-mono text-brand-600 w-8 text-right">{signScale}%</span>
+                <span className="font-mono text-brand-600 w-8 text-right">
+                  {signScale}%
+                </span>
               </label>
 
               {/* Signature source */}
@@ -514,46 +541,73 @@ export default function ESignStudio({
                 <div>
                   {signImg ? (
                     <div className="flex items-center gap-2">
-                      <img src={signImg} alt="Signature" className="h-12 object-contain border rounded bg-white" />
-                      <button onClick={() => { setSignImg(""); }} className="btn-ghost text-xs text-danger">
+                      <img
+                        src={signImg}
+                        alt="Signature"
+                        className="h-12 object-contain border rounded bg-white"
+                      />
+                      <button
+                        onClick={() => {
+                          setSignImg("");
+                        }}
+                        className="btn-ghost text-xs text-danger"
+                      >
                         <X size={12} /> Remove
                       </button>
                     </div>
                   ) : (
                     <label className="btn-ghost cursor-pointer text-xs">
                       <Upload size={14} /> Upload Signature Image
-                      <input type="file" accept="image/*" className="hidden" onChange={handleSignUpload} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleSignUpload}
+                      />
                     </label>
                   )}
                 </div>
               ) : (
                 /* upload-draw: drawing canvas */
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-brand-600">Draw your signature</p>
+                  <p className="text-xs font-medium text-brand-600">
+                    Draw your signature
+                  </p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 rounded-lg bg-brand-100 p-1">
+                    <div className="flex items-center gap-1 rounded-3xl bg-brand-100 p-1">
                       <button
                         onClick={() => setDrawTool("pen")}
-                        className={`rounded-md p-1 cursor-pointer ${drawTool === "pen" ? "bg-white shadow-sm text-ink" : "text-brand-400"}`}
+                        className={`rounded-md p-1 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
                       >
                         <PenLine size={14} />
                       </button>
                       <button
                         onClick={() => setDrawTool("eraser")}
-                        className={`rounded-md p-1 cursor-pointer ${drawTool === "eraser" ? "bg-white shadow-sm text-ink" : "text-brand-400"}`}
+                        className={`rounded-md p-1 cursor-pointer ${drawTool === "eraser" ? "bg-white text-ink" : "text-brand-400"}`}
                       >
                         <Eraser size={14} />
                       </button>
                     </div>
-                    <input type="color" value={drawColor} onChange={(e) => setDrawColor(e.target.value)} className="w-6 h-6 rounded border cursor-pointer p-0" />
-                    <select value={drawWidth} onChange={(e) => setDrawWidth(Number(e.target.value))} className="text-xs border rounded px-1.5 py-1">
+                    <input
+                      type="color"
+                      value={drawColor}
+                      onChange={(e) => setDrawColor(e.target.value)}
+                      className="w-6 h-6 rounded border cursor-pointer p-0"
+                    />
+                    <select
+                      value={drawWidth}
+                      onChange={(e) => setDrawWidth(Number(e.target.value))}
+                      className="text-xs border rounded px-1.5 py-1"
+                    >
                       <option value={2}>Thin</option>
                       <option value={4}>Medium</option>
                       <option value={7}>Thick</option>
                     </select>
-                    <button onClick={clearCanvas} className="btn-ghost text-xs"><RotateCcw size={14} /> Clear</button>
+                    <button onClick={clearCanvas} className="btn-ghost text-xs">
+                      <RotateCcw size={14} /> Clear
+                    </button>
                   </div>
-                  <div className="rounded-xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
+                  <div className="rounded-3xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
                     <canvas
                       ref={canvasRef}
                       onMouseDown={startDraw}
@@ -574,13 +628,16 @@ export default function ESignStudio({
               <div className="flex items-center gap-2">
                 <button
                   onClick={applySign}
-                  disabled={(mode === "upload-both" && !signImg) || (mode === "upload-draw" && !hasDrawing)}
+                  disabled={
+                    (mode === "upload-both" && !signImg) ||
+                    (mode === "upload-draw" && !hasDrawing)
+                  }
                   className="btn-primary"
                 >
                   <Download size={14} /> Sign & Download
                 </button>
                 {done && (
-                  <span className="flex items-center gap-1 text-xs font-semibold text-success">
+                  <span className="flex items-center gap-1 text-xs font-medium text-success">
                     <Check size={14} /> Done
                   </span>
                 )}

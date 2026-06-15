@@ -86,17 +86,29 @@ export default function RotateStudio({
   return (
     <div>
       <div className="mb-3 flex items-center justify-center gap-2">
-        <button onClick={() => spin(-90)} className="btn-ghost h-10 w-12" title="Rotate left" aria-label="Rotate page left">
+        <button
+          onClick={() => spin(-90)}
+          className="btn-ghost h-10 w-12"
+          title="Rotate left"
+          aria-label="Rotate page left"
+        >
           <RotateCcw size={18} />
         </button>
-        <span className="w-16 text-center text-sm font-bold tabular-nums text-ink">{angle}°</span>
-        <button onClick={() => spin(90)} className="btn-ghost h-10 w-12" title="Rotate right" aria-label="Rotate page right">
+        <span className="w-16 text-center text-sm font-medium tabular-nums text-ink">
+          {angle}°
+        </span>
+        <button
+          onClick={() => spin(90)}
+          className="btn-ghost h-10 w-12"
+          title="Rotate right"
+          aria-label="Rotate page right"
+        >
           <RotateCw size={18} />
         </button>
       </div>
 
       <div
-        className="mx-auto grid w-full max-w-xl place-items-center overflow-hidden rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-[#3A3D45] dark:bg-black/20"
+        className="mx-auto grid w-full max-w-xl place-items-center overflow-hidden rounded-3xl border border-brand-200 bg-brand-50 p-4 dark:border-[#2C2C2E] dark:bg-black/20"
         style={{ minHeight: 360 }}
       >
         {pageImg ? (
@@ -117,7 +129,12 @@ export default function RotateStudio({
         )}
       </div>
 
-      <button onClick={apply} disabled={saving || angle === 0} className="btn-primary mt-4 w-full" aria-label="Apply rotation and download">
+      <button
+        onClick={apply}
+        disabled={saving || angle === 0}
+        className="btn-primary mt-4 w-full"
+        aria-label="Apply rotation and download"
+      >
         {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
         Apply rotation to all pages & download
       </button>

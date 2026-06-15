@@ -47,8 +47,12 @@ export default function CompanyDetails() {
 
   useEffect(() => {
     billing.getCompany().then(setC).catch(console.error);
-    loadBankInfo().then(setBank).catch(() => {});
-    loadLetterhead().then(setLh).catch(() => {});
+    loadBankInfo()
+      .then(setBank)
+      .catch(() => {});
+    loadLetterhead()
+      .then(setLh)
+      .catch(() => {});
   }, []);
 
   const setBankField = (k: keyof BankInfo, v: string) => {
@@ -56,13 +60,9 @@ export default function CompanyDetails() {
     setSaved(false);
   };
 
-  if (!c)
-    return <div className="card text-sm text-brand-400">Loading…</div>;
+  if (!c) return <div className="card text-sm text-brand-400">Loading…</div>;
 
-  const set = <K extends keyof CompanyProfile>(
-    k: K,
-    v: CompanyProfile[K]
-  ) => {
+  const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) => {
     setC({ ...c, [k]: v });
     setSaved(false);
   };
@@ -77,9 +77,18 @@ export default function CompanyDetails() {
   const save = async () => {
     clearFieldErrors();
     let hasErr = false;
-    if (!c.name?.trim()) { setFieldError("name", "Company name is required"); hasErr = true; }
-    if (!c.address?.trim()) { setFieldError("address", "Address is required"); hasErr = true; }
-    if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) { setFieldError("email", "Enter a valid email"); hasErr = true; }
+    if (!c.name?.trim()) {
+      setFieldError("name", "Company name is required");
+      hasErr = true;
+    }
+    if (!c.address?.trim()) {
+      setFieldError("address", "Address is required");
+      hasErr = true;
+    }
+    if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) {
+      setFieldError("email", "Enter a valid email");
+      hasErr = true;
+    }
     if (hasErr) return;
 
     setSaving(true);
@@ -90,7 +99,8 @@ export default function CompanyDetails() {
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
-      } catch {
+      } catch (e) {
+        console.warn("Failed to load company details after save", e);
         // getCompany falls back to cache — our saved data is there.
       }
       setSaved(true);
@@ -100,11 +110,11 @@ export default function CompanyDetails() {
         e instanceof Error
           ? e.message
           : e && typeof e === "object"
-          ? (e as any).message ??
-            (e as any).details ??
-            (e as any).hint ??
-            JSON.stringify(e)
-          : String(e);
+            ? ((e as any).message ??
+              (e as any).details ??
+              (e as any).hint ??
+              JSON.stringify(e))
+            : String(e);
       toast.error(`Could not save company details: ${msg}`);
     } finally {
       setSaving(false);
@@ -113,15 +123,15 @@ export default function CompanyDetails() {
 
   return (
     <div className="card">
-      <p className="font-bold text-ink">Company Details</p>
+      <p className="font-medium text-ink">Company Details</p>
       <p className="text-sm text-brand-500 mt-0.5 mb-5">
-        Update your company information. These details appear on invoices,
-        quotations and other documents automatically.
+        Update your company information. These details appear on invoices, quotations and
+        other documents automatically.
       </p>
 
       <p className="label">Company Logo</p>
       <div className="flex items-center gap-4 mb-5">
-        <div className="w-24 h-24 rounded-2xl border border-brand-200 bg-brand-50 grid place-items-center overflow-hidden">
+        <div className="w-24 h-24 rounded-3xl border border-brand-200 bg-brand-50 grid place-items-center overflow-hidden">
           {c.logo ? (
             <img
               src={c.logo}
@@ -133,18 +143,13 @@ export default function CompanyDetails() {
           )}
         </div>
         <div>
-          <button
-            className="btn-ghost"
-            onClick={() => fileRef.current?.click()}
-          >
+          <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
             <Upload size={14} /> Upload Logo
           </button>
-          <p className="text-[11px] text-brand-400 mt-1">
-            JPG, PNG or SVG · max 2MB
-          </p>
+          <p className="text-[11px] text-brand-400 mt-1">JPG, PNG or SVG · max 2MB</p>
           {c.logo && (
             <button
-              className="text-[11px] font-semibold text-danger mt-1 cursor-pointer"
+              className="text-[11px] font-medium text-danger mt-1 cursor-pointer"
               onClick={() => set("logo", undefined)}
             >
               <X size={11} className="inline" /> Remove
@@ -231,7 +236,11 @@ export default function CompanyDetails() {
               onChange={(e) => set("phone", e.target.value)}
             />
           </FormField>
-          <FormField label="Email Address" error={fieldErrors.email} hint="hello@company.com">
+          <FormField
+            label="Email Address"
+            error={fieldErrors.email}
+            hint="hello@company.com"
+          >
             <input
               className="input"
               placeholder="hello@company.com"
@@ -269,7 +278,7 @@ export default function CompanyDetails() {
       </div>
 
       <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-bold text-ink">Tax Information</p>
+        <p className="font-medium text-ink">Tax Information</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
           Select how tax is applied to your transactions
         </p>
@@ -300,21 +309,19 @@ export default function CompanyDetails() {
               className="input"
               placeholder="5"
               value={c.default_tax_rate ?? ""}
-              onChange={(e) =>
-                set("default_tax_rate", numInput(e.target.value))
-              }
+              onChange={(e) => set("default_tax_rate", numInput(e.target.value))}
             />
           </FormField>
         </div>
       </div>
 
       <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-bold text-ink flex items-center gap-2">
+        <p className="font-medium text-ink flex items-center gap-2">
           <Landmark size={16} /> Bank Details
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Enter once here. Then toggle “Show bank details” on any invoice,
-          quotation or other document to print them.
+          Enter once here. Then toggle “Show bank details” on any invoice, quotation or
+          other document to print them.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {BANK_FIELDS.map((f) => (
@@ -331,14 +338,14 @@ export default function CompanyDetails() {
       </div>
 
       <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-bold text-ink flex items-center gap-2">
+        <p className="font-medium text-ink flex items-center gap-2">
           <FileText size={16} /> Letterhead
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Upload your full A4 letterhead (logo, header and footer artwork on one
-          page). Toggle “Use letterhead” on an LPO, declaration letter or other
-          document to print the body on top of it — then adjust the header and
-          footer spacing on that document so the text clears your artwork.
+          Upload your full A4 letterhead (logo, header and footer artwork on one page).
+          Toggle “Use letterhead” on an LPO, declaration letter or other document to print
+          the body on top of it — then adjust the header and footer spacing on that
+          document so the text clears your artwork.
         </p>
         <LetterheadConfig
           value={lh}
@@ -351,7 +358,7 @@ export default function CompanyDetails() {
 
       <div className="flex items-center justify-end gap-3 mt-6">
         {saved && (
-          <span className="inline-flex items-center gap-1 text-sm font-semibold text-success">
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
             <Check size={15} /> Saved — applied to all documents
           </span>
         )}

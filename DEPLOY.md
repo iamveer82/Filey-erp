@@ -84,6 +84,7 @@ Output goes to `dist/` — a self-contained static SPA.
 ## 6. Optional: Error Monitoring
 
 To enable Sentry:
+
 1. Create project at [sentry.io](https://sentry.io)
 2. Copy DSN to `VITE_SENTRY_DSN`
 3. Rebuild and redeploy

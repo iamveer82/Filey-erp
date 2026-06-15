@@ -48,24 +48,13 @@ interface AuthValue {
   profileLoading: boolean;
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
   /** Returns needsOtp=false when Supabase confirmation is disabled (instant session). */
-  signUpWithPassword: (
-    c: Credential,
-    password: string
-  ) => Promise<{ needsOtp: boolean }>;
+  signUpWithPassword: (c: Credential, password: string) => Promise<{ needsOtp: boolean }>;
   /** Passwordless: sends a login code to an existing account. */
   sendLoginOtp: (c: Credential) => Promise<void>;
-  verifyOtp: (
-    c: Credential,
-    token: string,
-    purpose: "signup" | "login"
-  ) => Promise<void>;
+  verifyOtp: (c: Credential, token: string, purpose: "signup" | "login") => Promise<void>;
   resendOtp: (c: Credential, purpose: "signup" | "login") => Promise<void>;
   signOut: () => Promise<void>;
-  createProfile: (
-    firstName: string,
-    lastName: string,
-    company: string
-  ) => Promise<void>;
+  createProfile: (firstName: string, lastName: string, company: string) => Promise<void>;
   updateProfile: (patch: Partial<Profile>) => Promise<void>;
 }
 
@@ -148,9 +137,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const u = s.user;
         setProfileLoaded(false);
         setTimeout(() => {
-          if (active) void loadProfile(u).catch((err) =>
-            console.error("[auth] loadProfile failed:", err)
-          );
+          if (active)
+            void loadProfile(u).catch((err) =>
+              console.error("[auth] loadProfile failed:", err)
+            );
         }, 0);
       } else {
         loadedFor.current = null;
@@ -183,8 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUpWithPassword = async (c: Credential, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");
-    if (password.length < 6)
-      throw new Error("Password must be at least 6 characters.");
+    if (password.length < 6) throw new Error("Password must be at least 6 characters.");
     const { data, error } = await supabase.auth.signUp({
       ...norm(c),
       password,
@@ -204,18 +193,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const verifyOtp = async (
-    c: Credential,
-    token: string,
-    purpose: "signup" | "login"
-  ) => {
+  const verifyOtp = async (c: Credential, token: string, purpose: "signup" | "login") => {
     if (!supabase) throw new Error("Supabase not configured");
     const type =
-      c.channel === "phone"
-        ? "sms"
-        : purpose === "signup"
-        ? "signup"
-        : "email";
+      c.channel === "phone" ? "sms" : purpose === "signup" ? "signup" : "email";
     const { error } = await supabase.auth.verifyOtp({
       ...norm(c),
       token: token.trim(),
@@ -244,11 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   };
 
-  const createProfile = async (
-    firstName: string,
-    lastName: string,
-    company: string
-  ) => {
+  const createProfile = async (firstName: string, lastName: string, company: string) => {
     if (!supabase || !user) throw new Error("Not signed in");
     const name = `${firstName.trim()} ${lastName.trim()}`.trim();
     // org_id is provisioned by the signup trigger — do NOT set it here,
@@ -259,11 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name,
       company: company.trim(),
     };
-    const { data, error } = await supabase
-      .from("profiles")
-      .upsert(row)
-      .select()
-      .single();
+    const { data, error } = await supabase.from("profiles").upsert(row).select().single();
     if (error) throw error;
     setCacheOrg((data as Profile).org_id);
     setProfile(data as Profile);

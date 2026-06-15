@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://voyrjqgaypiylwskkwpr.supabase.co" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Lora:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@300;400;500&display=swap"
       rel="stylesheet"
     />
     <title>Filey — AI ERP, CRM & PDF Tools</title>
@@ -41,8 +41,7 @@
           var t = localStorage.getItem("theme") || "system";
           var dark =
             t === "dark" ||
-            (t === "system" &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
+            (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
         } catch (e) {}
       })();

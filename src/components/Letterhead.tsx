@@ -33,8 +33,8 @@ export const hasLetterhead = (l?: LetterheadInfo | null): boolean =>
   !!l && !!l.background;
 
 /** Load saved letterhead (empty record if none / not configured).
- *  Tolerates the legacy header/footer-band shape by ignoring it — those
- *  installs simply re-upload a full-page letterhead. */
+ * Tolerates the legacy header/footer-band shape by ignoring it — those
+ * installs simply re-upload a full-page letterhead. */
 export async function loadLetterhead(): Promise<LetterheadInfo> {
   try {
     const rows = await tools.settings();
@@ -42,7 +42,8 @@ export async function loadLetterhead(): Promise<LetterheadInfo> {
     if (!row?.value) return { ...EMPTY_LETTERHEAD };
     const parsed = JSON.parse(row.value) as Partial<LetterheadInfo>;
     return { ...EMPTY_LETTERHEAD, ...parsed };
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load letterhead:", e);
     return { ...EMPTY_LETTERHEAD };
   }
 }
@@ -52,11 +53,11 @@ export async function saveLetterhead(l: LetterheadInfo): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Config panel (Settings → Company Details, Template Designer)       */
+/* Config panel (Settings → Company Details, Template Designer) */
 /* ------------------------------------------------------------------ */
 
 /** Full-page A4 letterhead upload. Drop into Settings or the template
- *  designer — keeps the same `{ value, onChange }` API as before. */
+ * designer — keeps the same `{ value, onChange }` API as before. */
 export function LetterheadConfig({
   value,
   onChange,
@@ -72,23 +73,23 @@ export function LetterheadConfig({
     r.readAsDataURL(f);
   };
   return (
-    <div className="rounded-xl border border-brand-200 p-3 dark:border-[#3A3D45]">
-      <div className="flex items-center gap-2 text-ink font-semibold text-sm mb-2">
+    <div className="rounded-3xl border border-brand-200 p-3 dark:border-[#2C2C2E]">
+      <div className="flex items-center gap-2 text-ink font-medium text-sm mb-2">
         <FileImage size={15} /> Letterhead page (A4)
       </div>
       {value.background ? (
-        <div className="relative inline-block rounded-lg border border-brand-100 bg-brand-50/40 p-2">
+        <div className="relative inline-block rounded-3xl border border-brand-100 bg-brand-50/40 p-2">
           <img
             src={value.background}
             alt="Letterhead"
-            className="h-auto w-44 rounded shadow-sm"
+            className="h-auto w-44 rounded"
             style={{ aspectRatio: "210 / 297", objectFit: "cover" }}
           />
           <button
             type="button"
             title="Remove letterhead"
             aria-label="Remove letterhead"
-            className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-md bg-white/90 border border-brand-200 text-danger shadow-sm hover:bg-red-50 transition-colors"
+            className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-3xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
             onClick={() => onChange({ ...value, background: "" })}
           >
             <X size={13} />
@@ -98,10 +99,10 @@ export function LetterheadConfig({
         <button
           type="button"
           onClick={() => ref.current?.click()}
-          className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-lg border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all"
+          className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-3xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all"
         >
           <Upload size={18} className="text-brand-400" />
-          <span className="text-xs font-semibold text-brand-600">
+          <span className="text-xs font-medium text-brand-600">
             Upload full A4 letterhead
           </span>
           <span className="text-[10px] text-brand-400">
@@ -121,18 +122,18 @@ export function LetterheadConfig({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Render frame (wraps a document body on the A4 sheet)               */
+/* Render frame (wraps a document body on the A4 sheet) */
 /* ------------------------------------------------------------------ */
 
 /** Wrap a document body so the letterhead prints full-bleed BEHIND it and the
- *  body flows on top, clear of the header/footer artwork.
+ * body flows on top, clear of the header/footer artwork.
  *
- *  The parent should be a full-bleed A4 sheet with NO padding — this frame
- *  owns the body padding. `headerSpace` / `footerSpace` push the body down
- *  from the top and up from the bottom so it never sits over the letterhead's
- *  printed bands; raise them to make more room. When `enabled` is false (or no
- *  letterhead is configured) the background is omitted and a plain uniform
- *  `bodyPadding` is used, so the same frame works for every document. */
+ * The parent should be a full-bleed A4 sheet with NO padding — this frame
+ * owns the body padding. `headerSpace` / `footerSpace` push the body down
+ * from the top and up from the bottom so it never sits over the letterhead's
+ * printed bands; raise them to make more room. When `enabled` is false (or no
+ * letterhead is configured) the background is omitted and a plain uniform
+ * `bodyPadding` is used, so the same frame works for every document. */
 export function LetterheadFrame({
   letterhead,
   enabled = true,

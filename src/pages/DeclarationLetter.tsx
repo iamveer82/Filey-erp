@@ -108,7 +108,8 @@ async function listDeclarations(): Promise<SavedDecl[]> {
     if (!row?.value) return [];
     const arr = JSON.parse(row.value);
     return Array.isArray(arr) ? (arr as SavedDecl[]) : [];
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load declaration letters", e);
     return [];
   }
 }
@@ -142,7 +143,11 @@ const fmtLongDate = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+    : d.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
 };
 
 /** Substitute {tokens} in the body with current field values. */
@@ -172,7 +177,10 @@ export default function DeclarationLetter() {
   const [editing, setEditing] = useState<SavedDecl | null>(null);
   const [search, setSearch] = useState("");
 
-  const loadDocs = () => listDeclarations().then(setDocs).catch(() => {});
+  const loadDocs = () =>
+    listDeclarations()
+      .then(setDocs)
+      .catch(() => {});
   useEffect(() => {
     loadDocs();
   }, []);
@@ -264,9 +272,7 @@ export default function DeclarationLetter() {
             label: "Reference",
             sortValue: (d) => d.ref || d.lpo_ref,
             render: (d) => (
-              <span className="font-semibold">
-                {d.ref || d.lpo_ref || "Untitled"}
-              </span>
+              <span className="font-medium">{d.ref || d.lpo_ref || "Untitled"}</span>
             ),
           },
           {
@@ -279,9 +285,7 @@ export default function DeclarationLetter() {
             key: "lpo",
             label: "LPO #",
             sortValue: (d) => d.lpo_ref,
-            render: (d) => (
-              <span className="font-mono text-xs">{d.lpo_ref || "—"}</span>
-            ),
+            render: (d) => <span className="font-mono text-xs">{d.lpo_ref || "—"}</span>,
           },
           {
             key: "amount",
@@ -436,7 +440,7 @@ function DeclarationEditor({
         <div className="no-print space-y-4">
           {/* Parties */}
           <div className="card">
-            <p className="font-bold text-ink mb-3">Your Company</p>
+            <p className="font-medium text-ink mb-3">Your Company</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Company Name">
                 <input
@@ -455,7 +459,7 @@ function DeclarationEditor({
               </Field>
             </div>
 
-            <p className="font-bold text-ink mb-3 mt-5">Recipient (Supplier)</p>
+            <p className="font-medium text-ink mb-3 mt-5">Recipient (Supplier)</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Name">
                 <input
@@ -494,7 +498,7 @@ function DeclarationEditor({
 
           {/* Reference / figures */}
           <div className="card">
-            <p className="font-bold text-ink mb-3">Order Reference</p>
+            <p className="font-medium text-ink mb-3">Order Reference</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="LPO Number">
                 <input
@@ -533,13 +537,14 @@ function DeclarationEditor({
 
           {/* Body */}
           <div className="card">
-            <p className="font-bold text-ink mb-1">Declaration Text</p>
+            <p className="font-medium text-ink mb-1">Declaration Text</p>
             <p className="text-xs text-brand-400 mb-3">
               Tokens like <code className="font-mono">{"{company}"}</code>,{" "}
               <code className="font-mono">{"{trn}"}</code>,{" "}
               <code className="font-mono">{"{lpo}"}</code>,{" "}
               <code className="font-mono">{"{qty}"}</code>,{" "}
-              <code className="font-mono">{"{amount}"}</code> auto-fill from the fields above.
+              <code className="font-mono">{"{amount}"}</code> auto-fill from the fields
+              above.
             </p>
             <textarea
               className="textarea font-mono text-xs leading-relaxed"
@@ -551,7 +556,7 @@ function DeclarationEditor({
 
           {/* Branding */}
           <div className="card">
-            <p className="font-bold text-ink mb-3">Branding</p>
+            <p className="font-medium text-ink mb-3">Branding</p>
             <label className="flex items-center justify-between py-1.5 mb-3 cursor-pointer">
               <span className="text-sm text-ink flex items-center gap-2">
                 <FileText size={15} /> Use letterhead
@@ -628,7 +633,7 @@ function DeclarationEditor({
           <div className="card !p-4">
             <div className="no-print flex items-start justify-between mb-3">
               <div>
-                <p className="font-bold text-ink">Preview</p>
+                <p className="font-medium text-ink">Preview</p>
                 <p className="text-xs text-brand-400">
                   This is how your declaration letter will look
                 </p>
@@ -654,7 +659,10 @@ function DeclarationEditor({
                 >
                   <div
                     className="text-neutral-900"
-                    style={{ fontFamily: "Georgia, 'Times New Roman', serif", lineHeight: 1.7 }}
+                    style={{
+                      fontFamily: "Georgia, 'Times New Roman', serif",
+                      lineHeight: 1.7,
+                    }}
                   >
                     <h1 className="text-center text-[15px] font-bold underline tracking-wide mb-6">
                       DECLARATION LETTER
@@ -701,7 +709,9 @@ function DeclarationEditor({
               <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "desktop" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                    device === "desktop"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
                   }`}
                   onClick={() => setDevice("desktop")}
                   aria-label="Desktop preview"
@@ -710,7 +720,9 @@ function DeclarationEditor({
                 </button>
                 <button
                   className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "mobile" ? "bg-primary-100 text-primary-700" : "text-brand-400"
+                    device === "mobile"
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-brand-400"
                   }`}
                   onClick={() => setDevice("mobile")}
                   aria-label="Mobile preview"

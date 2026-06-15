@@ -21,13 +21,7 @@ import {
   type Order,
   type Opportunity,
 } from "../lib/api";
-import {
-  PageHeader,
-  StatCard,
-  DataTable,
-  Badge,
-  statusTone,
-} from "../components/ui";
+import { PageHeader, StatCard, DataTable, Badge, statusTone } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -36,7 +30,7 @@ import FollowUps from "../components/FollowUps";
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-5">
-      <h2 className="text-sm font-bold text-ink mb-2">{title}</h2>
+      <h2 className="text-sm font-medium text-ink mb-2">{title}</h2>
       {children}
     </section>
   );
@@ -129,7 +123,7 @@ export default function CustomerDetail() {
           <ArrowLeft size={15} /> Back to Customers
         </Link>
         <div className="card text-center py-16">
-          <p className="text-lg font-bold text-ink">Customer not found</p>
+          <p className="text-lg font-medium text-ink">Customer not found</p>
           <p className="text-sm text-brand-500 mt-2">
             This customer may have been removed.
           </p>
@@ -146,9 +140,7 @@ export default function CustomerDetail() {
       <PageHeader
         title={display || "Customer"}
         subtitle={customer?.segment || "Customer profile & history"}
-        action={
-          customer?.shared ? <Badge tone="info">Shared</Badge> : undefined
-        }
+        action={customer?.shared ? <Badge tone="info">Shared</Badge> : undefined}
       />
 
       <div className="grid lg:grid-cols-4 gap-4 mb-5">
@@ -179,9 +171,7 @@ export default function CustomerDetail() {
           <StatCard
             label="Total invoiced"
             value={aed(totalInvoiced)}
-            hint={`${myInvoices.length} invoice${
-              myInvoices.length === 1 ? "" : "s"
-            }`}
+            hint={`${myInvoices.length} invoice${myInvoices.length === 1 ? "" : "s"}`}
             icon={<Receipt size={18} />}
           />
           <StatCard
@@ -227,9 +217,7 @@ export default function CustomerDetail() {
               key: "number",
               label: "Number",
               sortValue: (d) => d.number,
-              render: (d) => (
-                <span className="font-semibold text-ink">{d.number}</span>
-              ),
+              render: (d) => <span className="font-medium text-ink">{d.number}</span>,
             },
             {
               key: "issue",
@@ -241,17 +229,19 @@ export default function CustomerDetail() {
               key: "status",
               label: "Status",
               sortValue: (d) => d.status,
-              render: (d) => (
-                <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-              ),
+              render: (d) => <Badge tone={statusTone(d.status)}>{d.status}</Badge>,
             },
-            { key: "total", label: "Total", sortValue: (d) => d.total, render: (d) => aed(d.total) },
+            {
+              key: "total",
+              label: "Total",
+              sortValue: (d) => d.total,
+              render: (d) => aed(d.total),
+            },
             {
               key: "balance",
               label: "Balance",
               sortValue: (d) => d.balance ?? Math.max(0, d.total - (d.paid ?? 0)),
-              render: (d) =>
-                aed(d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
+              render: (d) => aed(d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
             },
           ]}
         />
@@ -267,9 +257,7 @@ export default function CustomerDetail() {
               key: "number",
               label: "Number",
               sortValue: (q) => q.number,
-              render: (q) => (
-                <span className="font-semibold text-ink">{q.number}</span>
-              ),
+              render: (q) => <span className="font-medium text-ink">{q.number}</span>,
             },
             {
               key: "valid",
@@ -281,11 +269,14 @@ export default function CustomerDetail() {
               key: "status",
               label: "Status",
               sortValue: (q) => q.status,
-              render: (q) => (
-                <Badge tone={statusTone(q.status)}>{q.status}</Badge>
-              ),
+              render: (q) => <Badge tone={statusTone(q.status)}>{q.status}</Badge>,
             },
-            { key: "total", label: "Total", sortValue: (q) => q.total, render: (q) => aed(q.total) },
+            {
+              key: "total",
+              label: "Total",
+              sortValue: (q) => q.total,
+              render: (q) => aed(q.total),
+            },
           ]}
         />
       </Section>
@@ -301,9 +292,7 @@ export default function CustomerDetail() {
               label: "Order",
               sortValue: (o) => o.order_number,
               render: (o) => (
-                <span className="font-semibold text-ink">
-                  {o.order_number}
-                </span>
+                <span className="font-medium text-ink">{o.order_number}</span>
               ),
             },
             {
@@ -316,11 +305,14 @@ export default function CustomerDetail() {
               key: "status",
               label: "Status",
               sortValue: (o) => o.status,
-              render: (o) => (
-                <Badge tone={statusTone(o.status)}>{o.status}</Badge>
-              ),
+              render: (o) => <Badge tone={statusTone(o.status)}>{o.status}</Badge>,
             },
-            { key: "total", label: "Total", sortValue: (o) => o.total, render: (o) => aed(o.total) },
+            {
+              key: "total",
+              label: "Total",
+              sortValue: (o) => o.total,
+              render: (o) => aed(o.total),
+            },
           ]}
         />
       </Section>
@@ -334,19 +326,20 @@ export default function CustomerDetail() {
                 key: "title",
                 label: "Title",
                 sortValue: (o) => o.title,
-                render: (o) => (
-                  <span className="font-semibold text-ink">{o.title}</span>
-                ),
+                render: (o) => <span className="font-medium text-ink">{o.title}</span>,
               },
               {
                 key: "stage",
                 label: "Stage",
                 sortValue: (o) => o.stage,
-                render: (o) => (
-                  <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>
-                ),
+                render: (o) => <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>,
               },
-              { key: "value", label: "Value", sortValue: (o) => o.value, render: (o) => aed(o.value) },
+              {
+                key: "value",
+                label: "Value",
+                sortValue: (o) => o.value,
+                render: (o) => aed(o.value),
+              },
               {
                 key: "prob",
                 label: "Probability",

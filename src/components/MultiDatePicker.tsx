@@ -1,124 +1,68 @@
-import * as React from "react";
-import { format, setMonth, setYear } from "date-fns";
-import { X } from "lucide-react";
-import Calendar from "./Calendar";
+/* ── MultiDatePicker (HR / leave tracking) ───────────────────────
+ * Calendar with multi-select. Returns an array of dates, plus an
+ * onConfirm callback for the parent to commit. Used by People.tsx
+ * for marking employee leave. Replaces the deleted v8-era
+ * MultiDatePicker. */
+import { Button } from "./Button";
+import { Calendar } from "./Calendar";
+import { format } from "date-fns";
 
-/** Multi-date picker with year + month dropdowns, a calendar grid,
- *  pill list of picked days, and a Confirm action. Filey-themed,
- *  no shadcn deps — uses .select / .pill / .btn-* tokens. */
-export function MultiDatePicker({
+export interface MultiDatePickerProps {
+  value: Date[];
+  onChange: (dates: Date[]) => void;
+  onConfirm: (dates: Date[]) => void;
+}
+
+export default function MultiDatePicker({
   value,
   onChange,
   onConfirm,
-  className = "",
-}: {
-  value?: Date[];
-  onChange?: (dates: Date[]) => void;
-  onConfirm?: (dates: Date[]) => void;
-  className?: string;
-}) {
-  const today = new Date();
-  const isControlled = value !== undefined;
-  const [internal, setInternal] = React.useState<Date[]>(value ?? []);
-  const selected = isControlled ? value! : internal;
-  const setSelected = (next: Date[]) => {
-    if (!isControlled) setInternal(next);
-    onChange?.(next);
-  };
-
-  const [month, setMonthState] = React.useState(today.getMonth());
-  const [year, setYearState] = React.useState(today.getFullYear());
-  const displayMonth = setMonth(setYear(today, year), month);
-
-  const handleRemove = (date: Date) => {
-    const k = format(date, "yyyy-MM-dd");
-    setSelected(selected.filter((d) => format(d, "yyyy-MM-dd") !== k));
-  };
-
-  const years = React.useMemo(
-    () => Array.from({ length: 50 }, (_, i) => today.getFullYear() - 25 + i),
-    [today]
-  );
-
+}: MultiDatePickerProps) {
   return (
-    <div className={`card !p-4 w-full max-w-md flex flex-col gap-4 ${className}`}>
-      {/* Year + Month dropdowns */}
-      <div className="flex gap-2">
-        <select
-          aria-label="Year"
-          className="select flex-1"
-          value={year}
-          onChange={(e) => setYearState(Number(e.target.value))}
-        >
-          {years.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Month"
-          className="select flex-1"
-          value={month}
-          onChange={(e) => setMonthState(Number(e.target.value))}
-        >
-          {Array.from({ length: 12 }, (_, i) => (
-            <option key={i} value={i}>
-              {format(new Date(2000, i, 1), "MMMM")}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Calendar */}
+    <div className="space-y-3">
       <Calendar
         mode="multiple"
-        selected={selected}
-        onSelect={(dates) => setSelected(dates ?? [])}
-        month={displayMonth}
-        onMonthChange={(date) => {
-          setMonthState(date.getMonth());
-          setYearState(date.getFullYear());
-        }}
+        selected={value}
+        onSelect={(dates) => onChange(dates ?? [])}
+        className="rounded-3xl border border-brand-200 dark:border-[#2C2C2E]"
       />
-
-      {/* Selected dates pills */}
-      <div className="flex flex-wrap gap-2">
-        {selected.length === 0 && (
-          <p className="text-xs text-brand-400">No dates selected</p>
-        )}
-        {selected
-          .slice()
-          .sort((a, b) => a.getTime() - b.getTime())
-          .map((d) => (
-            <span
-              key={d.toISOString()}
-              className="pill bg-brand-100 dark:bg-white/10 text-ink inline-flex items-center gap-1.5 pr-1"
-            >
-              {format(d, "PPP")}
-              <button
-                aria-label={`Remove ${format(d, "PPP")}`}
-                onClick={() => handleRemove(d)}
-                className="grid h-4 w-4 place-items-center rounded-full text-brand-400 hover:text-danger hover:bg-danger/10 cursor-pointer transition-colors"
-              >
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-      </div>
-
-      {/* Confirm */}
-      <div className="flex justify-end">
-        <button
-          className="btn-primary"
-          onClick={() => onConfirm?.(selected)}
-          disabled={selected.length === 0}
-        >
-          Confirm
-        </button>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-brand-500">
+          {value.length === 0 ? (
+            <>Select leave dates from the calendar</>
+          ) : (
+            <>
+              {value.length} day{value.length === 1 ? "" : "s"} selected
+              {value.length > 0 && (
+                <span className="block text-[10px] text-brand-400 mt-0.5">
+                  First: {format(value[0], "dd MMM yyyy")}
+                  {value.length > 1 &&
+                    ` · Last: ${format(value[value.length - 1], "dd MMM yyyy")}`}
+                </span>
+              )}
+            </>
+          )}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              onChange([]);
+            }}
+            disabled={value.length === 0}
+          >
+            Clear
+          </Button>
+          <Button
+            onClick={() => {
+              onConfirm(value);
+            }}
+            disabled={value.length === 0}
+          >
+            Save leave
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
-
-export default MultiDatePicker;

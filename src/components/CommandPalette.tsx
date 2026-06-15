@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { Search, CornerDownLeft, UserRound, Target, Contact } from "lucide-react";
+import {
+  Search,
+  CornerDownLeft,
+  UserRound,
+  Target,
+  Contact,
+  FileText,
+  Package,
+  LayoutDashboard,
+  Plus,
+} from "lucide-react";
 import { useModules } from "../lib/modules";
 import { crm, type CrmCustomer, type Lead, type Opportunity } from "../lib/api";
 
@@ -15,8 +25,53 @@ interface Item {
   label: string;
   sub?: string;
   icon: React.ReactNode;
+  badge?: string;
   run: () => void;
 }
+
+const QUICK_ACTIONS: {
+  label: string;
+  to: string;
+  icon: React.ReactNode;
+  keywords: string[];
+}[] = [
+  {
+    label: "New invoice",
+    to: "/invoicing?new=1",
+    icon: <FileText size={15} />,
+    keywords: ["invoice", "bill"],
+  },
+  {
+    label: "New quotation",
+    to: "/quoting?new=1",
+    icon: <FileText size={15} />,
+    keywords: ["quotation", "quote"],
+  },
+  {
+    label: "Add product",
+    to: "/inventory?new=1",
+    icon: <Package size={15} />,
+    keywords: ["product", "stock", "item"],
+  },
+  {
+    label: "Add customer",
+    to: "/crm?new=1",
+    icon: <UserRound size={15} />,
+    keywords: ["customer", "client", "crm"],
+  },
+  {
+    label: "New sales order",
+    to: "/orders?new=1",
+    icon: <LayoutDashboard size={15} />,
+    keywords: ["order", "sales"],
+  },
+  {
+    label: "Record expense",
+    to: "/purchase?new=1",
+    icon: <Plus size={15} />,
+    keywords: ["purchase", "expense", "spend"],
+  },
+];
 
 export default function CommandPalette() {
   const nav = useNavigate();
@@ -72,6 +127,33 @@ export default function CommandPalette() {
     const match = (s: string) => s.toLowerCase().includes(term);
     const out: Item[] = [];
 
+    // Always-visible quick actions first when search is empty or matches keywords
+    const quickMatches = QUICK_ACTIONS.filter(
+      (a) =>
+        !term ||
+        a.label.toLowerCase().includes(term) ||
+        a.keywords.some((k) => k.includes(term))
+    );
+    if (quickMatches.length) {
+      out.push({
+        key: "qa-header",
+        group: "Quick actions",
+        label: "",
+        icon: null,
+        run: () => {},
+      });
+      for (const a of quickMatches) {
+        out.push({
+          key: `qa-${a.label}`,
+          group: "Quick actions",
+          label: a.label,
+          icon: a.icon,
+          badge: "Create",
+          run: () => go(a.to),
+        });
+      }
+    }
+
     for (const m of modules) {
       if (!isEnabled(m.id)) continue;
       if (!term || match(m.label) || match(m.desc)) {
@@ -110,7 +192,10 @@ export default function CommandPalette() {
           });
       }
       for (const l of leads) {
-        const name = (l as { name?: string; company?: string }).name ?? (l as { company?: string }).company ?? "Lead";
+        const name =
+          (l as { name?: string; company?: string }).name ??
+          (l as { company?: string }).company ??
+          "Lead";
         if (match(name))
           out.push({
             key: `l-${l.id}`,
@@ -142,10 +227,10 @@ export default function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-bento-hover dark:bg-[#1E2025]"
+        className="w-full max-w-lg overflow-hidden rounded-3xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-brand-200 px-4 dark:border-[#3A3D45]">
+        <div className="flex items-center gap-2 border-b border-brand-200 px-4 dark:border-[#2C2C2E]">
           <Search size={16} className="text-brand-400" />
           <input
             ref={inputRef}
@@ -169,7 +254,9 @@ export default function CommandPalette() {
             placeholder="Search pages, customers, deals…"
             className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-brand-400"
           />
-          <kbd className="rounded border border-brand-200 px-1.5 py-0.5 text-[10px] text-brand-400 dark:border-[#3A3D45]">esc</kbd>
+          <kbd className="rounded border border-brand-200 px-1.5 py-0.5 text-[10px] text-brand-400 dark:border-[#2C2C2E]">
+            esc
+          </kbd>
         </div>
 
         <div className="max-h-[55vh] overflow-y-auto p-1.5">
@@ -179,34 +266,70 @@ export default function CommandPalette() {
             </p>
           ) : (
             items.map((it, i) => {
-              const head = it.group !== lastGroup ? ((lastGroup = it.group)) : null;
+              const head = it.group !== lastGroup ? (lastGroup = it.group) : null;
+              if (head && it.key === "qa-header") return null;
               return (
                 <div key={it.key}>
-                  {head && (
-                    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-brand-400">
+                  {head && it.key !== "qa-header" && (
+                    <p className="px-3 pb-1 pt-2 text-[10px] font-medium text-brand-400">
                       {it.group}
                     </p>
                   )}
                   <button
                     onMouseEnter={() => setActive(i)}
                     onClick={() => it.run()}
-                    className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left ${
-                      i === active ? "bg-primary-100 dark:bg-primary-400/15" : "hover:bg-brand-50 dark:hover:bg-white/5"
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left ${
+                      i === active
+                        ? "bg-primary-100 dark:bg-primary-400/15"
+                        : "hover:bg-brand-50 dark:hover:bg-white/5"
                     }`}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-100 text-brand-500 dark:bg-white/5">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
                       {it.icon}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-ink">{it.label}</span>
-                      {it.sub && <span className="block truncate text-xs text-brand-400">{it.sub}</span>}
+                      <span className="block truncate text-sm font-medium text-ink">
+                        {it.label}
+                      </span>
+                      {it.sub && (
+                        <span className="block truncate text-xs text-brand-400">
+                          {it.sub}
+                        </span>
+                      )}
                     </span>
-                    {i === active && <CornerDownLeft size={14} className="text-brand-400" />}
+                    {it.badge && (
+                      <span className="rounded-full border border-brand-200 bg-surface px-2 py-0.5 text-[10px] font-medium text-brand-500 dark:border-[#2C2C2E]">
+                        {it.badge}
+                      </span>
+                    )}
+                    {i === active && (
+                      <CornerDownLeft size={14} className="text-brand-400" />
+                    )}
                   </button>
                 </div>
               );
             })
           )}
+        </div>
+        <div className="flex items-center gap-4 border-t border-brand-200 px-4 py-2 text-[11px] text-brand-400 dark:border-[#2C2C2E]">
+          <span className="flex items-center gap-1">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+              ↑↓
+            </kbd>{" "}
+            navigate
+          </span>
+          <span className="flex items-center gap-1">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+              ↵
+            </kbd>{" "}
+            open
+          </span>
+          <span className="flex items-center gap-1">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+              esc
+            </kbd>{" "}
+            close
+          </span>
         </div>
       </div>
     </div>,

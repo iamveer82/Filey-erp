@@ -5,14 +5,11 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 
 ## Outstanding now
 
-- [ ] **Activate Stripe billing** (code is built — `supabase/functions/stripe/`):
-      1. `supabase functions deploy stripe --no-verify-jwt`
-      2. Set secrets: `supabase secrets set STRIPE_SECRET_KEY=… STRIPE_WEBHOOK_SECRET=… STRIPE_PRICE_PRO=price_… STRIPE_PRICE_BUSINESS=price_… SITE_URL=https://your-domain`
-      3. In Stripe → Webhooks, add endpoint
-         `https://voyrjqgaypiylwskkwpr.functions.supabase.co/stripe`
-         for `checkout.session.completed`, `customer.subscription.updated`,
-         `customer.subscription.deleted`; copy its signing secret into
-         `STRIPE_WEBHOOK_SECRET`.
+- [ ] **Activate Stripe billing** (code is built — `supabase/functions/stripe/`): 1. `supabase functions deploy stripe --no-verify-jwt` 2. Set secrets: `supabase secrets set STRIPE_SECRET_KEY=… STRIPE_WEBHOOK_SECRET=… STRIPE_PRICE_PRO=price_… STRIPE_PRICE_BUSINESS=price_… SITE_URL=https://your-domain` 3. In Stripe → Webhooks, add endpoint
+      `https://voyrjqgaypiylwskkwpr.functions.supabase.co/stripe`
+      for `checkout.session.completed`, `customer.subscription.updated`,
+      `customer.subscription.deleted`; copy its signing secret into
+      `STRIPE_WEBHOOK_SECRET`.
       Until then the Billing tab shows plans but checkout returns a friendly
       "not set up yet" message. (DB columns already added to `organizations`.)
 - [ ] **Deploy the `run-tool` edge function** (server PDF tools):
@@ -44,12 +41,7 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 
 - [x] **All 7 backlog tasks done (2026-05-25)** — migrations applied with the
       7-day token: org billing columns, `invoice_recurrence`, `share_token` +
-      `get_shared_invoice` RPC.
-      - #17 recurring invoices + overdue reminder
-      - #18 multi-currency · #19 export
-      - #20 Stripe billing (edge fn built — activate per "Outstanding")
-      - #21 AI doc scan · #22 AI copilot
-      - #23 customer portal + PWA
+      `get_shared_invoice` RPC. - #17 recurring invoices + overdue reminder - #18 multi-currency · #19 export - #20 Stripe billing (edge fn built — activate per "Outstanding") - #21 AI doc scan · #22 AI copilot - #23 customer portal + PWA
 - [x] **AI suite (2026-05-25)** — BYOK copilot (any model), persistent
       multi-chat, onboarding persona, rename/recolour orb, data grounding,
       **tool-use agent** (reads your data + creates draft invoices), doc/receipt
@@ -77,5 +69,5 @@ The code is built; these activate it. Ask anytime and I'll point you here.
 - **PWA push notifications** → not built yet; needs a VAPID keypair you
   generate + a subscriptions table + a sender fn. Say the word and I'll scaffold
   it (it's the one piece left that's genuinely optional).
-- **Knowledge-graph storage** → the usage *meter* ships; a true per-row graph +
+- **Knowledge-graph storage** → the usage _meter_ ships; a true per-row graph +
   hard limits would be a server-side enforcement layer (future).

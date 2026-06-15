@@ -21,22 +21,18 @@ function ManageRow({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 rounded-xl border border-brand-200 px-3 py-3 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+      className="w-full flex items-center gap-3 rounded-3xl border border-brand-200 px-3 py-3 text-left hover:bg-brand-50 transition-colors cursor-pointer"
     >
       <span
-        className={`rounded-lg p-2 ${
-          danger
-            ? "bg-danger/10 text-danger"
-            : "bg-primary-100 text-primary-700"
+        className={`rounded-md p-2 ${
+          danger ? "bg-danger/10 text-danger" : "bg-primary-100 text-primary-700"
         }`}
       >
         {icon}
       </span>
       <span className="flex-1 min-w-0">
         <span
-          className={`block text-sm font-semibold ${
-            danger ? "text-danger" : "text-ink"
-          }`}
+          className={`block text-sm font-medium ${danger ? "text-danger" : "text-ink"}`}
         >
           {title}
         </span>
@@ -55,10 +51,8 @@ export default function SecurityPanel({
 }) {
   return (
     <div className="card">
-      <p className="font-bold text-ink">Security</p>
-      <p className="text-sm text-brand-500 mt-0.5 mb-4">
-        Protect your account
-      </p>
+      <p className="font-medium text-ink">Security</p>
+      <p className="text-sm text-brand-500 mt-0.5 mb-4">Protect your account</p>
       <div className="space-y-2">
         <ManageRow
           icon={<Lock size={16} />}
@@ -138,12 +132,12 @@ export function ChangePasswordModal({
           />
         </Field>
         {err && (
-          <p className="text-xs font-semibold text-danger bg-danger/10 rounded-lg px-3 py-2">
+          <p className="text-xs font-medium text-danger bg-danger/10 rounded-3xl px-3 py-2">
             {err}
           </p>
         )}
         {ok && (
-          <p className="text-xs font-semibold text-success bg-success/10 rounded-lg px-3 py-2">
+          <p className="text-xs font-medium text-success bg-success/10 rounded-3xl px-3 py-2">
             Password updated.
           </p>
         )}

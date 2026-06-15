@@ -20,13 +20,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import {
-  crm,
-  Opportunity,
-  CrmCustomer,
-  Activity,
-  Lead,
-} from "../lib/api";
+import { crm, Opportunity, CrmCustomer, Activity, Lead } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
@@ -44,6 +38,7 @@ import {
   Spinner,
   ErrorBanner,
 } from "../components/ui";
+import { Tabs, TabsList, TabsTrigger } from "../components/Tabs";
 
 export default function Crm() {
   const nav = useNavigate();
@@ -67,19 +62,17 @@ export default function Crm() {
       crm.leads().then(setLeads),
       crm.activities().then(setActs),
     ])
-      .catch((e) =>
-        setError(`Could not load CRM: ${e instanceof Error ? e.message : e}`)
-      )
+      .catch((e) => setError(`Could not load CRM: ${e instanceof Error ? e.message : e}`))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
   useLiveSync(load);
 
   const now = Date.now();
   const newCount = customers.filter(
-    (c) =>
-      c.created_at &&
-      now - new Date(c.created_at).getTime() < 30 * 86400000
+    (c) => c.created_at && now - new Date(c.created_at).getTime() < 30 * 86400000
   ).length;
   const inactive = (c: CrmCustomer) =>
     (c.segment ?? "").toLowerCase().includes("inactive");
@@ -112,17 +105,12 @@ export default function Crm() {
 
   const funnel = useMemo(() => {
     const sum = (st: string) =>
-      opps
-        .filter((o) => o.stage === st)
-        .reduce((a, o) => a + o.value, 0);
-    const cnt = (st: string) =>
-      opps.filter((o) => o.stage === st).length;
+      opps.filter((o) => o.stage === st).reduce((a, o) => a + o.value, 0);
+    const cnt = (st: string) => opps.filter((o) => o.stage === st).length;
     return [
       {
         label: "Leads",
-        n: leads.filter(
-          (l) => !["converted", "lost"].includes(l.status)
-        ).length,
+        n: leads.filter((l) => !["converted", "lost"].includes(l.status)).length,
         v: 0,
         c: "bg-primary-400",
       },
@@ -153,9 +141,7 @@ export default function Crm() {
     return customers
       .map((c) => {
         const key = (c.company || c.name || "").toLowerCase();
-        const theirs = opps.filter(
-          (o) => o.customer_name.toLowerCase() === key
-        );
+        const theirs = opps.filter((o) => o.customer_name.toLowerCase() === key);
         return {
           c,
           orders: theirs.length,
@@ -174,45 +160,34 @@ export default function Crm() {
         title="CRM"
         subtitle="Manage relationships, track interactions and grow your business"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               className="btn-ghost"
-              aria-label="Export customers"
+              aria-label="Export"
               onClick={() =>
                 downloadCsv(
-                  "customers",
+                  "filey-customers",
                   customers as unknown as Record<string, unknown>[],
                   [
-                    { key: "name", label: "Name" },
+                    { key: "name", label: "Contact" },
                     { key: "company", label: "Company" },
+                    { key: "trn", label: "TRN" },
                     { key: "email", label: "Email" },
                     { key: "phone", label: "Phone" },
                     { key: "address", label: "Address" },
-                    { key: "segment", label: "Segment" },
                   ]
                 )
               }
             >
               <Download size={15} /> Export
             </button>
-            <button className="btn-ghost" aria-label="Import customers" onClick={() => setImportOpen(true)}>
+            <button
+              className="btn-ghost"
+              aria-label="Import customers"
+              onClick={() => setImportOpen(true)}
+            >
               <Upload size={15} /> Import
             </button>
-            <div className="flex rounded-xl bg-brand-100 dark:bg-white/5 p-1 gap-1">
-              {(["dashboard", "pipeline"] as const).map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setView(v)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize cursor-pointer transition-colors ${
-                    view === v
-                      ? "bg-white text-ink shadow-bento dark:bg-[#3A3D45] dark:text-[#F4F5F6]"
-                      : "text-brand-500 hover:text-ink dark:hover:text-[#F4F5F6]"
-                  }`}
-                >
-                  {v === "pipeline" ? "Pipeline board" : "Dashboard"}
-                </button>
-              ))}
-            </div>
           </div>
         }
       />
@@ -222,47 +197,60 @@ export default function Crm() {
           <ErrorBanner message={error} />
         </div>
       )}
-      {loading &&
-        customers.length === 0 &&
-        opps.length === 0 &&
-        !error && (
-          <div className="card mb-4">
-            <Spinner label="Loading CRM…" />
-          </div>
-        )}
+      {loading && customers.length === 0 && opps.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading CRM…" />
+        </div>
+      )}
+
+      <Tabs
+        value={view}
+        onValueChange={(v) => setView(v as "dashboard" | "pipeline")}
+        className="mb-2"
+      >
+        <TabsList>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="pipeline">Pipeline board</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {view === "pipeline" ? (
-        <PipelineBoard opps={opps} setOpps={setOpps} reload={load} onOpen={setSelectedOpp} />
+        <PipelineBoard
+          opps={opps}
+          setOpps={setOpps}
+          reload={load}
+          onOpen={setSelectedOpp}
+        />
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
             <MetricCard
               label="Total Customers"
               value={num(customers.length)}
-              icon={<Users size={20} />}
+              icon={<Users size={16} />}
             />
             <MetricCard
               label="Active Customers"
               value={num(activeCount)}
-              icon={<UserCheck size={20} />}
+              icon={<UserCheck size={16} />}
               iconClass="bg-success/15 text-success"
             />
             <MetricCard
               label="New Customers"
               value={num(newCount)}
-              icon={<UserPlus size={20} />}
+              icon={<UserPlus size={16} />}
               iconClass="bg-secondary-400/20 text-secondary-600"
             />
             <MetricCard
               label="Total Deals"
               value={num(opps.length)}
-              icon={<Target size={20} />}
+              icon={<Target size={16} />}
               iconClass="bg-info/15 text-info"
             />
             <MetricCard
               label="Pipeline Value"
               value={aed(pipelineValue)}
-              icon={<TrendingUp size={20} />}
+              icon={<TrendingUp size={16} />}
               iconClass="bg-primary-100 text-primary-700"
             />
           </div>
@@ -323,9 +311,9 @@ export default function Crm() {
                         <span className={`w-2 h-2 rounded-full ${f.c}`} />
                         {f.label}
                       </span>
-                      <span className="font-bold text-ink">{f.n}</span>
+                      <span className="font-medium text-ink">{f.n}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-brand-100 dark:bg-white/10 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-brand-100 dark:bg-white/12 overflow-hidden">
                       <div
                         className={`h-full rounded-full ${f.c}`}
                         style={{ width: `${(f.n / funnelMax) * 100}%` }}
@@ -377,7 +365,7 @@ export default function Crm() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs font-semibold text-brand-400">
+                    <tr className="text-left text-xs font-medium text-brand-400">
                       <th className="py-2">Customer</th>
                       <th className="py-2">Email</th>
                       <th className="py-2 text-right">Deals</th>
@@ -391,26 +379,18 @@ export default function Crm() {
                         key={c.id || c.name}
                         onClick={() => c.id && nav(`/customers/${c.id}`)}
                         className={cn(
-                          "border-t border-brand-100 dark:border-[#2A2C33] transition-colors",
+                          "border-t border-brand-100 dark:border-[#2C2C2E] transition-colors",
                           c.id &&
                             "cursor-pointer hover:bg-brand-50/70 dark:hover:bg-white/5"
                         )}
                       >
                         <td className="py-2.5">
-                          <p className="font-semibold text-ink">
-                            {c.company || c.name}
-                          </p>
-                          <p className="text-[11px] text-brand-400">
-                            {c.name}
-                          </p>
+                          <p className="font-medium text-ink">{c.company || c.name}</p>
+                          <p className="text-[11px] text-brand-400">{c.name}</p>
                         </td>
-                        <td className="py-2.5 text-brand-600">
-                          {c.email ?? "—"}
-                        </td>
-                        <td className="py-2.5 text-right text-brand-600">
-                          {orders}
-                        </td>
-                        <td className="py-2.5 text-right font-semibold text-ink">
+                        <td className="py-2.5 text-brand-600">{c.email ?? "—"}</td>
+                        <td className="py-2.5 text-right text-brand-600">{orders}</td>
+                        <td className="py-2.5 text-right font-medium text-ink">
                           {aed(spent)}
                         </td>
                         <td className="py-2.5 text-right">
@@ -438,10 +418,7 @@ export default function Crm() {
             <InfoCard
               title="Tasks & Follow Ups"
               action={
-                <button
-                  className="btn-ghost text-xs"
-                  onClick={() => setTaskOpen(true)}
-                >
+                <button className="btn-ghost text-xs" onClick={() => setTaskOpen(true)}>
                   <Plus size={13} /> Add
                 </button>
               }
@@ -467,7 +444,7 @@ export default function Crm() {
                       className="mt-0.5 w-4 h-4 rounded border-2 border-brand-300 hover:border-primary-400 cursor-pointer shrink-0"
                     />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-ink leading-snug">
+                      <p className="text-sm font-medium text-ink leading-snug">
                         {a.subject}
                       </p>
                       <p className="text-[11px] text-brand-400 flex items-center gap-1">
@@ -520,7 +497,11 @@ export default function Crm() {
         ]}
       />
 
-      <DealDrawer opp={selectedOpp} onClose={() => setSelectedOpp(null)} onChange={load} />
+      <DealDrawer
+        opp={selectedOpp}
+        onClose={() => setSelectedOpp(null)}
+        onChange={load}
+      />
     </div>
   );
 }

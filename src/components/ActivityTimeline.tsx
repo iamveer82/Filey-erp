@@ -84,7 +84,11 @@ export default function ActivityTimeline({ relatedTo }: { relatedTo: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Quick add */}
       <div className="mb-3 flex items-center gap-2">
-        <select value={kind} onChange={(e) => setKind(e.target.value)} className="select h-9 !py-0 text-xs">
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          className="select h-9 !py-0 text-xs"
+        >
           {KINDS.map((k) => (
             <option key={k.id} value={k.id}>
               {k.label}
@@ -98,7 +102,11 @@ export default function ActivityTimeline({ relatedTo }: { relatedTo: string }) {
           onChange={(e) => setSubject(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
-        <button onClick={add} disabled={adding || !subject.trim()} className="btn-primary h-9 !px-3">
+        <button
+          onClick={add}
+          disabled={adding || !subject.trim()}
+          className="btn-primary h-9 !px-3"
+        >
           {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
         </button>
       </div>
@@ -117,12 +125,19 @@ export default function ActivityTimeline({ relatedTo }: { relatedTo: string }) {
             const Icon = kindIcon(a.kind);
             const isTask = a.kind === "task";
             return (
-              <div key={a.id} className="flex items-start gap-2.5 rounded-xl border border-brand-200 p-2.5 dark:border-[#3A3D45]">
-                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-100 text-brand-500 dark:bg-white/5">
+              <div
+                key={a.id}
+                className="flex items-start gap-2.5 rounded-3xl border border-brand-200 p-2.5 dark:border-[#2C2C2E]"
+              >
+                <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-3xl bg-brand-100 text-brand-500 dark:bg-white/8">
                   <Icon size={14} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm text-ink ${a.done ? "text-brand-400 line-through" : ""}`}>{a.subject}</p>
+                  <p
+                    className={`text-sm text-ink ${a.done ? "text-brand-400 line-through" : ""}`}
+                  >
+                    {a.subject}
+                  </p>
                   <p className="text-[11px] text-brand-400">
                     {a.kind} · {fmtDate(a.created_at)}
                   </p>

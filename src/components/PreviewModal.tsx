@@ -20,7 +20,7 @@ function kindOf(name: string, type: string): Kind {
 }
 
 /** Document previewer — renders PDF (pdfjs), images, or text locally.
- *  Opens as an overlay panel with a close button. No upload to server. */
+ * Opens as an overlay panel with a close button. No upload to server. */
 export default function PreviewModal({
   open,
   title,
@@ -76,11 +76,7 @@ export default function PreviewModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, paths.join("|")]);
 
-  const renderBytes = async (
-    fileName: string,
-    type: string,
-    bytes: Uint8Array
-  ) => {
+  const renderBytes = async (fileName: string, type: string, bytes: Uint8Array) => {
     if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current);
     imgUrlRef.current = "";
     setImgUrl("");
@@ -157,20 +153,15 @@ export default function PreviewModal({
   if (!open) return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 bg-ink/40 flex justify-end"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 bg-ink/40 flex justify-end" onClick={onClose}>
       <div
-        className="w-full max-w-3xl h-full bg-white dark:bg-[#24262C] shadow-bento-hover flex flex-col"
+        className="w-full max-w-3xl h-full bg-white dark:bg-[#1C1C1E] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2A2C33] shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2C2C2E] shrink-0">
           <div className="min-w-0">
-            <p className="font-bold text-ink truncate">
-              {name || title || "Preview"}
-            </p>
+            <p className="font-medium text-ink truncate">{name || title || "Preview"}</p>
             <p className="text-xs text-brand-400">
               {paths.length
                 ? "Stored securely in your account"
@@ -188,7 +179,7 @@ export default function PreviewModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+              className="rounded-3xl p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -207,7 +198,7 @@ export default function PreviewModal({
 
         {/* multi-file tabs */}
         {paths.length > 1 && (
-          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2A2C33] overflow-x-auto shrink-0">
+          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2C2C2E] overflow-x-auto shrink-0">
             {paths.map((p) => (
               <button
                 key={p}
@@ -225,14 +216,14 @@ export default function PreviewModal({
         )}
 
         {/* body */}
-        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#1A1B1E] p-5">
+        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#1C1C1E] p-5">
           {busy && (
             <div className="h-full grid place-items-center text-brand-400">
               <Loader2 size={28} className="animate-spin" />
             </div>
           )}
           {!busy && err && (
-            <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">
+            <p className="text-sm text-danger bg-danger/10 rounded-3xl px-3 py-2">
               {err}
             </p>
           )}
@@ -240,10 +231,10 @@ export default function PreviewModal({
             <div className="h-full grid place-items-center text-center text-brand-400">
               <div>
                 <FileText size={30} className="mx-auto mb-3 text-primary-500" />
-                <p className="font-semibold text-ink">No document loaded</p>
+                <p className="font-medium text-ink">No document loaded</p>
                 <p className="text-xs mt-1">
-                  Click <span className="font-semibold">Open file</span> to
-                  preview a PDF, image, or text document.
+                  Click <span className="font-medium">Open file</span> to preview a PDF,
+                  image, or text document.
                 </p>
                 <button
                   className="btn-primary mt-4 mx-auto"
@@ -254,9 +245,7 @@ export default function PreviewModal({
               </div>
             </div>
           )}
-          {!busy && !err && loaded && kind === "pdf" && (
-            <div ref={canvasWrap} />
-          )}
+          {!busy && !err && loaded && kind === "pdf" && <div ref={canvasWrap} />}
           {!busy && !err && loaded && kind === "image" && imgUrl && (
             <img
               src={imgUrl}
@@ -265,7 +254,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1A1B1E] rounded-xl border border-brand-200 dark:border-[#3A3D45] p-4 text-brand-700 dark:text-[#DDE0E4]">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1C1C1E] rounded-3xl border border-brand-200 dark:border-[#2C2C2E] p-4 text-brand-700 dark:text-[#DDE0E4]">
               {text}
             </pre>
           )}

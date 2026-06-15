@@ -43,21 +43,9 @@ const STAGE_PROB: Record<string, number> = {
 
 type Deal = Opportunity;
 
-function SortableDealCard({
-  deal,
-  onClick,
-}: {
-  deal: Deal;
-  onClick: (d: Deal) => void;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: deal.id, data: { type: "deal", deal } });
+function SortableDealCard({ deal, onClick }: { deal: Deal; onClick: (d: Deal) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: deal.id, data: { type: "deal", deal } });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -71,7 +59,7 @@ function SortableDealCard({
       {...attributes}
       onClick={() => onClick(deal)}
       className={
-        "card !p-3 cursor-grab select-none hover:shadow-bento-hover active:cursor-grabbing " +
+        "card !p-3 cursor-grab select-none hover: active:cursor-grabbing " +
         (isDragging ? "opacity-50" : "")
       }
     >
@@ -83,17 +71,11 @@ function SortableDealCard({
           <GripVertical size={15} />
         </button>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink truncate">
-            {deal.title}
-          </p>
-          <p className="text-xs text-brand-500 truncate">
-            {deal.customer_name}
-          </p>
+          <p className="text-sm font-medium text-ink truncate">{deal.title}</p>
+          <p className="text-xs text-brand-500 truncate">{deal.customer_name}</p>
           <div className="flex items-center justify-between mt-2">
-            <span className="text-sm font-bold text-ink">
-              {aed(deal.value)}
-            </span>
-            <span className="text-[11px] font-semibold text-brand-400">
+            <span className="text-sm font-medium text-ink">{aed(deal.value)}</span>
+            <span className="text-[11px] font-medium text-brand-400">
               {deal.probability}%
             </span>
           </div>
@@ -105,21 +87,15 @@ function SortableDealCard({
 
 function DealCardOverlay({ deal }: { deal: Deal }) {
   return (
-    <div className="card !p-3 shadow-bento-hover rotate-2 w-64">
+    <div className="card !p-3 rotate-2 w-64">
       <div className="flex items-start gap-2">
         <GripVertical size={15} className="text-brand-300 mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink truncate">
-            {deal.title}
-          </p>
-          <p className="text-xs text-brand-500 truncate">
-            {deal.customer_name}
-          </p>
+          <p className="text-sm font-medium text-ink truncate">{deal.title}</p>
+          <p className="text-xs text-brand-500 truncate">{deal.customer_name}</p>
           <div className="flex items-center justify-between mt-2">
-            <span className="text-sm font-bold text-ink">
-              {aed(deal.value)}
-            </span>
-            <span className="text-[11px] font-semibold text-brand-400">
+            <span className="text-sm font-medium text-ink">{aed(deal.value)}</span>
+            <span className="text-[11px] font-medium text-brand-400">
               {deal.probability}%
             </span>
           </div>
@@ -193,7 +169,9 @@ export default function PipelineBoard({
       targetStage = overDeal.stage;
     }
 
-    setDragOverColumn(targetStage !== activeDeal.stage ? targetStage : overIsColumn ? targetStage : null);
+    setDragOverColumn(
+      targetStage !== activeDeal.stage ? targetStage : overIsColumn ? targetStage : null
+    );
 
     if (targetStage !== activeDeal.stage) {
       setOpps((prev) =>
@@ -239,8 +217,9 @@ export default function PipelineBoard({
       await import("../lib/api").then((m) =>
         m.crm.setOppStage(activeId, activeDeal.stage)
       );
-    } catch {
+    } catch (e) {
       toast.error("Failed to update opportunity stage");
+      console.error("Failed to update opportunity stage:", e);
       reload();
     }
   };
@@ -263,8 +242,9 @@ export default function PipelineBoard({
         probability: STAGE_PROB[stage] ?? 20,
       });
       reload();
-    } catch {
+    } catch (e) {
       toast.error("Failed to create opportunity");
+      console.error("Failed to create opportunity:", e);
       reload();
     }
   };
@@ -287,22 +267,20 @@ export default function PipelineBoard({
               key={s.id}
               data-column={s.id}
               className={
-                "w-72 shrink-0 rounded-2xl border bg-brand-50/60 dark:bg-white/[0.03] p-3 transition-colors " +
+                "w-72 shrink-0 rounded-md border bg-brand-50/60 dark:bg-white/[0.03] p-3 transition-colors " +
                 (isOver
                   ? "border-primary-500 bg-primary-100/40"
-                  : "border-brand-200 dark:border-[#3A3D45]")
+                  : "border-brand-200 dark:border-[#2C2C2E]")
               }
             >
               <div className="flex items-center justify-between px-1 mb-3">
                 <div className="flex items-center gap-2">
                   <Badge tone={s.tone}>{s.label}</Badge>
-                  <span className="inline-flex items-center justify-center min-w-[22px] h-5 rounded-full bg-white dark:bg-white/10 text-[11px] font-bold text-brand-500 px-1.5 shadow-sm">
+                  <span className="inline-flex items-center justify-center min-w-[22px] h-5 rounded-full bg-white dark:bg-white/12 text-[11px] font-medium text-brand-500 px-1.5">
                     {list.length}
                   </span>
                 </div>
-                <span className="text-xs font-bold text-ink">
-                  {aed(total)}
-                </span>
+                <span className="text-xs font-medium text-ink">{aed(total)}</span>
               </div>
 
               <SortableContext
@@ -312,11 +290,7 @@ export default function PipelineBoard({
               >
                 <div className="space-y-2 min-h-[120px]">
                   {list.map((o) => (
-                    <SortableDealCard
-                      key={o.id}
-                      deal={o}
-                      onClick={onOpen}
-                    />
+                    <SortableDealCard key={o.id} deal={o} onClick={onOpen} />
                   ))}
                   {list.length === 0 && (
                     <p className="text-center text-xs text-brand-300 py-6">
@@ -349,7 +323,7 @@ export default function PipelineBoard({
                       setAddStage(s.id);
                       setAddTitle("");
                     }}
-                    className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-brand-300 py-1.5 text-xs font-semibold text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-[#3A3D45]"
+                    className="flex w-full items-center justify-center gap-1 rounded-3xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-[#2C2C2E]"
                   >
                     <Plus size={13} /> Add deal
                   </button>

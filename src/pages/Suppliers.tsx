@@ -8,6 +8,7 @@ import {
   Plus,
   Trash2,
   Pencil,
+  Sliders,
 } from "lucide-react";
 import {
   erp,
@@ -19,6 +20,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, num } from "../lib/format";
+import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import {
   PageHeader,
   MetricCard,
@@ -44,6 +46,7 @@ export default function Suppliers() {
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [manageOpen, setManageOpen] = useState(false);
   const [error, setError] = useState("");
   const { confirm, toast } = useUI();
   const nav = useNavigate();
@@ -76,8 +79,7 @@ export default function Suppliers() {
     const m = new Map<string, CategoryGroup>();
     for (const p of products) {
       const key = p.category || "Unsorted";
-      const g =
-        m.get(key) ?? { name: key, skus: 0, value: 0, low: 0 };
+      const g = m.get(key) ?? { name: key, skus: 0, value: 0, low: 0 };
       g.skus += 1;
       g.value += p.quantity * p.cost_price;
       if (p.quantity <= p.reorder_level) g.low += 1;
@@ -95,17 +97,28 @@ export default function Suppliers() {
         title="Suppliers"
         subtitle="Vendor records & sourcing performance"
         action={
-          <button
-            className="btn-primary"
-            aria-label="New supplier"
-            onClick={() => {
-              setEdit(null);
-              setOpen(true);
-            }}
-          >
-            <Plus size={16} /> New Supplier
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" onClick={() => setManageOpen(true)}>
+              <Sliders size={15} /> Customize fields
+            </button>
+            <button
+              className="btn-primary"
+              aria-label="New supplier"
+              onClick={() => {
+                setEdit(null);
+                setOpen(true);
+              }}
+            >
+              <Plus size={16} /> New Supplier
+            </button>
+          </div>
         }
+      />
+      <CustomFieldsManager
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        module="suppliers"
+        sampleValues={{ region: "Sharjah", lead_time: "5 days" }}
       />
 
       {error && (
@@ -124,19 +137,19 @@ export default function Suppliers() {
           label="Sourced SKUs"
           value={num(products.length)}
           icon={<Boxes size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
+          iconClass="text-secondary-500"
         />
         <MetricCard
           label="Sourcing Value"
           value={aed(totalValue)}
           icon={<Package size={20} />}
-          iconClass="bg-info/15 text-info"
+          iconClass="text-info"
         />
         <MetricCard
           label="At Reorder"
           value={num(totalLow)}
           icon={<AlertTriangle size={20} />}
-          iconClass="bg-danger/15 text-danger"
+          iconClass="text-danger"
         />
       </div>
 
@@ -150,9 +163,7 @@ export default function Suppliers() {
             key: "name",
             label: "Supplier",
             sortValue: (s) => s.name,
-            render: (s) => (
-              <span className="font-semibold text-ink">{s.name}</span>
-            ),
+            render: (s) => <span className="font-medium text-ink">{s.name}</span>,
           },
           {
             key: "contact",
@@ -182,9 +193,7 @@ export default function Suppliers() {
                   try {
                     await shareRecord("suppliers", s.id, next);
                     load();
-                    toast.success(
-                      next ? "Shared with team." : "Set to private."
-                    );
+                    toast.success(next ? "Shared with team." : "Set to private.");
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : String(e));
                   }
@@ -199,7 +208,7 @@ export default function Suppliers() {
               <div className="flex gap-1">
                 <button
                   aria-label="Edit"
-                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-600 hover:bg-brand-100 dark:hover:bg-white/10 rounded-3xl p-1.5 cursor-pointer"
                   onClick={() => {
                     setEdit(s);
                     setOpen(true);
@@ -209,7 +218,7 @@ export default function Suppliers() {
                 </button>
                 <button
                   aria-label="Delete"
-                  className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
+                  className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer"
                   onClick={async () => {
                     const ok = await confirm({
                       title: "Delete supplier",
@@ -230,14 +239,12 @@ export default function Suppliers() {
         ]}
       />
 
-      <p className="mt-8 mb-3 text-xs font-bold uppercase tracking-wider text-brand-400">
-        By product category
-      </p>
+      <p className="mt-8 mb-3 text-xs font-medium text-brand-500">By product category</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {groups.map((g) => (
           <Card key={g.name} hover className="flex flex-col gap-4">
             <div className="flex items-start justify-between">
-              <div className="rounded-2xl bg-primary-100 text-primary-700 p-3">
+              <div className="rounded-3xl bg-brand-50 dark:bg-white/8 text-primary-700 dark:text-primary-300 p-3">
                 <Package size={22} />
               </div>
               {g.low > 0 ? (
@@ -247,25 +254,21 @@ export default function Suppliers() {
               )}
             </div>
             <div>
-              <p className="text-lg font-bold text-ink">{g.name}</p>
+              <p className="text-lg font-medium text-ink">{g.name}</p>
               <p className="text-sm text-brand-500 mt-0.5">
                 {g.skus} SKU{g.skus === 1 ? "" : "s"} sourced
               </p>
             </div>
-            <div className="mt-auto pt-3 border-t border-brand-100 dark:border-[#2A2C33] flex items-center justify-between">
-              <span className="text-xs font-semibold text-brand-400">
-                Sourcing value
-              </span>
-              <span className="text-sm font-bold text-ink">
-                {aed(g.value)}
-              </span>
+            <div className="mt-auto pt-3 border-t border-brand-100 dark:border-[#2C2C2E] flex items-center justify-between">
+              <span className="text-xs font-medium text-brand-500">Sourcing value</span>
+              <span className="text-sm font-medium text-ink">{aed(g.value)}</span>
             </div>
           </Card>
         ))}
         {groups.length === 0 && (
           <Card className="col-span-full text-center text-sm text-brand-400">
-            No supplier groups yet — add products with categories to see
-            sourcing performance.
+            No supplier groups yet — add products with categories to see sourcing
+            performance.
           </Card>
         )}
       </div>
@@ -339,9 +342,7 @@ function SupplierModal({
       onSaved();
     } catch (e) {
       toast.error(
-        `Could not save supplier: ${
-          e instanceof Error ? e.message : String(e)
-        }`
+        `Could not save supplier: ${e instanceof Error ? e.message : String(e)}`
       );
     }
   };
@@ -364,9 +365,7 @@ function SupplierModal({
           <input
             className="input"
             value={f.contact_person}
-            onChange={(e) =>
-              setF({ ...f, contact_person: e.target.value })
-            }
+            onChange={(e) => setF({ ...f, contact_person: e.target.value })}
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">

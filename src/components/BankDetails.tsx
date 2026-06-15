@@ -26,14 +26,15 @@ export const EMPTY_BANK: BankInfo = {
 
 const SETTING_KEY = "company_bank";
 
-export const BANK_FIELDS: { key: keyof BankInfo; label: string; placeholder?: string }[] = [
-  { key: "bank_name", label: "Bank Name", placeholder: "Emirates NBD" },
-  { key: "branch", label: "Branch Name", placeholder: "Business Bay" },
-  { key: "account_name", label: "Account Name", placeholder: "Your Company L.L.C" },
-  { key: "account_number", label: "Account Number", placeholder: "01234567890" },
-  { key: "iban", label: "IBAN", placeholder: "AE00 0000 0000 0000 0000 000" },
-  { key: "swift", label: "SWIFT / BIC", placeholder: "EBILAEAD" },
-];
+export const BANK_FIELDS: { key: keyof BankInfo; label: string; placeholder?: string }[] =
+  [
+    { key: "bank_name", label: "Bank Name", placeholder: "Emirates NBD" },
+    { key: "branch", label: "Branch Name", placeholder: "Business Bay" },
+    { key: "account_name", label: "Account Name", placeholder: "Your Company L.L.C" },
+    { key: "account_number", label: "Account Number", placeholder: "01234567890" },
+    { key: "iban", label: "IBAN", placeholder: "AE00 0000 0000 0000 0000 000" },
+    { key: "swift", label: "SWIFT / BIC", placeholder: "EBILAEAD" },
+  ];
 
 export const hasBankInfo = (b?: BankInfo | null): boolean =>
   !!b && Object.values(b).some((v) => (v ?? "").toString().trim());
@@ -45,7 +46,8 @@ export async function loadBankInfo(): Promise<BankInfo> {
     const row = rows.find((r) => r.key === SETTING_KEY);
     if (!row?.value) return { ...EMPTY_BANK };
     return { ...EMPTY_BANK, ...(JSON.parse(row.value) as Partial<BankInfo>) };
-  } catch {
+  } catch (e) {
+    console.warn("Failed to parse company bank details", e);
     return { ...EMPTY_BANK };
   }
 }
@@ -67,9 +69,11 @@ export function BankDetailsBlock({
   if (!hasBankInfo(bank)) return null;
   const rows = BANK_FIELDS.filter((f) => (bank[f.key] ?? "").trim());
   return (
-    <div className={`mt-6 pt-3 border-t border-neutral-200 text-neutral-900 ${className}`}>
+    <div
+      className={`mt-6 pt-3 border-t border-neutral-200 text-neutral-900 ${className}`}
+    >
       <p
-        className="text-xs font-bold mb-1.5"
+        className="text-xs font-medium mb-1.5"
         style={accent ? { color: accent } : undefined}
       >
         Bank Details
@@ -78,9 +82,7 @@ export function BankDetailsBlock({
         {rows.map((f) => (
           <div key={f.key} className="flex justify-between gap-3">
             <span className="text-neutral-400">{f.label}</span>
-            <span className="font-medium text-neutral-800 text-right">
-              {bank[f.key]}
-            </span>
+            <span className="font-medium text-neutral-800 text-right">{bank[f.key]}</span>
           </div>
         ))}
       </div>

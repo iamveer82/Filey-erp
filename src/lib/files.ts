@@ -97,7 +97,8 @@ export async function autoSaveDocument(
     if (existing.some((f) => f.name === name && f.tool === tool)) return false;
     await saveOutput(await gen(), tool);
     return true;
-  } catch {
+  } catch (e) {
+    console.warn("autoSaveDocument failed:", e);
     return false;
   }
 }

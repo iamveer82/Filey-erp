@@ -48,15 +48,11 @@ export default function Purchase() {
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const byCat = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of expenses)
-      m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
+    for (const e of expenses) m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
   }, [expenses]);
   const thisMonth = expenses
-    .filter(
-      (e) =>
-        new Date(e.expense_date).getMonth() === new Date().getMonth()
-    )
+    .filter((e) => new Date(e.expense_date).getMonth() === new Date().getMonth())
     .reduce((s, e) => s + e.amount, 0);
 
   return (
@@ -112,9 +108,9 @@ export default function Purchase() {
                 <li key={c}>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-brand-600 font-medium">{c}</span>
-                    <span className="font-bold text-ink">{aed(v)}</span>
+                    <span className="font-medium text-ink">{aed(v)}</span>
                   </div>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 dark:bg-white/10 overflow-hidden">
+                  <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 dark:bg-white/12 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-primary-400"
                       style={{ width: `${pct}%` }}
@@ -139,25 +135,19 @@ export default function Purchase() {
                 key: "cat",
                 label: "Category",
                 sortValue: (e) => e.category,
-                render: (e) => (
-                  <Badge tone="info">{e.category}</Badge>
-                ),
+                render: (e) => <Badge tone="info">{e.category}</Badge>,
               },
               {
                 key: "desc",
                 label: "Description",
                 sortValue: (e) => e.description ?? "",
-                render: (e) => (
-                  <span className="text-ink">{e.description ?? "—"}</span>
-                ),
+                render: (e) => <span className="text-ink">{e.description ?? "—"}</span>,
               },
               {
                 key: "amt",
                 label: "Amount",
                 sortValue: (e) => e.amount,
-                render: (e) => (
-                  <span className="font-semibold">{aed(e.amount)}</span>
-                ),
+                render: (e) => <span className="font-medium">{aed(e.amount)}</span>,
               },
               {
                 key: "date",
@@ -171,9 +161,15 @@ export default function Purchase() {
                 render: (e) => (
                   <button
                     aria-label="Delete purchase"
-                    className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-danger hover:bg-danger/10 rounded-3xl p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
-                      if (!(await confirm({ title: "Delete purchase", message: "Delete this purchase record? This cannot be undone." }))) return;
+                      if (
+                        !(await confirm({
+                          title: "Delete purchase",
+                          message: "Delete this purchase record? This cannot be undone.",
+                        }))
+                      )
+                        return;
                       await fin.deleteExpense(e.id);
                       load();
                       toast.success("Purchase deleted");
@@ -188,11 +184,7 @@ export default function Purchase() {
         </div>
       </div>
 
-      <PurchaseModal
-        open={open}
-        onClose={() => setOpen(false)}
-        onSaved={load}
-      />
+      <PurchaseModal open={open} onClose={() => setOpen(false)} onSaved={load} />
     </div>
   );
 }
@@ -216,7 +208,11 @@ function PurchaseModal({
   });
   const [accounts, setAccounts] = useState<Account[]>([]);
   useEffect(() => {
-    if (open) fin.accounts().then(setAccounts).catch(() => setAccounts([]));
+    if (open)
+      fin
+        .accounts()
+        .then(setAccounts)
+        .catch(() => setAccounts([]));
   }, [open]);
   return (
     <Modal open={open} onClose={onClose} title="New Purchase">
@@ -229,9 +225,7 @@ function PurchaseModal({
             placeholder="Raw materials"
           />
           {!f.category.trim() && (
-            <p className="text-[11px] text-danger mt-1">
-              Category is required.
-            </p>
+            <p className="text-[11px] text-danger mt-1">Category is required.</p>
           )}
         </Field>
         <Field label="Description">
@@ -294,9 +288,7 @@ function PurchaseModal({
               onClose();
             } catch (e) {
               toast.error(
-                `Could not save purchase: ${
-                  e instanceof Error ? e.message : String(e)
-                }`
+                `Could not save purchase: ${e instanceof Error ? e.message : String(e)}`
               );
             }
           }}

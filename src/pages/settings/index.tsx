@@ -27,6 +27,7 @@ import BillingPanel from "./BillingPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import BackupPanel from "./BackupPanel";
 import EmailPanel from "./EmailPanel";
+// import { MessageSquare } from "lucide-react";
 
 type Section =
   | "company"
@@ -39,6 +40,7 @@ type Section =
   | "security"
   | "notifications"
   | "email"
+  | "sms"
   | "integrations"
   | "backup"
   | "activity"
@@ -56,6 +58,7 @@ const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "security", label: "Security", icon: ShieldCheck },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "email", label: "Email", icon: Bell },
+  // { id: "sms", label: "SMS", icon: MessageSquare },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "activity", label: "Activity Log", icon: History },
@@ -81,7 +84,7 @@ export default function Settings() {
             <button
               key={id}
               onClick={() => setSection(id)}
-              className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-left leading-snug transition-colors cursor-pointer ${
+              className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-left leading-snug transition-colors cursor-pointer ${
                 section === id
                   ? "bg-primary-100 text-primary-700"
                   : "text-brand-500 hover:bg-brand-50 hover:text-ink"
@@ -107,6 +110,7 @@ export default function Settings() {
           {section === "billing" && <BillingPanel />}
           {section === "notifications" && <NotificationsPanel />}
           {section === "email" && <EmailPanel />}
+          {/* {section === "sms" && <SmsPanel />} */}
           {section === "integrations" && <IntegrationsPanel />}
           {section === "backup" && <BackupPanel />}
         </div>

@@ -18,7 +18,11 @@ export default function OverdueReminder() {
         if (!active) return;
         const today = new Date().toISOString().slice(0, 10);
         const overdue = docs.filter(
-          (d) => (d.balance ?? 0) > 0 && !!d.due_date && d.due_date < today && d.status !== "paid"
+          (d) =>
+            (d.balance ?? 0) > 0 &&
+            !!d.due_date &&
+            d.due_date < today &&
+            d.status !== "paid"
         );
         if (overdue.length > 0) {
           toast.notify({

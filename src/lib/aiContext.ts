@@ -57,7 +57,7 @@ export async function buildAiContext(companyName?: string): Promise<string> {
               s(d.currency) || ccy
             )} due, due ${s(d.due_date)}`
         );
-      lines.push(`  Overdue: ${list.join("; ")}`);
+      lines.push(` Overdue: ${list.join("; ")}`);
     }
   }
 

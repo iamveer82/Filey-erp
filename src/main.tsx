@@ -15,13 +15,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-  </React.StrictMode>,
+  </React.StrictMode>
 );
 
 // PWA: register the network-first service worker in production builds only
 // (avoids caching surprises during local dev).
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((e) => console.error("Failed to register service worker:", e));
+    navigator.serviceWorker
+      .register("/sw.js")
+      .catch((e) => console.error("Failed to register service worker:", e));
   });
 }

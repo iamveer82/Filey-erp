@@ -9,8 +9,7 @@ export function parseRanges(input: string, pageCount: number): number[] {
     if (m) {
       const a = m[1] ? parseInt(m[1], 10) : 1;
       const b = m[2] ? parseInt(m[2], 10) : pageCount;
-      for (let i = a; i <= b; i++)
-        if (i >= 1 && i <= pageCount) out.add(i - 1);
+      for (let i = a; i <= b; i++) if (i >= 1 && i <= pageCount) out.add(i - 1);
     } else if (/^\d+$/.test(part)) {
       const i = parseInt(part, 10);
       if (i >= 1 && i <= pageCount) out.add(i - 1);

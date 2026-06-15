@@ -22,7 +22,7 @@ export interface TextBlock {
 }
 
 /** Natural single-line width of `text` in a CSS `font`
- *  (e.g. `"600 16px 'Plus Jakarta Sans'"`). No DOM reflow. */
+ * (e.g. `"600 16px 'Plus Jakarta Sans'"`). No DOM reflow. */
 export function measureTextWidth(
   text: string,
   font: string,
@@ -67,8 +67,8 @@ export interface RenderTextOptions {
 }
 
 /** Render measured, wrapped text onto a tightly-sized canvas. The canvas
- *  dimensions come from pretext, so it wraps exactly to the content —
- *  ideal for embedding into a PDF via pdf-lib `embedPng`. */
+ * dimensions come from pretext, so it wraps exactly to the content —
+ * ideal for embedding into a PDF via pdf-lib `embedPng`. */
 export function renderTextToCanvas(
   text: string,
   opts: RenderTextOptions
@@ -122,10 +122,7 @@ export function renderTextToCanvas(
 }
 
 /** Render text to a PNG data URL (transparent by default). */
-export function renderTextToDataUrl(
-  text: string,
-  opts: RenderTextOptions
-): string {
+export function renderTextToDataUrl(text: string, opts: RenderTextOptions): string {
   return renderTextToCanvas(text, opts).toDataURL("image/png");
 }
 

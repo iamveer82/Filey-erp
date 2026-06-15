@@ -18,7 +18,12 @@ export interface AuditEntry {
 }
 
 /** Log an action to the audit trail. */
-export function audit(action: string, entity: string, details?: string, entityId?: string | number) {
+export function audit(
+  action: string,
+  entity: string,
+  details?: string,
+  entityId?: string | number
+) {
   try {
     const logs = getAuditLog();
     logs.unshift({
@@ -31,14 +36,17 @@ export function audit(action: string, entity: string, details?: string, entityId
     });
     if (logs.length > MAX_ENTRIES) logs.length = MAX_ENTRIES;
     localStorage.setItem(AUDIT_KEY, JSON.stringify(logs));
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to write audit log", e);
+  }
 }
 
 /** Get all audit entries, newest first. */
 export function getAuditLog(): AuditEntry[] {
   try {
     return JSON.parse(localStorage.getItem(AUDIT_KEY) || "[]");
-  } catch {
+  } catch (e) {
+    console.warn("Failed to parse audit log", e);
     return [];
   }
 }
@@ -50,7 +58,11 @@ export function getRecentAudit(n = 20): AuditEntry[] {
 
 /** Clear all audit entries. */
 export function clearAuditLog() {
-  try { localStorage.removeItem(AUDIT_KEY); } catch {}
+  try {
+    localStorage.removeItem(AUDIT_KEY);
+  } catch (e) {
+    console.warn("Failed to clear audit log", e);
+  }
 }
 
 /** Format an audit entry for display. */

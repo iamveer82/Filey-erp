@@ -9,12 +9,12 @@ interface MagicCardProps {
 }
 
 /** Minimal card surface. The former 3D-tilt/glow treatment was removed for
- *  the minimal theme; this is now a plain quiet card with the same API. */
+ * the minimal theme; this is now a plain quiet card with the same API. */
 export function MagicCard({ children, className }: MagicCardProps) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-brand-200/80 bg-white shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]",
+        "relative overflow-hidden rounded-md border border-brand-200/80 bg-white dark:border-[#3A3D45] dark:bg-[#24262C]",
         className
       )}
     >

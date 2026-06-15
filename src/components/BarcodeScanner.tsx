@@ -67,7 +67,11 @@ export default function BarcodeScanner({
     const startCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         });
         streamRef.current = stream;
         if (videoRef.current) {
@@ -80,8 +84,8 @@ export default function BarcodeScanner({
           e?.name === "NotAllowedError"
             ? "Camera access denied. Please allow camera access and try again."
             : e?.name === "NotFoundError"
-            ? "No camera found on this device."
-            : `Camera error: ${e?.message || "Could not access camera"}`
+              ? "No camera found on this device."
+              : `Camera error: ${e?.message || "Could not access camera"}`
         );
       }
     };
@@ -133,8 +137,9 @@ export default function BarcodeScanner({
         if (barcodes.length > 0) {
           handleBarcode(barcodes[0].rawValue);
         }
-      } catch {
+      } catch (e) {
         // BarcodeDetector may throw on some frames
+        console.warn("Barcode detection frame failed:", e);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -151,7 +156,7 @@ export default function BarcodeScanner({
     <Modal open={open} onClose={onClose} title={title} size="lg">
       <div className="space-y-4">
         {/* Camera view */}
-        <div className="relative bg-black rounded-xl overflow-hidden aspect-[4/3]">
+        <div className="relative bg-black rounded-3xl overflow-hidden aspect-[4/3]">
           {error ? (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-white text-sm p-4 text-center">
               <div>
@@ -172,7 +177,7 @@ export default function BarcodeScanner({
               />
               {/* Scanning overlay */}
               <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-[15%] border-2 border-primary-400/60 rounded-2xl">
+                <div className="absolute inset-[15%] border-2 border-primary-400/60 rounded-3xl">
                   <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-primary-400 rounded-tl-xl" />
                   <div className="absolute top-0 right-0 w-8 h-8 border-t-3 border-r-3 border-primary-400 rounded-tr-xl" />
                   <div className="absolute bottom-0 left-0 w-8 h-8 border-b-3 border-l-3 border-primary-400 rounded-bl-xl" />
@@ -212,7 +217,7 @@ export default function BarcodeScanner({
             </button>
           )}
           {lastScan && (
-            <span className="text-xs text-success font-mono font-semibold">
+            <span className="text-xs text-success font-medium">
               <ScanLine size={12} className="inline mr-1" />
               {lastScan}
             </span>
@@ -221,7 +226,7 @@ export default function BarcodeScanner({
 
         {/* Manual input */}
         <div>
-          <p className="text-xs font-semibold text-brand-400 mb-2">
+          <p className="text-xs font-medium text-brand-400 mb-2">
             Or type a barcode / SKU
           </p>
           <div className="flex gap-2">
@@ -250,11 +255,11 @@ export default function BarcodeScanner({
       </div>
 
       <style>{`
-        @keyframes barcodeScan {
-          0%, 100% { top: 15%; }
-          50% { top: 85%; }
-        }
-      `}</style>
+ @keyframes barcodeScan {
+ 0%, 100% { top: 15%; }
+ 50% { top: 85%; }
+ }
+ `}</style>
     </Modal>
   );
 }

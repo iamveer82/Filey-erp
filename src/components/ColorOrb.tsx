@@ -40,8 +40,7 @@ export default function ColorOrb({
   const dot = d < 50 ? Math.max(d * 0.004, 0.05) : Math.max(d * 0.008, 0.1);
   const shadow = d < 50 ? Math.max(d * 0.004, 0.5) : Math.max(d * 0.008, 2);
   const mask = d < 30 ? "0%" : d < 50 ? "5%" : d < 100 ? "15%" : "25%";
-  const adjContrast =
-    d < 30 ? 1.1 : d < 50 ? Math.max(contrast * 1.2, 1.3) : contrast;
+  const adjContrast = d < 30 ? 1.1 : d < 50 ? Math.max(contrast * 1.2, 1.3) : contrast;
 
   const style = {
     width: dimension,

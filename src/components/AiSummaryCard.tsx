@@ -16,8 +16,8 @@ function cached(): string {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
     if (c && c.date === today()) return c.text as string;
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.warn("Failed to parse AI summary cache", e);
   }
   return "";
 }
@@ -64,12 +64,15 @@ export default function AiSummaryCard() {
       <div className="card mb-4 flex items-center gap-3">
         <ColorOrb dimension="28px" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-ink">AI daily briefing</p>
+          <p className="text-sm font-medium text-ink">AI daily briefing</p>
           <p className="text-xs text-brand-500">
             Connect your AI model to get a data-grounded summary of your business.
           </p>
         </div>
-        <button className="btn-ghost h-9 shrink-0" onClick={() => navigate("/settings?section=ai")}>
+        <button
+          className="btn-ghost h-9 shrink-0"
+          onClick={() => navigate("/settings?section=ai")}
+        >
           Connect
         </button>
       </div>
@@ -79,10 +82,10 @@ export default function AiSummaryCard() {
   return (
     <div className="card mb-4 relative overflow-hidden">
       {/* Subtle pulse ring on the AI card to draw attention */}
-      <div className="absolute inset-0 rounded-2xl pointer-events-none" />
+      <div className="absolute inset-0 rounded-3xl pointer-events-none" />
       <div className="mb-2 flex items-center gap-2 relative z-10">
         <ColorOrb dimension="22px" />
-        <p className="flex-1 text-sm font-bold text-ink">AI daily briefing</p>
+        <p className="flex-1 text-sm font-medium text-ink">AI daily briefing</p>
         <button className="btn-ghost h-8" onClick={generate} disabled={busy}>
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           {text ? "Refresh" : "Generate"}
@@ -90,7 +93,9 @@ export default function AiSummaryCard() {
       </div>
       {err && <p className="text-xs text-danger relative z-10">{err}</p>}
       {text ? (
-        <div className="whitespace-pre-wrap text-sm leading-relaxed text-brand-600 relative z-10">{text}</div>
+        <div className="whitespace-pre-wrap text-sm leading-relaxed text-brand-600 relative z-10">
+          {text}
+        </div>
       ) : (
         !busy && (
           <p className="text-xs text-brand-400 relative z-10">

@@ -41,9 +41,7 @@ describe("invoiceTotals", () => {
 
 describe("quotationTotals", () => {
   it("applies per-line discount then per-line tax", () => {
-    const t = quotationTotals([
-      { qty: 2, rate: 100, discount: 10, tax: 12 },
-    ]);
+    const t = quotationTotals([{ qty: 2, rate: 100, discount: 10, tax: 12 }]);
     // gross 200, disc 20, net 180, tax 21.6
     expect(t.subtotal).toBe(200);
     expect(t.discount).toBe(20);

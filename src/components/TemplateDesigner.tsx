@@ -1,5 +1,21 @@
 import { useState, useRef, useEffect } from "react";
-import { Save, X, PaintBucket, Type, Layout, Eye, Plus, Upload, FileImage, Image, FileText, Pencil, GripHorizontal, ChevronRight, ChevronLeft } from "lucide-react";
+import {
+  Save,
+  X,
+  PaintBucket,
+  Type,
+  Layout,
+  Eye,
+  Plus,
+  Upload,
+  FileImage,
+  Image,
+  FileText,
+  Pencil,
+  GripHorizontal,
+  ChevronRight,
+  ChevronLeft,
+} from "lucide-react";
 import { cn } from "../lib/format";
 import { tools } from "../lib/api";
 import {
@@ -45,31 +61,35 @@ export const DRAGGABLE_SECTIONS = [
 
 function defaultPositions(): Record<string, { x: number; y: number }> {
   return {
-    seller:  { x: 6, y: 6 },
-    header:  { x: 68, y: 5 },
-    customer:{ x: 6, y: 22 },
-    items:   { x: 6, y: 38 },
-    totals:  { x: 70, y: 38 },
-    footer:  { x: 6, y: 88 },
+    seller: { x: 6, y: 6 },
+    header: { x: 68, y: 5 },
+    customer: { x: 6, y: 22 },
+    items: { x: 6, y: 38 },
+    totals: { x: 70, y: 38 },
+    footer: { x: 6, y: 88 },
   };
 }
 
 const FONTS = [
-  { label: "Plus Jakarta Sans (Default)", value: "'Plus Jakarta Sans', system-ui, sans-serif" },
+  {
+    label: "Plus Jakarta Sans (Default)",
+    value: "'Plus Jakarta Sans', system-ui, sans-serif",
+  },
   { label: "Lora (Serif)", value: "'Lora', Georgia, serif" },
   { label: "IBM Plex Mono", value: "'IBM Plex Mono', monospace" },
 ];
 
 const STORAGE_KEY = "filey.customTemplates";
 /** Key under which the full template list is mirrored to Supabase
- *  (app_settings) so it follows the user across devices. */
+ * (app_settings) so it follows the user across devices. */
 const SETTING_KEY = "custom_templates";
 
 export function loadCustomTemplates(): CustomTemplate[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (e) {
+    console.warn("Failed to parse custom templates from localStorage:", e);
     return [];
   }
 }
@@ -83,10 +103,10 @@ function saveCustomTemplates(templates: CustomTemplate[]) {
 }
 
 /** Pull the user's templates saved on other devices into local storage.
- *  Remote (Supabase) is treated as the source of truth when present so that
- *  deletions propagate correctly; on first run any local-only templates are
- *  pushed up. Falls back to the local list when offline / not configured.
- *  Call on mount in pages that render the template picker. */
+ * Remote (Supabase) is treated as the source of truth when present so that
+ * deletions propagate correctly; on first run any local-only templates are
+ * pushed up. Falls back to the local list when offline / not configured.
+ * Call on mount in pages that render the template picker. */
 export async function syncCustomTemplates(): Promise<CustomTemplate[]> {
   try {
     const settings = await tools.settings();
@@ -102,13 +122,14 @@ export async function syncCustomTemplates(): Promise<CustomTemplate[]> {
       void tools.setSetting(SETTING_KEY, JSON.stringify(local)).catch(() => {});
     }
     return local;
-  } catch {
+  } catch (e) {
+    console.warn("Failed to sync custom templates:", e);
     return loadCustomTemplates();
   }
 }
 
 /** Remove a custom template by id; returns the updated list so callers
- *  can sync their local state without a re-read. */
+ * can sync their local state without a re-read. */
 export function deleteCustomTemplate(id: string): CustomTemplate[] {
   const next = loadCustomTemplates().filter((t) => t.id !== id);
   saveCustomTemplates(next);
@@ -147,15 +168,18 @@ export default function TemplateDesigner({
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [lhSaved, setLhSaved] = useState(false);
   useEffect(() => {
-    loadLetterhead().then(setLh).catch(() => {});
+    loadLetterhead()
+      .then(setLh)
+      .catch(() => {});
   }, []);
   const handleSaveLetterhead = async () => {
     try {
       await saveLetterhead(lh);
       setLhSaved(true);
       setTimeout(() => onClose(), 700);
-    } catch {
+    } catch (e) {
       /* offline writes stay local until the next sync */
+      console.warn("Failed to save letterhead:", e);
     }
   };
   const [file, setFile] = useState<File | null>(null);
@@ -164,7 +188,8 @@ export default function TemplateDesigner({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Position state
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(defaultPositions);
+  const [positions, setPositions] =
+    useState<Record<string, { x: number; y: number }>>(defaultPositions);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -262,33 +287,31 @@ export default function TemplateDesigner({
   const previewScale = 0.35; // scale down for sidebar display
 
   return (
-    <div
-      className="card !p-5 space-y-5"
-    >
+    <div className="card !p-5 space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-display font-bold text-ink">Create Template</p>
+          <p className="font-display font-medium text-ink">Create Template</p>
           <p className="text-xs text-brand-400 mt-0.5">
-            {step === "position" ? "Drag boxes to position them" : "Design your own document layout"}
+            {step === "position"
+              ? "Drag boxes to position them"
+              : "Design your own document layout"}
           </p>
         </div>
         <button
           onClick={onClose}
-          className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
+          className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
         >
           <X size={18} />
         </button>
       </div>
 
       {saved ? (
-        <div
-          className="text-center py-8"
-        >
+        <div className="text-center py-8">
           <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center mx-auto mb-3">
             <Save size={24} />
           </div>
-          <p className="font-bold text-ink">Template saved!</p>
+          <p className="font-medium text-ink">Template saved!</p>
           <p className="text-sm text-brand-400 mt-1">
             "{fileName || tpl.name}" is ready to use
           </p>
@@ -309,7 +332,7 @@ export default function TemplateDesigner({
             onMouseMove={onDragMove}
             onMouseUp={onDragEnd}
             onMouseLeave={onDragEnd}
-            className="relative rounded-xl border-2 border-dashed border-brand-200 bg-brand-50 overflow-hidden select-none cursor-crosshair mx-auto"
+            className="relative rounded-3xl border-2 border-dashed border-brand-200 bg-brand-50 overflow-hidden select-none cursor-crosshair mx-auto"
             style={{
               width: paperW * previewScale,
               height: paperH * previewScale,
@@ -326,12 +349,31 @@ export default function TemplateDesigner({
             )}
 
             {/* Grid lines */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.15 }}>
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              style={{ opacity: 0.15 }}
+            >
               {Array.from({ length: 9 }).map((_, i) => (
-                <line key={`h${i}`} x1="0" y1={`${(i + 1) * 10}%`} x2="100%" y2={`${(i + 1) * 10}%`} stroke="#94a3b8" strokeWidth="0.5" />
+                <line
+                  key={`h${i}`}
+                  x1="0"
+                  y1={`${(i + 1) * 10}%`}
+                  x2="100%"
+                  y2={`${(i + 1) * 10}%`}
+                  stroke="#94a3b8"
+                  strokeWidth="0.5"
+                />
               ))}
               {Array.from({ length: 9 }).map((_, i) => (
-                <line key={`v${i}`} x1={`${(i + 1) * 10}%`} y1="0" x2={`${(i + 1) * 10}%`} y2="100%" stroke="#94a3b8" strokeWidth="0.5" />
+                <line
+                  key={`v${i}`}
+                  x1={`${(i + 1) * 10}%`}
+                  y1="0"
+                  x2={`${(i + 1) * 10}%`}
+                  y2="100%"
+                  stroke="#94a3b8"
+                  strokeWidth="0.5"
+                />
               ))}
             </svg>
 
@@ -348,7 +390,7 @@ export default function TemplateDesigner({
                     "absolute rounded-lg border-2 bg-white/80 px-2 py-1.5 flex items-center gap-1 cursor-grab active:cursor-grabbing transition-shadow select-none",
                     isActive
                       ? "border-primary-400 shadow-lg shadow-primary-200/40 z-20 scale-105"
-                      : "border-brand-200 shadow-sm hover:border-primary-300 hover:shadow-md z-10"
+                      : "border-brand-200 hover:border-primary-300 hover: z-10"
                   )}
                   style={{
                     left: `${pos.x}%`,
@@ -358,7 +400,7 @@ export default function TemplateDesigner({
                   }}
                 >
                   <GripHorizontal size={10} className="text-brand-300 shrink-0" />
-                  <span className="text-[9px] font-semibold text-brand-600 truncate">
+                  <span className="text-[9px] font-medium text-brand-600 truncate">
                     {sec.label}
                   </span>
                 </div>
@@ -368,7 +410,7 @@ export default function TemplateDesigner({
 
           {/* Accent colour picker */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+            <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
               <PaintBucket size={13} /> Accent Color
             </label>
             <div className="flex items-center gap-2">
@@ -376,7 +418,7 @@ export default function TemplateDesigner({
                 type="color"
                 value={tpl.accent}
                 onChange={(e) => set("accent", e.target.value)}
-                className="h-9 w-12 cursor-pointer rounded-lg border border-brand-200 bg-transparent"
+                className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-transparent"
               />
               <input
                 className="input h-9 flex-1 font-mono text-xs"
@@ -402,35 +444,44 @@ export default function TemplateDesigner({
       ) : (
         <>
           {/* Tab Switcher */}
-          <div className="flex rounded-xl bg-brand-50 p-1 gap-1">
+          <div className="flex rounded-3xl bg-brand-50 p-1 gap-1">
             <button
-              onClick={() => { setTab("design"); setStep("upload"); }}
+              onClick={() => {
+                setTab("design");
+                setStep("upload");
+              }}
               className={cn(
                 "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
                 tab === "design"
-                  ? "bg-white text-ink shadow-sm"
+                  ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
               )}
             >
               <Pencil size={13} /> Design
             </button>
             <button
-              onClick={() => { setTab("upload"); setStep("upload"); }}
+              onClick={() => {
+                setTab("upload");
+                setStep("upload");
+              }}
               className={cn(
                 "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
                 tab === "upload"
-                  ? "bg-white text-ink shadow-sm"
+                  ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
               )}
             >
               <Upload size={13} /> Upload
             </button>
             <button
-              onClick={() => { setTab("letterhead"); setStep("upload"); }}
+              onClick={() => {
+                setTab("letterhead");
+                setStep("upload");
+              }}
               className={cn(
                 "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
                 tab === "letterhead"
-                  ? "bg-white text-ink shadow-sm"
+                  ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
               )}
             >
@@ -442,7 +493,7 @@ export default function TemplateDesigner({
             <>
               {/* Name */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Type size={13} /> Template Name
                 </label>
                 <input
@@ -456,7 +507,7 @@ export default function TemplateDesigner({
 
               {/* Accent Color */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <PaintBucket size={13} /> Accent Color
                 </label>
                 <div className="flex items-center gap-2">
@@ -464,7 +515,7 @@ export default function TemplateDesigner({
                     type="color"
                     value={tpl.accent}
                     onChange={(e) => set("accent", e.target.value)}
-                    className="h-9 w-12 cursor-pointer rounded-lg border border-brand-200 bg-transparent"
+                    className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-transparent"
                   />
                   <input
                     className="input h-9 flex-1 font-mono text-xs"
@@ -476,7 +527,7 @@ export default function TemplateDesigner({
 
               {/* Font */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Type size={13} /> Font Family
                 </label>
                 <select
@@ -494,7 +545,7 @@ export default function TemplateDesigner({
 
               {/* Layout */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Layout size={13} /> Layout Style
                 </label>
                 <div className="flex gap-2">
@@ -508,14 +559,16 @@ export default function TemplateDesigner({
                           ? "border-primary-400 bg-primary-50 text-ink"
                           : "border-brand-200 text-brand-400 hover:border-brand-300"
                       )}
-                    >{l}</button>
+                    >
+                      {l}
+                    </button>
                   ))}
                 </div>
               </div>
 
               {/* Section Toggles */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1 mb-2">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1 mb-2">
                   <Eye size={13} /> Visible Sections
                 </label>
                 <div className="space-y-1.5">
@@ -529,7 +582,10 @@ export default function TemplateDesigner({
                       ["showTax", "Tax Breakdown"],
                     ] as [keyof CustomTemplate, string][]
                   ).map(([key, label]) => (
-                    <label key={key} className="flex items-center justify-between py-1.5 px-3 rounded-lg hover:bg-brand-50 cursor-pointer">
+                    <label
+                      key={key}
+                      className="flex items-center justify-between py-1.5 px-3 rounded-3xl hover:bg-brand-50 cursor-pointer"
+                    >
                       <span className="text-sm text-ink">{label}</span>
                       <button
                         onClick={() => set(key, !tpl[key])}
@@ -538,10 +594,12 @@ export default function TemplateDesigner({
                           tpl[key] ? "bg-primary-400" : "bg-brand-200"
                         )}
                       >
-                        <span className={cn(
-                          "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform",
-                          tpl[key] ? "left-4" : "left-0.5"
-                        )} />
+                        <span
+                          className={cn(
+                            "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform",
+                            tpl[key] ? "left-4" : "left-0.5"
+                          )}
+                        />
                       </button>
                     </label>
                   ))}
@@ -550,9 +608,15 @@ export default function TemplateDesigner({
 
               {/* Mini Preview */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500">Preview</label>
-                <div className="rounded-lg border border-brand-200 p-4 space-y-2 overflow-hidden" style={{ fontFamily: tpl.font }}>
-                  <div className="h-1.5 rounded w-24" style={{ background: tpl.accent }} />
+                <label className="text-xs font-medium text-brand-500">Preview</label>
+                <div
+                  className="rounded-3xl border border-brand-200 p-4 space-y-2 overflow-hidden"
+                  style={{ fontFamily: tpl.font }}
+                >
+                  <div
+                    className="h-1.5 rounded w-24"
+                    style={{ background: tpl.accent }}
+                  />
                   {tpl.showLogo && <div className="w-10 h-10 rounded bg-brand-100" />}
                   {tpl.showSeller && (
                     <div className="space-y-1">
@@ -579,10 +643,15 @@ export default function TemplateDesigner({
                   {tpl.showTax && (
                     <div className="flex justify-between pt-1 border-t border-brand-100">
                       <div className="h-2 rounded bg-brand-200 w-12" />
-                      <div className="h-2 rounded w-16" style={{ background: tpl.accent }} />
+                      <div
+                        className="h-2 rounded w-16"
+                        style={{ background: tpl.accent }}
+                      />
                     </div>
                   )}
-                  {tpl.showNotes && <div className="h-1 rounded bg-brand-100 w-full mt-2" />}
+                  {tpl.showNotes && (
+                    <div className="h-1 rounded bg-brand-100 w-full mt-2" />
+                  )}
                 </div>
               </div>
 
@@ -598,7 +667,7 @@ export default function TemplateDesigner({
             <>
               {/* Upload Tab */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <FileImage size={13} /> Template Name
                 </label>
                 <input
@@ -612,39 +681,60 @@ export default function TemplateDesigner({
 
               {/* Upload Area */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Upload size={13} /> Upload Image or PDF
                 </label>
-                <input ref={fileInputRef} type="file" accept="image/*,.pdf" className="hidden" onChange={handleFilePick} />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={handleFilePick}
+                />
                 {filePreview ? (
                   <div className="space-y-2">
-                    <div className="relative rounded-lg border-2 border-dashed border-primary-300 bg-primary-50/30 p-3 overflow-hidden">
+                    <div className="relative rounded-3xl border-2 border-dashed border-primary-300 bg-primary-50/30 p-3 overflow-hidden">
                       {file?.type?.startsWith("image/") ? (
-                        <img src={filePreview} alt="Template preview" className="w-full max-h-48 object-contain rounded-lg" />
+                        <img
+                          src={filePreview}
+                          alt="Template preview"
+                          className="w-full max-h-48 object-contain rounded-3xl"
+                        />
                       ) : (
                         <div className="flex items-center justify-center gap-3 py-10 text-brand-400">
                           <FileText size={48} />
                           <div className="text-left">
-                            <p className="font-semibold text-sm text-ink">{file?.name}</p>
+                            <p className="font-medium text-sm text-ink">{file?.name}</p>
                             <p className="text-xs">PDF — first page used as background</p>
                           </div>
                         </div>
                       )}
                       <button
-                        onClick={() => { setFile(null); setFilePreview(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/80 text-brand-500 grid place-items-center hover:bg-white shadow-sm cursor-pointer"
-                      ><X size={12} /></button>
+                        onClick={() => {
+                          setFile(null);
+                          setFilePreview("");
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/80 text-brand-500 grid place-items-center hover:bg-white cursor-pointer"
+                      >
+                        <X size={12} />
+                      </button>
                     </div>
                   </div>
                 ) : (
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full rounded-xl border-2 border-dashed border-brand-200 hover:border-primary-400 hover:bg-primary-50/30 py-10 flex flex-col items-center gap-2 cursor-pointer transition-all group"
+                    className="w-full rounded-3xl border-2 border-dashed border-brand-200 hover:border-primary-400 hover:bg-primary-50/30 py-10 flex flex-col items-center gap-2 cursor-pointer transition-all group"
                   >
                     <div className="w-12 h-12 rounded-full bg-brand-50 group-hover:bg-primary-100 grid place-items-center transition-colors">
-                      <Image size={24} className="text-brand-400 group-hover:text-primary-600" />
+                      <Image
+                        size={24}
+                        className="text-brand-400 group-hover:text-primary-600"
+                      />
                     </div>
-                    <p className="text-sm font-semibold text-brand-500 group-hover:text-ink">Click to upload</p>
+                    <p className="text-sm font-medium text-brand-500 group-hover:text-ink">
+                      Click to upload
+                    </p>
                     <p className="text-xs text-brand-400">PNG, JPG, WebP, or PDF</p>
                   </button>
                 )}
@@ -652,7 +742,7 @@ export default function TemplateDesigner({
 
               {/* Paper Size */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-brand-500 flex items-center gap-1">
+                <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Layout size={13} /> Paper Size
                 </label>
                 <div className="flex gap-2">
@@ -662,9 +752,13 @@ export default function TemplateDesigner({
                       onClick={() => set("paperSize", s)}
                       className={cn(
                         "flex-1 rounded-lg border px-3 py-2 text-xs font-semibold transition-all cursor-pointer",
-                        tpl.paperSize === s ? "border-primary-400 bg-primary-50 text-ink" : "border-brand-200 text-brand-400 hover:border-brand-300"
+                        tpl.paperSize === s
+                          ? "border-primary-400 bg-primary-50 text-ink"
+                          : "border-brand-200 text-brand-400 hover:border-brand-300"
                       )}
-                    >{s}</button>
+                    >
+                      {s}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -682,13 +776,11 @@ export default function TemplateDesigner({
             <>
               {/* Letterhead Tab */}
               {lhSaved ? (
-                <div
-                  className="text-center py-8"
-                >
+                <div className="text-center py-8">
                   <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center mx-auto mb-3">
                     <Save size={24} />
                   </div>
-                  <p className="font-bold text-ink">Letterhead saved!</p>
+                  <p className="font-medium text-ink">Letterhead saved!</p>
                   <p className="text-sm text-brand-400 mt-1">
                     Toggle “Use letterhead” on any document to apply it.
                   </p>
@@ -696,9 +788,9 @@ export default function TemplateDesigner({
               ) : (
                 <>
                   <p className="text-xs text-brand-400 -mt-1">
-                    Upload a header strip (logos) and a footer strip (contact band).
-                    They print across the top and bottom of every document where you
-                    enable “Use letterhead”. Saved to your account and shared across devices.
+                    Upload a header strip (logos) and a footer strip (contact band). They
+                    print across the top and bottom of every document where you enable
+                    “Use letterhead”. Saved to your account and shared across devices.
                   </p>
                   <LetterheadConfig value={lh} onChange={setLh} />
                   <button

@@ -16,10 +16,7 @@ export function invoiceTotals(
   discount: number,
   taxRatePct: number
 ): Totals {
-  const subtotal = items.reduce(
-    (s, i) => s + (i.qty || 0) * (i.unit_price || 0),
-    0
-  );
+  const subtotal = items.reduce((s, i) => s + (i.qty || 0) * (i.unit_price || 0), 0);
   const disc = Math.min(Math.max(0, discount || 0), subtotal);
   const net = subtotal - disc;
   const tax = net * ((taxRatePct || 0) / 100);

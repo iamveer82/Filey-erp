@@ -33,7 +33,7 @@ export const CURRENCIES: { code: string; name: string }[] = [
 ];
 
 /** Format a value in the org's display currency. Name kept for history;
- *  it is no longer AED-only. */
+ * it is no longer AED-only. */
 export function aed(value: number): string {
   return money(value, displayCurrency);
 }
@@ -56,7 +56,8 @@ export function money(value: number, currency = "AED"): string {
       currency: currency || "AED",
       maximumFractionDigits: 2,
     }).format(value || 0);
-  } catch {
+  } catch (e) {
+    console.warn("Failed to format currency; falling back", e);
     return `${currency} ${(value || 0).toFixed(2)}`;
   }
 }
@@ -78,8 +79,8 @@ export function fmtDate(d?: string | null): string {
 }
 
 /** Extract a human-readable message from any error shape.
- *  Handles Error, Supabase PostgrestError ({message, details, hint}),
- *  and plain objects without producing [object Object]. */
+ * Handles Error, Supabase PostgrestError ({message, details, hint}),
+ * and plain objects without producing [object Object]. */
 export function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === "object") {

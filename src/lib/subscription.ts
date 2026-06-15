@@ -23,7 +23,12 @@ export const PLANS: { id: Plan; name: string; price: string; features: string[] 
     id: "pro",
     name: "Pro",
     price: "$19/mo",
-    features: ["Everything in Free", "More storage", "Recurring invoices", "Priority support"],
+    features: [
+      "Everything in Free",
+      "More storage",
+      "Recurring invoices",
+      "Priority support",
+    ],
   },
   {
     id: "business",
@@ -52,7 +57,8 @@ async function invokeStripe(body: Record<string, unknown>): Promise<string> {
   const { data, error } = await supabase.functions.invoke("stripe", { body });
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
-  if (!data?.url) throw new Error("Billing isn't set up yet — add Stripe keys to the edge function.");
+  if (!data?.url)
+    throw new Error("Billing isn't set up yet — add Stripe keys to the edge function.");
   return data.url as string;
 }
 

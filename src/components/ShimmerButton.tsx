@@ -11,7 +11,7 @@ interface ShimmerButtonProps {
 }
 
 /** Minimal button. The former shimmer sweep and scale-on-hover were removed
- *  for the minimal theme; renders as a standard button variant. */
+ * for the minimal theme; renders as a standard button variant. */
 export function ShimmerButton({
   children,
   className,
@@ -24,8 +24,8 @@ export function ShimmerButton({
     variant === "primary"
       ? "btn-primary"
       : variant === "secondary"
-      ? "btn-secondary"
-      : "btn-ghost";
+        ? "btn-secondary"
+        : "btn-ghost";
 
   return (
     <button

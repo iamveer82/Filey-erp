@@ -31,7 +31,8 @@ function loadCached(): Rates | null {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as Rates;
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load cached exchange rates", e);
     return null;
   }
 }
@@ -40,7 +41,9 @@ function saveCache(rates: Rates): void {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(rates));
     localStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to save exchange-rate cache", e);
+  }
 }
 
 async function fetchFresh(): Promise<Rates> {
@@ -73,7 +76,8 @@ async function fetchFresh(): Promise<Rates> {
     }
     saveCache(rates);
     return rates;
-  } catch {
+  } catch (e) {
+    console.warn("Exchange-rate API failed; using fallback rates", e);
     // API down — use hardcoded fallback
     const fallback = getFallbackRates();
     saveCache(fallback);

@@ -40,7 +40,7 @@ function renderBody(body: string): ReactNode {
   const parts = body.split(/(@[\w.\-]+)/g);
   return parts.map((p, i) =>
     p.startsWith("@") ? (
-      <span key={i} className="font-semibold text-primary-700">
+      <span key={i} className="font-medium text-primary-700">
         {p}
       </span>
     ) : (
@@ -68,15 +68,13 @@ function MessageRow({
       <span
         className={`grid ${
           isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"
-        } shrink-0 place-items-center rounded-full font-bold ${tone(
-          m.user_id
-        )}`}
+        } shrink-0 place-items-center rounded-full font-bold ${tone(m.user_id)}`}
       >
         {initials(m.author)}
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-snug">
-          <span className="font-semibold text-ink">{m.author}</span>{" "}
+          <span className="font-medium text-ink">{m.author}</span>{" "}
           <span className="text-[11px] text-brand-400">{ago(m.created_at)}</span>
         </p>
         <p className="text-sm text-brand-600 whitespace-pre-wrap break-words">
@@ -85,7 +83,7 @@ function MessageRow({
         {!isReply && (
           <button
             onClick={() => onReply(m.id)}
-            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400 hover:text-primary-700 cursor-pointer"
+            className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-brand-400 hover:text-primary-700 cursor-pointer"
           >
             <Reply size={11} /> Reply
           </button>
@@ -105,7 +103,7 @@ function MessageRow({
 }
 
 /** Company message board — org-wide team feed with threaded replies and
- *  @mention highlighting. */
+ * @mention highlighting. */
 export default function CompanyMessages() {
   const { user } = useAuth();
   const { toast, confirm } = useUI();
@@ -129,17 +127,12 @@ export default function CompanyMessages() {
   useEffect(() => {
     org
       .members()
-      .then((ms) =>
-        setMembers(ms.map((m) => ({ id: m.user_id, name: m.name })))
-      )
+      .then((ms) => setMembers(ms.map((m) => ({ id: m.user_id, name: m.name }))))
       .catch(() => toast.error("Failed to load members"));
   }, []);
 
   const roots = useMemo(
-    () =>
-      all
-        .filter((m) => !m.parent_id)
-        .sort((a, b) => b.id - a.id),
+    () => all.filter((m) => !m.parent_id).sort((a, b) => b.id - a.id),
     [all]
   );
   const repliesByParent = useMemo(() => {
@@ -168,16 +161,20 @@ export default function CompanyMessages() {
       }
       load();
     } catch (e) {
-      toast.error(
-        `Could not post: ${e instanceof Error ? e.message : String(e)}`
-      );
+      toast.error(`Could not post: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
   };
 
   const remove = async (id: number) => {
-    if (!(await confirm({ title: "Delete message", message: "Delete this message? This cannot be undone." }))) return;
+    if (
+      !(await confirm({
+        title: "Delete message",
+        message: "Delete this message? This cannot be undone.",
+      }))
+    )
+      return;
     try {
       await messages.remove(id);
       load();
@@ -192,7 +189,7 @@ export default function CompanyMessages() {
     <InfoCard
       title="Company Messages"
       action={
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-400">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-400">
           <MessageSquare size={12} /> {all.length}
         </span>
       }
@@ -212,11 +209,7 @@ export default function CompanyMessages() {
           disabled={busy || !text.trim()}
           onClick={() => post(text, null)}
         >
-          {busy ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <Send size={15} />
-          )}
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
         </button>
       </div>
 
@@ -233,11 +226,23 @@ export default function CompanyMessages() {
             const replies = repliesByParent.get(m.id) ?? [];
             return (
               <li key={m.id}>
-                <MessageRow m={m} userId={user?.id} onReply={handleReply} onDelete={remove} />
+                <MessageRow
+                  m={m}
+                  userId={user?.id}
+                  onReply={handleReply}
+                  onDelete={remove}
+                />
                 {(replies.length > 0 || replyTo === m.id) && (
-                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2A2C33] pl-3">
+                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2C2C2E] pl-3">
                     {replies.map((r) => (
-                      <MessageRow key={r.id} m={r} isReply userId={user?.id} onReply={handleReply} onDelete={remove} />
+                      <MessageRow
+                        key={r.id}
+                        m={r}
+                        isReply
+                        userId={user?.id}
+                        onReply={handleReply}
+                        onDelete={remove}
+                      />
                     ))}
                     {replyTo === m.id && (
                       <div className="flex items-center gap-2 pt-1">

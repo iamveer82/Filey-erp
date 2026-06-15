@@ -43,16 +43,20 @@ export default function GettingStarted({
     <div className="card mb-4 border-primary-300/40 bg-primary-50/40 dark:bg-primary-400/5">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <p className="font-bold text-ink">Get started with Filey</p>
+          <p className="font-medium text-ink">Get started with Filey</p>
           <p className="text-xs text-brand-500 mt-0.5">
             {doneCount} of {steps.length} completed
           </p>
         </div>
-        <button onClick={dismiss} aria-label="Dismiss" className="cursor-pointer text-brand-400 hover:text-ink">
+        <button
+          onClick={dismiss}
+          aria-label="Dismiss"
+          className="cursor-pointer text-brand-400 hover:text-ink"
+        >
           <X size={16} />
         </button>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-brand-100 dark:bg-white/10 mb-3 overflow-hidden">
+      <div className="w-full h-1.5 rounded-full bg-brand-100 dark:bg-white/12 mb-3 overflow-hidden">
         <div
           className="h-full rounded-full bg-primary-500 transition-all"
           style={{ width: `${(doneCount / steps.length) * 100}%` }}

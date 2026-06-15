@@ -18,13 +18,14 @@ const DEFAULT_SWATCHES = [
 function safeHsva(hex: string): HsvaColor {
   try {
     return hexToHsva(hex);
-  } catch {
+  } catch (e) {
+    console.warn("Invalid colour hex; falling back to black", e);
     return { h: 0, s: 0, v: 0, a: 1 };
   }
 }
 
 /** Compact colour picker — swatch trigger + popover with saturation/hue,
- *  a hex field and quick swatches. Closes on outside-click / Escape. */
+ * a hex field and quick swatches. Closes on outside-click / Escape. */
 export default function ColorPicker({
   value,
   onChange,
@@ -43,8 +44,7 @@ export default function ColorPicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -61,17 +61,17 @@ export default function ColorPicker({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Pick a colour"
-        className="flex h-9 items-center gap-2 rounded-lg border border-brand-200 bg-white px-2 text-ink shadow-sm shadow-black/5 transition-colors hover:border-brand-300 cursor-pointer dark:bg-[#1A1B1E] dark:border-[#3A3D45] dark:text-[#F4F5F6]"
+        className="flex h-9 items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 text-ink shadow-black/5 transition-colors hover:border-brand-300 cursor-pointer dark:bg-[#1C1C1E] dark:border-[#2C2C2E] dark:text-[#F4F5F6]"
       >
         <span
-          className="h-5 w-5 rounded-md border border-black/10"
+          className="h-5 w-5 rounded-3xl border border-black/10"
           style={{ background: value }}
         />
-        <span className="font-mono text-xs uppercase">{value}</span>
+        <span className="font-mono text-xs">{value}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 z-40 w-[248px] rounded-2xl border border-brand-200 bg-white p-3 shadow-bento-hover dark:bg-[#24262C] dark:border-[#3A3D45]">
+        <div className="absolute right-0 top-11 z-40 w-[248px] rounded-3xl border border-brand-200 bg-white p-3 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]">
           <Saturation
             hsva={hsva}
             onChange={(c) => onChange(hsvaToHex(c))}
@@ -90,7 +90,7 @@ export default function ColorPicker({
             />
           </div>
           <input
-            className="input mt-3 font-mono text-xs uppercase"
+            className="input mt-3 font-mono text-xs"
             value={hsvaToHex(hsva)}
             onChange={(e) => onChange(e.target.value)}
             spellCheck={false}
@@ -102,7 +102,7 @@ export default function ColorPicker({
                 type="button"
                 onClick={() => onChange(s)}
                 aria-label={`Set colour ${s}`}
-                className="h-6 w-6 rounded-md border border-black/10 transition-shadow hover:ring-2 hover:ring-ink/30 cursor-pointer"
+                className="h-6 w-6 rounded-3xl border border-black/10 transition-hover:ring-2 hover:ring-ink/30 cursor-pointer"
                 style={{ background: s }}
               />
             ))}

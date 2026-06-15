@@ -6,12 +6,14 @@ import {
   CalendarOff,
   Wallet,
   MoreHorizontal,
+  Sliders,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, num, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import {
   PageHeader,
   MetricCard,
@@ -35,22 +37,22 @@ export default function People() {
   const [emps, setEmps] = useState<Employee[]>([]);
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = () => {
     setError("");
-    return Promise.all([
-      hr.employees().then(setEmps),
-      hr.summary().then(setSum),
-    ])
+    return Promise.all([hr.employees().then(setEmps), hr.summary().then(setSum)])
       .catch((e) =>
         setError(`Could not load people: ${e instanceof Error ? e.message : e}`)
       )
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
   useLiveSync(load);
 
   return (
@@ -59,10 +61,21 @@ export default function People() {
         title="People"
         subtitle="Employees, attendance & payroll"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus size={16} /> Add employee
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" onClick={() => setManageOpen(true)}>
+              <Sliders size={15} /> Customize fields
+            </button>
+            <button className="btn-primary" onClick={() => setOpen(true)}>
+              <Plus size={16} /> Add employee
+            </button>
+          </div>
         }
+      />
+      <CustomFieldsManager
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        module="employees"
+        sampleValues={{ visa_status: "Active", emirates_id: "784-..." }}
       />
 
       {error && (
@@ -97,19 +110,63 @@ export default function People() {
       </div>
 
       {!loading && emps.length === 0 && (
-        <div className="empty-gradient rounded-2xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
-          <svg width="100" height="80" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-70">
-            <circle cx="36" cy="28" r="12" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+        <div className="empty-gradient rounded-3xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
+          <svg
+            width="100"
+            height="80"
+            viewBox="0 0 100 80"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="opacity-70"
+          >
+            <circle
+              cx="36"
+              cy="28"
+              r="12"
+              fill="#FFF3C4"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
             <circle cx="34" cy="26" r="3" fill="#B88C00" />
-            <path d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
-            <circle cx="64" cy="28" r="12" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
+            <path
+              d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z"
+              fill="#FFF3C4"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
+            <circle
+              cx="64"
+              cy="28"
+              r="12"
+              fill="#FFF3C4"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
             <circle cx="62" cy="26" r="3" fill="#B88C00" />
-            <path d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
-            <circle cx="50" cy="68" r="7" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
-            <path d="M47.5 68l1.7 1.7 3.3-3.3" stroke="#B88C00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z"
+              fill="#FFF3C4"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
+            <circle
+              cx="50"
+              cy="68"
+              r="7"
+              fill="#FFFBEB"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
+            <path
+              d="M47.5 68l1.7 1.7 3.3-3.3"
+              stroke="#B88C00"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <div>
-            <p className="text-sm font-bold text-brand-700">No employees yet</p>
+            <p className="text-sm font-medium text-brand-700">No employees yet</p>
             <p className="text-xs text-brand-500 mt-1">
               Add your first team member to start tracking attendance and payroll.
             </p>
@@ -127,9 +184,7 @@ export default function People() {
             label: "Code",
             sortValue: (e) => e.employee_code,
             render: (e) => (
-              <span className="font-mono text-xs text-brand-500">
-                {e.employee_code}
-              </span>
+              <span className="font-mono text-xs text-brand-500">{e.employee_code}</span>
             ),
           },
           {
@@ -138,10 +193,8 @@ export default function People() {
             sortValue: (e) => e.name,
             render: (e) => (
               <div>
-                <p className="font-semibold text-ink">{e.name}</p>
-                <p className="text-[11px] text-brand-400">
-                  {e.email ?? "—"}
-                </p>
+                <p className="font-medium text-ink">{e.name}</p>
+                <p className="text-[11px] text-brand-400">{e.email ?? "—"}</p>
               </div>
             ),
           },
@@ -201,7 +254,7 @@ export default function People() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${e.name}`}
-                    className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
+                    className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>
@@ -388,11 +441,7 @@ function LeaveModal({
     setBusy(true);
     try {
       for (const d of dates) {
-        await hr.markAttendance(
-          employee.id,
-          format(d, "yyyy-MM-dd"),
-          "leave"
-        );
+        await hr.markAttendance(employee.id, format(d, "yyyy-MM-dd"), "leave");
       }
       onSaved();
     } finally {
@@ -400,11 +449,7 @@ function LeaveModal({
     }
   };
   return (
-    <Modal
-      open={!!employee}
-      onClose={onClose}
-      title={`Mark leave — ${employee.name}`}
-    >
+    <Modal open={!!employee} onClose={onClose} title={`Mark leave — ${employee.name}`}>
       <MultiDatePicker value={dates} onChange={setDates} onConfirm={save} />
       <p className="text-xs text-brand-400 mt-3">
         {dates.length === 0
@@ -412,9 +457,7 @@ function LeaveModal({
           : `${dates.length} day${dates.length === 1 ? "" : "s"} will be saved as “leave”.`}
       </p>
       {busy && (
-        <p className="text-xs font-semibold text-brand-500 mt-2">
-          Saving attendance…
-        </p>
+        <p className="text-xs font-medium text-brand-500 mt-2">Saving attendance…</p>
       )}
     </Modal>
   );

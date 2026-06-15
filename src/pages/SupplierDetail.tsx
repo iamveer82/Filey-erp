@@ -20,13 +20,7 @@ import {
   type Supplier,
   type PoSummary,
 } from "../lib/api";
-import {
-  PageHeader,
-  StatCard,
-  DataTable,
-  Badge,
-  statusTone,
-} from "../components/ui";
+import { PageHeader, StatCard, DataTable, Badge, statusTone } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -34,7 +28,7 @@ import ActivityTimeline from "../components/ActivityTimeline";
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-5">
-      <h2 className="text-sm font-bold text-ink mb-2">{title}</h2>
+      <h2 className="text-sm font-medium text-ink mb-2">{title}</h2>
       {children}
     </section>
   );
@@ -63,10 +57,7 @@ export default function SupplierDetail() {
     };
   }, []);
 
-  const supplier = useMemo(
-    () => list.find((s) => String(s.id) === id),
-    [list, id]
-  );
+  const supplier = useMemo(() => list.find((s) => String(s.id) === id), [list, id]);
 
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
@@ -83,9 +74,7 @@ export default function SupplierDetail() {
       await suppliersApi.update(Number(id), { notes: notesDraft || undefined });
       // Update local state
       setList((prev) =>
-        prev.map((s) =>
-          s.id === Number(id) ? { ...s, notes: notesDraft } : s
-        )
+        prev.map((s) => (s.id === Number(id) ? { ...s, notes: notesDraft } : s))
       );
       setEditingNotes(false);
       toast.success("Notes saved.");
@@ -124,7 +113,7 @@ export default function SupplierDetail() {
           <ArrowLeft size={15} /> Back to Suppliers
         </Link>
         <div className="card text-center py-16">
-          <p className="text-lg font-bold text-ink">Supplier not found</p>
+          <p className="text-lg font-medium text-ink">Supplier not found</p>
           <p className="text-sm text-brand-500 mt-2">
             This supplier may have been removed.
           </p>
@@ -141,9 +130,7 @@ export default function SupplierDetail() {
       <PageHeader
         title={supplier?.name || "Supplier"}
         subtitle={supplier?.contact_person || "Supplier profile & purchasing"}
-        action={
-          supplier?.shared ? <Badge tone="info">Shared</Badge> : undefined
-        }
+        action={supplier?.shared ? <Badge tone="info">Shared</Badge> : undefined}
       />
 
       <div className="grid lg:grid-cols-4 gap-4 mb-5">
@@ -181,9 +168,9 @@ export default function SupplierDetail() {
             </div>
 
             {/* Notes */}
-            <div className="border-t border-brand-100 dark:border-[#2A2C33] pt-3">
+            <div className="border-t border-brand-100 dark:border-[#2C2C2E] pt-3">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-brand-400">Notes</p>
+                <p className="text-xs font-medium text-brand-400">Notes</p>
                 {!editingNotes && (
                   <button
                     className="text-brand-400 hover:text-ink p-0.5 rounded cursor-pointer"
@@ -274,7 +261,7 @@ export default function SupplierDetail() {
               label: "PO #",
               sortValue: (o) => o.po_number,
               render: (o) => (
-                <span className="font-mono text-xs font-semibold text-ink">
+                <span className="font-mono text-xs font-medium text-ink">
                   {o.po_number}
                 </span>
               ),
@@ -295,9 +282,7 @@ export default function SupplierDetail() {
               key: "status",
               label: "Status",
               sortValue: (o) => o.status,
-              render: (o) => (
-                <Badge tone={statusTone(o.status)}>{o.status}</Badge>
-              ),
+              render: (o) => <Badge tone={statusTone(o.status)}>{o.status}</Badge>,
             },
             {
               key: "total",

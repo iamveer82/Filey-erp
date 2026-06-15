@@ -212,7 +212,15 @@ function ReceiptPreview() {
       <rect x="20" y="4" width="60" height="4" fill="#374151" rx="2" />
       <rect x="30" y="11" width="40" height="2" fill="#6b7280" rx="1" />
       {/* dashed divider */}
-      <line x1="12" y1="18" x2="88" y2="18" stroke="#d1d5db" strokeWidth="0.5" strokeDasharray="3,3" />
+      <line
+        x1="12"
+        y1="18"
+        x2="88"
+        y2="18"
+        stroke="#d1d5db"
+        strokeWidth="0.5"
+        strokeDasharray="3,3"
+      />
       {/* narrow receipt lines */}
       <rect x="10" y="23" width="80" height="2" fill="#9ca3af" rx="1" />
       <rect x="10" y="28" width="80" height="2" fill="#9ca3af" rx="1" />
@@ -220,7 +228,15 @@ function ReceiptPreview() {
       <rect x="10" y="38" width="80" height="2" fill="#9ca3af" rx="1" />
       <rect x="10" y="43" width="80" height="2" fill="#9ca3af" rx="1" />
       {/* dashed divider */}
-      <line x1="12" y1="50" x2="88" y2="50" stroke="#d1d5db" strokeWidth="0.5" strokeDasharray="3,3" />
+      <line
+        x1="12"
+        y1="50"
+        x2="88"
+        y2="50"
+        stroke="#d1d5db"
+        strokeWidth="0.5"
+        strokeDasharray="3,3"
+      />
       {/* total */}
       <rect x="46" y="55" width="44" height="1" fill="#d1d5db" />
       <rect x="46" y="59" width="44" height="4" fill="#374151" rx="2" />
@@ -235,7 +251,17 @@ function MonogramPreview() {
       {/* large monogram box - left */}
       <rect x="6" y="6" width="20" height="20" fill="#0f766e" rx="4" opacity="0.8" />
       {/* monogram letter */}
-      <text x="16" y="22" textAnchor="middle" fontSize="14" fontWeight="bold" fill="#fff" fontFamily="serif">F</text>
+      <text
+        x="16"
+        y="22"
+        textAnchor="middle"
+        fontSize="14"
+        fontWeight="bold"
+        fill="#fff"
+        fontFamily="serif"
+      >
+        F
+      </text>
       {/* heading next to monogram */}
       <rect x="32" y="10" width="40" height="4" fill="#0f766e" rx="2" opacity="0.7" />
       <rect x="32" y="18" width="24" height="2" fill="#5eead4" rx="1" opacity="0.6" />
@@ -351,19 +377,15 @@ export default function TemplateTilePreview({
 
     if (hasFilePreview) {
       return (
-        <div className="h-24 rounded-md bg-brand-50 border border-brand-100 overflow-hidden relative">
-          <img
-            src={ct!.fileData}
-            alt={ct!.name}
-            className="w-full h-full object-cover"
-          />
+        <div className="h-24 rounded-3xl bg-brand-50 border border-brand-100 overflow-hidden relative">
+          <img src={ct!.fileData} alt={ct!.name} className="w-full h-full object-cover" />
         </div>
       );
     }
 
     // builder type or file without image data
     return (
-      <div className="h-24 rounded-md bg-brand-50 border border-brand-100 overflow-hidden relative">
+      <div className="h-24 rounded-3xl bg-brand-50 border border-brand-100 overflow-hidden relative">
         <WireframePlaceholder />
       </div>
     );
@@ -376,7 +398,7 @@ export default function TemplateTilePreview({
     const accent = ACCENTS[templateId] || "#333333";
     return (
       <div
-        className="h-24 rounded-md overflow-hidden relative"
+        className="h-24 rounded-3xl overflow-hidden relative"
         style={{ backgroundColor: accent + "08" }}
       >
         <PreviewComponent />
@@ -386,7 +408,7 @@ export default function TemplateTilePreview({
 
   // Fallback for unknown template IDs
   return (
-    <div className="h-24 rounded-md bg-brand-50 border border-brand-100 overflow-hidden relative">
+    <div className="h-24 rounded-3xl bg-brand-50 border border-brand-100 overflow-hidden relative">
       <WireframePlaceholder />
     </div>
   );

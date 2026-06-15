@@ -95,9 +95,7 @@ export default function AccountProfile() {
   const [cpw, setCpw] = useState("");
   const [show, setShow] = useState({ c: false, n: false, k: false });
   const [pwBusy, setPwBusy] = useState(false);
-  const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(
-    null
-  );
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const pwValid = PW_RULES.every((r) => r.test(npw));
 
   const changeEmail = async () => {
@@ -116,15 +114,11 @@ export default function AccountProfile() {
   const updatePassword = async () => {
     setPwMsg(null);
     if (!pwValid) return setPwMsg({ ok: false, t: "New password too weak." });
-    if (npw !== cpw)
-      return setPwMsg({ ok: false, t: "Passwords do not match." });
+    if (npw !== cpw) return setPwMsg({ ok: false, t: "Passwords do not match." });
     if (!supabase || !profile) return;
     setPwBusy(true);
     try {
-      await signInWithPassword(
-        { channel: "email", value: profile.email },
-        cur
-      );
+      await signInWithPassword({ channel: "email", value: profile.email }, cur);
       const { error } = await supabase.auth.updateUser({ password: npw });
       if (error) throw error;
       setPwMsg({ ok: true, t: "Password updated." });
@@ -149,7 +143,7 @@ export default function AccountProfile() {
         <div className="card">
           <div className="flex items-start justify-between mb-1 gap-3">
             <div>
-              <p className="font-bold text-ink">Profile Information</p>
+              <p className="font-medium text-ink">Profile Information</p>
               <p className="text-sm text-brand-500 mt-0.5">
                 Update your personal details and profile information
               </p>
@@ -159,7 +153,10 @@ export default function AccountProfile() {
               onClick={async () => {
                 clearFieldErrors();
                 let hasErr = false;
-                if (!p.name?.trim()) { setFieldError("name", "Full name is required"); hasErr = true; }
+                if (!p.name?.trim()) {
+                  setFieldError("name", "Full name is required");
+                  hasErr = true;
+                }
                 if (hasErr) return;
                 try {
                   await updateProfile({
@@ -173,9 +170,7 @@ export default function AccountProfile() {
                   setTimeout(() => setSavedProfile(false), 2500);
                   toast.success("Profile saved.");
                 } catch (e) {
-                  toast.error(
-                    `Could not save: ${e instanceof Error ? e.message : e}`
-                  );
+                  toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
                 }
               }}
             >
@@ -184,7 +179,7 @@ export default function AccountProfile() {
           </div>
           <div className="flex items-start gap-5 mt-4">
             <div className="relative shrink-0">
-              <div className="w-20 h-20 rounded-full bg-ink text-white grid place-items-center text-xl font-bold overflow-hidden">
+              <div className="w-20 h-20 rounded-full bg-ink text-white grid place-items-center text-xl font-medium overflow-hidden">
                 {p.avatar ? (
                   <img
                     src={p.avatar}
@@ -242,13 +237,11 @@ export default function AccountProfile() {
                   value={p.role}
                   onChange={(e) => set("role", e.target.value)}
                 >
-                  {["Administrator", "Manager", "Accountant", "Staff"].map(
-                    (r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    )
-                  )}
+                  {["Administrator", "Manager", "Accountant", "Staff"].map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
                 </select>
               </FormField>
             </div>
@@ -257,7 +250,7 @@ export default function AccountProfile() {
 
         {/* Login Credentials */}
         <div className="card">
-          <p className="font-bold text-ink">Login Credentials</p>
+          <p className="font-medium text-ink">Login Credentials</p>
           <p className="text-sm text-brand-500 mt-0.5 mb-4">
             Manage your login email and connected methods
           </p>
@@ -301,10 +294,10 @@ export default function AccountProfile() {
           ].map((a) => (
             <div
               key={a.n}
-              className="flex items-center justify-between rounded-xl border border-brand-200 px-3 py-2.5 mb-2"
+              className="flex items-center justify-between rounded-3xl border border-brand-200 px-3 py-2.5 mb-2"
             >
               <div>
-                <p className="text-sm font-semibold text-ink">{a.n}</p>
+                <p className="text-sm font-medium text-ink">{a.n}</p>
                 <p className="text-[11px] text-brand-400">{a.s}</p>
               </div>
               <button
@@ -320,7 +313,7 @@ export default function AccountProfile() {
 
         {/* Preferences */}
         <div className="card">
-          <p className="font-bold text-ink">Preferences</p>
+          <p className="font-medium text-ink">Preferences</p>
           <p className="text-sm text-brand-500 mt-0.5 mb-4">
             Manage your language, timezone and other preferences
           </p>
@@ -331,11 +324,9 @@ export default function AccountProfile() {
                 value={p.language}
                 onChange={(e) => set("language", e.target.value)}
               >
-                {["English (US)", "English (UK)", "Arabic", "Hindi"].map(
-                  (l) => (
-                    <option key={l}>{l}</option>
-                  )
-                )}
+                {["English (US)", "English (UK)", "Arabic", "Hindi"].map((l) => (
+                  <option key={l}>{l}</option>
+                ))}
               </select>
             </FormField>
             <FormField label="Timezone">
@@ -379,9 +370,7 @@ export default function AccountProfile() {
           </div>
           <div className="flex items-center justify-end gap-3 mt-4">
             {savedPrefs && (
-              <span className="text-sm font-semibold text-success">
-                Saved
-              </span>
+              <span className="text-sm font-medium text-success">Saved</span>
             )}
             <button
               className="btn-primary"
@@ -397,9 +386,7 @@ export default function AccountProfile() {
                   setTimeout(() => setSavedPrefs(false), 2500);
                   toast.success("Preferences saved.");
                 } catch (e) {
-                  toast.error(
-                    `Could not save: ${e instanceof Error ? e.message : e}`
-                  );
+                  toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
                 }
               }}
             >
@@ -411,7 +398,7 @@ export default function AccountProfile() {
 
       {/* right column: Change Password */}
       <div className="card xl:sticky xl:top-2">
-        <p className="font-bold text-ink">Change Password</p>
+        <p className="font-medium text-ink">Change Password</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
           Update your password to keep your account secure
         </p>
@@ -444,9 +431,7 @@ export default function AccountProfile() {
                 >
                   <span
                     className={`grid place-items-center w-4 h-4 rounded-full ${
-                      ok
-                        ? "bg-success text-white"
-                        : "bg-brand-200 text-white"
+                      ok ? "bg-success text-white" : "bg-brand-200 text-white"
                     }`}
                   >
                     <Check size={10} strokeWidth={3} />
@@ -467,9 +452,7 @@ export default function AccountProfile() {
           {pwMsg && (
             <p
               className={`text-xs font-semibold rounded-lg px-3 py-2 ${
-                pwMsg.ok
-                  ? "text-success bg-success/10"
-                  : "text-danger bg-danger/10"
+                pwMsg.ok ? "text-success bg-success/10" : "text-danger bg-danger/10"
               }`}
             >
               {pwMsg.t}

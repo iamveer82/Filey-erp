@@ -41,9 +41,7 @@ export default function BackupPanel() {
       );
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `filey-backup-${new Date()
-        .toISOString()
-        .slice(0, 10)}.json`;
+      a.download = `filey-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       setDone(true);
@@ -55,27 +53,24 @@ export default function BackupPanel() {
   return (
     <div className="space-y-4">
       <div className="card">
-        <p className="font-bold text-ink">Export data</p>
+        <p className="font-medium text-ink">Export data</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Download a JSON snapshot of your company, products, orders,
-          invoices, quotations, customers and expenses.
+          Download a JSON snapshot of your company, products, orders, invoices,
+          quotations, customers and expenses.
         </p>
         <button className="btn-primary" disabled={busy} onClick={exportData}>
           <Download size={16} /> {busy ? "Preparing…" : "Export backup"}
         </button>
         {done && (
-          <span className="ml-3 text-sm font-semibold text-success">
-            Backup downloaded
-          </span>
+          <span className="ml-3 text-sm font-medium text-success">Backup downloaded</span>
         )}
       </div>
       <div className="card">
-        <p className="font-bold text-ink">Restore</p>
+        <p className="font-medium text-ink">Restore</p>
         <p className="text-sm text-brand-500 mt-2">
-          Your source of truth is your Supabase project — restore from a
-          Supabase backup (Dashboard → Database → Backups), or contact the
-          owner to re-import an exported file. In-app restore/import is on
-          the roadmap.
+          Your source of truth is your Supabase project — restore from a Supabase backup
+          (Dashboard → Database → Backups), or contact the owner to re-import an exported
+          file. In-app restore/import is on the roadmap.
         </p>
       </div>
     </div>

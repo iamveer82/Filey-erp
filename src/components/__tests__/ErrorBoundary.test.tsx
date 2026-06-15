@@ -24,9 +24,7 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>
     );
     expect(screen.getByText(/something went wrong/i)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /reload app/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reload app/i })).toBeInTheDocument();
     expect(screen.getByText("kaboom")).toBeInTheDocument();
     spy.mockRestore();
   });

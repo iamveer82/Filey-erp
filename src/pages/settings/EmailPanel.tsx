@@ -1,7 +1,15 @@
-import { loadEmailConfig, saveEmailConfig, sendEmail, emailShell, hasDesktop, type EmailConfig } from "../../lib/email";
+import {
+  loadEmailConfig,
+  saveEmailConfig,
+  sendEmail,
+  emailShell,
+  hasDesktop,
+  type EmailConfig,
+} from "../../lib/email";
 import { Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Field } from "../../components/ui";
+import BrandIcon from "../../components/BrandIcon";
 import { numInput } from "../../lib/format";
 
 /* ---------------- Email (Gmail SMTP) ---------------- */
@@ -94,16 +102,18 @@ export default function EmailPanel() {
   return (
     <div className="space-y-4">
       <div className="card">
-        <p className="font-bold text-ink">Email connection (Gmail SMTP)</p>
+        <div className="flex items-center gap-2 mb-1">
+          <BrandIcon name="gmail" className="h-5 w-5" />
+          <p className="font-medium text-ink">Email connection (Gmail SMTP)</p>
+        </div>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
           Connect your Gmail to send invoices, quotations and alerts. Use a{" "}
-          <b>Gmail App Password</b> (Google Account → Security → 2-Step
-          Verification → App passwords) — not your normal password.
+          <b>Gmail App Password</b> (Google Account → Security → 2-Step Verification → App
+          passwords) — not your normal password.
         </p>
         {!hasDesktop && (
-          <p className="text-xs font-semibold text-warning bg-warning/10 rounded-lg px-3 py-2 mb-4">
-            You can save settings here, but email is only sent from the
-            Filey desktop app.
+          <p className="text-xs font-medium text-warning bg-warning/10 rounded-3xl px-3 py-2 mb-4">
+            You can save settings here, but email is only sent from the Filey desktop app.
           </p>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -165,15 +175,13 @@ export default function EmailPanel() {
             <Send size={14} /> {test.busy ? "Sending…" : "Send test"}
           </button>
           {test.msg && (
-            <span className="text-xs font-semibold text-brand-600">
-              {test.msg}
-            </span>
+            <span className="text-xs font-medium text-brand-600">{test.msg}</span>
           )}
         </div>
       </div>
 
       <div className="card">
-        <p className="font-bold text-ink mb-3">Compose &amp; send</p>
+        <p className="font-medium text-ink mb-3">Compose &amp; send</p>
         <div className="space-y-3">
           <Field label="To">
             <input
@@ -207,9 +215,7 @@ export default function EmailPanel() {
               <Send size={15} /> {sending.busy ? "Sending…" : "Send email"}
             </button>
             {sending.msg && (
-              <span className="text-xs font-semibold text-brand-600">
-                {sending.msg}
-              </span>
+              <span className="text-xs font-medium text-brand-600">{sending.msg}</span>
             )}
           </div>
         </div>

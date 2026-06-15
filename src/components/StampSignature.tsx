@@ -3,13 +3,13 @@ import { Upload, X } from "lucide-react";
 
 /* Shared stamp & signature widgets used by every document builder
  * (Invoicing, Quoting, Purchase Orders, Declaration Letter, …).
- *  - StampSig: the stored shape ({data, position %, opacity, crop}).
- *  - StampSigCard: the upload / opacity / crop config panel.
- *  - StampSignatureLayer: the draggable overlay rendered on the A4 sheet.
+ * - StampSig: the stored shape ({data, position %, opacity, crop}).
+ * - StampSigCard: the upload / opacity / crop config panel.
+ * - StampSignatureLayer: the draggable overlay rendered on the A4 sheet.
  *
- *  Positioning is expressed as 0–100 % of the sheet (center anchored), so it
- *  is resolution-independent and survives the FitPreview zoom transform —
- *  dragging reads the parent's bounding rect, which is already scaled. */
+ * Positioning is expressed as 0–100 % of the sheet (center anchored), so it
+ * is resolution-independent and survives the FitPreview zoom transform —
+ * dragging reads the parent's bounding rect, which is already scaled. */
 
 export type StampSig = {
   data: string;
@@ -86,22 +86,22 @@ export function StampSigCard({
   defaults: StampSig;
 }) {
   return (
-    <div className="rounded-xl border border-brand-200 p-4 dark:border-[#3A3D45]">
-      <div className="flex items-center gap-2 text-ink font-semibold text-sm">
+    <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+      <div className="flex items-center gap-2 text-ink font-medium text-sm">
         {icon} {label}
       </div>
       <div className="mt-3">
         {value?.data ? (
           <div className="space-y-3">
             {/* preview with inline remove */}
-            <div className="relative flex items-center justify-center py-4 rounded-lg bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
+            <div className="relative flex items-center justify-center py-4 rounded-3xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
               <img
                 src={value.data}
                 alt={label}
                 className="object-contain rounded"
                 style={{
-                  width: `${180 * (value.scale ?? 100) / 100}px`,
-                  maxHeight: `${80 * (value.scale ?? 100) / 100}px`,
+                  width: `${(180 * (value.scale ?? 100)) / 100}px`,
+                  maxHeight: `${(80 * (value.scale ?? 100)) / 100}px`,
                   clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`,
                   opacity: value.opacity / 100,
                 }}
@@ -109,7 +109,7 @@ export function StampSigCard({
               <button
                 title={`Remove ${label.toLowerCase()}`}
                 aria-label={`Remove ${label.toLowerCase()}`}
-                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-md bg-white/90 border border-brand-200 text-danger shadow-sm hover:bg-red-50 transition-colors"
+                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-3xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
                 onClick={() => onChange(undefined)}
               >
                 <X size={13} />
@@ -119,7 +119,9 @@ export function StampSigCard({
             <label className="block">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] font-medium text-brand-500">Opacity</span>
-                <span className="text-[11px] font-mono tabular-nums text-brand-600">{value.opacity}%</span>
+                <span className="text-[11px] font-mono tabular-nums text-brand-600">
+                  {value.opacity}%
+                </span>
               </div>
               <input
                 type="range"
@@ -134,7 +136,9 @@ export function StampSigCard({
             <label className="block">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] font-medium text-brand-500">Size</span>
-                <span className="text-[11px] font-mono tabular-nums text-brand-600">{value.scale}%</span>
+                <span className="text-[11px] font-mono tabular-nums text-brand-600">
+                  {value.scale}%
+                </span>
               </div>
               <input
                 type="range"
@@ -149,24 +153,31 @@ export function StampSigCard({
             <div>
               <p className="text-[11px] font-medium text-brand-400 mb-1.5">Crop edges</p>
               <div className="grid grid-cols-4 gap-1.5">
-                {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map((k, i) => (
-                  <div
-                    key={k}
-                    className="flex items-center gap-1 rounded-md border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:bg-[#24262C] dark:border-[#3A3D45]"
-                  >
-                    <span className="text-[10px] font-mono font-semibold text-brand-400">{["T", "R", "B", "L"][i]}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={90}
-                      value={value[k]}
-                      className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none dark:text-[#DDE0E4]"
-                      onChange={(e) =>
-                        onChange({ ...value, [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) })
-                      }
-                    />
-                  </div>
-                ))}
+                {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map(
+                  (k, i) => (
+                    <div
+                      key={k}
+                      className="flex items-center gap-1 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+                    >
+                      <span className="text-[10px] font-mono font-medium text-brand-400">
+                        {["T", "R", "B", "L"][i]}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={90}
+                        value={value[k]}
+                        className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none dark:text-[#DDE0E4]"
+                        onChange={(e) =>
+                          onChange({
+                            ...value,
+                            [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)),
+                          })
+                        }
+                      />
+                    </div>
+                  )
+                )}
               </div>
             </div>
             <p className="text-[11px] text-brand-400">
@@ -174,9 +185,9 @@ export function StampSigCard({
             </p>
           </div>
         ) : (
-          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-lg border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
+          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-3xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
             <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-semibold text-brand-600">Upload {label}</span>
+            <span className="text-xs font-medium text-brand-600">Upload {label}</span>
             <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
             <input
               type="file"
@@ -244,8 +255,9 @@ function DraggableMark({
         dragging.current = false;
         try {
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-        } catch {
+        } catch (e) {
           /* capture may already be released */
+          console.warn("releasePointerCapture failed:", e);
         }
       }}
       title={`Drag to position ${alt.toLowerCase()}`}
@@ -321,7 +333,10 @@ export function DraggableBlock({
         dragging.current = false;
         try {
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-        } catch { /* capture may already be released */ }
+        } catch (e) {
+          /* capture may already be released */
+          console.warn("releasePointerCapture failed:", e);
+        }
       }}
       title="Drag to position"
       style={{
@@ -341,8 +356,8 @@ export function DraggableBlock({
 }
 
 /** Drop this inside a `position:relative` wrapper around the document body.
- *  Renders the stamp/signature where they belong and lets the user drag
- *  them anywhere on the A4 sheet. */
+ * Renders the stamp/signature where they belong and lets the user drag
+ * them anywhere on the A4 sheet. */
 export function StampSignatureLayer({
   stamp,
   signature,
@@ -357,7 +372,13 @@ export function StampSignatureLayer({
   return (
     <>
       {stamp?.data && (
-        <DraggableMark mark={stamp} maxH={100} maxW={200} alt="Stamp" onMove={onStampMove} />
+        <DraggableMark
+          mark={stamp}
+          maxH={100}
+          maxW={200}
+          alt="Stamp"
+          onMove={onStampMove}
+        />
       )}
       {signature?.data && (
         <DraggableMark

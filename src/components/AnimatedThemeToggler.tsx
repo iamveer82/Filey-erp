@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { setTheme, getTheme } from "../lib/theme";
 
 /** Minimal theme toggle — light/dark icon swap, no motion (design.md §0.8).
- *  Persists via the app theme store. Click sound removed for the
- *  professional/minimal aesthetic. */
+ * Persists via the app theme store. Click sound removed for the
+ * professional/minimal aesthetic. */
 export interface AnimatedThemeTogglerProps {
   /** Kept for API compatibility; click sound is no longer emitted. */
   sound?: boolean;
@@ -26,11 +26,19 @@ export default function AnimatedThemeToggler(_: AnimatedThemeTogglerProps = {}) 
       onClick={toggle}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Light mode" : "Dark mode"}
-      className="grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer outline-none"
+      className="grid h-10 w-10 place-items-center rounded-3xl bg-white dark:bg-[#1C1C1E] border border-brand-200 dark:border-[#2C2C2E] text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer outline-none"
     >
       {isDark ? (
         // Sun — show in dark mode to mean "click to brighten"
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        >
           <circle cx="12" cy="12" r="4" />
           <line x1="12" y1="2" x2="12" y2="4" />
           <line x1="12" y1="20" x2="12" y2="22" />
@@ -43,7 +51,16 @@ export default function AnimatedThemeToggler(_: AnimatedThemeTogglerProps = {}) 
         </svg>
       ) : (
         // Moon — show in light mode to mean "click to dim"
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )}

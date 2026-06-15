@@ -157,9 +157,11 @@ export interface CrmCustomer {
   company?: string;
   email?: string;
   phone?: string;
+  phone_e164?: string;
   address?: string;
   trn?: string;
   segment?: string;
+  custom_fields?: Record<string, string>;
   shared?: boolean;
   created_at: string;
 }

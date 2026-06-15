@@ -96,9 +96,7 @@ export function PageHeader({
     <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
       <div>
         <h1 className="text-[28px] leading-9 font-bold text-ink">{title}</h1>
-        {subtitle && (
-          <p className="text-sm text-brand-500 mt-1">{subtitle}</p>
-        )}
+        {subtitle && <p className="text-sm text-brand-500 mt-1">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -123,7 +121,13 @@ export function Card({
   );
 }
 
-export function Delta({ value, suffix = "vs last month" }: { value: number; suffix?: string }) {
+export function Delta({
+  value,
+  suffix = "vs last month",
+}: {
+  value: number;
+  suffix?: string;
+}) {
   const up = value >= 0;
   return (
     <span
@@ -133,8 +137,7 @@ export function Delta({ value, suffix = "vs last month" }: { value: number; suff
       )}
     >
       {up ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-      {Math.abs(value)}%
-      <span className="text-brand-400 font-medium">{suffix}</span>
+      {Math.abs(value)}%<span className="text-brand-400 font-medium">{suffix}</span>
     </span>
   );
 }
@@ -164,9 +167,7 @@ export function MetricCard({
       <div className="p-5">
         <div className="flex items-start gap-3">
           {icon && (
-            <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>
-              {icon}
-            </div>
+            <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>{icon}</div>
           )}
           <div className="min-w-0">
             <p className="text-xs font-semibold text-brand-500">{label}</p>
@@ -234,9 +235,7 @@ export function StatCard({
           {hint && <p className="text-xs text-brand-400 mt-1">{hint}</p>}
         </div>
         {icon && (
-          <div className="rounded-xl p-2.5 bg-primary-100 text-primary-700">
-            {icon}
-          </div>
+          <div className="rounded-xl p-2.5 bg-primary-100 text-primary-700">{icon}</div>
         )}
       </div>
     </div>
@@ -264,17 +263,11 @@ export function statusTone(
   s: string
 ): "success" | "warn" | "danger" | "info" | "neutral" {
   const v = s.toLowerCase();
-  if (
-    ["paid", "active", "present", "delivered", "confirmed", "in stock"].includes(
-      v
-    )
-  )
+  if (["paid", "active", "present", "delivered", "confirmed", "in stock"].includes(v))
     return "success";
   if (["pending", "draft", "unpaid", "leave", "low", "low stock"].includes(v))
     return "warn";
-  if (
-    ["inactive", "cancelled", "absent", "overdue", "out of stock"].includes(v)
-  )
+  if (["inactive", "cancelled", "absent", "overdue", "out of stock"].includes(v))
     return "danger";
   return "info";
 }
@@ -324,7 +317,9 @@ export function DataTable<T>({
   const [sel, setSel] = useState<Set<string | number>>(new Set());
   const [running, setRunning] = useState(false);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
-  const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(null);
+  const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(
+    null
+  );
   const [editVal, setEditVal] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -358,8 +353,7 @@ export function DataTable<T>({
   const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
   const allChecked =
     selectable && rows.length > 0 && rows.every((r) => sel.has(keyOf(r)));
-  const toggleAll = () =>
-    setSel(allChecked ? new Set() : new Set(rows.map(keyOf)));
+  const toggleAll = () => setSel(allChecked ? new Set() : new Set(rows.map(keyOf)));
   const toggle = (k: string | number) =>
     setSel((s) => {
       const n = new Set(s);
@@ -383,9 +377,7 @@ export function DataTable<T>({
     <div className="card overflow-hidden p-0">
       {selectable && sel.size > 0 && (
         <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-brand-50 border-b border-brand-200 dark:bg-white/5 dark:border-[#3A3D45]">
-          <span className="text-sm font-semibold text-ink">
-            {sel.size} selected
-          </span>
+          <span className="text-sm font-semibold text-ink">{sel.size} selected</span>
           <div className="flex items-center gap-1.5 flex-wrap">
             {bulkActions!.map((a) => (
               <button
@@ -416,11 +408,12 @@ export function DataTable<T>({
         ref={scrollRef}
         className={cn(
           "overflow-x-auto",
-          scrolled && "shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+          scrolled &&
+            "shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
         )}
       >
         <table className="w-full">
-          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E]">          
+          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E]">
             <tr>
               {selectable && (
                 <th className="th w-10">
@@ -684,13 +677,7 @@ export function Modal({
   );
 }
 
-export function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <label className="label">{label}</label>
@@ -891,7 +878,8 @@ export function TimelineItem({
     done: "bg-success text-white border-success",
     current: "bg-primary-500 text-white border-primary-500 ring-4 ring-primary-500/15",
     error: "bg-danger text-white border-danger",
-    default: "bg-white text-brand-500 border-brand-200 dark:border-white/10 dark:bg-[#24262C]",
+    default:
+      "bg-white text-brand-500 border-brand-200 dark:border-white/10 dark:bg-[#24262C]",
   };
   return (
     <li className="relative flex gap-3 pb-4">
@@ -902,17 +890,18 @@ export function TimelineItem({
             dotClass[status]
           )}
         >
-          {icon ?? (status === "done" ? <Check size={12} /> : <CircleIcon size={6} className="fill-current" />)}
+          {icon ??
+            (status === "done" ? (
+              <Check size={12} />
+            ) : (
+              <CircleIcon size={6} className="fill-current" />
+            ))}
         </div>
-        {!last && (
-          <div className="w-px flex-1 bg-brand-200 dark:bg-white/10 mt-1" />
-        )}
+        {!last && <div className="w-px flex-1 bg-brand-200 dark:bg-white/10 mt-1" />}
       </div>
       <div className="min-w-0 flex-1 pt-0.5">
         <p className="text-sm text-ink leading-snug">{title}</p>
-        {subtitle && (
-          <p className="text-[11px] text-brand-400 mt-0.5">{subtitle}</p>
-        )}
+        {subtitle && <p className="text-[11px] text-brand-400 mt-0.5">{subtitle}</p>}
         {meta && <div className="mt-1.5">{meta}</div>}
       </div>
     </li>

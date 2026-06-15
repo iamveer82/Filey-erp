@@ -171,13 +171,16 @@ export default function PeekingCharacters({
   useEffect(() => {
     let t: ReturnType<typeof setTimeout>;
     const loop = () => {
-      t = setTimeout(() => {
-        setPurpleBlink(true);
-        setTimeout(() => {
-          setPurpleBlink(false);
-          loop();
-        }, 150);
-      }, Math.random() * 4000 + 3000);
+      t = setTimeout(
+        () => {
+          setPurpleBlink(true);
+          setTimeout(() => {
+            setPurpleBlink(false);
+            loop();
+          }, 150);
+        },
+        Math.random() * 4000 + 3000
+      );
     };
     loop();
     return () => clearTimeout(t);
@@ -185,13 +188,16 @@ export default function PeekingCharacters({
   useEffect(() => {
     let t: ReturnType<typeof setTimeout>;
     const loop = () => {
-      t = setTimeout(() => {
-        setBlackBlink(true);
-        setTimeout(() => {
-          setBlackBlink(false);
-          loop();
-        }, 150);
-      }, Math.random() * 4000 + 3000);
+      t = setTimeout(
+        () => {
+          setBlackBlink(true);
+          setTimeout(() => {
+            setBlackBlink(false);
+            loop();
+          }, 150);
+        },
+        Math.random() * 4000 + 3000
+      );
     };
     loop();
     return () => clearTimeout(t);
@@ -214,10 +220,13 @@ export default function PeekingCharacters({
       setPeeking(false);
       return;
     }
-    const t = setTimeout(() => {
-      setPeeking(true);
-      setTimeout(() => setPeeking(false), 800);
-    }, Math.random() * 3000 + 2000);
+    const t = setTimeout(
+      () => {
+        setPeeking(true);
+        setTimeout(() => setPeeking(false), 800);
+      },
+      Math.random() * 3000 + 2000
+    );
     return () => clearTimeout(t);
   }, [revealed, peeking]);
 
@@ -239,10 +248,7 @@ export default function PeekingCharacters({
   const orange = calc(orangeRef);
 
   return (
-    <div
-      className="relative"
-      style={{ width: 460, height: 360, maxWidth: "100%" }}
-    >
+    <div className="relative" style={{ width: 460, height: 360, maxWidth: "100%" }}>
       {/* Purple — back */}
       <div
         ref={purpleRef}
@@ -257,8 +263,8 @@ export default function PeekingCharacters({
           transform: revealed
             ? "skewX(0deg)"
             : hiding
-            ? `skewX(${purple.bodySkew - 12}deg) translateX(40px)`
-            : `skewX(${purple.bodySkew}deg)`,
+              ? `skewX(${purple.bodySkew - 12}deg) translateX(40px)`
+              : `skewX(${purple.bodySkew}deg)`,
           transformOrigin: "bottom center",
         }}
       >
@@ -296,8 +302,8 @@ export default function PeekingCharacters({
           transform: revealed
             ? "skewX(0deg)"
             : lookEachOther
-            ? `skewX(${black.bodySkew * 1.5 + 10}deg) translateX(18px)`
-            : `skewX(${black.bodySkew * 1.5}deg)`,
+              ? `skewX(${black.bodySkew * 1.5 + 10}deg) translateX(18px)`
+              : `skewX(${black.bodySkew * 1.5}deg)`,
           transformOrigin: "bottom center",
         }}
       >
@@ -344,8 +350,14 @@ export default function PeekingCharacters({
             top: revealed ? 72 : 76 + orange.faceY,
           }}
         >
-          <Pupil forceLookX={revealed ? -5 : undefined} forceLookY={revealed ? -4 : undefined} />
-          <Pupil forceLookX={revealed ? -5 : undefined} forceLookY={revealed ? -4 : undefined} />
+          <Pupil
+            forceLookX={revealed ? -5 : undefined}
+            forceLookY={revealed ? -4 : undefined}
+          />
+          <Pupil
+            forceLookX={revealed ? -5 : undefined}
+            forceLookY={revealed ? -4 : undefined}
+          />
         </div>
       </div>
 
@@ -371,8 +383,14 @@ export default function PeekingCharacters({
             top: revealed ? 30 : 34 + yellow.faceY,
           }}
         >
-          <Pupil forceLookX={revealed ? -5 : undefined} forceLookY={revealed ? -4 : undefined} />
-          <Pupil forceLookX={revealed ? -5 : undefined} forceLookY={revealed ? -4 : undefined} />
+          <Pupil
+            forceLookX={revealed ? -5 : undefined}
+            forceLookY={revealed ? -4 : undefined}
+          />
+          <Pupil
+            forceLookX={revealed ? -5 : undefined}
+            forceLookY={revealed ? -4 : undefined}
+          />
         </div>
         <div
           className="absolute h-[4px] w-16 rounded-full bg-[#2D2D2D] transition-all duration-200 ease-out"

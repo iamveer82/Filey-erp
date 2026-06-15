@@ -15,13 +15,7 @@ import {
   ErrorBanner,
 } from "../components/ui";
 
-const ACCOUNT_TYPES = [
-  "asset",
-  "liability",
-  "equity",
-  "revenue",
-  "expense",
-];
+const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"];
 
 export default function Accounting() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -46,7 +40,9 @@ export default function Accounting() {
       )
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
   useLiveSync(load);
 
   return (
@@ -56,7 +52,11 @@ export default function Accounting() {
         subtitle="Chart of accounts, journal entries & financial position"
         action={
           <div className="flex gap-2">
-            <button className="btn-ghost" aria-label="Scan receipt" onClick={() => setScanOpen(true)}>
+            <button
+              className="btn-ghost"
+              aria-label="Scan receipt"
+              onClick={() => setScanOpen(true)}
+            >
               <Sparkles size={15} /> Scan receipt
             </button>
             <button
@@ -73,7 +73,11 @@ export default function Accounting() {
         }
       />
 
-      <ExpenseScanModal open={scanOpen} onClose={() => setScanOpen(false)} onSaved={load} />
+      <ExpenseScanModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onSaved={load}
+      />
 
       {error && (
         <div className="mb-4">
@@ -125,15 +129,18 @@ export default function Accounting() {
           loading={loading}
           empty="No journal entries yet"
           columns={[
-            { key: "d", label: "Date", sortValue: (t) => t.txn_date, render: (t) => fmtDate(t.txn_date) },
+            {
+              key: "d",
+              label: "Date",
+              sortValue: (t) => t.txn_date,
+              render: (t) => fmtDate(t.txn_date),
+            },
             {
               key: "acct",
               label: "Account",
               sortValue: (t) => t.account_name,
               render: (t) => (
-                <span className="font-semibold text-ink">
-                  {t.account_name}
-                </span>
+                <span className="font-medium text-ink">{t.account_name}</span>
               ),
             },
             {
@@ -156,9 +163,7 @@ export default function Accounting() {
               key: "amt",
               label: "Amount",
               sortValue: (t) => t.amount,
-              render: (t) => (
-                <span className="font-semibold">{aed(t.amount)}</span>
-              ),
+              render: (t) => <span className="font-medium">{aed(t.amount)}</span>,
             },
           ]}
         />
@@ -173,34 +178,26 @@ export default function Accounting() {
               label: "Code",
               sortValue: (a) => a.code,
               render: (a) => (
-                <span className="font-mono text-xs text-brand-500">
-                  {a.code}
-                </span>
+                <span className="font-mono text-xs text-brand-500">{a.code}</span>
               ),
             },
             {
               key: "name",
               label: "Account",
               sortValue: (a) => a.name,
-              render: (a) => (
-                <span className="font-semibold text-ink">{a.name}</span>
-              ),
+              render: (a) => <span className="font-medium text-ink">{a.name}</span>,
             },
             {
               key: "type",
               label: "Type",
               sortValue: (a) => a.account_type,
-              render: (a) => (
-                <Badge tone="neutral">{a.account_type}</Badge>
-              ),
+              render: (a) => <Badge tone="neutral">{a.account_type}</Badge>,
             },
             {
               key: "bal",
               label: "Balance",
               sortValue: (a) => a.balance,
-              render: (a) => (
-                <span className="font-semibold">{aed(a.balance)}</span>
-              ),
+              render: (a) => <span className="font-medium">{aed(a.balance)}</span>,
             },
           ]}
         />
@@ -272,9 +269,7 @@ function AccountModal({
             <select
               className="select"
               value={f.account_type}
-              onChange={(e) =>
-                setF({ ...f, account_type: e.target.value })
-              }
+              onChange={(e) => setF({ ...f, account_type: e.target.value })}
             >
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -370,9 +365,7 @@ function JournalModal({
           <select
             className="select"
             value={f.account_id}
-            onChange={(e) =>
-              setF({ ...f, account_id: numInput(e.target.value) })
-            }
+            onChange={(e) => setF({ ...f, account_id: numInput(e.target.value) })}
           >
             {accounts.length === 0 && <option value={0}>No accounts</option>}
             {accounts.map((a) => (
@@ -407,9 +400,7 @@ function JournalModal({
           <input
             className="input"
             value={f.description}
-            onChange={(e) =>
-              setF({ ...f, description: e.target.value })
-            }
+            onChange={(e) => setF({ ...f, description: e.target.value })}
           />
         </Field>
       </div>

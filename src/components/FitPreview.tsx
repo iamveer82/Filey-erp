@@ -55,12 +55,12 @@ export default function FitPreview({
   return (
     <div
       ref={boxRef}
-      className="fp-box bg-brand-100 rounded-xl p-4 overflow-auto max-h-[70vh]"
+      className="fp-box bg-brand-100 rounded-3xl p-4 overflow-auto max-h-[70vh]"
     >
       {scale <= 0.98 ? (
         /* Scale down: render at full resolution, then GPU-scale to fit.
-           Text/borders render crisp at native size; GPU handles downscale.
-           Viewport clips overflow so layout stays at the scaled dimensions. */
+ Text/borders render crisp at native size; GPU handles downscale.
+ Viewport clips overflow so layout stays at the scaled dimensions. */
         <div
           className="mx-auto"
           style={{
@@ -84,8 +84,8 @@ export default function FitPreview({
         </div>
       ) : (
         /* Scale up (zoom in): use CSS zoom so browser re-layouts at the
-           larger size — crisper than bitmap-scaling a full-size render.
-           Overflow on fp-box enables scrolling when zoomed past 100%. */
+ larger size — crisper than bitmap-scaling a full-size render.
+ Overflow on fp-box enables scrolling when zoomed past 100%. */
         <div
           className="invoice-print bg-white mx-auto"
           style={{

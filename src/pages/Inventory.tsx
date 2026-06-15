@@ -500,7 +500,7 @@ export default function Inventory() {
                     <Pencil size={14} /> Edit product
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    tone="danger"
+                    className="text-danger"
                     onClick={async (e) => {
                       e.preventDefault();
                       if (!(await confirm({ title: "Delete product", message: `Delete ${p.name}? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;

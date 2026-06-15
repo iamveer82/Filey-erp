@@ -97,14 +97,17 @@ interface PrRecord {
 function loadPrs(): PrRecord[] {
   try {
     return JSON.parse(localStorage.getItem(PR_STORAGE_KEY) || "[]");
-  } catch {
+  } catch (e) {
+    console.warn("Failed to load payment receipts", e);
     return [];
   }
 }
 function savePrs(r: PrRecord[]) {
   try {
     localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(r));
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to save payment receipts", e);
+  }
   // Write-through so receipts follow the user across devices.
   void tools.setSetting(PR_SETTING_KEY, JSON.stringify(r)).catch(() => {});
 }
@@ -118,7 +121,8 @@ async function syncPrs(): Promise<PrRecord[]> {
       localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(remote));
       return remote;
     }
-  } catch {
+  } catch (e) {
+    console.warn("Failed to sync payment receipts from server", e);
     /* offline / not configured — fall back to local */
   }
   return loadPrs();
@@ -295,7 +299,8 @@ function PrEditor({
         elementToPdfBytes(el, base)
       );
       if (saved) toast.success("Saved a copy to My Files.");
-    } catch {
+    } catch (e) {
+      console.warn("Failed to archive payment receipt PDF", e);
       /* archiving is a convenience — never block save */
     }
   };

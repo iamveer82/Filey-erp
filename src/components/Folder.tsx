@@ -1,10 +1,10 @@
 import { cn } from "../lib/format";
 
 /** Minimal folder — the spring paper-fan hover from the previous
- *  framer-motion version is gone (design.md §0.8). Papers still
- *  rest at their fanned angles; on hover the group-hover CSS gives
- *  them a quiet color shift instead of position bounce. The folder
- *  container itself is just rounded div + gradients, no animation. */
+ * framer-motion version is gone (design.md §0.8). Papers still
+ * rest at their fanned angles; on hover the group-hover CSS gives
+ * them a quiet color shift instead of position bounce. The folder
+ * container itself is just rounded div + gradients, no animation. */
 
 type FolderColor = "blue" | "black" | "grey" | "yellow" | "orange" | "red";
 type FolderSize = "sm" | "md" | "lg";
@@ -32,7 +32,7 @@ const sizeMap: Record<
   }
 > = {
   sm: {
-    container: "size-24 rounded-2xl",
+    container: "size-24 rounded-md",
     tabLeft: "w-9 h-3 rounded-tl-lg",
     tabRight: "w-2 h-3 rounded-tr-2xl",
     tabBridge: "w-2 h-2",
@@ -44,7 +44,7 @@ const sizeMap: Record<
     label: "bottom-2 left-2 text-[9px] py-0.5 px-1.5",
   },
   md: {
-    container: "size-32 rounded-3xl",
+    container: "size-32 rounded-md",
     tabLeft: "w-12 h-4 rounded-tl-lg",
     tabRight: "w-2.5 h-4 rounded-tr-3xl",
     tabBridge: "w-2.5 h-2.5",
@@ -70,7 +70,7 @@ const sizeMap: Record<
 };
 
 /** Folders: solid color (no gradient — design.md §0.8 ban). Each color
- *  is a single hue with a slightly darker bottom band. */
+ * is a single hue with a slightly darker bottom band. */
 const colorMap: Record<
   FolderColor,
   {
@@ -188,7 +188,7 @@ export const Folder = ({
         <div
           style={{ transform: "rotate(4deg)", transformOrigin: "center bottom" }}
           className={cn(
-            "absolute inset-x-0 rounded-2xl",
+            "absolute inset-x-0 rounded-md",
             s.paperOffset,
             s.paperH,
             c.paperBack
@@ -198,7 +198,7 @@ export const Folder = ({
         <div
           style={{ transform: "rotate(-4deg)", transformOrigin: "center bottom" }}
           className={cn(
-            "absolute inset-x-0 rounded-2xl",
+            "absolute inset-x-0 rounded-md",
             s.paperOffset,
             s.paperH,
             c.paperBack

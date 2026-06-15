@@ -13,7 +13,7 @@ export interface ImportField {
 }
 
 /** Generic CSV importer: upload → auto-map headers to fields → preview →
- *  import. `onImport` receives mapped, transformed row objects. */
+ * import. `onImport` receives mapped, transformed row objects. */
 export default function ImportCsvModal({
   open,
   title,
@@ -60,9 +60,7 @@ export default function ImportCsvModal({
     setMap(auto);
   };
 
-  const ready =
-    raw.length > 0 &&
-    fields.every((f) => !f.required || map[f.key]);
+  const ready = raw.length > 0 && fields.every((f) => !f.required || map[f.key]);
 
   const mapped = useMemo(
     () =>
@@ -70,7 +68,7 @@ export default function ImportCsvModal({
         const obj: Record<string, unknown> = {};
         for (const f of fields) {
           const col = map[f.key];
-          const v = col ? r[col] ?? "" : "";
+          const v = col ? (r[col] ?? "") : "";
           obj[f.key] = f.transform ? f.transform(v) : v;
         }
         return obj;
@@ -85,9 +83,7 @@ export default function ImportCsvModal({
       toast.success(`Imported ${mapped.length} row(s).`);
       onClose();
     } catch (e) {
-      toast.error(
-        `Import failed: ${e instanceof Error ? e.message : String(e)}`
-      );
+      toast.error(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -116,20 +112,15 @@ export default function ImportCsvModal({
           </p>
           <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
             {fields.map((f) => (
-              <div
-                key={f.key}
-                className="grid grid-cols-2 gap-2 items-center"
-              >
-                <span className="text-sm font-semibold text-ink">
+              <div key={f.key} className="grid grid-cols-2 gap-2 items-center">
+                <span className="text-sm font-medium text-ink">
                   {f.label}
                   {f.required && <span className="text-danger"> *</span>}
                 </span>
                 <select
                   className="select"
                   value={map[f.key] ?? ""}
-                  onChange={(e) =>
-                    setMap((m) => ({ ...m, [f.key]: e.target.value }))
-                  }
+                  onChange={(e) => setMap((m) => ({ ...m, [f.key]: e.target.value }))}
                 >
                   <option value="">— skip —</option>
                   {headers.map((h) => (
@@ -148,11 +139,7 @@ export default function ImportCsvModal({
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button
-          className="btn-primary"
-          disabled={!ready || busy}
-          onClick={run}
-        >
+        <button className="btn-primary" disabled={!ready || busy} onClick={run}>
           {busy ? (
             <>
               <Loader2 size={15} className="animate-spin" /> Importing…

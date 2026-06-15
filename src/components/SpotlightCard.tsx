@@ -9,12 +9,12 @@ interface SpotlightCardProps {
 }
 
 /** Minimal card surface. The former mouse-follow spotlight and spring
- *  entrance were removed for the minimal theme; same API, quiet visuals. */
+ * entrance were removed for the minimal theme; same API, quiet visuals. */
 export function SpotlightCard({ children, className }: SpotlightCardProps) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-brand-200/80 bg-white shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]",
+        "relative overflow-hidden rounded-md border border-brand-200/80 bg-white dark:border-[#3A3D45] dark:bg-[#24262C]",
         className
       )}
     >

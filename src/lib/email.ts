@@ -32,7 +32,8 @@ export async function loadEmailConfig(): Promise<EmailConfig | null> {
   try {
     const v = await invoke<string | null>("cache_get", { key: KEY });
     return v ? (JSON.parse(v) as EmailConfig) : null;
-  } catch {
+  } catch (e) {
+    console.error("Failed to load email config", e);
     return null;
   }
 }
@@ -47,8 +48,8 @@ export async function saveEmailConfig(c: EmailConfig): Promise<void> {
 }
 
 /** Send one HTML email. Desktop uses the local SMTP bridge; web uses the
- *  Supabase `send-email` Edge Function (Resend) so no SMTP credentials
- *  ever live on the client. */
+ * Supabase `send-email` Edge Function (Resend) so no SMTP credentials
+ * ever live on the client. */
 export async function sendEmail(msg: EmailMessage): Promise<void> {
   if (!msg.to.trim()) throw new Error("No recipient email address.");
 
@@ -75,7 +76,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
 }
 
 /** Escape a user-supplied value before embedding it in email HTML.
- *  Prevents HTML/script injection from customer names, notes, etc. */
+ * Prevents HTML/script injection from customer names, notes, etc. */
 export function esc(v: unknown): string {
   return String(v ?? "")
     .replace(/&/g, "&amp;")
@@ -88,14 +89,14 @@ export function esc(v: unknown): string {
 /** Minimal branded HTML wrapper for transactional emails. */
 export function emailShell(title: string, bodyHtml: string): string {
   return `<div style="font-family:Poppins,Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">
-    <div style="background:#FFD600;padding:18px 24px;border-radius:12px 12px 0 0">
-      <strong style="font-size:18px">${esc(title)}</strong>
-    </div>
-    <div style="border:1px solid #E4DAC6;border-top:0;border-radius:0 0 12px 12px;padding:24px;background:#fff">
-      ${bodyHtml}
-      <p style="color:#B6BAC1;font-size:12px;margin-top:24px">
-        Sent via Filey ERP
-      </p>
-    </div>
-  </div>`;
+ <div style="background:#FFD600;padding:18px 24px;border-radius:12px 12px 0 0">
+ <strong style="font-size:18px">${esc(title)}</strong>
+ </div>
+ <div style="border:1px solid #E4DAC6;border-top:0;border-radius:0 0 12px 12px;padding:24px;background:#fff">
+ ${bodyHtml}
+ <p style="color:#B6BAC1;font-size:12px;margin-top:24px">
+ Sent via Filey ERP
+ </p>
+ </div>
+ </div>`;
 }

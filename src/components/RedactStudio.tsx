@@ -72,13 +72,21 @@ export default function RedactStudio({
 
   const stageRef = useRef<HTMLDivElement>(null);
   const drawRef = useRef<{ x: number; y: number } | null>(null);
-  const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [draft, setDraft] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
 
   const frac = (e: React.PointerEvent) => {
     const s = stageRef.current;
     if (!s) return { x: 0, y: 0 };
     const r = s.getBoundingClientRect();
-    return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
+    return {
+      x: clamp((e.clientX - r.left) / r.width, 0, 1),
+      y: clamp((e.clientY - r.top) / r.height, 0, 1),
+    };
   };
   const down = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -91,14 +99,22 @@ export default function RedactStudio({
     const s = drawRef.current;
     if (!s) return;
     const p = frac(e);
-    setDraft({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
+    setDraft({
+      x: Math.min(s.x, p.x),
+      y: Math.min(s.y, p.y),
+      w: Math.abs(p.x - s.x),
+      h: Math.abs(p.y - s.y),
+    });
   };
   const up = () => {
     const d = draft;
     drawRef.current = null;
     setDraft(null);
     if (d && d.w > 0.01 && d.h > 0.01)
-      setBoxes((b) => [...b, { id: uid(), page, xFrac: d.x, yFrac: d.y, wFrac: d.w, hFrac: d.h }]);
+      setBoxes((b) => [
+        ...b,
+        { id: uid(), page, xFrac: d.x, yFrac: d.y, wFrac: d.w, hFrac: d.h },
+      ]);
   };
 
   const pageBoxes = boxes.filter((b) => b.page === page);
@@ -112,10 +128,18 @@ export default function RedactStudio({
     try {
       const out = await redactBoxes(
         file,
-        boxes.map(({ page, xFrac, yFrac, wFrac, hFrac }) => ({ page, xFrac, yFrac, wFrac, hFrac }))
+        boxes.map(({ page, xFrac, yFrac, wFrac, hFrac }) => ({
+          page,
+          xFrac,
+          yFrac,
+          wFrac,
+          hFrac,
+        }))
       );
       onApply(out);
-      toast.success(`${boxes.length} area${boxes.length > 1 ? "s" : ""} redacted & downloaded.`);
+      toast.success(
+        `${boxes.length} area${boxes.length > 1 ? "s" : ""} redacted & downloaded.`
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -125,23 +149,47 @@ export default function RedactStudio({
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#3A3D45] dark:bg-[#1E2025]">
-        <span className="flex items-center gap-1 text-xs font-semibold text-brand-500">
-          <Eraser size={13} /> Drag to cover · {boxes.length} box{boxes.length === 1 ? "" : "es"}
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+        <span className="flex items-center gap-1 text-xs font-medium text-brand-500">
+          <Eraser size={13} /> Drag to cover · {boxes.length} box
+          {boxes.length === 1 ? "" : "es"}
         </span>
-        <button className="btn-ghost h-7 text-xs" onClick={() => setBoxes((b) => b.filter((x) => x.page !== page))} disabled={!pageBoxes.length} aria-label="Clear all redactions on this page">
+        <button
+          className="btn-ghost h-7 text-xs"
+          onClick={() => setBoxes((b) => b.filter((x) => x.page !== page))}
+          disabled={!pageBoxes.length}
+          aria-label="Clear all redactions on this page"
+        >
           Clear page
         </button>
         <span className="flex-1" />
-        <button aria-label="Previous page" className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}>
+        <button
+          aria-label="Previous page"
+          className="btn-ghost h-7 !px-1.5"
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          disabled={page <= 0}
+        >
           <ChevronLeft size={14} />
         </button>
-        <span className="whitespace-nowrap text-xs font-semibold text-brand-500">{page + 1}/{pages || "…"}</span>
-        <button aria-label="Next page" className="btn-ghost h-7 !px-1.5" onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}>
+        <span className="whitespace-nowrap text-xs font-medium text-brand-500">
+          {page + 1}/{pages || "…"}
+        </span>
+        <button
+          aria-label="Next page"
+          className="btn-ghost h-7 !px-1.5"
+          onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
+          disabled={page >= pages - 1}
+        >
           <ChevronRight size={14} />
         </button>
-        <button onClick={apply} disabled={saving || !boxes.length} className="btn-primary h-7 text-xs" aria-label="Apply redactions and download">
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Apply
+        <button
+          onClick={apply}
+          disabled={saving || !boxes.length}
+          className="btn-primary h-7 text-xs"
+          aria-label="Apply redactions and download"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
+          Apply
         </button>
       </div>
 
@@ -150,13 +198,24 @@ export default function RedactStudio({
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-[#3A3D45]"
-        style={{ aspectRatio: aspect ? `${aspect.w} / ${aspect.h}` : undefined, touchAction: "none", cursor: "crosshair" }}
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]"
+        style={{
+          aspectRatio: aspect ? `${aspect.w} / ${aspect.h}` : undefined,
+          touchAction: "none",
+          cursor: "crosshair",
+        }}
       >
         {pageImg ? (
-          <img src={pageImg} alt={`page ${page + 1}`} className="block h-full w-full select-none" draggable={false} />
+          <img
+            src={pageImg}
+            alt={`page ${page + 1}`}
+            className="block h-full w-full select-none"
+            draggable={false}
+          />
         ) : (
-          <div className="grid h-full place-items-center"><Loader2 size={20} className="animate-spin text-brand-400" /></div>
+          <div className="grid h-full place-items-center">
+            <Loader2 size={20} className="animate-spin text-brand-400" />
+          </div>
         )}
 
         {pageBoxes.map((b) => (
@@ -164,19 +223,30 @@ export default function RedactStudio({
             key={b.id}
             onDoubleClick={() => setBoxes((arr) => arr.filter((x) => x.id !== b.id))}
             title="Double-click to remove"
-            style={{ left: `${b.xFrac * 100}%`, top: `${b.yFrac * 100}%`, width: `${b.wFrac * 100}%`, height: `${b.hFrac * 100}%` }}
+            style={{
+              left: `${b.xFrac * 100}%`,
+              top: `${b.yFrac * 100}%`,
+              width: `${b.wFrac * 100}%`,
+              height: `${b.hFrac * 100}%`,
+            }}
             className="absolute bg-black"
           />
         ))}
         {draft && (
           <div
-            style={{ left: `${draft.x * 100}%`, top: `${draft.y * 100}%`, width: `${draft.w * 100}%`, height: `${draft.h * 100}%` }}
+            style={{
+              left: `${draft.x * 100}%`,
+              top: `${draft.y * 100}%`,
+              width: `${draft.w * 100}%`,
+              height: `${draft.h * 100}%`,
+            }}
             className="pointer-events-none absolute bg-black/70"
           />
         )}
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
-        Drag to draw black boxes over anything to hide. Double-click a box to remove it, then <strong>Apply</strong>.
+        Drag to draw black boxes over anything to hide. Double-click a box to remove it,
+        then <strong>Apply</strong>.
       </p>
     </div>
   );

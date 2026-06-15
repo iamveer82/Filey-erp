@@ -9,7 +9,15 @@ import { numInput } from "../lib/format";
 
 /* Scan a receipt with the user's AI model and log it as an expense. */
 
-const CATEGORIES = ["Travel", "Meals", "Office", "Software", "Utilities", "Rent", "Other"];
+const CATEGORIES = [
+  "Travel",
+  "Meals",
+  "Office",
+  "Software",
+  "Utilities",
+  "Rent",
+  "Other",
+];
 
 export default function ExpenseScanModal({
   open,
@@ -86,14 +94,16 @@ export default function ExpenseScanModal({
       title="Scan a receipt with AI"
     >
       {!data ? (
-        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
+        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
           {busy ? (
             <Loader2 size={28} className="animate-spin text-primary-500" />
           ) : (
             <Upload size={28} className="text-brand-400" />
           )}
-          <span className="text-sm font-semibold text-ink">
-            {busy ? "Reading the receipt…" : fileName || "Upload a receipt (PDF or image)"}
+          <span className="text-sm font-medium text-ink">
+            {busy
+              ? "Reading the receipt…"
+              : fileName || "Upload a receipt (PDF or image)"}
           </span>
           <span className="text-xs text-brand-400">
             Your AI model extracts the details — nothing is sent to Filey.
@@ -160,7 +170,11 @@ export default function ExpenseScanModal({
               Scan another
             </button>
             <button className="btn-primary" onClick={saveExpense} disabled={saving}>
-              {saving ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {saving ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Sparkles size={15} />
+              )}
               Log expense
             </button>
           </div>

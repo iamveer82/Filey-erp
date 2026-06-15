@@ -22,17 +22,13 @@ import {
 import Logo from "./Logo";
 import ErrorBoundary from "./ErrorBoundary";
 import Breadcrumbs from "./Breadcrumbs";
+import { PageContextProvider } from "../lib/pageContext";
 import { cn, setDisplayCurrency } from "../lib/format";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
 import { useLang, LANGS, type Lang } from "../lib/i18n";
-import {
-  billing,
-  followups,
-  notifs as notifsApi,
-  type Notification,
-} from "../lib/api";
+import { billing, followups, notifs as notifsApi, type Notification } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 import { useUI } from "../lib/ui";
@@ -45,13 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "./DropdownMenu";
 
-const GROUP_ORDER = [
-  "Pages",
-  "Products",
-  "Orders",
-  "Invoices",
-  "Customers",
-] as const;
+const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
 
 /** Quick-action commands for the ⌘K palette. `create` deep-links a page
  *  to auto-open its create form via the ?new=1 query. */
@@ -62,7 +52,11 @@ const COMMANDS: { label: string; to: string; keywords: string }[] = [
   { label: "Add customer", to: "/crm?new=1", keywords: "create customer client crm" },
   { label: "Add supplier", to: "/suppliers?new=1", keywords: "create supplier vendor" },
   { label: "New sales order", to: "/orders?new=1", keywords: "create order" },
-  { label: "Record expense", to: "/purchase?new=1", keywords: "create purchase expense spend" },
+  {
+    label: "Record expense",
+    to: "/purchase?new=1",
+    keywords: "create purchase expense spend",
+  },
   { label: "Go to Reports", to: "/reports", keywords: "reports analytics" },
   { label: "Open Tools", to: "/tools", keywords: "pdf tools utilities" },
   { label: "Settings", to: "/settings", keywords: "settings company account" },
@@ -119,8 +113,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     (pathname.startsWith("/customers")
       ? modules.find((m) => m.id === "crm")
       : pathname.startsWith("/suppliers")
-      ? modules.find((m) => m.id === "suppliers")
-      : undefined);
+        ? modules.find((m) => m.id === "suppliers")
+        : undefined);
   const newTo = pageMeta ? NEW_ACTION[pageMeta.id] : undefined;
 
   // Keep the org's display currency in sync for dashboards/aggregates.
@@ -149,9 +143,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   );
   const [width, setWidth] = useState(() => {
     const w = parseInt(localStorage.getItem("sidebar.width") || "256", 10);
-    return Number.isFinite(w)
-      ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w))
-      : 256;
+    return Number.isFinite(w) ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w)) : 256;
   });
   const [dragging, setDragging] = useState(false);
   // Mobile off-canvas drawer (the resizable sidebar is desktop-only).
@@ -228,8 +220,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     const s = q.trim().toLowerCase();
     if (!s) return COMMANDS;
     return COMMANDS.filter(
-      (c) =>
-        c.label.toLowerCase().includes(s) || c.keywords.includes(s)
+      (c) => c.label.toLowerCase().includes(s) || c.keywords.includes(s)
     );
   })();
   const alerts = useNotifications();
@@ -261,9 +252,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             seen.add(r.id);
             if (!r.read)
               toast.notify({
-                title: `${r.actor} ${
-                  r.kind === "mention" ? "mentioned you" : ""
-                }`.trim(),
+                title: `${r.actor} ${r.kind === "mention" ? "mentioned you" : ""}`.trim(),
                 message: r.body,
                 avatar: initialsOf(r.actor),
                 to: r.link,
@@ -332,10 +321,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (searchRef.current && !searchRef.current.contains(t))
-        setSearchOpen(false);
-      if (notifRef.current && !notifRef.current.contains(t))
-        setNotifOpen(false);
+      if (searchRef.current && !searchRef.current.contains(t)) setSearchOpen(false);
+      if (notifRef.current && !notifRef.current.contains(t)) setNotifOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -349,200 +336,201 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div
-      className={cn(
-        "flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3",
-        dragging && "cursor-col-resize select-none"
-      )}
-    >
-      {/* Offline banner */}
-      {!isOnline && (
-        <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
-          You are offline — changes will sync when reconnected
-        </div>
-      )}
-      {/* Mobile drawer backdrop */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-ink/40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* ───────────── Sidebar ───────────── */}
-      <aside
-        style={{
-          width: effectiveWidth,
-          transition: dragging ? "none" : "width 200ms ease-out, transform 200ms ease-out",
-        }}
+    <PageContextProvider>
+      <div
         className={cn(
-          "bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#3A3D45] shadow-bento flex flex-col overflow-hidden",
-          // Desktop: in-flow resizable column. Mobile: fixed off-canvas drawer.
-          "max-lg:fixed max-lg:inset-y-3 max-lg:left-3 max-lg:z-50 lg:shrink-0",
-          mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-[120%]"
+          "flex h-full w-full overflow-hidden bg-background dark:bg-[#1A1B1E] p-3",
+          dragging && "cursor-col-resize select-none"
         )}
       >
-        <div
-          className={cn(
-            "border-b border-brand-100 dark:border-[#2A2C33] flex items-center",
-            railMode ? "px-2 py-4 justify-center" : "px-5 py-5"
-          )}
-        >
-          <Link
-            to="/overview"
-            className="flex items-center gap-2.5 cursor-pointer min-w-0"
-            title="Filey"
-          >
-            <Logo size={railMode ? 40 : 72} />
-            {!railMode && (
-              <span className="leading-tight">
-                <span className="block font-bold text-ink text-lg">Filey</span>
-                <span className="block text-[11px] font-semibold text-brand-400">
-                  Business Suite
-                </span>
-              </span>
-            )}
-          </Link>
-        </div>
-
-        <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
-          {!railMode && (
-            <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-              Menu
-            </p>
-          )}
-          <div className="space-y-1">
-            {navModules.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={railMode ? label : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
-                    railMode ? "justify-center px-0" : "px-3",
-                    isActive
-                      ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
-                      : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <span
-                      className={cn(
-                        "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-500 transition-opacity duration-200",
-                        isActive ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <Icon size={18} className="shrink-0" />
-                    {!railMode && <span className="truncate">{label}</span>}
-                  </>
-                )}
-              </NavLink>
-            ))}
+        {/* Offline banner */}
+        {!isOnline && (
+          <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
+            You are offline — changes will sync when reconnected
           </div>
-        </nav>
+        )}
+        {/* Mobile drawer backdrop */}
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-ink/40 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+        )}
 
-        <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A2C33] space-y-1">
-          <button
-            onClick={signOut}
-            title={railMode ? "Sign out" : undefined}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer",
-              railMode ? "justify-center px-0" : "px-3"
-            )}
-          >
-            <LogOut size={18} className="shrink-0" />
-            {!railMode && "Sign out"}
-          </button>
-        </div>
-      </aside>
-
-      {/* Resizable divider — drag to resize · double-click / ← → to collapse */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        aria-valuenow={sidebarWidth}
-        aria-valuemin={SIDEBAR_RAIL}
-        aria-valuemax={SIDEBAR_MAX}
-        tabIndex={0}
-        title="Drag to resize · double-click to collapse"
-        onPointerDown={onResizeDown}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeUp}
-        onDoubleClick={() => setCollapsed((c) => !c)}
-        onKeyDown={onResizeKey}
-        className="group relative hidden w-3 shrink-0 cursor-col-resize select-none touch-none items-center justify-center self-stretch outline-none lg:flex"
-      >
-        <span
+        {/* ───────────── Sidebar ───────────── */}
+        <aside
+          style={{
+            width: effectiveWidth,
+            transition: dragging
+              ? "none"
+              : "width 200ms ease-out, transform 200ms ease-out",
+          }}
           className={cn(
-            "h-10 w-1 rounded-full transition-colors",
-            dragging
-              ? "bg-primary-500"
-              : "bg-brand-200 group-hover:bg-brand-300 group-focus-visible:bg-primary-400 dark:bg-[#3A3D45]"
-          )}
-        />
-        <span
-          className={cn(
-            "absolute grid h-6 w-4 place-items-center rounded-md border border-brand-200 bg-white text-brand-400 transition-opacity dark:bg-[#24262C] dark:border-[#3A3D45]",
-            dragging
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+            "bg-surface dark:bg-[#161618] rounded-2xl border border-brand-200 dark:border-[#3A3D45] shadow-bento flex flex-col overflow-hidden",
+            // Desktop: in-flow resizable column. Mobile: fixed off-canvas drawer.
+            "max-lg:fixed max-lg:inset-y-3 max-lg:left-3 max-lg:z-50 lg:shrink-0",
+            mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-[120%]"
           )}
         >
-          <GripVertical size={12} />
-        </span>
-      </div>
-
-      {/* ───────────── Main ───────────── */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <header className="h-14 shrink-0 flex items-center justify-between gap-4 mb-3">
-          {/* Mobile menu toggle */}
-          <button
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-200 bg-surface text-brand-600 dark:border-[#3A3D45] dark:bg-[#161618] lg:hidden"
+          <div
+            className={cn(
+              "border-b border-brand-100 dark:border-[#2A2C33] flex items-center",
+              railMode ? "px-2 py-4 justify-center" : "px-5 py-5"
+            )}
           >
-            <Menu size={18} />
-          </button>
+            <Link
+              to="/overview"
+              className="flex items-center gap-2.5 cursor-pointer min-w-0"
+              title="Filey"
+            >
+              <Logo size={railMode ? 40 : 72} />
+              {!railMode && (
+                <span className="leading-tight">
+                  <span className="block font-bold text-ink text-lg">Filey</span>
+                  <span className="block text-[11px] font-semibold text-brand-400">
+                    Business Suite
+                  </span>
+                </span>
+              )}
+            </Link>
+          </div>
 
-          {/* Current-page context — keeps users oriented (Odoo/Tally style) */}
-          {pageMeta && (
-            <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
-                <pageMeta.icon size={18} />
-              </span>
-              <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
-                {pageMeta.label}
-              </span>
-            </div>
-          )}
-
-          {/* Global search */}
-          <div ref={searchRef} className="relative flex-1 max-w-md">
-            <input
-              ref={inputRef}
-              aria-label="Search"
-              placeholder="Search products, orders, invoices, customers…"
-              className="input pl-3.5 pr-10"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setSearchOpen(true);
-              }}
-              onFocus={() => setSearchOpen(true)}
-            />
-            <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-400">
-              <Search size={16} />
-            </div>
-
-            {searchOpen && (
-                <div
-                  className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover animate-fade-in"
+          <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
+            {!railMode && (
+              <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                Menu
+              </p>
+            )}
+            <div className="space-y-1">
+              {navModules.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  title={railMode ? label : undefined}
+                  className={({ isActive }) =>
+                    cn(
+                      "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
+                      railMode ? "justify-center px-0" : "px-3",
+                      isActive
+                        ? "bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
+                        : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
+                    )
+                  }
                 >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={cn(
+                          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-500 transition-opacity duration-200",
+                          isActive ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <Icon size={18} className="shrink-0" />
+                      {!railMode && <span className="truncate">{label}</span>}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </nav>
+
+          <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A2C33] space-y-1">
+            <button
+              onClick={signOut}
+              title={railMode ? "Sign out" : undefined}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer",
+                railMode ? "justify-center px-0" : "px-3"
+              )}
+            >
+              <LogOut size={18} className="shrink-0" />
+              {!railMode && "Sign out"}
+            </button>
+          </div>
+        </aside>
+
+        {/* Resizable divider — drag to resize · double-click / ← → to collapse */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={SIDEBAR_RAIL}
+          aria-valuemax={SIDEBAR_MAX}
+          tabIndex={0}
+          title="Drag to resize · double-click to collapse"
+          onPointerDown={onResizeDown}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeUp}
+          onDoubleClick={() => setCollapsed((c) => !c)}
+          onKeyDown={onResizeKey}
+          className="group relative hidden w-3 shrink-0 cursor-col-resize select-none touch-none items-center justify-center self-stretch outline-none lg:flex"
+        >
+          <span
+            className={cn(
+              "h-10 w-1 rounded-full transition-colors",
+              dragging
+                ? "bg-primary-500"
+                : "bg-brand-200 group-hover:bg-brand-300 group-focus-visible:bg-primary-400 dark:bg-[#3A3D45]"
+            )}
+          />
+          <span
+            className={cn(
+              "absolute grid h-6 w-4 place-items-center rounded-md border border-brand-200 bg-white text-brand-400 transition-opacity dark:bg-[#24262C] dark:border-[#3A3D45]",
+              dragging
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+            )}
+          >
+            <GripVertical size={12} />
+          </span>
+        </div>
+
+        {/* ───────────── Main ───────────── */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <header className="h-14 shrink-0 flex items-center justify-between gap-4 mb-3">
+            {/* Mobile menu toggle */}
+            <button
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-200 bg-surface text-brand-600 dark:border-[#3A3D45] dark:bg-[#161618] lg:hidden"
+            >
+              <Menu size={18} />
+            </button>
+
+            {/* Current-page context — keeps users oriented (Odoo/Tally style) */}
+            {pageMeta && (
+              <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300">
+                  <pageMeta.icon size={18} />
+                </span>
+                <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
+                  {pageMeta.label}
+                </span>
+              </div>
+            )}
+
+            {/* Global search */}
+            <div ref={searchRef} className="relative flex-1 max-w-md">
+              <input
+                ref={inputRef}
+                aria-label="Search"
+                placeholder="Search products, orders, invoices, customers…"
+                className="input pl-3.5 pr-10"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-400">
+                <Search size={16} />
+              </div>
+
+              {searchOpen && (
+                <div className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover animate-fade-in">
                   <div className="max-h-[52vh] overflow-y-auto p-2">
                     {/* Quick actions (command palette) */}
                     {cmdHits.length > 0 && (
@@ -613,207 +601,209 @@ export default function Layout({ children }: { children: ReactNode }) {
                   </div>
                 </div>
               )}
-          </div>
+            </div>
 
-          <div className="flex items-center gap-3">
-            {/* Context-aware quick create (Odoo-style "New") */}
-            {newTo && (
-              <button
-                onClick={() => nav(newTo)}
-                className="btn-primary h-10 hidden sm:inline-flex"
-              >
-                <Plus size={16} /> New
-              </button>
-            )}
-
-            {/* Light / dark theme toggle (left of notifications) */}
-            <AnimatedThemeToggler />
-
-            {/* Language switcher */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <div className="flex items-center gap-3">
+              {/* Context-aware quick create (Odoo-style "New") */}
+              {newTo && (
                 <button
-                  aria-label="Change language"
-                  className="flex h-10 items-center gap-1.5 rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] px-2.5 text-brand-600 dark:text-[#DDE0E4] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 transition-colors cursor-pointer"
+                  onClick={() => nav(newTo)}
+                  className="btn-primary h-10 hidden sm:inline-flex"
                 >
-                  <span className={`fi fi-${LANGS[lang].flag} rounded-sm`} />
-                  <span className="hidden text-xs font-semibold sm:block">
-                    {LANGS[lang].short}
-                  </span>
-                  <ChevronDown size={14} className="text-brand-400" />
+                  <Plus size={16} /> New
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
-                {(Object.keys(LANGS) as Lang[]).map((code) => (
-                  <DropdownMenuItem key={code} onSelect={() => setLang(code)}>
-                    <span className={`fi fi-${LANGS[code].flag} rounded-sm`} />
-                    <span className="flex-1">{LANGS[code].name}</span>
-                    <span className="text-xs text-brand-400">
-                      {LANGS[code].native}
+              )}
+
+              {/* Light / dark theme toggle (left of notifications) */}
+              <AnimatedThemeToggler />
+
+              {/* Language switcher */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label="Change language"
+                    className="flex h-10 items-center gap-1.5 rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] px-2.5 text-brand-600 dark:text-[#DDE0E4] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 transition-colors cursor-pointer"
+                  >
+                    <span className={`fi fi-${LANGS[lang].flag} rounded-sm`} />
+                    <span className="hidden text-xs font-semibold sm:block">
+                      {LANGS[lang].short}
                     </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    <ChevronDown size={14} className="text-brand-400" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  {(Object.keys(LANGS) as Lang[]).map((code) => (
+                    <DropdownMenuItem key={code} onSelect={() => setLang(code)}>
+                      <span className={`fi fi-${LANGS[code].flag} rounded-sm`} />
+                      <span className="flex-1">{LANGS[code].name}</span>
+                      <span className="text-xs text-brand-400">{LANGS[code].native}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-            {/* Notifications */}
-            <div ref={notifRef} className="relative">
-              <button
-                aria-label="Notifications"
-                onClick={() => setNotifOpen((o) => !o)}
-                className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-brand-500 dark:text-[#B6BAC1] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
-              >
-                <Bell size={18} />
-                {badge > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[9px] font-bold grid place-items-center">
-                    {badge > 9 ? "9+" : badge}
-                  </span>
-                )}
-              </button>
+              {/* Notifications */}
+              <div ref={notifRef} className="relative">
+                <button
+                  aria-label="Notifications"
+                  onClick={() => setNotifOpen((o) => !o)}
+                  className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] text-brand-500 dark:text-[#B6BAC1] hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                >
+                  <Bell size={18} />
+                  {badge > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[9px] font-bold grid place-items-center">
+                      {badge > 9 ? "9+" : badge}
+                    </span>
+                  )}
+                </button>
 
-              {notifOpen && (
-                <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A2C33]">
-                    <p className="text-sm font-bold text-ink">
-                      Notifications
-                    </p>
-                    {unread > 0 && (
-                      <button
-                        onClick={async () => {
-                          await notifsApi.markAllRead();
-                          loadInbox();
-                        }}
-                        className="text-xs font-semibold text-primary-700 hover:underline cursor-pointer"
-                      >
-                        Mark all read
-                      </button>
+                {notifOpen && (
+                  <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A2C33]">
+                      <p className="text-sm font-bold text-ink">Notifications</p>
+                      {unread > 0 && (
+                        <button
+                          onClick={async () => {
+                            await notifsApi.markAllRead();
+                            loadInbox();
+                          }}
+                          className="text-xs font-semibold text-primary-700 hover:underline cursor-pointer"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                    {inbox.length === 0 && alerts.length === 0 ? (
+                      <p className="px-4 py-8 text-center text-sm text-brand-400">
+                        You’re all caught up.
+                      </p>
+                    ) : (
+                      <div className="p-1.5">
+                        {/* personal inbox (mentions etc.) */}
+                        {inbox.map((n) => (
+                          <button
+                            key={`n${n.id}`}
+                            onClick={async () => {
+                              if (!n.read) {
+                                await notifsApi.markRead(n.id);
+                                loadInbox();
+                              }
+                              if (n.link) go(n.link);
+                            }}
+                            className={cn(
+                              "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors cursor-pointer",
+                              n.read
+                                ? "hover:bg-brand-50 dark:hover:bg-white/5"
+                                : "bg-primary-50/60 hover:bg-primary-100 dark:bg-primary-400/10 dark:hover:bg-primary-400/20"
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                                n.read ? "bg-brand-200" : "bg-primary-500"
+                              )}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-ink">
+                                {n.actor}{" "}
+                                {n.kind === "mention" ? "mentioned you" : n.kind}
+                              </span>
+                              <span className="block text-xs text-brand-400 truncate">
+                                {n.body}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                        {/* derived operational alerts */}
+                        {alerts.map((n) => (
+                          <button
+                            key={n.id}
+                            onClick={() => go(n.to)}
+                            className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                          >
+                            <span
+                              className={cn(
+                                "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                                TONE_DOT[n.tone]
+                              )}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-ink">
+                                {n.title}
+                              </span>
+                              <span className="block text-xs text-brand-400">
+                                {n.detail}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  {inbox.length === 0 && alerts.length === 0 ? (
-                    <p className="px-4 py-8 text-center text-sm text-brand-400">
-                      You’re all caught up.
-                    </p>
-                  ) : (
-                    <div className="p-1.5">
-                      {/* personal inbox (mentions etc.) */}
-                      {inbox.map((n) => (
-                        <button
-                          key={`n${n.id}`}
-                          onClick={async () => {
-                            if (!n.read) {
-                              await notifsApi.markRead(n.id);
-                              loadInbox();
-                            }
-                            if (n.link) go(n.link);
-                          }}
-                          className={cn(
-                            "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors cursor-pointer",
-                            n.read ? "hover:bg-brand-50 dark:hover:bg-white/5" : "bg-primary-50/60 hover:bg-primary-100 dark:bg-primary-400/10 dark:hover:bg-primary-400/20"
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                              n.read ? "bg-brand-200" : "bg-primary-500"
-                            )}
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-semibold text-ink">
-                              {n.actor}{" "}
-                              {n.kind === "mention"
-                                ? "mentioned you"
-                                : n.kind}
-                            </span>
-                            <span className="block text-xs text-brand-400 truncate">
-                              {n.body}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                      {/* derived operational alerts */}
-                      {alerts.map((n) => (
-                        <button
-                          key={n.id}
-                          onClick={() => go(n.to)}
-                          className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                        >
-                          <span
-                            className={cn(
-                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-                              TONE_DOT[n.tone]
-                            )}
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-semibold text-ink">
-                              {n.title}
-                            </span>
-                            <span className="block text-xs text-brand-400">
-                              {n.detail}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label="Account menu"
-                  className="flex items-center gap-3 h-12 rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] pl-3.5 pr-1.5 hover:border-brand-300 hover:shadow-bento dark:hover:border-[#454852] transition-all duration-200 cursor-pointer"
-                >
-                  <span className="hidden md:block leading-tight text-left">
-                    <span className="block text-sm font-semibold text-ink tracking-tight">
-                      {name}
-                    </span>
-                    <span className="block max-w-[150px] truncate text-[11px] text-brand-400 tracking-tight">
-                      {profile?.email ?? profile?.company ?? "Admin"}
-                    </span>
-                  </span>
-                  <span className="h-9 w-9 shrink-0 rounded-full border border-brand-200 dark:border-[#3A3D45] p-0.5">
-                    {profile?.avatar ? (
-                      <img
-                        src={profile.avatar}
-                        alt={name}
-                        className="h-full w-full rounded-full object-cover"
-                      />
-                    ) : (
-                      <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#24262C] text-ink text-xs font-bold">
-                        {initials}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label="Account menu"
+                    className="flex items-center gap-3 h-12 rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] pl-3.5 pr-1.5 hover:border-brand-300 hover:shadow-bento dark:hover:border-[#454852] transition-all duration-200 cursor-pointer"
+                  >
+                    <span className="hidden md:block leading-tight text-left">
+                      <span className="block text-sm font-semibold text-ink tracking-tight">
+                        {name}
                       </span>
-                    )}
-                  </span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-52">
-                <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => nav("/settings?section=account")}>
-                  <UserRound size={14} /> Account
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => nav("/settings")}>
-                  <Settings size={14} /> Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem tone="danger" onSelect={signOut}>
-                  <LogOut size={14} /> Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </header>
-
-        <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
-          <Breadcrumbs />
-          <div className="pb-4 pr-1">
-            <div key={pathname} className="animate-fade-in">
-              <ErrorBoundary>{children}</ErrorBoundary>
+                      <span className="block max-w-[150px] truncate text-[11px] text-brand-400 tracking-tight">
+                        {profile?.email ?? profile?.company ?? "Admin"}
+                      </span>
+                    </span>
+                    <span className="h-9 w-9 shrink-0 rounded-full border border-brand-200 dark:border-[#3A3D45] p-0.5">
+                      {profile?.avatar ? (
+                        <img
+                          src={profile.avatar}
+                          alt={name}
+                          className="h-full w-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <span className="grid h-full w-full place-items-center rounded-full bg-white dark:bg-[#24262C] text-ink text-xs font-bold">
+                          {initials}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-52">
+                  <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => nav("/settings?section=account")}>
+                    <UserRound size={14} /> Account
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => nav("/settings")}>
+                    <Settings size={14} /> Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      signOut().catch(() => {});
+                    }}
+                    className="text-danger focus:text-danger focus:bg-danger/10"
+                  >
+                    <LogOut size={14} /> Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </div>
-        </main>
+          </header>
+
+          <main className="flex-1 min-w-0 overflow-auto rounded-2xl">
+            <Breadcrumbs />
+            <div className="pb-4 pr-1">
+              <div key={pathname} className="animate-fade-in">
+                <ErrorBoundary>{children}</ErrorBoundary>
+              </div>
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </PageContextProvider>
   );
 }

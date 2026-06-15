@@ -24,10 +24,13 @@ const initials = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("") || "?";
 const handle = (name: string) =>
-  name.trim().split(/\s+/)[0]?.replace(/[^\w.\-]/g, "") || "user";
+  name
+    .trim()
+    .split(/\s+/)[0]
+    ?.replace(/[^\w.\-]/g, "") || "user";
 
 /** Text input with @mention autocomplete — a member picker (avatar + name)
- *  appears while typing "@". Picking inserts "@Handle ". */
+ * appears while typing "@". Picking inserts "@Handle ". */
 export default function MentionInput({
   value,
   onChange,
@@ -50,9 +53,7 @@ export default function MentionInput({
 
   const matches = open
     ? members
-        .filter((m) =>
-          m.name.toLowerCase().includes(query.toLowerCase())
-        )
+        .filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
         .slice(0, 6)
     : [];
 
@@ -123,7 +124,7 @@ export default function MentionInput({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
       {open && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-brand-200 dark:border-[#3A3D45] bg-white dark:bg-[#24262C] shadow-bento-hover p-1.5">
+        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-3xl border border-brand-200 dark:border-[#2C2C2E] bg-white dark:bg-[#1C1C1E] p-1.5">
           {matches.map((m, i) => (
             <button
               key={m.id}
@@ -133,18 +134,20 @@ export default function MentionInput({
                 pick(m);
               }}
               className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left cursor-pointer transition-colors ${
-                i === active ? "bg-primary-100 dark:bg-primary-400/15" : "hover:bg-brand-50 dark:hover:bg-white/5"
+                i === active
+                  ? "bg-primary-100 dark:bg-primary-400/15"
+                  : "hover:bg-brand-50 dark:hover:bg-white/5"
               }`}
             >
               <span
-                className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold ${tone(
+                className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-medium ${tone(
                   m.id
                 )}`}
               >
                 {initials(m.name)}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-ink">
+                <span className="block truncate text-sm font-medium text-ink">
                   {m.name}
                 </span>
                 <span className="block truncate text-[11px] text-brand-400">

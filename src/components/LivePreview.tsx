@@ -17,7 +17,9 @@ const RENDER_W = 900;
 
 /** Build a one-page PDF File from the first page of the source. */
 async function firstPageFile(file: File): Promise<File> {
-  const src = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  const src = await PDFDocument.load(await file.arrayBuffer(), {
+    ignoreEncryption: true,
+  });
   const out = await PDFDocument.create();
   const [pg] = await out.copyPages(src, [0]);
   out.addPage(pg);
@@ -76,9 +78,9 @@ export default function LivePreview({
           const out = outs.find((o) => /\.pdf$/i.test(o.name)) ?? outs[0];
           if (!out || !/\.pdf$/i.test(out.name)) throw new Error("non-pdf");
           bytes = out.bytes;
-        } catch {
+        } catch (e) {
           // Options incomplete or not previewable — show the plain page.
-          console.warn('Preview unavailable, showing plain page');
+          console.warn("Preview unavailable, showing plain page:", e);
           bytes = new Uint8Array(await trimmed.arrayBuffer());
           fellBack = true;
         }
@@ -101,27 +103,33 @@ export default function LivePreview({
 
   return (
     <div>
-      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-[#3A3D45]">
+      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]">
         {img ? (
-          <img src={img} alt="live preview" className="block w-full select-none" draggable={false} />
+          <img
+            src={img}
+            alt="live preview"
+            className="block w-full select-none"
+            draggable={false}
+          />
         ) : (
           <div className="grid h-72 place-items-center text-sm text-brand-400">
             <Loader2 size={20} className="animate-spin" />
           </div>
         )}
         {busy && img && (
-          <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 shadow dark:bg-[#1E2025]/90">
+          <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 dark:bg-[#1C1C1E]/90">
             <Loader2 size={14} className="animate-spin text-primary-500" />
           </div>
         )}
         {!busy && (
-          <span className="absolute left-2 top-2 rounded-full bg-primary-500/90 px-2 py-0.5 text-[10px] font-bold text-[#0A0A0A]">
+          <span className="absolute left-2 top-2 rounded-full bg-primary-500/90 px-2 py-0.5 text-[10px] font-medium text-[#0A0A0A]">
             LIVE PREVIEW
           </span>
         )}
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
-        {note || `Live preview of “${tool.name}” on page 1 — Run to apply to every page and download.`}
+        {note ||
+          `Live preview of “${tool.name}” on page 1 — Run to apply to every page and download.`}
       </p>
     </div>
   );

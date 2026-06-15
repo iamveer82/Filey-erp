@@ -14,8 +14,7 @@ export interface ServerToolResult {
 
 const INPUT_BUCKET = "tool-inputs";
 
-const sanitize = (name: string) =>
-  name.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "file";
+const sanitize = (name: string) => name.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "file";
 
 /** Run a tool on the server. Resolves once the output is ready in storage. */
 export async function runServerTool(opts: {
@@ -70,10 +69,7 @@ export async function runServerTool(opts: {
   return waitForJob(jobId, opts.timeoutMs ?? (engine === "worker" ? 180000 : 60000));
 }
 
-async function waitForJob(
-  jobId: string,
-  timeoutMs: number
-): Promise<ServerToolResult> {
+async function waitForJob(jobId: string, timeoutMs: number): Promise<ServerToolResult> {
   const client = sb();
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -93,11 +89,9 @@ async function waitForJob(
 
 async function markError(jobId: string, msg: string) {
   try {
-    await sb()
-      .from("tool_jobs")
-      .update({ status: "error", error: msg })
-      .eq("id", jobId);
-  } catch {
+    await sb().from("tool_jobs").update({ status: "error", error: msg }).eq("id", jobId);
+  } catch (e) {
+    console.warn("Failed to update tool job error status", e);
     /* best effort */
   }
 }

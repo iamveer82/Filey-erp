@@ -10,7 +10,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 type CustomerOpt = { id: number; name: string; company?: string };
 
 /** Follow-ups / reminders. Scoped to one customer when `customerId` is set,
- *  otherwise global (pass `customers` to attach a reminder to one). */
+ * otherwise global (pass `customers` to attach a reminder to one). */
 export default function FollowUps({
   customerId,
   customerName,
@@ -27,7 +27,13 @@ export default function FollowUps({
   const [cust, setCust] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => followups.list(customerId).then(setItems).catch((e) => toast.error("Failed to load follow-ups: " + (e instanceof Error ? e.message : e)));
+  const load = () =>
+    followups
+      .list(customerId)
+      .then(setItems)
+      .catch((e) =>
+        toast.error("Failed to load follow-ups: " + (e instanceof Error ? e.message : e))
+      );
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,8 +49,7 @@ export default function FollowUps({
         title: title.trim(),
         due_date: due,
         customer_id: customerId ?? (cust === "" ? null : Number(cust)),
-        customer_name:
-          customerName ?? selected?.company ?? selected?.name ?? "",
+        customer_name: customerName ?? selected?.company ?? selected?.name ?? "",
       });
       setTitle("");
       setDue(todayISO());
@@ -96,7 +101,7 @@ export default function FollowUps({
   const Row = (f: FollowUp, tone?: "overdue" | "today") => (
     <li
       key={f.id}
-      className="flex items-center gap-3 border-b border-brand-100 dark:border-[#2A2C33] py-2.5 last:border-0"
+      className="flex items-center gap-3 border-b border-brand-100 dark:border-[#2C2C2E] py-2.5 last:border-0"
     >
       <input
         type="checkbox"
@@ -108,7 +113,7 @@ export default function FollowUps({
       <div className="min-w-0 flex-1">
         <p
           className={cn(
-            "truncate text-sm font-semibold text-ink",
+            "truncate text-sm font-medium text-ink",
             f.done && "text-brand-400 line-through"
           )}
         >
@@ -118,17 +123,17 @@ export default function FollowUps({
           {f.customer_name ? `${f.customer_name} · ` : ""}
           {fmtDate(f.due_date)}
           {tone === "overdue" && (
-            <span className="ml-1 font-semibold text-danger">overdue</span>
+            <span className="ml-1 font-medium text-danger">overdue</span>
           )}
           {tone === "today" && (
-            <span className="ml-1 font-semibold text-primary-700">today</span>
+            <span className="ml-1 font-medium text-primary-700">today</span>
           )}
         </p>
       </div>
       <button
         aria-label="Delete reminder"
         onClick={() => del(f)}
-        className="rounded-lg p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger cursor-pointer"
+        className="rounded-full p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger cursor-pointer"
       >
         <Trash2 size={14} />
       </button>
@@ -139,7 +144,7 @@ export default function FollowUps({
     <div className="card">
       <div className="mb-3 flex items-center gap-2">
         <AlarmClock size={16} className="text-primary-600" />
-        <p className="font-bold text-ink">Follow-ups &amp; reminders</p>
+        <p className="font-medium text-ink">Follow-ups &amp; reminders</p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-2">
@@ -154,9 +159,7 @@ export default function FollowUps({
           <select
             className="select w-auto"
             value={cust}
-            onChange={(e) =>
-              setCust(e.target.value === "" ? "" : Number(e.target.value))
-            }
+            onChange={(e) => setCust(e.target.value === "" ? "" : Number(e.target.value))}
           >
             <option value="">No customer</option>
             {customers.map((c) => (
@@ -178,18 +181,79 @@ export default function FollowUps({
       </div>
 
       {items.length === 0 && (
-        <div className="empty-gradient rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
-          <svg width="100" height="80" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-80">
-            <rect x="24" y="8" width="52" height="44" rx="5" fill="#FFF3C4" stroke="#E0AE00" strokeWidth="1.5" />
-            <line x1="34" y1="20" x2="66" y2="20" stroke="#E0AE00" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="34" y1="28" x2="58" y2="28" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="34" y1="36" x2="50" y2="36" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="34" y1="44" x2="62" y2="44" stroke="#D4D4D8" strokeWidth="1.5" strokeLinecap="round" />
-            <circle cx="50" cy="68" r="7" fill="#FFFBEB" stroke="#E0AE00" strokeWidth="1.5" />
-            <path d="M47.5 68l1.7 1.7 3.3-3.3" stroke="#B88C00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        <div className="empty-gradient rounded-3xl p-8 flex flex-col items-center gap-4 text-center">
+          <svg
+            width="100"
+            height="80"
+            viewBox="0 0 100 80"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="opacity-80"
+          >
+            <rect
+              x="24"
+              y="8"
+              width="52"
+              height="44"
+              rx="5"
+              fill="#FFF3C4"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
+            <line
+              x1="34"
+              y1="20"
+              x2="66"
+              y2="20"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <line
+              x1="34"
+              y1="28"
+              x2="58"
+              y2="28"
+              stroke="#D4D4D8"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <line
+              x1="34"
+              y1="36"
+              x2="50"
+              y2="36"
+              stroke="#D4D4D8"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <line
+              x1="34"
+              y1="44"
+              x2="62"
+              y2="44"
+              stroke="#D4D4D8"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <circle
+              cx="50"
+              cy="68"
+              r="7"
+              fill="#FFFBEB"
+              stroke="#E0AE00"
+              strokeWidth="1.5"
+            />
+            <path
+              d="M47.5 68l1.7 1.7 3.3-3.3"
+              stroke="#B88C00"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <div>
-            <p className="text-sm font-bold text-brand-700">No reminders yet</p>
+            <p className="text-sm font-medium text-brand-700">No reminders yet</p>
             <p className="text-xs text-brand-500 mt-1">
               Add a note with a date — we'll remind you that day.
             </p>
@@ -216,9 +280,7 @@ export default function FollowUps({
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mb-3 last:mb-0">
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-        {label}
-      </p>
+      <p className="mb-1 text-[10px] font-medium text-brand-400">{label}</p>
       <ul>{children}</ul>
     </div>
   );
