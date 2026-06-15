@@ -7,10 +7,6 @@ import {
   Plus,
   Sparkles,
   TrendingUp,
-  PackageOpen,
-  Users,
-  ShoppingCart,
-  FileText,
   ArrowUpRight,
   CheckCircle2,
   AlertCircle as AlertCircleIcon,
@@ -47,8 +43,8 @@ import {
   Timeline,
   TimelineItem,
 } from "../components/ui";
-import type { LucideIcon } from "lucide-react";
 import AiSummaryCard from "../components/AiSummaryCard";
+import AppIcon from "../components/AppIcon";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
    Minimal iOS-style dashboard. NOT drag-drop. Sections are fixed and ordered:
@@ -390,7 +386,7 @@ export default function ModernOverview() {
             label="Open orders"
             value={orderStats.progress}
             format={(n) => num(n)}
-            icon={<ShoppingCart size={18} />}
+            icon={<AppIcon name="orders" className="w-[18px] h-[18px]" />}
             iconClass="bg-warning/15 text-warning"
           />
           <KpiMetric
@@ -398,7 +394,7 @@ export default function ModernOverview() {
             label="Products"
             value={stockBreakdown.total}
             format={(n) => num(n)}
-            icon={<PackageOpen size={18} />}
+            icon={<AppIcon name="inventory" className="w-[18px] h-[18px]" />}
             iconClass={
               stockBreakdown.low > 0 || stockBreakdown.out > 0
                 ? "bg-danger/15 text-danger"
@@ -496,7 +492,7 @@ export default function ModernOverview() {
               {activity.map((a, i) => {
                 const ev = a.event;
                 const Icon =
-                  ev === "order" ? Truck : ev === "invoice" ? Receipt : ShoppingCart;
+                  ev === "order" ? Truck : ev === "invoice" ? Receipt : Truck;
                 const status: "done" | "current" | "default" =
                   a.tone === "ok" ? "done" : a.tone === "warn" ? "current" : "default";
                 return (
@@ -598,7 +594,7 @@ export default function ModernOverview() {
                   onClick={() => nav("/inventory")}
                 >
                   <div className="rounded-2xl p-1.5 bg-warning/15 text-warning shrink-0">
-                    <PackageOpen size={14} />
+                    <AppIcon name="inventory" className="w-[14px] h-[14px]" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
@@ -703,12 +699,12 @@ export default function ModernOverview() {
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <Tile
-                Icon={Users}
+                icon={<AppIcon name="customers" className="w-[14px] h-[14px]" />}
                 label="Customers"
                 value={num(customers.length)}
               />
               <Tile
-                Icon={FileText}
+                icon={<AppIcon name="quotations" className="w-[14px] h-[14px]" />}
                 label="Open quotes"
                 value={num(
                   quotations.filter((q) => (q.status || "").toLowerCase() !== "accepted")
@@ -716,7 +712,7 @@ export default function ModernOverview() {
                 )}
               />
               <Tile
-                Icon={ShoppingCart}
+                icon={<AppIcon name="po" className="w-[14px] h-[14px]" />}
                 label="Open POs"
                 value={num(
                   posList.filter((p) =>
@@ -725,7 +721,7 @@ export default function ModernOverview() {
                 )}
               />
               <Tile
-                Icon={Truck}
+                icon={<AppIcon name="orders" className="w-[14px] h-[14px]" />}
                 label="In progress"
                 value={num(orderStats.progress)}
               />
@@ -856,14 +852,14 @@ function MoneyRow({
   );
 }
 
-function Tile({ Icon, label, value }: { Icon: LucideIcon; label: string; value: string }) {
+function Tile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-brand-50 dark:bg-white/5 px-3 py-2.5 min-w-0">
       <div className="flex items-center gap-1.5">
-        <Icon size={14} className="text-ink" />
-        <p className="text-xs font-medium text-brand-500">{label}</p>
+        <span className="text-ink w-[14px] h-[14px] flex items-center justify-center">{icon}</span>
+        <p className="text-xs font-medium text-brand-500 leading-4">{label}</p>
       </div>
-      <p className="text-base font-semibold text-ink tabular-nums mt-1">{value}</p>
+      <p className="text-base font-semibold text-ink tabular-nums mt-1 leading-6">{value}</p>
     </div>
   );
 }

@@ -158,14 +158,14 @@ export function MetricCard({
   formatValue?: (n: number) => string;
 }) {
   return (
-    <CardPrimitive className="p-5">
-      <div className="flex items-start gap-3">
+    <CardPrimitive className="p-4">
+      <div className="flex items-center gap-3">
         {icon && (
-          <div className={cn("rounded-xl p-2.5 shrink-0", iconClass)}>{icon}</div>
+          <div className={cn("rounded-xl p-2 shrink-0", iconClass)} style={{ width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
         )}
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-brand-500">{label}</p>
-          <p className="text-[24px] leading-8 font-semibold text-ink mt-1 tabular-nums">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-brand-500 leading-4">{label}</p>
+          <p className="text-[22px] leading-7 font-semibold text-ink mt-0.5 tabular-nums">
             {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
           </p>
         </div>
