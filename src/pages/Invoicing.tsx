@@ -280,6 +280,7 @@ export default function Invoicing() {
           unit_price: i.unit_price,
           unit: i.unit || "",
           custom: i.custom || {},
+          product_id: i.product_id,
         })),
         customColumns: d.custom_columns || [],
       });
@@ -350,6 +351,7 @@ export default function Invoicing() {
           unit_price: i.unit_price,
           unit: i.unit || "",
           custom: i.custom || {},
+          product_id: i.product_id,
         })),
         customColumns: d.custom_columns || [],
       });
@@ -395,6 +397,7 @@ export default function Invoicing() {
           unit_price: it.unit_price,
           unit: it.unit || undefined,
           custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
+          product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
@@ -450,6 +453,7 @@ export default function Invoicing() {
           unit_price: it.unit_price,
           unit: it.unit || undefined,
           custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
+          product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
@@ -462,7 +466,7 @@ export default function Invoicing() {
       await loadDocs();
       toast.success(
         status === "sent"
-          ? "Invoice finalized — posted to Orders & Accounting."
+          ? "Invoice finalized — posted to Orders, Accounting & Inventory."
           : "Moved back to draft."
       );
     } catch (e) {
@@ -1009,7 +1013,7 @@ function InventoryImportModal({
       p.sku.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal open={open} onClose={onClose} title="Import from Inventory">
+    <Modal open={open} onClose={onClose} title="Add from Inventory">
       <SearchInput
         value={q}
         onChange={setQ}
@@ -1413,7 +1417,7 @@ function Editor({
               className="btn-primary"
               onClick={handleFinalize}
               disabled={saving}
-              title="Finalize — posts to Orders & Accounting, saves a PDF to My Files, and shows in reports & the dashboard"
+              title="Finalize — posts to Orders & Accounting, updates inventory for linked products, and shows in reports & the dashboard"
             >
               <CheckCircle2 size={15} /> Mark as done
             </button>

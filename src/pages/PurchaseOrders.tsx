@@ -143,7 +143,7 @@ function blankLpo(c: CompanyProfile, existing: string[] = []): LpoForm {
     notes: "Thank you for your business.",
     terms:
       "1. Payment due within 30 days of invoice.\n2. Goods remain property of seller until paid in full.\n3. All prices are in AED unless otherwise stated.\n4. Delivery within 7-14 working days.",
-    items: [{ description: "", qty: 1, unit: "MT", unit_price: 0 }],
+    items: [{ description: "", qty: 1, unit: "PCS", unit_price: 0 }],
   };
 }
 
@@ -390,7 +390,7 @@ export default function PurchaseOrders() {
             label: "LPO #",
             sortValue: (r) => r.po_number,
             render: (r) => (
-              <span className="font-medium text-xs font-medium">{r.po_number}</span>
+              <span className="font-medium text-xs">{r.po_number}</span>
             ),
           },
           {
@@ -591,7 +591,7 @@ function LPOEditor({
   const addItem = () =>
     setForm({
       ...form,
-      items: [...form.items, { description: "", qty: 1, unit: "MT", unit_price: 0 }],
+      items: [...form.items, { description: "", qty: 1, unit: "PCS", unit_price: 0 }],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
@@ -661,7 +661,6 @@ function LPOEditor({
   }, [viewOpen]);
 
   const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
-  const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
 
   return (
     <div>
@@ -1043,8 +1042,8 @@ function LPOEditor({
               </div>
               <div className="text-right">
                 <span className="text-xs text-brand-400 mr-2">Total</span>
-                <span className="font-medium text-lg font-medium text-ink tabular-nums">
-                  {aed(total)}
+                <span className="font-medium text-lg text-ink tabular-nums">
+                  {aed(invoiceTotals(form.items, 0, form.tax_rate || 0).total)}
                 </span>
               </div>
             </div>
