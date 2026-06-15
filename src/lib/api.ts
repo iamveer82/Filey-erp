@@ -195,12 +195,12 @@ export interface CrmSummary {
 
 export interface InvoiceItem {
   id?: number;
+  product_id?: number;
   description: string;
   qty: number;
   unit_price: number;
   unit?: string;
   custom?: Record<string, string>;
-  product_id?: number;
 }
 export interface InvoiceDocSummary {
   id: number;
@@ -1453,7 +1453,7 @@ async function findOrCreateSalesAccount(): Promise<number> {
  *  failure here is logged but never blocks saving the invoice itself. */
 async function propagateInvoice(
   doc: Record<string, unknown>,
-  items: { qty: number; unit_price: number }[]
+  items: { product_id?: number; qty: number; unit_price: number }[]
 ) {
   try {
     const number = String(doc.number ?? "").trim();
@@ -1480,11 +1480,21 @@ async function propagateInvoice(
       order_number: orderNumber,
       customer_name: doc.customer_name ?? "—",
       customer_id: (doc.customer_id as number | undefined) ?? null,
-      status: "confirmed",
+      status: "completed",
       total,
     });
 
-    // 2) Sales revenue entry in Accounting.
+    // 2) Decrement inventory for any invoice lines linked to products.
+    for (const it of items) {
+      if (!it.product_id || !it.qty) continue;
+      const { error } = await sb().rpc("adjust_product_stock", {
+        p_id: it.product_id,
+        p_delta: -Math.abs(Number(it.qty)),
+      });
+      if (error) throw error;
+    }
+
+    // 3) Sales revenue entry in Accounting.
     if (total > 0) {
       const acctId = await findOrCreateSalesAccount();
       if (acctId > 0) {
@@ -1574,6 +1584,7 @@ export const billing = {
               description: i.description,
               qty: i.qty,
               unit_price: i.unit_price,
+              product_id: i.product_id ?? undefined,
             })),
         } as InvoiceDoc;
       },
@@ -1607,6 +1618,7 @@ export const billing = {
               unit: (it as any).unit || undefined,
               custom: (it as any).custom || undefined,
               position: i,
+              product_id: (it as any).product_id ?? null,
             }))
           );
         if (error) throw error;
@@ -2365,17 +2377,11 @@ export const pos = {
       const po = await pos.get(poId);
       for (const it of po.items) {
         if (!it.product_id) continue;
-        const { data, error } = await sb()
-          .from("products")
-          .select("quantity")
-          .eq("id", it.product_id)
-          .single();
-        if (error) throw error;
-        await sUpdate("products", it.product_id, {
-          quantity:
-            Number((data as { quantity: number }).quantity ?? 0) +
-            it.quantity,
+        const { error } = await sb().rpc("adjust_product_stock", {
+          p_id: it.product_id,
+          p_delta: Math.abs(Number(it.quantity)),
         });
+        if (error) throw error;
       }
       await sUpdate("purchase_orders", poId, { status: "received" });
     }),

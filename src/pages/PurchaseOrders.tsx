@@ -24,12 +24,14 @@ import {
 import {
   pos,
   suppliers as suppliersApi,
+  erp,
   billing,
   type PoSummary,
   type PoInput,
   type PoPayment,
   type Supplier,
   type CompanyProfile,
+  type Product,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -46,6 +48,7 @@ import {
   Modal,
   Field,
   ErrorBanner,
+  SearchInput,
 } from "../components/ui";
 import TemplateDesigner, {
   loadCustomTemplates,
@@ -81,6 +84,7 @@ const LPO_TEMPLATES = [
 const today = () => new Date().toISOString().slice(0, 10);
 
 type LpoItem = {
+  product_id?: number;
   description: string;
   qty: number;
   unit: string;
@@ -274,6 +278,7 @@ export default function PurchaseOrders() {
         notes: po.notes || "",
         terms: "",
         items: po.items.map((i: any) => ({
+          product_id: i.product_id ?? undefined,
           description: i.description || "",
           qty: i.quantity || 1,
           unit: (i as any).unit || "MT",
@@ -492,6 +497,7 @@ async function saveLpo(
           quantity: i.qty,
           unit_cost: i.unit_price,
           unit: i.unit || undefined,
+          product_id: i.product_id,
         })),
     };
     const id = await pos.save(input);
@@ -589,6 +595,35 @@ function LPOEditor({
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    erp
+      .products()
+      .then(setProducts)
+      .catch(() => toast.error("Failed to load products"));
+  }, []);
+  const addProduct = (p: Product) => {
+    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+    setForm({
+      ...form,
+      items: [
+        ...form.items.filter((it) => it.description.trim() || it.unit_price),
+        {
+          product_id: p.id,
+          description: desc,
+          qty: 1,
+          unit: "PCS",
+          unit_price: p.unit_price,
+        },
+      ],
+    });
+    setPickOpen(false);
+    setQ("");
+    toast.success(`Added ${p.name}`);
+  };
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierModal, setSupplierModal] = useState(false);
@@ -998,9 +1033,14 @@ function LPOEditor({
               </table>
             </div>
             <div className="flex items-center justify-between mt-3">
-              <button className="btn-ghost text-xs" onClick={addItem}>
-                <Plus size={14} /> Add item
-              </button>
+              <div className="flex items-center gap-2">
+                <button className="btn-ghost text-xs" onClick={addItem}>
+                  <Plus size={14} /> Add item
+                </button>
+                <button className="btn-ghost text-xs" onClick={() => setPickOpen(true)}>
+                  <PackageCheck size={14} /> Add from inventory
+                </button>
+              </div>
               <div className="text-right">
                 <span className="text-xs text-brand-400 mr-2">Total</span>
                 <span className="font-medium text-lg font-medium text-ink tabular-nums">
@@ -1008,6 +1048,54 @@ function LPOEditor({
                 </span>
               </div>
             </div>
+
+            <Modal
+              open={pickOpen}
+              onClose={() => {
+                setPickOpen(false);
+                setQ("");
+              }}
+              title="Add from inventory"
+            >
+              <SearchInput
+                value={q}
+                onChange={setQ}
+                placeholder="Search products or SKU…"
+                className="mb-3"
+              />
+              <div className="max-h-72 overflow-y-auto space-y-1">
+                {products
+                  .filter(
+                    (p) =>
+                      p.name.toLowerCase().includes(q.toLowerCase()) ||
+                      p.sku.toLowerCase().includes(q.toLowerCase())
+                  )
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => addProduct(p)}
+                      className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-ink truncate">{p.name}</p>
+                        <p className="text-[11px] text-brand-500 font-medium">{p.sku}</p>
+                      </div>
+                      <span className="text-sm font-medium text-ink">
+                        {aed(p.unit_price)}
+                      </span>
+                    </button>
+                  ))}
+                {products.filter(
+                  (p) =>
+                    p.name.toLowerCase().includes(q.toLowerCase()) ||
+                    p.sku.toLowerCase().includes(q.toLowerCase())
+                ).length === 0 && (
+                  <p className="text-sm text-brand-500 text-center py-6">
+                    No products found. Add them in Inventory first.
+                  </p>
+                )}
+              </div>
+            </Modal>
           </Step>
 
           {/* VAT Toggle */}

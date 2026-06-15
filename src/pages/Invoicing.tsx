@@ -89,6 +89,7 @@ import {
 
 type CustomColumn = { key: string; label: string };
 type Item = {
+  product_id?: number;
   description: string;
   qty: number;
   unit_price: number;
@@ -1201,7 +1202,14 @@ function Editor({
       ...form,
       items: [
         ...form.items.filter((it) => it.description.trim() || it.unit_price),
-        { description: desc, qty: 1, unit_price: p.unit_price, unit: "", custom: {} },
+        {
+          description: desc,
+          qty: 1,
+          unit_price: p.unit_price,
+          unit: "",
+          custom: {},
+          product_id: p.id,
+        },
       ],
     });
   };
