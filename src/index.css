@@ -21,6 +21,30 @@
   .dark ::after {
     border-color: #3a3d45;
   }
+
+  /* Chart colors for recharts components (ModernOverview trend chart) */
+  :root {
+    --chart-stroke: var(--color-primary-500);
+    --chart-fill-start: var(--color-primary-500);
+    --chart-fill-end: var(--color-primary-200);
+    --chart-fill-opacity-start: 0.35;
+    --chart-fill-opacity-end: 0.05;
+    --chart-grid: var(--color-brand-200);
+    --chart-tick: var(--color-brand-500);
+    --chart-tooltip-bg: var(--color-surface);
+    --chart-tooltip-border: var(--color-brand-200);
+  }
+  .dark {
+    --chart-stroke: var(--color-primary-400);
+    --chart-fill-start: var(--color-primary-400);
+    --chart-fill-end: var(--color-primary-800);
+    --chart-fill-opacity-start: 0.35;
+    --chart-fill-opacity-end: 0.05;
+    --chart-grid: var(--color-brand-800);
+    --chart-tick: var(--color-brand-400);
+    --chart-tooltip-bg: var(--color-surface);
+    --chart-tooltip-border: var(--color-brand-700);
+  }
 }
 @layer utilities {
   .rounded {

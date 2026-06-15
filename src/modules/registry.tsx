@@ -1,34 +1,5 @@
-// Filey module registry — an Odoo-style "mini app" system.
-// Every screen is a self-contained module with a manifest. Non-core
-// modules can be enabled/disabled per user from Settings → Apps.
-// Pages are lazy-loaded so the initial bundle stays small; heavy
-// screens (PDF tools, charts) only download when first visited.
-import {
-  LayoutGrid,
-  Boxes,
-  ClipboardList,
-  FileText,
-  FileSignature,
-  Target,
-  Users,
-  UserRound,
-  AlarmClock,
-  ShoppingCart,
-  BarChart3,
-  Contact,
-  Landmark,
-  Wrench,
-  Settings2,
-  PackageCheck,
-  FolderOpen,
-  Truck,
-  CreditCard,
-  Banknote,
-  Mail,
-  ScrollText,
-  type LucideIcon,
-} from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { type AppIconName } from "../components/AppIcon";
 
 const ModernOverview = lazy(() => import("../pages/ModernOverview"));
 const Inventory = lazy(() => import("../pages/Inventory"));
@@ -53,14 +24,13 @@ const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
 const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
 const BankAccounts = lazy(() => import("../pages/BankAccounts"));
 const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
-// const SmsTemplates = lazy(() => import("../pages/SmsTemplates"));
 
 export interface AppModule {
   id: string;
   label: string;
   short: string;
   desc: string;
-  icon: LucideIcon;
+  icon: AppIconName;
   to: string;
   Component: LazyExoticComponent<ComponentType>;
   /** Core modules are always on and cannot be disabled. */
@@ -73,7 +43,7 @@ export const MODULES: AppModule[] = [
     label: "Overview",
     short: "Overview",
     desc: "Inventory KPIs & operational snapshot",
-    icon: LayoutGrid,
+    icon: "overview",
     to: "/overview-modern",
     Component: ModernOverview,
     core: true,
@@ -83,7 +53,7 @@ export const MODULES: AppModule[] = [
     label: "Inventory",
     short: "Inventory",
     desc: "Products, stock levels & reorder alerts",
-    icon: Boxes,
+    icon: "inventory",
     to: "/inventory",
     Component: Inventory,
   },
@@ -92,7 +62,7 @@ export const MODULES: AppModule[] = [
     label: "Orders",
     short: "Orders",
     desc: "Sales orders & fulfilment status",
-    icon: ClipboardList,
+    icon: "orders",
     to: "/orders",
     Component: Orders,
   },
@@ -101,7 +71,7 @@ export const MODULES: AppModule[] = [
     label: "Invoicing",
     short: "Invoicing",
     desc: "FTA tax invoices with live preview",
-    icon: FileText,
+    icon: "invoicing",
     to: "/invoicing",
     Component: Invoicing,
   },
@@ -110,7 +80,7 @@ export const MODULES: AppModule[] = [
     label: "Quoting",
     short: "Quoting",
     desc: "Create quotations & convert leads",
-    icon: FileSignature,
+    icon: "quotations",
     to: "/quoting",
     Component: Quoting,
   },
@@ -119,7 +89,7 @@ export const MODULES: AppModule[] = [
     label: "CRM",
     short: "CRM",
     desc: "Customer dashboard & pipeline",
-    icon: Target,
+    icon: "customers",
     to: "/crm",
     Component: Crm,
   },
@@ -128,7 +98,7 @@ export const MODULES: AppModule[] = [
     label: "Customers",
     short: "Customers",
     desc: "Customer directory — names, TRN & addresses for invoicing",
-    icon: UserRound,
+    icon: "customers",
     to: "/customers",
     Component: Customers,
   },
@@ -137,7 +107,7 @@ export const MODULES: AppModule[] = [
     label: "Follow-ups",
     short: "Follow-ups",
     desc: "Reminders & to-dos, surfaced when they're due",
-    icon: AlarmClock,
+    icon: "followups",
     to: "/follow-ups",
     Component: FollowUpsPage,
   },
@@ -146,7 +116,7 @@ export const MODULES: AppModule[] = [
     label: "Suppliers",
     short: "Suppliers",
     desc: "Supply groups & sourcing performance",
-    icon: Users,
+    icon: "suppliers",
     to: "/suppliers",
     Component: Suppliers,
   },
@@ -155,7 +125,7 @@ export const MODULES: AppModule[] = [
     label: "Purchase",
     short: "Purchase",
     desc: "Purchase spend & expense tracking",
-    icon: ShoppingCart,
+    icon: "purchase",
     to: "/purchase",
     Component: Purchase,
   },
@@ -164,7 +134,7 @@ export const MODULES: AppModule[] = [
     label: "Purchase Orders",
     short: "POs",
     desc: "Order from suppliers & receive stock",
-    icon: PackageCheck,
+    icon: "po",
     to: "/purchase-orders",
     Component: PurchaseOrders,
   },
@@ -173,7 +143,7 @@ export const MODULES: AppModule[] = [
     label: "Reports",
     short: "Reports",
     desc: "Inventory & financial reporting",
-    icon: BarChart3,
+    icon: "reports",
     to: "/reports",
     Component: Reports,
   },
@@ -182,7 +152,7 @@ export const MODULES: AppModule[] = [
     label: "People",
     short: "People",
     desc: "Employees, attendance & payroll",
-    icon: Contact,
+    icon: "people",
     to: "/people",
     Component: People,
   },
@@ -191,7 +161,7 @@ export const MODULES: AppModule[] = [
     label: "Accounting",
     short: "Accounting",
     desc: "Chart of accounts & journal entries",
-    icon: Landmark,
+    icon: "accounting",
     to: "/accounting",
     Component: Accounting,
   },
@@ -200,7 +170,7 @@ export const MODULES: AppModule[] = [
     label: "Tools",
     short: "Tools",
     desc: "Local PDF toolkit",
-    icon: Wrench,
+    icon: "tools",
     to: "/tools",
     Component: ToolsPage,
   },
@@ -209,7 +179,7 @@ export const MODULES: AppModule[] = [
     label: "My Files",
     short: "Files",
     desc: "Tool outputs saved to your account",
-    icon: FolderOpen,
+    icon: "files",
     to: "/files",
     Component: MyFilesPage,
   },
@@ -218,7 +188,7 @@ export const MODULES: AppModule[] = [
     label: "Settings",
     short: "Settings",
     desc: "Company, account, users & system",
-    icon: Settings2,
+    icon: "settings",
     to: "/settings",
     Component: Settings,
     core: true,
@@ -228,7 +198,7 @@ export const MODULES: AppModule[] = [
     label: "Delivery",
     short: "Delivery",
     desc: "Track delivery orders, goods received notes & returns",
-    icon: Truck,
+    icon: "delivery",
     to: "/delivery-challans",
     Component: DeliveryChallan,
   },
@@ -237,7 +207,7 @@ export const MODULES: AppModule[] = [
     label: "Payment Receipts",
     short: "Receipts",
     desc: "Issue payment receipts to customers & suppliers",
-    icon: CreditCard,
+    icon: "payment",
     to: "/payment-receipts",
     Component: PaymentReceipt,
   },
@@ -246,7 +216,7 @@ export const MODULES: AppModule[] = [
     label: "Declaration Letter",
     short: "Declaration",
     desc: "VAT supply declaration letters in the standard UAE format",
-    icon: ScrollText,
+    icon: "declaration",
     to: "/declaration",
     Component: DeclarationLetter,
   },
@@ -255,7 +225,7 @@ export const MODULES: AppModule[] = [
     label: "Cheques",
     short: "Cheques",
     desc: "Track issued & received cheques with status",
-    icon: Banknote,
+    icon: "cheque",
     to: "/cheques",
     Component: ChequeRegister,
   },
@@ -264,7 +234,7 @@ export const MODULES: AppModule[] = [
     label: "Bank Accounts",
     short: "Bank",
     desc: "Manage company bank accounts & balances",
-    icon: Landmark,
+    icon: "bank",
     to: "/bank-accounts",
     Component: BankAccounts,
   },
@@ -273,7 +243,7 @@ export const MODULES: AppModule[] = [
     label: "Email Templates",
     short: "Emails",
     desc: "Reusable email templates with placeholders",
-    icon: Mail,
+    icon: "email",
     to: "/email-templates",
     Component: EmailTemplates,
   },
@@ -282,7 +252,7 @@ export const MODULES: AppModule[] = [
     label: "SMS Templates",
     short: "SMS",
     desc: "Reusable SMS templates with placeholders + 6-digit OTP",
-    icon: MessageSquare,
+    icon: "email",
     to: "/sms-templates",
     Component: SmsTemplates,
   }, */

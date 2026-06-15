@@ -1,5 +1,6 @@
 import { useModules } from "../../lib/modules";
 import { Badge } from "../../components/ui";
+import AppIcon from "../../components/AppIcon";
 
 /* ---------------- Apps & Modules ---------------- */
 
@@ -15,14 +16,13 @@ export default function AppsManager() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {modules.map((m) => {
           const on = isEnabled(m.id);
-          const Icon = m.icon;
           return (
             <div
               key={m.id}
               className="flex items-start gap-3 rounded-2xl border border-brand-200 p-4"
             >
               <div className="rounded-2xl bg-primary-100 text-ink p-2.5 shrink-0">
-                <Icon size={18} />
+                <AppIcon name={m.icon} className="w-[18px] h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

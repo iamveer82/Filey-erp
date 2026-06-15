@@ -19,6 +19,7 @@ import {
   Menu,
   ChevronDown,
 } from "lucide-react";
+import AppIcon from "./AppIcon";
 import Logo from "./Logo";
 import ErrorBoundary from "./ErrorBoundary";
 import Breadcrumbs from "./Breadcrumbs";
@@ -403,35 +404,35 @@ export default function Layout({ children }: { children: ReactNode }) {
               </p>
             )}
             <div className="space-y-1">
-              {navModules.map(({ to, label, icon: Icon }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  title={railMode ? label : undefined}
-                  className={({ isActive }) =>
-                    cn(
-                      "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
-                      railMode ? "justify-center px-0" : "px-3",
-                      isActive
-                        ? "bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
-                        : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span
-                        className={cn(
-                          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-400 transition-opacity duration-200",
-                          isActive ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                      <Icon size={18} className="shrink-0" />
-                      {!railMode && <span className="truncate">{label}</span>}
-                    </>
-                  )}
-                </NavLink>
-              ))}
+              {navModules.map(({ to, label, icon: iconName }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    title={railMode ? label : undefined}
+                    className={({ isActive }) =>
+                      cn(
+                        "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
+                        railMode ? "justify-center px-0" : "px-3",
+                        isActive
+                          ? "bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
+                          : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span
+                          className={cn(
+                            "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-400 transition-opacity duration-200",
+                            isActive ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        <AppIcon name={iconName} className="w-[18px] h-[18px] shrink-0" />
+                        {!railMode && <span className="truncate">{label}</span>}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
             </div>
           </nav>
 
@@ -503,7 +504,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {pageMeta && (
               <div className="flex items-center gap-2.5 min-w-0 shrink-0">
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]">
-                  <pageMeta.icon size={18} />
+                  <AppIcon name={pageMeta.icon} className="w-[18px] h-[18px]" />
                 </span>
                 <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
                   {pageMeta.label}

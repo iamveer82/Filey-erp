@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Receipt,
-  Banknote,
-  Clock,
-  Truck,
   Plus,
   Sparkles,
-  TrendingUp,
   ArrowUpRight,
   CheckCircle2,
-  AlertCircle as AlertCircleIcon,
+  Clock,
   Layout,
   Eye,
   EyeOff,
@@ -354,7 +349,7 @@ export default function ModernOverview() {
             label="Revenue (issued)"
             value={revenue.total}
             format={aed}
-            icon={<Receipt size={18} />}
+            icon={<AppIcon name="invoicing" className="w-5 h-5" />}
             iconClass="bg-primary-100 text-ink"
           />
           <KpiMetric
@@ -362,7 +357,7 @@ export default function ModernOverview() {
             label="Collected"
             value={revenue.collected}
             format={aed}
-            icon={<Banknote size={18} />}
+            icon={<AppIcon name="money" className="w-5 h-5" />}
             iconClass="bg-success/15 text-success"
           />
           <KpiMetric
@@ -370,7 +365,7 @@ export default function ModernOverview() {
             label="Outstanding"
             value={revenue.outstanding}
             format={aed}
-            icon={<Clock size={18} />}
+            icon={<AppIcon name="outstanding" className="w-5 h-5" />}
             iconClass="bg-danger/15 text-danger"
           />
           <KpiMetric
@@ -378,7 +373,7 @@ export default function ModernOverview() {
             label="Net profit"
             value={profit.net}
             format={aed}
-            icon={<TrendingUp size={18} />}
+            icon={<AppIcon name="reports" className="w-5 h-5" />}
             iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
           />
           <KpiMetric
@@ -452,7 +447,7 @@ export default function ModernOverview() {
                 {orderStats.overdue > 0 && (
                   <Badge tone="danger">
                     <span className="inline-flex items-center gap-1">
-                      <AlertCircleIcon size={10} /> {orderStats.overdue} overdue
+                      <AppIcon name="danger" className="w-3 h-3" /> {orderStats.overdue} overdue
                     </span>
                   </Badge>
                 )}
@@ -491,14 +486,14 @@ export default function ModernOverview() {
             <Timeline>
               {activity.map((a, i) => {
                 const ev = a.event;
-                const Icon =
-                  ev === "order" ? Truck : ev === "invoice" ? Receipt : Truck;
+                const iconName =
+                  ev === "order" ? "orders" : ev === "invoice" ? "invoicing" : "orders";
                 const status: "done" | "current" | "default" =
                   a.tone === "ok" ? "done" : a.tone === "warn" ? "current" : "default";
                 return (
                   <TimelineItem
                     key={i}
-                    icon={<Icon size={12} />}
+                    icon={<AppIcon name={iconName} className="w-3 h-3" />}
                     status={status}
                     title={
                       <>

@@ -22,7 +22,7 @@ interface TrendChartProps {
 export default function TrendChart({
   data,
   gradientId = "trendFill",
-  height = "100%",
+  height = 280,
 }: TrendChartProps) {
   return (
     <div style={{ width: "100%", height }} className="min-h-0">

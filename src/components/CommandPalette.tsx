@@ -13,6 +13,7 @@ import {
   Plus,
 } from "lucide-react";
 import { useModules } from "../lib/modules";
+import AppIcon from "../components/AppIcon";
 import { crm, type CrmCustomer, type Lead, type Opportunity } from "../lib/api";
 
 /* ⌘K / Ctrl-K command palette — jump to any page or CRM record. Data is
@@ -157,13 +158,12 @@ export default function CommandPalette() {
     for (const m of modules) {
       if (!isEnabled(m.id)) continue;
       if (!term || match(m.label) || match(m.desc)) {
-        const Icon = m.icon;
         out.push({
           key: `m-${m.id}`,
           group: "Pages",
           label: m.label,
           sub: m.desc,
-          icon: <Icon size={15} />,
+          icon: <AppIcon name={m.icon} className="w-4 h-4" />,
           run: () => go(m.to),
         });
       }
