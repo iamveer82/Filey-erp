@@ -188,9 +188,16 @@ create table if not exists transactions (
   amount numeric(16,2) not null default 0,
   description text,
   txn_date date not null default current_date,
+  -- Link back to the document that created this entry (invoice, order, etc.).
+  ref text,
+  source text,
+  invoice_id bigint references invoice_docs(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists idx_transactions_invoice_id on transactions(invoice_id);
+create index if not exists idx_transactions_ref on transactions(ref);
 
 -- ===== SUPPLIERS / PURCHASE ORDERS =====
 create table if not exists suppliers (
@@ -298,8 +305,12 @@ create table if not exists crm_customers (
   company text,
   email text,
   phone text,
+  phone_e164 text,
   address text,
+  trn text,
   segment text,
+  custom_fields jsonb default '{}',
+  shared boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

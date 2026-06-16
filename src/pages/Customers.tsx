@@ -574,11 +574,18 @@ function CustomerModal({
     try {
       // Also populate phone_e164 from phone for OTP / SMS
       const e164 = toE164Local(f.phone);
-      const payload = {
-        ...f,
+      const payload: Record<string, unknown> = {
+        name: f.name.trim(),
+        company: f.company.trim() || undefined,
+        trn: f.trn.trim() || undefined,
+        email: f.email.trim() || undefined,
+        phone: f.phone.trim() || undefined,
+        address: f.address.trim() || undefined,
         phone_e164: e164 ?? undefined,
         custom_fields:
-          Object.keys(f.custom_fields || {}).length > 0 ? f.custom_fields : undefined,
+          Object.keys(f.custom_fields || {}).length > 0
+            ? f.custom_fields
+            : undefined,
       };
       if (edit) await crm.updateCustomer(edit.id, payload);
       else

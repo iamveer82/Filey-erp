@@ -11,7 +11,6 @@ import NotFound from "./pages/NotFound";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
-import CopilotKitProvider from "./components/CopilotKit";
 import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
 import { Toaster } from "./components/Toaster";
@@ -81,7 +80,6 @@ function Gate() {
         <Layout>
           <AppRoutes />
         </Layout>
-        <CopilotKitProvider />
         <CommandPalette />
         <OverdueReminder />
         <Toaster />

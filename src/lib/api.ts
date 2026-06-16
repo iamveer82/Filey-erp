@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured } from "./supabase";
-import { quotationTotals } from "./money";
+import { quotationTotals, invoiceTotals } from "./money";
 
 // ===== Types =====
 export interface Product {
@@ -217,6 +217,7 @@ export interface InvoiceDocSummary {
   due_date?: string;
   shared?: boolean;
   updated_at: string;
+  unit_price_formula?: { a: string; b?: string } | null;
 }
 export interface InvoicePayment {
   id: number;
@@ -262,6 +263,7 @@ export interface InvoiceDoc {
   signature?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
   show_stamp?: boolean;
   show_signature?: boolean;
+  unit_price_formula?: { a: string; b: string } | null;
 }
 export type InvoiceDocInput = Omit<
   InvoiceDoc,
@@ -1005,6 +1007,60 @@ export const fin = {
       sInsert("accounts", row), -1
     );
   },
+  updateAccount: (id: number, input: Partial<Omit<Account, "id">>) => {
+    const row = clean(input as Record<string, unknown>);
+    return write(
+      { k: "update", t: "accounts", id, row },
+      () => sUpdate("accounts", id, row),
+      undefined
+    );
+  },
+  deleteAccount: (id: number) =>
+    write(
+      { k: "delete", t: "accounts", id },
+      async () => {
+        // Reverse this account's effect on the running balances, then delete.
+        const { data, error } = await sb()
+          .from("accounts")
+          .select("balance,account_type")
+          .eq("id", id)
+          .single();
+        if (error) throw error;
+        const acct = data as { balance: number; account_type: string } | null;
+        if (acct) {
+          // Reset balance to zero by posting the opposite of the current balance.
+          const zeroingDelta =
+            acct.account_type === "revenue" || acct.account_type === "liability"
+              ? -Number(acct.balance)
+              : Number(acct.balance);
+          if (zeroingDelta !== 0) {
+            // Find a partner account to absorb the offset. Use Sales Revenue for
+            // revenue accounts, AR for assets, Operating Expenses for expenses.
+            let partnerId = -1;
+            if (acct.account_type === "revenue") {
+              partnerId = await findOrCreateSalesAccount();
+            } else if (acct.account_type === "expense") {
+              partnerId = await findOrCreateExpenseAccount();
+            } else {
+              partnerId = await findOrCreateArAccount();
+            }
+            if (partnerId > 0) {
+              await sInsert("transactions", {
+                account_id: partnerId,
+                txn_type: zeroingDelta > 0 ? "debit" : "credit",
+                amount: Math.abs(zeroingDelta),
+                description: "Account deletion adjustment",
+                txn_date: new Date().toISOString().slice(0, 10),
+                source: "system",
+              });
+              await adjustAccountBalance(partnerId, Math.abs(zeroingDelta));
+            }
+          }
+        }
+        await sDelete("accounts", id);
+      },
+      undefined
+    ),
   expenses: () =>
     readCached<Expense[]>(
       "fin_expenses",
@@ -1086,6 +1142,38 @@ export const fin = {
       return id;
     });
   },
+  updateTransaction: (
+    id: number,
+    patch: Partial<Pick<Txn, "description" | "txn_date">>
+  ) =>
+    write(
+      { k: "update", t: "transactions", id, row: patch as Record<string, unknown> },
+      () => sUpdate("transactions", id, patch as Record<string, unknown>),
+      undefined
+    ),
+  deleteTransaction: (id: number) =>
+    write(
+      { k: "delete", t: "transactions", id },
+      async () => {
+        const { data, error } = await sb()
+          .from("transactions")
+          .select("account_id,txn_type,amount")
+          .eq("id", id)
+          .single();
+        if (error) throw error;
+        const t = data as {
+          account_id: number;
+          txn_type: string;
+          amount: number;
+        } | null;
+        if (t?.account_id) {
+          const delta = t.txn_type === "credit" ? -Number(t.amount) : Number(t.amount);
+          await adjustAccountBalance(t.account_id, delta);
+        }
+        await sDelete("transactions", id);
+      },
+      undefined
+    ),
   report: () =>
     readCached<FinanceReport>(
       "fin_report",
@@ -1438,33 +1526,59 @@ export const followups = {
 
 // ===== Billing / Invoicing =====
 function docTotal(
-  d: { tax_rate: number; discount: number },
-  items: { qty: number; unit_price: number }[]
+  d: {
+    tax_rate: number;
+    discount: number;
+    unit_price_formula?: { a: string; b?: string } | null;
+  },
+  items: {
+    qty: number;
+    unit_price: number;
+    custom?: Record<string, string> | null;
+  }[]
 ) {
-  const subtotal = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
-  return (subtotal - d.discount) * (1 + d.tax_rate / 100);
+  return invoiceTotals(items, d.discount, d.tax_rate, d.unit_price_formula).total;
 }
 
-/** Find an existing sales/revenue account or create a default one.
- *  Returns the account id, or -1 if it could not be resolved. */
-async function findOrCreateSalesAccount(): Promise<number> {
+/** Generic account lookup / auto-create. */
+async function findOrCreateAccount(
+  type: string,
+  code: string,
+  name: string,
+  pattern: RegExp
+): Promise<number> {
   const { data } = await sb()
     .from("accounts")
     .select("id,name")
-    .eq("account_type", "revenue");
+    .eq("account_type", type);
   const list = (data as { id: number; name: string }[] | null) ?? [];
-  const sales = list.find((a) => /sales|revenue|income/i.test(a.name)) ?? list[0];
-  if (sales) return sales.id;
+  const acct = list.find((a) => pattern.test(a.name)) ?? list[0];
+  if (acct) return acct.id;
   try {
-    return await sInsert("accounts", {
-      code: "4000",
-      name: "Sales Revenue",
-      account_type: "revenue",
-      balance: 0,
-    });
+    return await sInsert("accounts", { code, name, account_type: type, balance: 0 });
   } catch {
     return -1;
   }
+}
+
+async function findOrCreateSalesAccount(): Promise<number> {
+  return findOrCreateAccount("revenue", "4000", "Sales Revenue", /sales|revenue|income/i);
+}
+async function findOrCreateArAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "asset",
+    "1200",
+    "Accounts Receivable",
+    /receivable|debtors|ar/i
+  );
+}
+async function findOrCreateCashAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "asset",
+    "1000",
+    "Cash & Bank",
+    /cash|bank/i
+  );
 }
 
 async function findOrCreateExpenseAccount(): Promise<number> {
@@ -1507,38 +1621,73 @@ async function findOrCreatePayrollAccount(): Promise<number> {
   }
 }
 
-/** When an invoice is finalized, mirror it into the rest of the ERP so the
- *  user never re-enters the same data:
- *    • a linked Sales Order (SO-<invoice number>) appears under Orders
- *    • a Sales Revenue transaction posts to Accounting (and revenue totals)
- *  Idempotent — keyed on the deterministic SO order number, so re-finalizing
- *  or editing an already-posted invoice never double-posts. Best-effort: a
- *  failure here is logged but never blocks saving the invoice itself. */
+/** Reverse every accounting transaction linked to an invoice and restore the
+ *  account balances. Used before re-posting or when an invoice is reverted
+ *  to draft / deleted. */
+async function reverseInvoiceTransactions(
+  invoiceId: number | undefined,
+  ref: string
+) {
+  const q = sb().from("transactions").select("*");
+  if (invoiceId) q.eq("invoice_id", invoiceId);
+  else q.eq("ref", ref);
+  const { data, error } = await q;
+  if (error) throw error;
+  for (const t of (data ?? []) as any[]) {
+    const delta = t.txn_type === "credit" ? -Number(t.amount) : Number(t.amount);
+    if (t.account_id) await adjustAccountBalance(t.account_id, delta);
+  }
+  const delQ = sb().from("transactions").delete();
+  if (invoiceId) delQ.eq("invoice_id", invoiceId);
+  else delQ.eq("ref", ref);
+  const { error: de } = await delQ;
+  if (de) throw de;
+}
+
+/** Remove the linked sales order and restore any stock that was decremented. */
+async function reverseInvoiceOrderAndStock(
+  number: string,
+  items: { product_id?: number; qty: number; unit_price: number }[]
+) {
+  const orderNumber = `SO-${number}`;
+  const { data: order } = await sb()
+    .from("orders")
+    .select("id")
+    .eq("order_number", orderNumber)
+    .maybeSingle();
+  if (order?.id) {
+    await sb().from("orders").delete().eq("id", order.id);
+  }
+  for (const it of items) {
+    if (!it.product_id || !it.qty) continue;
+    await adjustProductStock(it.product_id, Math.abs(Number(it.qty)));
+  }
+}
+
+/** Mirror a finalized invoice into Orders, Inventory and Accounting.
+ *  Reverses any previous posting first, so re-finalizing or editing an already
+ *  posted invoice keeps the three modules in sync. */
 async function propagateInvoice(
   doc: Record<string, unknown>,
   items: { product_id?: number; qty: number; unit_price: number }[]
 ) {
   try {
+    const id = Number(doc.id ?? 0);
     const number = String(doc.number ?? "").trim();
     if (!number) return;
     const orderNumber = `SO-${number}`;
+    const ref = `Invoice ${number}`;
 
-    // Idempotency guard: if the linked order already exists this invoice was
-    // already propagated.
-    const { data: existing } = await sb()
-      .from("orders")
-      .select("id")
-      .eq("order_number", orderNumber)
-      .maybeSingle();
-    if (existing) return;
+    // 1) Reverse any previous posting for this invoice.
+    await reverseInvoiceTransactions(id || undefined, orderNumber);
+    await reverseInvoiceOrderAndStock(number, items);
 
     const total = docTotal(
       { tax_rate: Number(doc.tax_rate ?? 0), discount: Number(doc.discount ?? 0) },
       items
     );
 
-    // 1) Linked sales order — header-level only. Invoice lines are free-text
-    //    (no product_id), so we deliberately don't adjust stock here.
+    // 2) Linked sales order.
     await sInsert("orders", {
       order_number: orderNumber,
       customer_name: doc.customer_name ?? "—",
@@ -1547,30 +1696,63 @@ async function propagateInvoice(
       total,
     });
 
-    // 2) Decrement inventory for any invoice lines linked to products.
+    // 3) Decrement inventory for any invoice lines linked to products.
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
-      await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)),
-      );
+      await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)));
     }
 
-    // 3) Sales revenue entry in Accounting.
+    // 4) Double-entry accounting: debit AR, credit Sales Revenue.
+    const txnDate =
+      (doc.issue_date as string) || new Date().toISOString().slice(0, 10);
     if (total > 0) {
-      const acctId = await findOrCreateSalesAccount();
-      if (acctId > 0) {
+      const revenueId = await findOrCreateSalesAccount();
+      const arId = await findOrCreateArAccount();
+      if (revenueId > 0) {
         await sInsert("transactions", {
-          account_id: acctId,
+          account_id: revenueId,
           txn_type: "credit",
           amount: total,
-          description: `Invoice ${number}`,
-          txn_date:
-            (doc.issue_date as string) || new Date().toISOString().slice(0, 10),
+          description: `${ref} — Sales Revenue`,
+          ref,
+          source: "invoice",
+          invoice_id: id || null,
+          txn_date: txnDate,
         });
-        await adjustAccountBalance(acctId, total);
+        await adjustAccountBalance(revenueId, total);
+      }
+      if (arId > 0) {
+        await sInsert("transactions", {
+          account_id: arId,
+          txn_type: "debit",
+          amount: total,
+          description: `${ref} — Accounts Receivable`,
+          ref,
+          source: "invoice",
+          invoice_id: id || null,
+          txn_date: txnDate,
+        });
+        await adjustAccountBalance(arId, total);
       }
     }
   } catch (e) {
     console.error("Invoice propagation failed:", e);
+  }
+}
+
+/** Remove an invoice's footprint from Orders, Inventory and Accounting. */
+async function unpropagateInvoice(
+  doc: Record<string, unknown>,
+  items: { product_id?: number; qty: number; unit_price: number }[]
+) {
+  try {
+    const id = Number(doc.id ?? 0);
+    const number = String(doc.number ?? "").trim();
+    if (!number) return;
+    await reverseInvoiceTransactions(id || undefined, `SO-${number}`);
+    await reverseInvoiceOrderAndStock(number, items);
+  } catch (e) {
+    console.error("Invoice unpropagation failed:", e);
   }
 }
 
@@ -1685,21 +1867,55 @@ export const billing = {
           );
         if (error) throw error;
       }
-      // When an invoice is saved as finalized ("sent"), mirror it across the
-      // rest of the ERP (Orders + Accounting). Idempotent + best-effort.
+      // Keep Orders, Inventory and Accounting in sync with the invoice state.
+      // Idempotent + best-effort: failures are logged but never block saving.
       if (String((row as Record<string, unknown>).status ?? "") === "sent") {
         await propagateInvoice(row, items);
+      } else {
+        await unpropagateInvoice(row, items);
       }
       return docId;
     }),
   deleteDoc: (docId: number) =>
-    write({ k: "delete", t: "invoice_docs", id: docId }, () =>
-      sDelete("invoice_docs", docId), undefined
-    ),
+    write({ k: "delete", t: "invoice_docs", id: docId }, async () => {
+      const { data: doc, error } = await sb()
+        .from("invoice_docs")
+        .select("*")
+        .eq("id", docId)
+        .single();
+      if (error) throw error;
+      const items = await sList<any>("invoice_doc_items");
+      await sDelete("invoice_docs", docId);
+      await unpropagateInvoice(
+        doc as Record<string, unknown>,
+        items
+          .filter((i) => i.invoice_id === docId)
+          .map((i) => ({
+            product_id: i.product_id ?? undefined,
+            qty: i.qty,
+            unit_price: i.unit_price,
+          }))
+      );
+      return undefined;
+    }, undefined),
   setStatus: (docId: number, status: string) =>
     write(
       { k: "update", t: "invoice_docs", id: docId, row: { status } },
-      () => sUpdate("invoice_docs", docId, { status }),
+      async () => {
+        const { data: doc, error } = await sb()
+          .from("invoice_docs")
+          .select("*")
+          .eq("id", docId)
+          .single();
+        if (error) throw error;
+        const items = await sList<any>("invoice_doc_items");
+        await sUpdate("invoice_docs", docId, { status });
+        if (status === "sent") {
+          await propagateInvoice(doc as Record<string, unknown>, items.filter((i) => i.invoice_id === docId).map((i) => ({ product_id: i.product_id ?? undefined, qty: i.qty, unit_price: i.unit_price })));
+        } else {
+          await unpropagateInvoice(doc as Record<string, unknown>, items.filter((i) => i.invoice_id === docId).map((i) => ({ product_id: i.product_id ?? undefined, qty: i.qty, unit_price: i.unit_price })));
+        }
+      },
       undefined
     ),
   shareDoc: (docId: number, shared: boolean) =>
@@ -1748,12 +1964,18 @@ export const billing = {
     paidAt: string
   ) =>
     online(async () => {
-      await sInsert("invoice_payments", {
-        invoice_id: invoiceId,
-        amount,
-        method: method ?? null,
-        paid_at: paidAt,
-      });
+      const { data: pay } = await sb()
+        .from("invoice_payments")
+        .insert({
+          invoice_id: invoiceId,
+          amount,
+          method: method ?? null,
+          paid_at: paidAt,
+        })
+        .select("id")
+        .single();
+      const paymentId = (pay as { id: number } | null)?.id;
+
       // Auto-mark the invoice paid once the balance is cleared.
       const [{ data: doc }, items, { data: pays }] = await Promise.all([
         sb().from("invoice_docs").select("*").eq("id", invoiceId).single(),
@@ -1775,9 +1997,64 @@ export const billing = {
         paid >= total - 0.005 ? "paid" : (doc as any).status === "paid" ? "sent" : (doc as any).status;
       if (status !== (doc as any).status)
         await sUpdate("invoice_docs", invoiceId, { status });
+
+      // Post the cash receipt to accounting: debit Cash/Bank, credit AR.
+      const ref = `Invoice ${(doc as any)?.number ?? invoiceId} Payment`;
+      const cashId = await findOrCreateCashAccount();
+      const arId = await findOrCreateArAccount();
+      if (cashId > 0) {
+        await sInsert("transactions", {
+          account_id: cashId,
+          txn_type: "debit",
+          amount,
+          description: `${ref} — Cash/Bank`,
+          ref,
+          source: "payment",
+          invoice_id: invoiceId,
+          txn_date: paidAt,
+        });
+        await adjustAccountBalance(cashId, amount);
+      }
+      if (arId > 0) {
+        await sInsert("transactions", {
+          account_id: arId,
+          txn_type: "credit",
+          amount,
+          description: `${ref} — AR reduction`,
+          ref,
+          source: "payment",
+          invoice_id: invoiceId,
+          txn_date: paidAt,
+        });
+        await adjustAccountBalance(arId, -amount);
+      }
+      return paymentId;
     }),
   removePayment: (id: number) =>
-    online(() => sDelete("invoice_payments", id)),
+    online(async () => {
+      const { data: p, error } = await sb()
+        .from("invoice_payments")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) throw error;
+      const invoiceId = (p as any)?.invoice_id as number | undefined;
+      await sDelete("invoice_payments", id);
+      if (invoiceId) {
+        // Reverse the accounting entries for this payment.
+        const { data: doc } = await sb()
+          .from("invoice_docs")
+          .select("number,status")
+          .eq("id", invoiceId)
+          .single();
+        const ref = `Invoice ${(doc as any)?.number ?? invoiceId} Payment`;
+        await reverseInvoiceTransactions(invoiceId, ref);
+        // If the invoice was fully paid, move it back to sent.
+        if ((doc as any)?.status === "paid") {
+          await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        }
+      }
+    }),
   getCompany: () =>
     readCached<CompanyProfile>(
       "company_profile",

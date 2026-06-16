@@ -2768,58 +2768,132 @@ export function downloadFile(f: OutFile) {
 /** Capture a DOM element as a PDF and download it.
  *  Uses html-to-image to render the element to PNG, then pdf-lib to
  *  wrap it in a proper PDF file. Falls back to window.print() on error. */
-/** Render an on-screen element to A4 PDF bytes (multi-page when tall). Shared
- *  by the Download action and by auto-save-to-My-Files so both produce an
- *  identical document. */
+/** Render an element (or each of its direct A4-page children) to a PDF.
+ *  If `el` contains multiple direct page children, each becomes one PDF page.
+ *  Otherwise the element itself is captured as a single page. */
 export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<OutFile> {
-  // Reset any CSS scaling (from FitPreview) before capture so the export is
-  // rendered at native A4 — FitPreview fits the on-screen sheet with `zoom`.
-  const prevTransform = el.style.transform;
-  const prevTransformOrigin = el.style.transformOrigin;
-  const prevZoom = el.style.zoom;
-  el.style.transform = 'none';
-  el.style.transformOrigin = 'top left';
-  el.style.zoom = '1';
-  try {
-    const { toPng } = await import("html-to-image");
-    const { PDFDocument } = await import("pdf-lib");
-    const imgData = await toPng(el, { quality: 0.95, pixelRatio: 2 });
+  const { toPng } = await import("html-to-image");
+  const pdfDoc = await PDFDocument.create();
 
-    const pdfDoc = await PDFDocument.create();
-    const img = await pdfDoc.embedPng(imgData);
-    const { width: imgW, height: imgH } = img.scale(1);
+  // A4 at 96 CSS dpi: 794 × 1123 px. pdf-lib uses 72 pt per inch.
+  // We capture at pixelRatio 2 for quality, so image pixels are double.
+  const A4_CSS_W = 794;
+  const A4_CSS_H = 1123;
+  const pixelRatio = 2;
 
-    // A4 portrait at 72 points per inch: 595 × 842 pt
-    const A4_W = 595;
-    const A4_H = 842;
+  // `mix-blend-mode` is rendered as black by html-to-image in some browsers,
+  // especially when the captured subtree is briefly outside the normal
+  // viewport. Force any blended images to normal blend for the export.
+  const normaliseBlend = (root: HTMLElement) => {
+    root.querySelectorAll("img").forEach((img) => {
+      if ((img.style.mixBlendMode || window.getComputedStyle(img).mixBlendMode) &&
+          window.getComputedStyle(img).mixBlendMode !== "normal") {
+        img.style.mixBlendMode = "normal";
+      }
+    });
+  };
 
-    // Scale image to fit A4 width, keeping aspect ratio
-    const scale = A4_W / imgW;
-    const drawW = A4_W;
-    const drawH = imgH * scale;
+  const capturePage = async (node: HTMLElement) => {
+    // Use the page's own explicit A4 size; if it has none, fall back to our
+    // A4 constants. The source element is expected to already be sized at true
+    // A4 CSS px (e.g. the off-screen export stack in Invoicing.tsx).
+    const cssW = Math.max(1, node.offsetWidth || A4_CSS_W);
+    const cssH = Math.max(1, node.offsetHeight || A4_CSS_H);
+    const ptW = (cssW / 96) * 72; // CSS px → pdf-lib points
+    const ptH = (cssH / 96) * 72;
 
-    // Use standard A4 page size
-    const page = pdfDoc.addPage([A4_W, A4_H]);
-    // Center image vertically on A4 if it's shorter
-    const yOffset = drawH < A4_H ? (A4_H - drawH) / 2 : 0;
-    page.drawImage(img, { x: 0, y: yOffset, width: drawW, height: Math.min(drawH, A4_H) });
+    // We render the page at 2× CSS size and capture at 1×. This avoids
+    // html-to-image's internal `pixelRatio` scaling, which clips overflow
+    // inside our fixed wrapper and produced a cropped/zoomed PDF.
+    const capW = cssW * pixelRatio;
+    const capH = cssH * pixelRatio;
 
-    // Add additional pages if content exceeds one A4 page
-    let remainingH = drawH - A4_H;
-    while (remainingH > 0) {
-      const page2 = pdfDoc.addPage([A4_W, A4_H]);
-      page2.drawImage(img, { x: 0, y: -(A4_H + (drawH - A4_H - remainingH)), width: drawW, height: drawH });
-      remainingH -= A4_H;
+    // html-to-image cannot reliably capture a `position: fixed` container
+    // parked far off-screen. Clone the page into a short-lived viewport-rooted
+    // wrapper, capture it there, then throw the clone away.
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.top = "0";
+    wrapper.style.left = "0";
+    wrapper.style.width = `${capW}px`;
+    wrapper.style.height = `${capH}px`;
+    wrapper.style.zIndex = "-1";
+    wrapper.style.background = "#ffffff";
+    wrapper.style.pointerEvents = "none";
+    wrapper.style.overflow = "hidden";
+
+    const clone = node.cloneNode(true) as HTMLElement;
+    clone.removeAttribute("aria-hidden");
+    clone.style.position = "absolute";
+    clone.style.left = "0";
+    clone.style.top = "0";
+    clone.style.width = `${cssW}px`;
+    clone.style.height = `${cssH}px`;
+    clone.style.minWidth = `${cssW}px`;
+    clone.style.minHeight = `${cssH}px`;
+    clone.style.transform = `scale(${pixelRatio})`;
+    clone.style.transformOrigin = "top left";
+    clone.style.zoom = "1";
+    clone.style.margin = "0";
+    clone.style.padding = "0";
+    clone.style.border = "none";
+    clone.style.maxWidth = "none";
+    clone.style.maxHeight = "none";
+    clone.style.overflow = "hidden";
+    clone.style.boxSizing = "border-box";
+    normaliseBlend(clone);
+
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    try {
+      // Let fonts and images settle in the cloned DOM.
+      await document.fonts.ready;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      const imgData = await toPng(clone, {
+        quality: 0.95,
+        pixelRatio: 1, // we already scaled the clone ourselves
+        width: capW,
+        height: capH,
+        backgroundColor: "#ffffff",
+        style: {
+          width: `${cssW}px`,
+          height: `${cssH}px`,
+          transform: `scale(${pixelRatio})`,
+          transformOrigin: "top left",
+        },
+      });
+      const img = await pdfDoc.embedPng(imgData);
+      const page = pdfDoc.addPage([ptW, ptH]);
+      // Fill the page white first so a transparent PNG never appears black.
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: ptW,
+        height: ptH,
+        color: rgb(1, 1, 1),
+      });
+      // The captured PNG is a 2× render of the A4 sheet; map it 1:1 onto
+      // the PDF page so the output is exactly A4 at high resolution.
+      page.drawImage(img, { x: 0, y: 0, width: ptW, height: ptH });
+    } finally {
+      wrapper.remove();
     }
+  };
 
-    const bytes = await pdfDoc.save();
-    return { name: `${name}.pdf`, bytes };
-  } finally {
-    // Always restore the scaling, even if capture throws.
-    el.style.transform = prevTransform;
-    el.style.transformOrigin = prevTransformOrigin;
-    el.style.zoom = prevZoom;
+  const pageEls = el.querySelectorAll(":scope > div");
+  if (pageEls.length > 1) {
+    for (const pe of Array.from(pageEls)) {
+      await capturePage(pe as HTMLElement);
+    }
+  } else {
+    await capturePage(el);
   }
+
+  const bytes = await pdfDoc.save();
+  return { name: `${name}.pdf`, bytes };
 }
 
 export async function downloadElementAsPdf(el: HTMLElement, name: string) {

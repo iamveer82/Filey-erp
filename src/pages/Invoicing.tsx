@@ -31,6 +31,7 @@ import {
   Clock,
   PackageSearch,
   Landmark,
+  SeparatorHorizontal,
 } from "lucide-react";
 import {
   billing,
@@ -49,7 +50,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
-import { invoiceTotals } from "../lib/money";
+import { invoiceTotals, invoiceLineAmount } from "../lib/money";
 import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
@@ -65,6 +66,7 @@ import TemplateDesigner, {
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
   StampSignatureLayer,
+  StampSigAdjust,
   DraggableBlock,
   type StampSig,
 } from "../components/StampSignature";
@@ -100,6 +102,39 @@ type Item = {
   unit_price: number;
   unit: string;
   custom: Record<string, string>;
+  /** Start a new page in the generated PDF/preview at this item. */
+  pageBreakBefore?: boolean;
+};
+
+// Pages are driven only by manual breaks set by the user. Default = one A4 page.
+function paginateItems(items: Item[]): Item[][] {
+  const pages: Item[][] = [[]];
+  items.forEach((it, i) => {
+    const cur = pages[pages.length - 1];
+    if (i > 0 && it.pageBreakBefore) {
+      pages.push([it]);
+    } else {
+      cur.push(it);
+    }
+  });
+  return pages;
+}
+
+// The manual page-break flag is persisted inside the item's `custom` jsonb
+// (key "__pagebreak") so it survives a reload with no DB schema change. It is
+// stripped from the in-memory custom map so it never renders as a column value.
+const PB_KEY = "__pagebreak";
+const splitPageBreak = (custom?: Record<string, string> | null) => {
+  const c: Record<string, string> = { ...(custom || {}) };
+  const pageBreakBefore = c[PB_KEY] === "1";
+  delete c[PB_KEY];
+  return { custom: c, pageBreakBefore };
+};
+const mergePageBreak = (it: Item): Record<string, string> | undefined => {
+  const c: Record<string, string> = { ...(it.custom || {}) };
+  if (it.pageBreakBefore) c[PB_KEY] = "1";
+  else delete c[PB_KEY];
+  return Object.keys(c).length ? c : undefined;
 };
 type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   items: Item[];
@@ -108,6 +143,8 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
+  /** Optional formula: unit_price = fieldA × fieldB. */
+  unit_price_formula?: { a: string; b: string } | null;
 };
 
 const TEMPLATES = [
@@ -181,14 +218,16 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
     terms: "Payment due within 30 days.",
     tax_rate: c.default_tax_rate ?? 5,
     discount: 0,
-    items: [{ description: "", qty: 1, unit_price: 0, unit: "", custom: {} }],
+    items: [{ description: "", qty: 1, unit_price: 0, unit: "", custom: {}, pageBreakBefore: false }],
     customColumns: [],
     show_stamp: false,
     show_signature: false,
+    unit_price_formula: null,
   };
 }
 
-const totals = (f: Form) => invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0);
+const totals = (f: Form) =>
+  invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0, f.unit_price_formula);
 
 export default function Invoicing() {
   const { toast, confirm } = useUI();
@@ -310,15 +349,20 @@ const editInvoice = async (id: number) => {
           : undefined,
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
-        items: d.items.map((i) => ({
-          description: i.description,
-          qty: i.qty,
-          unit_price: i.unit_price,
-          unit: i.unit || "",
-          custom: i.custom || {},
-          product_id: i.product_id,
-        })),
+        items: d.items.map((i) => {
+          const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+          return {
+            description: i.description,
+            qty: i.qty,
+            unit_price: i.unit_price,
+            unit: i.unit || "",
+            custom,
+            product_id: i.product_id,
+            pageBreakBefore,
+          };
+        }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
+        unit_price_formula: d.unit_price_formula || null,
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
@@ -383,15 +427,20 @@ const editInvoice = async (id: number) => {
           : undefined,
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
-        items: d.items.map((i) => ({
-          description: i.description,
-          qty: i.qty,
-          unit_price: i.unit_price,
-          unit: i.unit || "",
-          custom: i.custom || {},
-          product_id: i.product_id,
-        })),
+        items: d.items.map((i) => {
+          const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+          return {
+            description: i.description,
+            qty: i.qty,
+            unit_price: i.unit_price,
+            unit: i.unit || "",
+            custom,
+            product_id: i.product_id,
+            pageBreakBefore,
+          };
+        }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
+        unit_price_formula: d.unit_price_formula || null,
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to duplicate invoice");
@@ -434,7 +483,7 @@ const editInvoice = async (id: number) => {
           qty: it.qty,
           unit_price: it.unit_price,
           unit: it.unit || undefined,
-          custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
+          custom: mergePageBreak(it),
           product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
@@ -492,7 +541,7 @@ const editInvoice = async (id: number) => {
           qty: it.qty,
           unit_price: it.unit_price,
           unit: it.unit || undefined,
-          custom: it.custom && Object.keys(it.custom).length ? it.custom : undefined,
+          custom: mergePageBreak(it),
           product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
@@ -1119,21 +1168,27 @@ function Editor({
 }) {
   const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
+  // Off-screen container that renders EVERY page stacked as real A4 sheets —
+  // captured for the PDF so the export contains all items (not just the page
+  // on screen) and honors manual page breaks + last-page totals.
+  const exportRef = useRef<HTMLDivElement>(null);
   const [previewPage, setPreviewPage] = useState(1);
-  const ITEMS_PER_PREVIEW_PAGE = 7;
-  const previewPages = Math.ceil(form.items.length / ITEMS_PER_PREVIEW_PAGE);
-  const previewForm = {
-    ...form,
-    items: form.items.slice(
-      (previewPage - 1) * ITEMS_PER_PREVIEW_PAGE,
-      previewPage * ITEMS_PER_PREVIEW_PAGE
-    ),
-  };
+  // Group items into A4 pages, honoring per-item manual page breaks.
+  const pages = paginateItems(form.items);
+  useEffect(() => {
+    setPreviewPage(1);
+  }, [form.items.length]);
+
+  const previewPages = pages.length;
+  const curPageIdx = Math.min(previewPage, previewPages) - 1;
+  const pageStartIndex = pages
+    .slice(0, curPageIdx)
+    .reduce((n, g) => n + g.length, 0);
+  const isLastPreviewPage = curPageIdx === previewPages - 1;
   const downloadPdf = () => {
-    if (invoiceRef.current) {
-      // Capture the full A4 sheet (with padding), not just the inner div
-      const sheet = invoiceRef.current.closest(".invoice-print") as HTMLElement;
-      downloadElementAsPdf(sheet || invoiceRef.current, form.number || "invoice");
+    const el = exportRef.current || invoiceRef.current;
+    if (el) {
+      downloadElementAsPdf(el, form.number || "invoice");
     } else window.print();
   };
   // Finalize, then archive the issued invoice PDF to My Files (best-effort,
@@ -1141,9 +1196,7 @@ function Editor({
   const handleFinalize = async () => {
     await onFinalize();
     try {
-      const el =
-        (invoiceRef.current?.closest(".invoice-print") as HTMLElement) ||
-        invoiceRef.current;
+      const el = exportRef.current || invoiceRef.current;
       if (el) {
         const base = form.number || "invoice";
         const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () =>
@@ -1194,22 +1247,19 @@ function Editor({
       ...form,
       items: [
         ...form.items,
-        { description: "", qty: 1, unit_price: 0, unit: "", custom: {} },
+        { description: "", qty: 1, unit_price: 0, unit: "", custom: {}, pageBreakBefore: false },
       ],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
 
   const setItemCustom = (idx: number, key: string, value: string) => {
+    if (key === PB_KEY) return; // reserved for page-break flag
     const items = form.items.map((it, i) =>
       i === idx ? { ...it, custom: { ...it.custom, [key]: value } } : it
     );
     setForm({ ...form, items });
   };
-
-  
-
-  
 
   const addCustomColumn = () => {
     const label = window.prompt("Column name:")?.trim();
@@ -1219,6 +1269,10 @@ function Editor({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_|_$/g, "") || `col_${Date.now()}`;
+    if (key === PB_KEY) {
+      toast.error("That name is reserved");
+      return;
+    }
     if (RESERVED_ITEM_COLUMNS.has(key)) {
       toast.error(`"${label}" is a default column and cannot be added again`);
       return;
@@ -1314,10 +1368,20 @@ function Editor({
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
-  const viewPreviewRef = useRef<HTMLDivElement>(null);
-  const [pageCount, setPageCount] = useState(1);
+  const [viewPage, setViewPage] = useState(1);
+  // Paginate for the full-screen "View" modal the same way as live preview/PDF.
+  const viewPages = paginateItems(form.items);
+  const viewPageCount = viewPages.length;
+  const viewPageIdx = Math.min(viewPage, viewPageCount) - 1;
+  const viewPageStart = viewPages
+    .slice(0, viewPageIdx)
+    .reduce((n, g) => n + g.length, 0);
+  const isLastViewPage = viewPageIdx === viewPageCount - 1;
 
-  // Close view modal on Escape
+  // Close view modal on Escape; reset to page 1 when reopening.
+  useEffect(() => {
+    if (viewOpen) setViewPage(1);
+  }, [viewOpen]);
   useEffect(() => {
     if (!viewOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1326,24 +1390,6 @@ function Editor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
-
-  // Calculate page count for the full-screen preview
-  useEffect(() => {
-    if (!viewOpen || !viewPreviewRef.current) {
-      setPageCount(1);
-      return;
-    }
-    const el = viewPreviewRef.current;
-    const measure = () => {
-      const contentHeight = el.scrollHeight;
-      const pageHeight = 1027; // A4 at 96dpi minus padding
-      setPageCount(Math.max(1, Math.ceil(contentHeight / pageHeight)));
-    };
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
-  }, [viewOpen, form.items.length, form.template]);
 
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
   const m = (v: number) => money(v, form.currency || "AED");
@@ -1356,7 +1402,12 @@ function Editor({
       toast.error("Add a customer email (Invoice Details) to send this invoice.");
       return;
     }
-    const t = invoiceTotals(form.items, form.discount || 0, form.tax_rate || 0);
+    const t = invoiceTotals(
+      form.items,
+      form.discount || 0,
+      form.tax_rate || 0,
+      form.unit_price_formula
+    );
     let portalUrl = "";
     try {
       if (effectiveId) {
@@ -1771,6 +1822,51 @@ function Editor({
 
           {/* 3 · Items */}
           <Step n={3} title="Items">
+            <div className="rounded-xl border border-brand-200 p-3 mb-3">
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 mb-2">
+                Multiply field with unit price
+                <button
+                  type="button"
+                  onClick={() =>
+                    set(
+                      "unit_price_formula",
+                      form.unit_price_formula ? null : { a: "", b: "unit_price" }
+                    )
+                  }
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    form.unit_price_formula ? "bg-primary-400" : "bg-brand-200"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      form.unit_price_formula ? "translate-x-4" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+              {form.unit_price_formula && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    className="input text-xs py-1.5 h-8"
+                    value={form.unit_price_formula.a || ""}
+                    onChange={(e) =>
+                      set("unit_price_formula", {
+                        a: e.target.value,
+                        b: "unit_price",
+                      })
+                    }
+                  >
+                    <option value="">Select field</option>
+                    <option value="qty">Qty</option>
+                    {form.customColumns.map((c) => (
+                      <option key={c.key} value={c.key}>{c.label}</option>
+                    ))}
+                  </select>
+                  <span className="text-brand-400">× unit price</span>
+                  <span className="text-[10px] text-brand-400">→ Amount</span>
+                </div>
+              )}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -1833,7 +1929,12 @@ function Editor({
                 <tbody>
                   {form.items.map((it, i) => (
                     <tr key={i} className="border-t border-brand-100">
-                      <td className="py-2 pr-2 text-brand-500">{i + 1}</td>
+                      <td className="py-2 pr-2 text-brand-500">
+                        {i + 1}
+                        {it.pageBreakBefore && i > 0 && (
+                          <span className="ml-1 text-[10px] text-primary-700 font-medium">↳ new page</span>
+                        )}
+                      </td>
                       <td className="py-2 px-2">
                         <input
                           className="input"
@@ -1873,7 +1974,11 @@ function Editor({
                       <td className="py-2 px-2">
                         <input
                           type="number"
-                          className="input text-right !px-2"
+                          className={`input text-right !px-2 ${
+                            form.unit_price_formula?.a && form.unit_price_formula?.b
+                              ? "bg-brand-50/50"
+                              : ""
+                          }`}
                           placeholder="0"
                           value={it.unit_price || ""}
                           onChange={(e) =>
@@ -1887,16 +1992,44 @@ function Editor({
                         </td>
                       )}
                       <td className="py-2 px-2 text-right font-medium text-ink">
-                        {m((it.qty || 0) * (it.unit_price || 0))}
+                        {m(invoiceLineAmount(it, form.unit_price_formula))}
                       </td>
                       <td className="py-2">
-                        <button
-                          aria-label="Remove line"
-                          className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
-                          onClick={() => removeItem(i)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            aria-label={
+                              it.pageBreakBefore
+                                ? "Remove page break before this item"
+                                : "Start a new page at this item"
+                            }
+                            title={
+                              i === 0
+                                ? "First item always starts page 1"
+                                : it.pageBreakBefore
+                                  ? "Starts a new page here (click to remove)"
+                                  : "Insert page break before this item"
+                            }
+                            disabled={i === 0}
+                            className={`rounded-lg p-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                              it.pageBreakBefore
+                                ? "text-primary-700 bg-primary-100"
+                                : "text-brand-400 hover:text-ink hover:bg-brand-50 cursor-pointer"
+                            }`}
+                            onClick={() =>
+                              setItem(i, { pageBreakBefore: !it.pageBreakBefore })
+                            }
+                          >
+                            <SeparatorHorizontal size={14} />
+                          </button>
+                          <button
+                            aria-label="Remove line"
+                            className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                            onClick={() => removeItem(i)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1972,18 +2105,38 @@ function Editor({
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, show_stamp: !form.show_stamp })}
+                onClick={() => {
+                  const on = !form.show_stamp;
+                  setForm({
+                    ...form,
+                    show_stamp: on,
+                    stamp:
+                      on && !form.stamp?.data && companyStampSig.stamp?.data
+                        ? { ...companyStampSig.stamp }
+                        : form.stamp,
+                  });
+                }}
                 className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show company stamp on this invoice"
+                title="Show company stamp on this invoice (adjust opacity & crop below)"
                 disabled={!companyStampSig.stamp?.data}
               >
                 <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, show_signature: !form.show_signature })}
+                onClick={() => {
+                  const on = !form.show_signature;
+                  setForm({
+                    ...form,
+                    show_signature: on,
+                    signature:
+                      on && !form.signature?.data && companyStampSig.signature?.data
+                        ? { ...companyStampSig.signature }
+                        : form.signature,
+                  });
+                }}
                 className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show company signature on this invoice"
+                title="Show company signature on this invoice (adjust opacity & crop below)"
                 disabled={!companyStampSig.signature?.data}
               >
                 <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
@@ -2024,6 +2177,30 @@ function Editor({
                 {showDiscount ? "Remove Discount" : "Add Discount"}
               </button>
             </div>
+            {(form.show_stamp || form.show_signature) &&
+              (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
+                  {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                    <StampSigAdjust
+                      label="Stamp"
+                      icon={<Stamp size={13} />}
+                      value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
+                      onChange={(v) => setForm({ ...form, stamp: v })}
+                    />
+                  )}
+                  {form.show_signature &&
+                    (form.signature?.data || companyStampSig.signature?.data) && (
+                      <StampSigAdjust
+                        label="Signature"
+                        icon={<PenTool size={13} />}
+                        value={
+                          form.signature?.data ? form.signature : companyStampSig.signature!
+                        }
+                        onChange={(v) => setForm({ ...form, signature: v })}
+                      />
+                    )}
+                </div>
+              )}
             {showDiscount && (
               <div className="mt-3 max-w-xs">
                 <Field label="Discount (amount)">
@@ -2099,6 +2276,10 @@ function Editor({
                       </option>
                     ))}
                   </select>
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 border border-brand-200 rounded-xl px-3 py-2">
+                    <span className="text-brand-500">Page breaks are manual only</span>
+                    <span className="text-[10px] text-brand-400">Use the row action in the items table</span>
+                  </div>
                   <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 border border-brand-200 rounded-xl px-3 py-2">
                     Accent color
                     <ColorPicker
@@ -2208,18 +2389,42 @@ function Editor({
                     minHeight: device === "desktop" ? 1027 : 498,
                   }}
                 >
-                  {/* Stamp & Signature — draggable, watermark-style overlay */}
+                  {/* Stamp & Signature — draggable, watermark-style overlay.
+                      Per-document copy (form.stamp/signature) seeded from the
+                      company asset; falls back to the company asset itself. */}
                   <StampSignatureLayer
-                    stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
-                    signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
-                    onStampMove={(x, y) =>
-                      setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))
+                    stamp={
+                      form.show_stamp
+                        ? form.stamp?.data
+                          ? form.stamp
+                          : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
+                        : undefined
                     }
-                    onSignatureMove={(x, y) =>
-                      setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
+                    signature={
+                      form.show_signature
+                        ? form.signature?.data
+                          ? form.signature
+                          : (companyStampSig ?? EMPTY_STAMP_SIG).signature
+                        : undefined
                     }
+                    onStampMove={(x, y) => {
+                      const base = form.stamp?.data ? form.stamp : companyStampSig.stamp;
+                      if (base) setForm({ ...form, stamp: { ...base, x, y } });
+                    }}
+                    onSignatureMove={(x, y) => {
+                      const base = form.signature?.data
+                        ? form.signature
+                        : companyStampSig.signature;
+                      if (base) setForm({ ...form, signature: { ...base, x, y } });
+                    }}
                   />
-                  <InvoiceView form={previewForm} />
+                  <InvoiceView
+                    form={form}
+                    pageItems={pages[curPageIdx] ?? []}
+                    itemStartIndex={pageStartIndex}
+                    showTotals={isLastPreviewPage}
+                    showFooter={isLastPreviewPage}
+                  />
                   {showBank && (
                     <DraggableBlock
                       x={bankX}
@@ -2235,6 +2440,80 @@ function Editor({
                 </div>
               </div>
             </FitPreview>
+
+            {/* Off-screen full render: every page stacked as a real A4 sheet.
+                This is what the PDF captures — all items, manual page breaks
+                honored, and totals/notes only on the final sheet. */}
+            {(() => {
+              const exportPages = paginateItems(form.items);
+              return (
+                <div
+                  ref={exportRef}
+                  aria-hidden
+                  className="fixed left-[-99999px] top-0 pointer-events-none"
+                  style={{ width: 794, background: "#fff" }}
+                >
+                  {exportPages.map((group, gi) => {
+                    const startIdx = exportPages
+                      .slice(0, gi)
+                      .reduce((n, g) => n + g.length, 0);
+                    const isLast = gi === exportPages.length - 1;
+                    return (
+                      <div
+                        key={gi}
+                        className="invoice-print"
+                        style={{
+                          width: 794,
+                          height: 1123,
+                          background: "#fff",
+                          position: "relative",
+                          overflow: "hidden",
+                          padding: 48,
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            width: "100%",
+                            minHeight: 1027,
+                            background: "#fff",
+                          }}
+                        >
+                          {isLast && (
+                            <StampSignatureLayer
+                              stamp={
+                                form.show_stamp
+                                  ? form.stamp?.data
+                                    ? form.stamp
+                                    : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
+                                  : undefined
+                              }
+                              signature={
+                                form.show_signature
+                                  ? form.signature?.data
+                                    ? form.signature
+                                    : (companyStampSig ?? EMPTY_STAMP_SIG).signature
+                                  : undefined
+                              }
+                              onStampMove={() => {}}
+                              onSignatureMove={() => {}}
+                            />
+                          )}
+                          <InvoiceView
+                            form={form}
+                            pageItems={group}
+                            itemStartIndex={startIdx}
+                            showTotals={isLast}
+                            showFooter={isLast}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {previewPages > 1 && (
               <div className="no-print flex items-center justify-center gap-2 mt-2">
@@ -2331,10 +2610,31 @@ function Editor({
                   {form.number || "Invoice preview"}
                 </h2>
                 <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
-                  Page 1 of {pageCount}
+                  Page {viewPage} of {viewPageCount}
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                {viewPageCount > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
+                      disabled={viewPage <= 1}
+                      onClick={() => setViewPage((p) => Math.max(1, p - 1))}
+                    >
+                      Prev
+                    </button>
+                    <span className="text-xs text-brand-500 font-medium w-16 text-center">
+                      {viewPage} / {viewPageCount}
+                    </span>
+                    <button
+                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
+                      disabled={viewPage >= viewPageCount}
+                      onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
                 <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
                   <Download size={14} /> PDF
                 </button>
@@ -2351,21 +2651,42 @@ function Editor({
               <div className="mx-auto max-w-5xl">
                 <div
                   className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]"
-                  ref={viewPreviewRef}
                 >
                   <div style={{ position: "relative", minHeight: 1059 }}>
                     <StampSignatureLayer
-                      stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
-                      signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
-                      onStampMove={(x, y) =>
-                        setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))
+                      stamp={
+                        form.show_stamp
+                          ? form.stamp?.data
+                            ? form.stamp
+                            : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
+                          : undefined
                       }
-                      onSignatureMove={(x, y) =>
-                        setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
+                      signature={
+                        form.show_signature
+                          ? form.signature?.data
+                            ? form.signature
+                            : (companyStampSig ?? EMPTY_STAMP_SIG).signature
+                          : undefined
                       }
+                      onStampMove={(x, y) => {
+                        const base = form.stamp?.data ? form.stamp : companyStampSig.stamp;
+                        if (base) setForm({ ...form, stamp: { ...base, x, y } });
+                      }}
+                      onSignatureMove={(x, y) => {
+                        const base = form.signature?.data
+                          ? form.signature
+                          : companyStampSig.signature;
+                        if (base) setForm({ ...form, signature: { ...base, x, y } });
+                      }}
                     />
-                    <InvoiceView form={form} />
-                    {showBank && (
+                    <InvoiceView
+                      form={form}
+                      pageItems={viewPages[viewPageIdx] ?? []}
+                      itemStartIndex={viewPageStart}
+                      showTotals={isLastViewPage}
+                      showFooter={isLastViewPage}
+                    />
+                    {showBank && isLastViewPage && (
                       <DraggableBlock
                         x={bankX}
                         y={bankY}
@@ -2379,11 +2700,6 @@ function Editor({
                     )}
                   </div>
                 </div>
-                {pageCount > 1 && (
-                  <p className="text-center text-xs text-brand-500 mt-3 font-medium">
-                    Page 1 of {pageCount} — scroll to see all pages
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -2563,10 +2879,29 @@ function CustomerModal({
 
 /* ---------------- Invoice templates ---------------- */
 
-function InvoiceView({ form }: { form: Form }) {
+function InvoiceView({
+  form,
+  pageItems,
+  itemStartIndex = 0,
+  showTotals = true,
+  showFooter = true,
+}: {
+  form: Form;
+  /** When set, render only these items (one page of a multi-page invoice). */
+  pageItems?: Item[];
+  /** SL/serial offset so numbering continues across pages. */
+  itemStartIndex?: number;
+  /** Subtotal/total block — shown only on the final page of a multi-page doc. */
+  showTotals?: boolean;
+  /** Notes/terms footer — shown only on the final page. */
+  showFooter?: boolean;
+}) {
+  // Totals always reflect the WHOLE invoice (full form.items), even though a
+  // single page may render only a slice — so the last-page total is correct.
   const t = totals(form);
   const ccy = form.currency || "AED";
   const m = (v: number) => money(v, ccy);
+  const itemsToRender = pageItems ?? form.items;
 
   // Resolve custom templates to their base layout for rendering
   const templateId = form.template?.startsWith("custom-")
@@ -2588,6 +2923,7 @@ function InvoiceView({ form }: { form: Form }) {
           style={{ background: headerBg, color: headerBg ? "#fff" : a }}
           className={bordered ? "" : "border-b-2"}
         >
+          <th className="text-right py-2 px-2 font-semibold w-8">SL</th>
           <th className="text-left py-2 px-2 font-semibold">Description</th>
           <th className="text-right py-2 px-2 font-semibold w-14">Qty</th>
           <th className="text-right py-2 px-2 font-semibold w-14">Unit</th>
@@ -2601,12 +2937,15 @@ function InvoiceView({ form }: { form: Form }) {
         </tr>
       </thead>
       <tbody>
-        {form.items.map((it, i) => (
+        {itemsToRender.map((it, i) => (
           <tr
             key={i}
             className="border-b border-neutral-200"
             style={bordered ? { borderColor: "#000" } : undefined}
           >
+            <td className="py-2 px-2 text-right text-neutral-500 tabular-nums">
+              {itemStartIndex + i + 1}
+            </td>
             <td className="py-2 px-2">{it.description || "—"}</td>
             <td className="py-2 px-2 text-right">{it.qty}</td>
             <td className="py-2 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
@@ -2620,7 +2959,7 @@ function InvoiceView({ form }: { form: Form }) {
             ))}
             <td className="py-2 px-2 text-right">{m(it.unit_price)}</td>
             <td className="py-2 px-2 text-right">
-              {m((it.qty || 0) * (it.unit_price || 0))}
+              {m(invoiceLineAmount(it, form.unit_price_formula))}
             </td>
           </tr>
         ))}
@@ -2628,23 +2967,24 @@ function InvoiceView({ form }: { form: Form }) {
     </table>
   );
 
-  const Totals = () => (
-    <div className="ml-auto w-72 mt-6 text-sm">
-      <Row k="Subtotal" v={m(t.subtotal)} />
-      {form.discount > 0 && <Row k="Discount" v={`- ${m(form.discount)}`} />}
-      {(form.tax_rate || 0) > 0 && <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />}
-      <div
-        className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
-        style={{ borderColor: a, color: a }}
-      >
-        <span>Total</span>
-        <span>{m(t.total)}</span>
+  const Totals = () =>
+    showTotals ? (
+      <div className="ml-auto w-72 mt-6 text-sm">
+        <Row k="Subtotal" v={m(t.subtotal)} />
+        {form.discount > 0 && <Row k="Discount" v={`- ${m(form.discount)}`} />}
+        {(form.tax_rate || 0) > 0 && <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />}
+        <div
+          className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
+          style={{ borderColor: a, color: a }}
+        >
+          <span>Total</span>
+          <span>{m(t.total)}</span>
+        </div>
       </div>
-    </div>
-  );
+    ) : null;
 
   const Footer = () =>
-    form.notes || form.terms ? (
+    showFooter && (form.notes || form.terms) ? (
       <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
         {form.notes && <p>{form.notes}</p>}
         {form.terms && <p className="text-neutral-400">{form.terms}</p>}

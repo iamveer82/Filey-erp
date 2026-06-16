@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, TrendingUp, Wallet, Receipt, Banknote, Sparkles } from "lucide-react";
+import {
+  Plus,
+  TrendingUp,
+  Wallet,
+  Receipt,
+  Banknote,
+  Sparkles,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -27,6 +36,9 @@ export default function Accounting() {
   const [tab, setTab] = useState<"journal" | "accounts">("journal");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
+  const { confirm, toast } = useUI();
 
   const load = () => {
     setError("");
@@ -157,6 +169,13 @@ export default function Accounting() {
               key: "desc",
               label: "Description",
               sortValue: (t) => t.description ?? "",
+              editable: {
+                value: (t) => t.description ?? "",
+                onSave: async (t, v) => {
+                  await fin.updateTransaction(t.id, { description: v });
+                  load();
+                },
+              },
               render: (t) => t.description ?? "—",
             },
             {
@@ -164,6 +183,49 @@ export default function Accounting() {
               label: "Amount",
               sortValue: (t) => t.amount,
               render: (t) => <span className="font-medium">{aed(t.amount)}</span>,
+            },
+            {
+              key: "actions",
+              label: "",
+              render: (t) => (
+                <div className="flex items-center justify-end gap-1" data-no-row-click>
+                  <button
+                    className="btn-ghost h-8 px-2.5 text-xs"
+                    title="Edit description"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTxn(t);
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    className="btn-danger h-8 px-2.5 text-xs"
+                    title="Delete entry"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (
+                        await confirm({
+                          title: "Delete journal entry",
+                          message: `Delete ${t.description || "this entry"}? This will restore the account balance.`,
+                          confirmLabel: "Delete",
+                          danger: true,
+                        })
+                      ) {
+                        try {
+                          await fin.deleteTransaction(t.id);
+                          load();
+                          toast.success("Entry deleted");
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed to delete entry");
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ),
             },
           ]}
         />
@@ -177,6 +239,13 @@ export default function Accounting() {
               key: "code",
               label: "Code",
               sortValue: (a) => a.code,
+              editable: {
+                value: (a) => a.code,
+                onSave: async (a, v) => {
+                  await fin.updateAccount(a.id, { code: v });
+                  load();
+                },
+              },
               render: (a) => (
                 <span className="font-mono text-xs text-brand-500">{a.code}</span>
               ),
@@ -185,6 +254,13 @@ export default function Accounting() {
               key: "name",
               label: "Account",
               sortValue: (a) => a.name,
+              editable: {
+                value: (a) => a.name,
+                onSave: async (a, v) => {
+                  await fin.updateAccount(a.id, { name: v });
+                  load();
+                },
+              },
               render: (a) => <span className="font-medium text-ink">{a.name}</span>,
             },
             {
@@ -199,24 +275,77 @@ export default function Accounting() {
               sortValue: (a) => a.balance,
               render: (a) => <span className="font-medium">{aed(a.balance)}</span>,
             },
+            {
+              key: "actions",
+              label: "",
+              render: (a) => (
+                <div className="flex items-center justify-end gap-1" data-no-row-click>
+                  <button
+                    className="btn-ghost h-8 px-2.5 text-xs"
+                    title="Edit account"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingAccount(a);
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    className="btn-danger h-8 px-2.5 text-xs"
+                    title="Delete account"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (
+                        await confirm({
+                          title: "Delete account",
+                          message: `Delete "${a.name}"? Any balance will be zeroed out with an offsetting entry.`,
+                          confirmLabel: "Delete",
+                          danger: true,
+                        })
+                      ) {
+                        try {
+                          await fin.deleteAccount(a.id);
+                          load();
+                          toast.success("Account deleted");
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed to delete account");
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ),
+            },
           ]}
         />
       )}
 
       <AccountModal
         open={acctOpen}
-        onClose={() => setAcctOpen(false)}
+        editing={editingAccount}
+        onClose={() => {
+          setAcctOpen(false);
+          setEditingAccount(null);
+        }}
         onSaved={() => {
           setAcctOpen(false);
+          setEditingAccount(null);
           load();
         }}
       />
       <JournalModal
-        open={jOpen}
+        open={jOpen || !!editingTxn}
+        txn={editingTxn}
         accounts={accounts}
-        onClose={() => setJOpen(false)}
+        onClose={() => {
+          setJOpen(false);
+          setEditingTxn(null);
+        }}
         onSaved={() => {
           setJOpen(false);
+          setEditingTxn(null);
           load();
         }}
       />
@@ -226,10 +355,12 @@ export default function Accounting() {
 
 function AccountModal({
   open,
+  editing,
   onClose,
   onSaved,
 }: {
   open: boolean;
+  editing?: Account | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -241,17 +372,27 @@ function AccountModal({
     balance: 0,
   });
   const [touched, setTouched] = useState(false);
+  const isEdit = !!editing;
   useEffect(() => {
     if (open) {
-      setF({ code: "", name: "", account_type: "asset", balance: 0 });
+      if (editing) {
+        setF({
+          code: editing.code,
+          name: editing.name,
+          account_type: editing.account_type,
+          balance: editing.balance,
+        });
+      } else {
+        setF({ code: "", name: "", account_type: "asset", balance: 0 });
+      }
       setTouched(false);
     }
-  }, [open]);
+  }, [open, editing]);
   const codeErr = !f.code.trim();
   const nameErr = !f.name.trim();
   const valid = !codeErr && !nameErr;
   return (
-    <Modal open={open} onClose={onClose} title="New Account">
+    <Modal open={open} onClose={onClose} title={isEdit ? "Edit Account" : "New Account"}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Code *">
@@ -311,12 +452,20 @@ function AccountModal({
             setTouched(true);
             if (!valid) return;
             try {
-              await fin.createAccount({
-                code: f.code,
-                name: f.name,
-                account_type: f.account_type,
-                balance: f.balance,
-              } as Omit<Account, "id">);
+              if (isEdit && editing) {
+                await fin.updateAccount(editing.id, {
+                  code: f.code,
+                  name: f.name,
+                  account_type: f.account_type,
+                });
+              } else {
+                await fin.createAccount({
+                  code: f.code,
+                  name: f.name,
+                  account_type: f.account_type,
+                  balance: f.balance,
+                } as Omit<Account, "id">);
+              }
               onSaved();
             } catch (e: any) {
               toast.error(e?.message || "Failed to save account");
@@ -332,39 +481,60 @@ function AccountModal({
 
 function JournalModal({
   open,
+  txn,
   accounts,
   onClose,
   onSaved,
 }: {
   open: boolean;
+  txn?: Txn | null;
   accounts: Account[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { toast } = useUI();
+  const isEdit = !!txn;
   const [f, setF] = useState({
     account_id: 0,
     txn_type: "debit",
     amount: 0,
     description: "",
+    txn_date: new Date().toISOString().slice(0, 10),
   });
   const firstAcct = useMemo(() => accounts[0]?.id ?? 0, [accounts]);
   useEffect(() => {
-    if (open)
-      setF({
-        account_id: firstAcct,
-        txn_type: "debit",
-        amount: 0,
-        description: "",
-      });
-  }, [open, firstAcct]);
+    if (open) {
+      if (txn) {
+        setF({
+          account_id: txn.account_id,
+          txn_type: txn.txn_type as "debit" | "credit",
+          amount: txn.amount,
+          description: txn.description ?? "",
+          txn_date: txn.txn_date,
+        });
+      } else {
+        setF({
+          account_id: firstAcct,
+          txn_type: "debit",
+          amount: 0,
+          description: "",
+          txn_date: new Date().toISOString().slice(0, 10),
+        });
+      }
+    }
+  }, [open, txn, firstAcct]);
   return (
-    <Modal open={open} onClose={onClose} title="New Journal Entry">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isEdit ? "Edit Journal Entry" : "New Journal Entry"}
+    >
       <div className="space-y-3">
         <Field label="Account">
           <select
             className="select"
             value={f.account_id}
+            disabled={isEdit}
             onChange={(e) => setF({ ...f, account_id: numInput(e.target.value) })}
           >
             {accounts.length === 0 && <option value={0}>No accounts</option>}
@@ -380,6 +550,7 @@ function JournalModal({
             <select
               className="select"
               value={f.txn_type}
+              disabled={isEdit}
               onChange={(e) => setF({ ...f, txn_type: e.target.value })}
             >
               <option value="debit">Debit</option>
@@ -391,6 +562,7 @@ function JournalModal({
               type="number"
               className="input"
               placeholder="0"
+              disabled={isEdit}
               value={f.amount || ""}
               onChange={(e) => setF({ ...f, amount: numInput(e.target.value) })}
             />
@@ -403,6 +575,14 @@ function JournalModal({
             onChange={(e) => setF({ ...f, description: e.target.value })}
           />
         </Field>
+        <Field label="Date">
+          <input
+            type="date"
+            className="input"
+            value={f.txn_date}
+            onChange={(e) => setF({ ...f, txn_date: e.target.value })}
+          />
+        </Field>
       </div>
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose}>
@@ -413,19 +593,26 @@ function JournalModal({
           disabled={!f.account_id || !f.amount}
           onClick={async () => {
             try {
-              await fin.postTransaction(
-                f.account_id,
-                f.txn_type,
-                f.amount,
-                f.description || null
-              );
+              if (isEdit && txn) {
+                await fin.updateTransaction(txn.id, {
+                  description: f.description,
+                  txn_date: f.txn_date,
+                });
+              } else {
+                await fin.postTransaction(
+                  f.account_id,
+                  f.txn_type,
+                  f.amount,
+                  f.description || null
+                );
+              }
               onSaved();
             } catch (e: any) {
               toast.error(e?.message || "Failed to post journal entry");
             }
           }}
         >
-          Post Entry
+          {isEdit ? "Save Changes" : "Post Entry"}
         </button>
       </div>
     </Modal>

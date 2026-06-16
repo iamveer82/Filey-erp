@@ -209,6 +209,91 @@ export function StampSigCard({
   );
 }
 
+/* ---------------- Compact per-document adjuster (opacity + crop) ----------------
+ * Rendered on a document editor when the stamp/signature toggle is ON. Edits a
+ * per-document copy of the StampSig (image inherited from company settings) so
+ * each document can tune opacity and crop without changing the saved company
+ * asset. Position is set by dragging the watermark directly on the sheet. */
+export function StampSigAdjust({
+  label,
+  icon,
+  value,
+  onChange,
+}: {
+  label: string;
+  icon?: ReactNode;
+  value: StampSig;
+  onChange: (v: StampSig) => void;
+}) {
+  const s = (value.scale ?? 100) / 100;
+  return (
+    <div className="rounded-2xl border border-brand-200 p-3 dark:border-[#2C2C2E]">
+      <div className="flex items-center gap-2 text-ink font-medium text-xs">
+        {icon} {label}
+      </div>
+      {/* live preview — mirrors the on-page watermark blend */}
+      <div className="relative mt-2 flex items-center justify-center py-3 rounded-2xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[72px]">
+        <CompanyAssetImage
+          src={value.data}
+          alt={label}
+          className="object-contain"
+          style={{
+            width: `${140 * s}px`,
+            maxHeight: `${64 * s}px`,
+            clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`,
+            opacity: value.opacity / 100,
+            mixBlendMode: "multiply",
+          }}
+        />
+      </div>
+      {/* opacity */}
+      <label className="block mt-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[11px] font-medium text-brand-500">Opacity</span>
+          <span className="text-[11px] tabular-nums text-brand-600">{value.opacity}%</span>
+        </div>
+        <input
+          type="range"
+          min={5}
+          max={100}
+          value={value.opacity}
+          className="w-full h-1.5 accent-brand-500 cursor-pointer"
+          onChange={(e) => onChange({ ...value, opacity: Number(e.target.value) })}
+        />
+      </label>
+      {/* crop edges */}
+      <div className="mt-3">
+        <p className="text-[11px] font-medium text-brand-400 mb-1.5">Crop edges (%)</p>
+        <div className="grid grid-cols-4 gap-1.5">
+          {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map((k, i) => (
+            <div
+              key={k}
+              className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+            >
+              <span className="text-[10px] tabular-nums font-medium text-brand-400">
+                {["T", "R", "B", "L"][i]}
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={90}
+                value={value[k]}
+                className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none dark:text-[#DDE0E4]"
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)),
+                  })
+                }
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Draggable overlay (rendered on the A4 sheet) ---------------- */
 
 function DraggableMark({
