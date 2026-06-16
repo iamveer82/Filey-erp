@@ -176,7 +176,7 @@ export default function StampStudio({
               pwdRef.current = pw;
               updatePassword(pw);
             })
-            .catch(() => {});
+            .catch((e) => console.warn("Failed to prompt for PDF password", e));
         };
         const pdf = await task.promise;
         if (dead) return;

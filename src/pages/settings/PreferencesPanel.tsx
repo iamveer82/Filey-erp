@@ -32,6 +32,17 @@ export function useSettings() {
   return { get, set, ready };
 }
 
+export function useBranding() {
+  const { get, set, ready } = useSettings();
+  return {
+    get,
+    set,
+    brandColor: get("brand_color", "#FFD600"),
+    setBrandColor: (v: string) => set("brand_color", v),
+    ready,
+  };
+}
+
 export function Toggle({
   on,
   onChange,
@@ -59,7 +70,7 @@ export function Toggle({
 
 export default function PreferencesPanel() {
   const { toast } = useUI();
-  const { get, set, ready } = useSettings();
+  const { get, set, ready, brandColor, setBrandColor } = useBranding();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   useEffect(() => {
     billing.getCompany().then(setCompany).catch((e) => toast.error("Failed to load company profile: " + (e instanceof Error ? e.message : e)));
@@ -107,6 +118,27 @@ export default function PreferencesPanel() {
               onBlur={(e) => set("pref.page_size", e.target.value || "25")}
             />
           </Field>
+          <Field label="Brand colour">
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={brandColor}
+                onChange={(e) => setBrandColor(e.target.value)}
+                className="h-10 w-14 rounded-xl border-0 p-0 cursor-pointer"
+              />
+              <span className="text-sm text-brand-500">{brandColor}</span>
+              <span
+                className="color-orb ml-auto"
+                style={{
+                  width: 28,
+                  height: 28,
+                  "--accent1": brandColor,
+                  "--accent2": blend(brandColor, "#FF8C00", 0.3),
+                  "--accent3": blend(brandColor, "#FFFFFF", 0.25),
+                } as React.CSSProperties}
+              />
+            </div>
+          </Field>
           <label className="flex items-center justify-between">
             <span className="text-sm text-brand-700">
               Show KPI change indicators
@@ -123,4 +155,18 @@ export default function PreferencesPanel() {
       </div>
     </div>
   );
+}
+
+/** Blend two hex colours. amount 0 = a, 1 = b. */
+function blend(a: string, b: string, amount: number): string {
+  const ah = parseInt(a.slice(1, 3), 16);
+  const ag = parseInt(a.slice(3, 5), 16);
+  const ab = parseInt(a.slice(5, 7), 16);
+  const bh = parseInt(b.slice(1, 3), 16);
+  const bg = parseInt(b.slice(3, 5), 16);
+  const bb = parseInt(b.slice(5, 7), 16);
+  const rh = Math.round(ah + (bh - ah) * amount);
+  const rg = Math.round(ag + (bg - ag) * amount);
+  const rb = Math.round(ab + (bb - ab) * amount);
+  return `#${rh.toString(16).padStart(2, "0")}${rg.toString(16).padStart(2, "0")}${rb.toString(16).padStart(2, "0")}`;
 }

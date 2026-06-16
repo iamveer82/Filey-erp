@@ -30,6 +30,7 @@ import successIcon from "../assets/icons/success.svg";
 import warningIcon from "../assets/icons/warning.svg";
 import dangerIcon from "../assets/icons/danger.svg";
 import emptyIcon from "../assets/icons/empty.svg";
+import outstandingIcon from "../assets/icons/low-stock.svg";
 
 const iconMap: Record<string, string> = {
   overview: overviewIcon,
@@ -84,6 +85,7 @@ const iconMap: Record<string, string> = {
   documents: filesIcon,
   money: moneyIcon,
   revenue: moneyIcon,
+  outstanding: outstandingIcon,
   reports: reportsIcon,
   report: reportsIcon,
   analytics: reportsIcon,

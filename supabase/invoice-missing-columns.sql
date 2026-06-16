@@ -24,3 +24,11 @@ alter table invoice_doc_items add column if not exists unit text;
 
 -- invoice_doc_items: per-item custom field values (map of column key → value)
 alter table invoice_doc_items add column if not exists custom jsonb;
+
+-- show/hide toggles for stamp & signature per document
+alter table invoice_docs add column if not exists show_stamp boolean not null default false;
+alter table invoice_docs add column if not exists show_signature boolean not null default false;
+alter table quotations add column if not exists show_stamp boolean not null default false;
+alter table quotations add column if not exists show_signature boolean not null default false;
+alter table purchase_orders add column if not exists show_stamp boolean not null default false;
+alter table purchase_orders add column if not exists show_signature boolean not null default false;

@@ -77,7 +77,7 @@ export function saveCustomFields(
 ): void {
   try {
     localStorage.setItem(storageKey(module), JSON.stringify(defs));
-    void tools.setSetting(settingsKey(module), JSON.stringify(defs)).catch(() => {});
+    void tools.setSetting(settingsKey(module), JSON.stringify(defs)).catch((e) => console.warn("Failed to sync custom fields to server", e));
   } catch (e) {
     console.warn("Failed to save custom fields", e);
     /* storage full / unavailable */

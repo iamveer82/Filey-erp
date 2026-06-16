@@ -20,15 +20,17 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
    - `billing-columns-lockdown.sql` — billing column hardening
    - `stripe-billing.sql` — Stripe subscription tables
    - `customer-portal.sql` — customer portal access
+   - `2026-06-16-sms-otp-templates.sql` — SMS/OTP/template + CRM/ERP custom fields (`sms_providers`, `sms_templates`, `sms_logs`, `otp_codes`, `custom_entity_fields`, `custom_entity_values`) and `products.unit`
 3. `verify-rls.sql` — run last to assert RLS is enabled everywhere (check, not a change).
 
-## Prod state — verified 2026-06-05
+## Prod state — verified 2026-06-16
 
 All of the above are **applied** to prod project `voyrjqgaypiylwskkwpr`. Verified via
 `information_schema` (tables: `follow_ups`, `tool_jobs`, `invoice_recurrence`,
-`user_assets`, `user_files`, `invoice_payments`; columns: `crm_customers.trn`,
-`invoice_docs.{doc_type,stamp,custom_columns}`, `invoice_doc_items.unit`,
-`products.custom_fields`).
+`user_assets`, `user_files`, `invoice_payments`, `sms_providers`, `sms_templates`,
+`sms_logs`, `otp_codes`, `custom_entity_fields`, `custom_entity_values`;
+columns: `crm_customers.trn`, `invoice_docs.{doc_type,stamp,custom_columns}`,
+`invoice_doc_items.unit`, `products.{custom_fields,unit}`).
 
 ## Convention — prevents the recurring drift bug
 

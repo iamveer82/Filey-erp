@@ -14,7 +14,6 @@ import {
   FileText,
   Upload,
   Stamp,
-  PenTool,
   Landmark,
   Monitor,
   Smartphone,
@@ -43,19 +42,18 @@ import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import { Modal, Field } from "../components/ui";
 import FitPreview from "../components/FitPreview";
-import {
-  StampSigCard,
-  StampSignatureLayer,
-  STAMP_DEFAULT,
-  SIGN_DEFAULT,
-  type StampSig,
-} from "../components/StampSignature";
+import { StampSignatureLayer } from "../components/StampSignature";
 import {
   BankDetailsBlock,
   loadBankInfo,
   EMPTY_BANK,
   type BankInfo,
 } from "../components/BankDetails";
+import {
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import TemplateDesigner, {
   loadCustomTemplates,
@@ -114,10 +112,11 @@ export default function Quoting() {
   const [viewOpen, setViewOpen] = useState(false);
   const [saved, setSaved] = useState<QuoteTemplate[]>([]);
   const [designing, setDesigning] = useState(false);
-  const [stamp, setStamp] = useState<StampSig | undefined>(undefined);
-  const [signature, setSignature] = useState<StampSig | undefined>(undefined);
   const [showBank, setShowBank] = useState(false);
+  const [showStamp, setShowStamp] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [customTemplates, setCustomTemplates] =
     useState<CustomTemplate[]>(loadCustomTemplates);
   const [zoom, setZoom] = useState(100);
@@ -330,6 +329,8 @@ export default function Quoting() {
       customer_trn: trn,
       customer_email: customer?.email,
       terms,
+      show_stamp: showStamp,
+      show_signature: showSignature,
       items: lines.map((l) => ({
         product: l.product,
         sku: l.sku || undefined,
@@ -693,9 +694,10 @@ export default function Quoting() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
-        {/* builder */}
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           <Step
             n={1}
             title="Choose Template"
@@ -1032,32 +1034,37 @@ export default function Quoting() {
             </div>
           </Step>
 
-          <Step
-            n={4}
-            title="Stamp & Signature"
-            subtitle="Upload your stamp and signature, then drag them onto the preview to position them. They appear on the PDF."
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <StampSigCard
-                label="Stamp"
-                icon={<Stamp size={15} />}
-                value={stamp}
-                onChange={setStamp}
-                defaults={STAMP_DEFAULT}
-              />
-              <StampSigCard
-                label="Signature"
-                icon={<PenTool size={15} />}
-                value={signature}
-                onChange={setSignature}
-                defaults={SIGN_DEFAULT}
-              />
+          <Step n={4} title="Stamp & Signature">
+            <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+              <div className="flex items-center gap-2 text-ink font-medium text-sm mb-3">
+                <Stamp size={15} /> Company Stamp & Signature
+              </div>
+              <p className="text-xs text-brand-500 mb-3">Images are managed in Settings → Company Details.</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowStamp((v) => !v)}
+                  className={`btn-ghost text-xs ${showStamp ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.stamp?.data}
+                >
+                  Stamp: {showStamp ? "On" : "Off"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSignature((v) => !v)}
+                  className={`btn-ghost text-xs ${showSignature ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.signature?.data}
+                >
+                  Signature: {showSignature ? "On" : "Off"}
+                </button>
+              </div>
             </div>
           </Step>
-        </div>
-
-        {/* preview */}
-        <div className="xl:sticky xl:top-2 space-y-4">
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           {designing && (
             <TemplateDesigner
               onSave={(tpl) => {
@@ -1085,11 +1092,11 @@ export default function Quoting() {
             <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom}>
               <div ref={quoteRef} className="relative">
                 <StampSignatureLayer
-                  stamp={stamp}
-                  signature={signature}
-                  onStampMove={(x, y) => setStamp((s) => (s ? { ...s, x, y } : s))}
+                  stamp={showStamp ? companyStampSig.stamp : undefined}
+                  signature={showSignature ? companyStampSig.signature : undefined}
+                  onStampMove={(x, y) => setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))}
                   onSignatureMove={(x, y) =>
-                    setSignature((s) => (s ? { ...s, x, y } : s))
+                    setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
                   }
                 />
                 {renderQuoteBody()}
@@ -1181,13 +1188,13 @@ export default function Quoting() {
                     >
                       <div className="relative">
                         <StampSignatureLayer
-                          stamp={stamp}
-                          signature={signature}
+                          stamp={showStamp ? companyStampSig.stamp : undefined}
+                          signature={showSignature ? companyStampSig.signature : undefined}
                           onStampMove={(x, y) =>
-                            setStamp((s) => (s ? { ...s, x, y } : s))
+                            setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))
                           }
                           onSignatureMove={(x, y) =>
-                            setSignature((s) => (s ? { ...s, x, y } : s))
+                            setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
                           }
                         />
                         {renderQuoteBody()}
@@ -1231,8 +1238,9 @@ export default function Quoting() {
               </button>
             </div>
           </div>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       <CustomerModal
         open={custModal}

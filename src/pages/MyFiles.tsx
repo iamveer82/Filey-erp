@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FolderOpen,
@@ -12,6 +12,7 @@ import {
   ExternalLink,
   X,
   ChevronRight,
+  UploadCloud,
 } from "lucide-react";
 import { FileIcon } from "../components/BrandIcon";
 import {
@@ -49,13 +50,15 @@ const folderMeta = (key: string) =>
 
 export default function MyFiles() {
   const { user } = useAuth();
-  const { files, loading, remove, rename } = useFiles();
+  const { files, loading, remove, rename, upload } = useFiles();
   const { toast, confirm, prompt } = useUI();
   const navigate = useNavigate();
 
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [preview, setPreview] = useState<SavedFile | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Group files into folders by document type.
   const folders = useMemo(() => {
@@ -79,6 +82,21 @@ export default function MyFiles() {
     () => (openFolder ? files.filter((f) => folderOf(f) === openFolder) : []),
     [files, openFolder]
   );
+
+  const doUpload = async (inputFiles: FileList | null) => {
+    if (!inputFiles?.length) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(inputFiles)) {
+        await upload(file);
+      }
+      toast.success(`${inputFiles.length} file${inputFiles.length > 1 ? "s" : ""} uploaded.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // If the open folder empties out (last file deleted), drop back to the grid.
   useEffect(() => {
@@ -202,28 +220,30 @@ export default function MyFiles() {
 
   /* ---------------- folder contents (full page) ---------------- */
   if (openFolder) {
-    const meta = folderMeta(openFolder);
     return (
       <div className="animate-fade-up">
-        <div className="mb-5 flex items-center gap-3">
-          <button
-            className="rounded-2xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
-            onClick={() => setOpenFolder(null)}
-            aria-label="Back to folders"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
-            <FolderOpen size={20} />
-          </span>
-          <div>
-            <h1 className="text-lg font-medium text-ink">{meta.label}</h1>
-            <p className="text-xs text-brand-500">
-              {folderFiles.length} document{folderFiles.length === 1 ? "" : "s"}
-            </p>
-          </div>
-        </div>
-
+        <Header back={() => setOpenFolder(null)}>
+          {<>
+            <input
+              ref={fileInputRef}
+              type="file"
+              id="folder-file-upload"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                doUpload(e.target.files);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
+            <label
+              htmlFor="folder-file-upload"
+              className="btn-primary cursor-pointer inline-flex items-center gap-2"
+            >
+              {uploading ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
+              Upload
+            </label>
+          </>}
+        </Header>
         <div className="space-y-2">
           {folderFiles.map((f) => (
             <div
@@ -276,7 +296,28 @@ export default function MyFiles() {
   /* ---------------- folder grid (home) ---------------- */
   return (
     <div className="animate-fade-up">
-      <Header />
+      <Header>
+        {<>
+          <input
+            ref={fileInputRef}
+            type="file"
+            id="file-upload"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              doUpload(e.target.files);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+          />
+          <label
+            htmlFor="file-upload"
+            className="btn-primary cursor-pointer inline-flex items-center gap-2"
+          >
+            {uploading ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />}
+            Upload
+          </label>
+        </>}
+      </Header>
       {!files.length ? (
         <div className="card grid place-items-center py-16 text-center">
           <FolderOpen size={28} className="mb-2 text-brand-300" />
@@ -315,19 +356,29 @@ export default function MyFiles() {
   );
 }
 
-function Header() {
+function Header({ children, back }: { children?: React.ReactNode; back?: () => void }) {
   return (
-    <div className="mb-5 flex items-center gap-3">
-      <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
-        <FolderOpen size={20} />
-      </span>
-      <div>
-        <p className="text-[10px] font-medium text-brand-400">Files</p>
-        <h1 className="text-lg font-medium text-ink">My Files</h1>
-        <p className="text-xs text-brand-500">
-          Every document you generate, filed by type
-        </p>
+    <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-3">
+        {back && (
+          <button
+            className="rounded-2xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+            onClick={back}
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
+          <FolderOpen size={20} />
+        </span>
+        <div>
+          <p className="text-[10px] font-medium text-brand-400">Files</p>
+          <h1 className="text-lg font-medium text-ink">My Files</h1>
+          <p className="text-xs text-brand-500">Every document you generate, filed by type</p>
+        </div>
       </div>
+      {children}
     </div>
   );
 }

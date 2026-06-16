@@ -393,7 +393,9 @@
 393|  description text not null default '',
 394|  qty numeric(14,3) not null default 1,
 395|  unit_price numeric(14,2) not null default 0,
-396|  position bigint not null default 0,
+396|  unit text,
+397|  custom jsonb,
+398|  position bigint not null default 0,
 397|  created_at timestamptz not null default now(),
 398|  updated_at timestamptz not null default now()
 399|);

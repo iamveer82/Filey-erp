@@ -191,10 +191,70 @@ export function folderOf(f: SavedFile): string {
   return FILE_FOLDERS.some((d) => d.key === f.tool) ? (f.tool as string) : "other";
 }
 
+/** Upload a user-selected file directly to My Files. */
+export async function uploadUserFile(file: File, tool?: string): Promise<void> {
+  const uid = await userId();
+  if (!uid || !supabase) throw new Error("Sign in to upload files.");
+  const id = newId();
+  const mime = file.type || mimeOf(file.name);
+  const path = `${uid}/${id}/${file.name}`;
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const blob = new Blob([bytes], { type: mime });
+  const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  if (up.error) throw up.error;
+  const ins = await supabase.from("user_files").insert({
+    id,
+    owner: uid,
+    name: file.name,
+    mime,
+    size: bytes.length,
+    storage_path: path,
+    tool: tool ?? null,
+  });
+  if (ins.error) {
+    await supabase.storage.from(BUCKET).remove([path]);
+    throw ins.error;
+  }
+}
+
 export async function deleteFile(f: SavedFile): Promise<void> {
   if (!supabase) return;
   await supabase.storage.from(BUCKET).remove([f.storagePath]);
   await supabase.from("user_files").delete().eq("id", f.id);
+}
+
+
+/** Upload a company-wide asset (stamp/signature/logo/letterhead) to the private
+ * `files` bucket under `{uid}/company/{name}`. Returns the storage path and a
+ * short-lived signed URL the preview can use. The path is what gets persisted in
+ * app_settings so the image follows the user across devices and sessions. */
+export async function uploadCompanyAsset(file: File): Promise<{ path: string; url: string }> {
+  const uid = await userId();
+  if (!uid || !supabase) throw new Error("Sign in to upload company assets.");
+  const id = newId();
+  const mime = file.type || mimeOf(file.name);
+  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${uid}/company/${id}/${safe}`;
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const blob = new Blob([bytes], { type: mime });
+  const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
+  if (up.error) throw up.error;
+  const { data: urlData, error: urlErr } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
+  if (urlErr) throw urlErr;
+  return { path, url: urlData?.signedUrl ?? "" };
+}
+
+/** Re-create a signed URL for a previously-uploaded company asset path. */
+export async function companyAssetUrl(path: string, expiresSec = 300): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, expiresSec);
+  if (error) {
+    console.warn("Failed to create signed URL for company asset", path, error.message);
+    return null;
+  }
+  return data?.signedUrl ?? null;
 }
 
 /** React hook: the signed-in user's saved files + refresh/remove helpers. */
@@ -216,6 +276,10 @@ export function useFiles() {
     files,
     loading,
     refresh,
+    upload: async (file: File, tool?: string) => {
+      await uploadUserFile(file, tool);
+      await refresh();
+    },
     remove: async (f: SavedFile) => {
       await deleteFile(f);
       setFiles((prev) => prev.filter((x) => x.id !== f.id));

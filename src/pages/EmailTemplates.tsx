@@ -32,7 +32,7 @@ function save(t: EmailTemplate[]) {
     console.warn("Failed to save email templates", e);
   }
   // Write-through to Supabase so templates follow the user across devices.
-  void tools.setSetting(SETTING_KEY, JSON.stringify(t)).catch(() => {});
+  void tools.setSetting(SETTING_KEY, JSON.stringify(t)).catch((e) => console.warn("Failed to sync email templates to server", e));
 }
 
 /** Pull email templates saved on other devices; remote wins when present. */

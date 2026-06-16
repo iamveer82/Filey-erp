@@ -25,6 +25,13 @@ import {
   statusTone,
   Field,
 } from "../components/ui";
+import {
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
+import { StampSignatureLayer } from "../components/StampSignature";
 import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, {
   loadCustomTemplates,
@@ -70,6 +77,8 @@ type DcForm = {
   notes: string;
   font: string;
   items: DcItem[];
+  show_stamp?: boolean;
+  show_signature?: boolean;
 };
 
 const DC_TYPES = [
@@ -96,6 +105,8 @@ function blankDc(existing: string[] = []): DcForm {
     driver_name: "",
     notes: "",
     font: "'Plus Jakarta Sans', system-ui, sans-serif",
+    show_stamp: false,
+    show_signature: false,
     items: [{ description: "", qty: 1 }],
   };
 }
@@ -115,6 +126,8 @@ interface DcRecord {
   party_name: string;
   issue_date: string;
   item_count: number;
+  show_stamp?: boolean;
+  show_signature?: boolean;
   created_at: string;
 }
 
@@ -199,6 +212,8 @@ export default function DeliveryChallan() {
             party_name: form.party_name,
             issue_date: form.issue_date,
             item_count: form.items.filter((i) => i.description.trim()).length,
+            show_stamp: form.show_stamp,
+            show_signature: form.show_signature,
             created_at: new Date().toISOString(),
           };
           if (existing >= 0) next[existing] = record;
@@ -354,6 +369,13 @@ function DcEditor({
   const set = <K extends keyof DcForm>(k: K, v: DcForm[K]) =>
     setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+
+  useEffect(() => {
+    loadCompanyStampSig()
+      .then(setCompanyStampSig)
+      .catch((e) => console.warn("Failed to load company stamp/signature", e));
+  }, []);
   const [customTemplates, setCustomTemplates] =
     useState<CustomTemplate[]>(loadCustomTemplates);
   // Pull templates saved on the user's other devices (Supabase-backed).
@@ -442,8 +464,10 @@ function DcEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           {/* Template */}
           <Step
             n={1}
@@ -664,8 +688,32 @@ function DcEditor({
             </div>
           </Step>
 
+          {/* Stamp / Signature */}
+          <Step n={4} title="Stamp & Signature">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex items-center justify-between card !p-3 cursor-pointer">
+                <span className="text-sm font-medium text-ink">Show stamp</span>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={form.show_stamp}
+                  onChange={(e) => set("show_stamp", e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between card !p-3 cursor-pointer">
+                <span className="text-sm font-medium text-ink">Show signature</span>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={form.show_signature}
+                  onChange={(e) => set("show_signature", e.target.checked)}
+                />
+              </label>
+            </div>
+          </Step>
+
           {/* Notes */}
-          <Step n={4} title="Notes">
+          <Step n={5} title="Notes">
             <Field label="Notes / Remarks">
               <textarea
                 className="textarea"
@@ -675,10 +723,12 @@ function DcEditor({
               />
             </Field>
           </Step>
-        </div>
-
-        {/* Preview */}
-        <div className="sticky top-4">
+        
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           {designing && (
             <div className="mb-4">
               <TemplateDesigner
@@ -693,9 +743,11 @@ function DcEditor({
               />
             </div>
           )}
-          <DcPreview form={form} dcRef={dcRef} />
-        </div>
-      </div>
+          <DcPreview form={form} dcRef={dcRef} companyStampSig={companyStampSig} />
+        
+          </div>
+        }
+      />
 
       {viewOpen && (
         <div
@@ -718,7 +770,7 @@ function DcEditor({
                 </button>
               </div>
             </div>
-            <DcPreview form={form} />
+            <DcPreview form={form} companyStampSig={companyStampSig} />
           </div>
         </div>
       )}
@@ -733,9 +785,11 @@ function DcEditor({
 function DcPreview({
   form,
   dcRef,
+  companyStampSig,
 }: {
   form: DcForm;
   dcRef?: React.RefObject<HTMLDivElement | null>;
+  companyStampSig?: CompanyStampSig;
 }) {
   const clean = (s: string) => s || "—";
   const totalQty = form.items.reduce((s, i) => s + i.qty, 0);
@@ -746,9 +800,15 @@ function DcPreview({
   return (
     <div
       ref={dcRef}
-      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
+      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none relative"
       style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
     >
+      <StampSignatureLayer
+        stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
+        signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
+        onStampMove={() => {}}
+        onSignatureMove={() => {}}
+      />
       <div className="p-8 min-h-[700px]">
         {/* Header */}
         <div

@@ -11,7 +11,7 @@ import NotFound from "./pages/NotFound";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
-import Copilot from "./components/Copilot";
+import CopilotKitProvider from "./components/CopilotKit";
 import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
 import { Toaster } from "./components/Toaster";
@@ -54,6 +54,7 @@ function AppRoutes() {
             />
           );
         })}
+        <Route path="/my-files" element={<Navigate to="/files" replace />} />
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/suppliers/:id" element={<SupplierDetail />} />
         <Route path="*" element={<NotFound />} />
@@ -80,7 +81,7 @@ function Gate() {
         <Layout>
           <AppRoutes />
         </Layout>
-        <Copilot />
+        <CopilotKitProvider />
         <CommandPalette />
         <OverdueReminder />
         <Toaster />
@@ -91,11 +92,18 @@ function Gate() {
 
 export default function App() {
   // Public customer portal — shared invoice links open here without auth.
+  // Still wrap in AuthProvider so any lazy-loaded child can safely call useAuth().
   if (typeof window !== "undefined" && window.location.hash.startsWith("#/portal/")) {
     return (
-      <Suspense fallback={<Splash />}>
-        <PortalView />
-      </Suspense>
+      <LanguageProvider>
+        <UIProvider>
+          <AuthProvider>
+            <Suspense fallback={<Splash />}>
+              <PortalView />
+            </Suspense>
+          </AuthProvider>
+        </UIProvider>
+      </LanguageProvider>
     );
   }
   return (

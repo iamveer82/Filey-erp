@@ -99,7 +99,7 @@ function saveCustomTemplates(templates: CustomTemplate[]) {
   // Write-through to Supabase so templates created on one device appear
   // on every device the user logs in from. Fire-and-forget: offline writes
   // simply stay local until the next successful save.
-  void tools.setSetting(SETTING_KEY, JSON.stringify(templates)).catch(() => {});
+  void tools.setSetting(SETTING_KEY, JSON.stringify(templates)).catch((e) => console.warn("Failed to sync custom templates to server", e));
 }
 
 /** Pull the user's templates saved on other devices into local storage.
@@ -119,7 +119,7 @@ export async function syncCustomTemplates(): Promise<CustomTemplate[]> {
     // No remote record yet — seed it from whatever is local.
     const local = loadCustomTemplates();
     if (local.length) {
-      void tools.setSetting(SETTING_KEY, JSON.stringify(local)).catch(() => {});
+      void tools.setSetting(SETTING_KEY, JSON.stringify(local)).catch((e) => console.warn("Failed to sync custom templates to server", e));
     }
     return local;
   } catch (e) {
@@ -170,7 +170,7 @@ export default function TemplateDesigner({
   useEffect(() => {
     loadLetterhead()
       .then(setLh)
-      .catch(() => {});
+      .catch((e) => console.warn("Failed to load letterhead", e));
   }, []);
   const handleSaveLetterhead = async () => {
     try {
@@ -300,6 +300,7 @@ export default function TemplateDesigner({
         </div>
         <button
           onClick={onClose}
+          aria-label="Close"
           className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
         >
           <X size={18} />

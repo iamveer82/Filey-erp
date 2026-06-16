@@ -7,8 +7,11 @@ import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
 import "./index.css";
 
+import { installExtensionBannerGuard } from "./lib/extension-guard";
+
 applyTheme();
 initMonitoring();
+installExtensionBannerGuard();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

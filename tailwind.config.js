@@ -68,11 +68,19 @@ export default {
         border: "#E2E8F0",
       },
       fontFamily: {
-        // Single clean geometric sans across the UI (theme: Plus Jakarta Sans).
-        sans: ['"Plus Jakarta Sans"', "system-ui", "-apple-system", "sans-serif"],
-        display: ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
+        // Linear-style dense UI face for body/navigation/data (loaded in index.html).
+        // 510 is Linear's signature emphasis weight between regular and medium.
+        sans: ['"Inter"', "system-ui", "-apple-system", "sans-serif"],
+        // Plus Jakarta Sans retained for display/chromatic headings and buttons.
+        display: ['"Plus Jakarta Sans"', '"Inter"', "system-ui", "sans-serif"],
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
+      },
+      letterSpacing: {
+        tighter: "-0.04em",
+        tight: "-0.025em",
+        normal: "0",
+        wide: "0.025em",
       },
       spacing: {
         // Fractional / large steps used by the Folder & FileCard art.

@@ -66,6 +66,7 @@ function SortableDealCard({ deal, onClick }: { deal: Deal; onClick: (d: Deal) =>
       <div className="flex items-start gap-2">
         <button
           {...listeners}
+          aria-label="Drag to reorder"
           className="mt-0.5 text-brand-300 hover:text-brand-500 cursor-grab active:cursor-grabbing shrink-0"
         >
           <GripVertical size={15} />

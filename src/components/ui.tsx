@@ -158,14 +158,14 @@ export function MetricCard({
   formatValue?: (n: number) => string;
 }) {
   return (
-    <CardPrimitive className="p-4">
-      <div className="flex items-center gap-3">
+    <CardPrimitive className="p-4 h-full">
+      <div className="flex items-start gap-3 h-full min-h-0">
         {icon && (
-          <div className={cn("rounded-xl p-2 shrink-0", iconClass)} style={{ width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
+          <div className={cn("rounded-xl p-1.5 shrink-0", iconClass)} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
         )}
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-brand-500 leading-4">{label}</p>
-          <p className="text-[22px] leading-7 font-semibold text-ink mt-0.5 tabular-nums">
+        <div className="min-w-0 flex-1 flex flex-col justify-center h-full overflow-hidden">
+          <p className="text-xs font-medium text-brand-500 leading-4 truncate">{label}</p>
+          <p className="text-base sm:text-lg lg:text-[20px] xl:text-[22px] leading-tight font-semibold text-ink mt-0.5 tabular-nums whitespace-nowrap truncate">
             {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
           </p>
         </div>
@@ -194,12 +194,12 @@ export function InfoCard({
   tone?: "default" | "accent" | "dark";
 }) {
   return (
-    <CardPrimitive className={cn("p-4", className)}>
+    <CardPrimitive className={cn("p-4 flex flex-col", className)}>
       <div className="flex items-center justify-between mb-3">
         <p className="font-semibold text-ink text-sm">{title}</p>
         {action}
       </div>
-      {children}
+      <div className="flex-1 min-h-0">{children}</div>
     </CardPrimitive>
   );
 }

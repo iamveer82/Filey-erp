@@ -1,33 +1,22 @@
+import { Home, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { FileQuestion, ArrowLeft, Home } from "lucide-react";
+import { PageHeader } from "../components/ui";
 
 export default function NotFound() {
-  const navigate = useNavigate();
-
+  const nav = useNavigate();
   return (
-    <div className="grid min-h-[80vh] place-items-center px-6">
-      <div className="text-center max-w-md">
-        <div className="mx-auto grid h-20 w-20 place-items-center rounded-2xl bg-brand-100 dark:bg-brand-800">
-          <FileQuestion size={36} className="text-brand-500" />
-        </div>
-        <h1 className="mt-6 font-medium text-5xl font-medium text-ink">404</h1>
-        <p className="mt-2 text-lg font-medium text-ink">Page not found</p>
-        <p className="mt-2 text-sm text-brand-500 leading-relaxed">
-          The page you're looking for doesn't exist or has been moved. Check the URL or go
-          back to your dashboard.
-        </p>
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-4 animate-fade-up">
+      <PageHeader title="Page not found" subtitle="That route doesn't exist in Filey." />
+      <div className="card p-8 text-center max-w-md mx-auto mt-8">
+        <p className="text-5xl font-bold text-brand-200">404</p>
+        <p className="mt-4 text-ink font-medium">We couldn't find the page you requested.</p>
+        <p className="mt-1 text-sm text-brand-500">Check the URL or return to the dashboard.</p>
         <div className="mt-6 flex items-center justify-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="btn-ghost inline-flex items-center gap-2"
-          >
-            <ArrowLeft size={16} /> Go back
+          <button className="btn-ghost" onClick={() => nav(-1)}>
+            <ArrowLeft size={15} /> Back
           </button>
-          <button
-            onClick={() => navigate("/overview")}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <Home size={16} /> Dashboard
+          <button className="btn-primary" onClick={() => nav("/")}>
+            <Home size={15} /> Dashboard
           </button>
         </div>
       </div>

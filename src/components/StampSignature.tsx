@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { Upload, X } from "lucide-react";
+import { CompanyAssetImage } from "./CompanyAssetImage";
 
 /* Shared stamp & signature widgets used by every document builder
  * (Invoicing, Quoting, Purchase Orders, Declaration Letter, …).
@@ -95,7 +96,7 @@ export function StampSigCard({
           <div className="space-y-3">
             {/* preview with inline remove */}
             <div className="relative flex items-center justify-center py-4 rounded-3xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
-              <img
+              <CompanyAssetImage
                 src={value.data}
                 alt={label}
                 className="object-contain rounded"
@@ -273,12 +274,11 @@ function DraggableMark({
         zIndex: 5,
       }}
     >
-      <img
+      <CompanyAssetImage
         src={mark.data}
         alt={alt}
-        draggable={false}
+        className="block"
         style={{
-          display: "block",
           maxHeight: h,
           maxWidth: w,
           opacity: mark.opacity / 100,

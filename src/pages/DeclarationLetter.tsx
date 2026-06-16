@@ -7,8 +7,6 @@ import {
   Smartphone,
   Minus,
   Plus,
-  Stamp as StampIcon,
-  PenTool,
   RotateCcw,
   ArrowLeft,
 } from "lucide-react";
@@ -19,13 +17,13 @@ import { PageHeader, Field, MetricCard, DataTable } from "../components/ui";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
+import { StampSignatureLayer } from "../components/StampSignature";
 import {
-  StampSigCard,
-  StampSignatureLayer,
-  STAMP_DEFAULT,
-  SIGN_DEFAULT,
-  type StampSig,
-} from "../components/StampSignature";
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
 import {
   LetterheadFrame,
   loadLetterhead,
@@ -58,6 +56,8 @@ A copy of the Certificate of Registration for Value Added Tax in the United Arab
 
 type DeclForm = {
   ref: string;
+  show_stamp?: boolean;
+  show_signature?: boolean;
   date: string;
   company_name: string;
   company_trn: string;
@@ -336,8 +336,9 @@ function DeclarationEditor({
   const [useLetterhead, setUseLetterhead] = useState(false);
   const [headerSpace, setHeaderSpace] = useState(DEFAULT_HEADER_SPACE);
   const [footerSpace, setFooterSpace] = useState(DEFAULT_FOOTER_SPACE);
-  const [stamp, setStamp] = useState<StampSig | undefined>(undefined);
-  const [signature, setSignature] = useState<StampSig | undefined>(undefined);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
+  const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [saving, setSaving] = useState(false);
@@ -363,6 +364,7 @@ function DeclarationEditor({
         setUseLetterhead(hasLetterhead(l));
       })
       .catch(() => {});
+    loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
   }, []);
 
   const set = <K extends keyof DeclForm>(k: K, v: DeclForm[K]) =>
@@ -392,6 +394,8 @@ function DeclarationEditor({
         ...form,
         id: doc.id,
         updated_at: new Date().toISOString(),
+        show_stamp: showStamp,
+        show_signature: showSignature,
       };
       const list = await upsertDeclaration(saved);
       onSaved(list);
@@ -435,9 +439,10 @@ function DeclarationEditor({
         }
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
-        {/* ---------- left: builder ---------- */}
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           {/* Parties */}
           <div className="card">
             <p className="font-medium text-ink mb-3">Your Company</p>
@@ -610,26 +615,31 @@ function DeclarationEditor({
               </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <StampSigCard
-                label="Company Stamp"
-                icon={<StampIcon size={15} />}
-                value={stamp}
-                onChange={setStamp}
-                defaults={STAMP_DEFAULT}
-              />
-              <StampSigCard
-                label="Signature"
-                icon={<PenTool size={15} />}
-                value={signature}
-                onChange={setSignature}
-                defaults={SIGN_DEFAULT}
-              />
+              <label className="flex items-center justify-between card !p-3 cursor-pointer">
+                <span className="text-sm font-medium text-ink">Show stamp</span>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={showStamp}
+                  onChange={(e) => setShowStamp(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between card !p-3 cursor-pointer">
+                <span className="text-sm font-medium text-ink">Show signature</span>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={showSignature}
+                  onChange={(e) => setShowSignature(e.target.checked)}
+                />
+              </label>
             </div>
           </div>
-        </div>
-
-        {/* ---------- right: preview ---------- */}
-        <div className="xl:sticky xl:top-2 space-y-3">
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           <div className="card !p-4">
             <div className="no-print flex items-start justify-between mb-3">
               <div>
@@ -643,12 +653,10 @@ function DeclarationEditor({
             <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
               <div ref={declRef} className="relative">
                 <StampSignatureLayer
-                  stamp={stamp}
-                  signature={signature}
-                  onStampMove={(x, y) => setStamp((s) => (s ? { ...s, x, y } : s))}
-                  onSignatureMove={(x, y) =>
-                    setSignature((s) => (s ? { ...s, x, y } : s))
-                  }
+                  stamp={showStamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
+                  signature={showSignature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
+                  onStampMove={() => {}}
+                  onSignatureMove={() => {}}
                 />
                 <LetterheadFrame
                   letterhead={lh}
@@ -751,8 +759,9 @@ function DeclarationEditor({
               </div>
             </div>
           </div>
-        </div>
-      </div>
+          </div>
+        }
+      />
     </div>
   );
 }

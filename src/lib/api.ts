@@ -13,6 +13,7 @@ export interface Product {
   cost_price: number;
   quantity: number;
   reorder_level: number;
+  unit?: string;
   batch_number?: string;
   expiry_date?: string;
   barcode?: string;
@@ -259,6 +260,8 @@ export interface InvoiceDoc {
   custom_columns?: { key: string; label: string }[];
   stamp?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
   signature?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
+  show_stamp?: boolean;
+  show_signature?: boolean;
 }
 export type InvoiceDocInput = Omit<
   InvoiceDoc,
@@ -538,6 +541,49 @@ const clean = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== undefined)
   ) as Record<string, unknown>;
 
+async function adjustProductStock(productId: number, delta: number): Promise<void> {
+  if (!productId || delta === 0) return;
+  const { error } = await sb().rpc("adjust_product_stock", {
+    p_id: productId,
+    p_delta: delta,
+  });
+  if (!error) return;
+  // Fallback: read current qty and write the delta ourselves (best-effort, not atomic).
+  const { data: row, error: fe } = await sb()
+    .from("products")
+    .select("quantity")
+    .eq("id", productId)
+    .single();
+  if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
+  const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
+  const { error: ue } = await sb()
+    .from("products")
+    .update({ quantity: next })
+    .eq("id", productId);
+  if (ue) throw new Error(`Stock RPC failed and fallback update failed: ${ue.message}`);
+}
+
+async function adjustAccountBalance(accountId: number, delta: number): Promise<void> {
+  if (!accountId || delta === 0) return;
+  const { error } = await sb().rpc("adjust_account_balance", {
+    p_id: accountId,
+    p_delta: delta,
+  });
+  if (!error) return;
+  const { data: row, error: fe } = await sb()
+    .from("accounts")
+    .select("balance")
+    .eq("id", accountId)
+    .single();
+  if (fe) throw new Error(`Account balance RPC failed and fallback fetch failed: ${fe.message}`);
+  const next = (Number(row?.balance) || 0) + delta;
+  const { error: ue } = await sb()
+    .from("accounts")
+    .update({ balance: next })
+    .eq("id", accountId);
+  if (ue) throw new Error(`Account balance RPC failed and fallback update failed: ${ue.message}`);
+}
+
 // ===== ERP Core =====
 export const erp = {
   products: () =>
@@ -555,11 +601,8 @@ export const erp = {
   updateStock: (productId: number, delta: number) =>
     online(async () => {
       // Atomic — avoids lost updates when two clients adjust stock at once.
-      const { error } = await sb().rpc("adjust_product_stock", {
-        p_id: productId,
-        p_delta: delta,
-      });
-      if (error) throw error;
+      await adjustProductStock(productId, delta,
+      );
     }),
   updateProduct: (
     productId: number,
@@ -620,11 +663,8 @@ export const erp = {
         if (itemsErr) throw itemsErr;
         for (const l of lines) {
           // Atomic decrement (clamped at 0 server-side).
-          const { error } = await sb().rpc("adjust_product_stock", {
-            p_id: l.product_id,
-            p_delta: -l.quantity,
-          });
-          if (error) throw error;
+          await adjustProductStock(l.product_id, -l.quantity,
+          );
         }
       }
       return orderId;
@@ -717,11 +757,8 @@ export const erp = {
       for (const pid of ids) {
         const delta = (oldMap.get(pid) ?? 0) - (newMap.get(pid) ?? 0);
         if (delta !== 0) {
-          const { error } = await sb().rpc("adjust_product_stock", {
-            p_id: pid,
-            p_delta: delta,
-          });
-          if (error) throw error;
+          await adjustProductStock(pid, delta,
+          );
         }
       }
     }),
@@ -738,11 +775,8 @@ export const erp = {
         quantity: number;
       }[]) {
         if (it.product_id != null && it.quantity) {
-          const { error } = await sb().rpc("adjust_product_stock", {
-            p_id: it.product_id,
-            p_delta: it.quantity,
-          });
-          if (error) throw error;
+          await adjustProductStock(it.product_id, it.quantity,
+          );
         }
       }
       const { error: de } = await sb()
@@ -907,26 +941,19 @@ export const hr = {
       net_pay: net,
       status: "pending",
     };
-    if (accountId == null) {
-      return write({ k: "insert", t: "payroll", row }, () =>
-        sInsert("payroll", row), -1
-      );
-    }
     return online(async () => {
       const id = await sInsert("payroll", row);
-      await sInsert("transactions", {
-        account_id: accountId,
-        txn_type: "debit",
-        amount: net,
-        description: `Payroll ${period}`,
-        txn_date: new Date().toISOString().slice(0, 10),
-      });
-      // Atomic balance debit — avoids lost updates under concurrency.
-      const { error } = await sb().rpc("adjust_account_balance", {
-        p_id: accountId,
-        p_delta: -net,
-      });
-      if (error) throw error;
+      const targetId = accountId ?? (await findOrCreatePayrollAccount());
+      if (targetId > 0) {
+        await sInsert("transactions", {
+          account_id: targetId,
+          txn_type: "debit",
+          amount: net,
+          description: `Payroll ${period}`,
+          txn_date: new Date().toISOString().slice(0, 10),
+        });
+        await adjustAccountBalance(targetId, -net);
+      }
       return id;
     });
   },
@@ -999,26 +1026,19 @@ export const fin = {
       expense_date: expenseDate,
       account_id: accountId,
     };
-    if (accountId == null) {
-      return write({ k: "insert", t: "expenses", row }, () =>
-        sInsert("expenses", row), -1
-      );
-    }
     return online(async () => {
       const id = await sInsert("expenses", row);
-      await sInsert("transactions", {
-        account_id: accountId,
-        txn_type: "debit",
-        amount,
-        description: description ?? category,
-        txn_date: expenseDate,
-      });
-      // Atomic balance debit — avoids lost updates under concurrency.
-      const { error } = await sb().rpc("adjust_account_balance", {
-        p_id: accountId,
-        p_delta: -amount,
-      });
-      if (error) throw error;
+      const targetId = accountId ?? (await findOrCreateExpenseAccount());
+      if (targetId > 0) {
+        await sInsert("transactions", {
+          account_id: targetId,
+          txn_type: "debit",
+          amount,
+          description: description ?? category,
+          txn_date: expenseDate,
+        });
+        await adjustAccountBalance(targetId, -amount);
+      }
       return id;
     });
   },
@@ -1059,9 +1079,12 @@ export const fin = {
       amount,
       description,
     };
-    return write({ k: "insert", t: "transactions", row }, () =>
-      sInsert("transactions", row), -1
-    );
+    return online(async () => {
+      const id = await sInsert("transactions", row);
+      const delta = txnType === "credit" ? amount : -amount;
+      await adjustAccountBalance(accountId, delta);
+      return id;
+    });
   },
   report: () =>
     readCached<FinanceReport>(
@@ -1444,6 +1467,46 @@ async function findOrCreateSalesAccount(): Promise<number> {
   }
 }
 
+async function findOrCreateExpenseAccount(): Promise<number> {
+  const { data } = await sb()
+    .from("accounts")
+    .select("id,name")
+    .eq("account_type", "expense");
+  const list = (data as { id: number; name: string }[] | null) ?? [];
+  const acct = list.find((a) => /operating|expense|general/i.test(a.name)) ?? list[0];
+  if (acct) return acct.id;
+  try {
+    return await sInsert("accounts", {
+      code: "5000",
+      name: "Operating Expenses",
+      account_type: "expense",
+      balance: 0,
+    });
+  } catch {
+    return -1;
+  }
+}
+
+async function findOrCreatePayrollAccount(): Promise<number> {
+  const { data } = await sb()
+    .from("accounts")
+    .select("id,name")
+    .eq("account_type", "expense");
+  const list = (data as { id: number; name: string }[] | null) ?? [];
+  const acct = list.find((a) => /salary|payroll|wage/i.test(a.name)) ?? list[0];
+  if (acct) return acct.id;
+  try {
+    return await sInsert("accounts", {
+      code: "5200",
+      name: "Salaries & Wages",
+      account_type: "expense",
+      balance: 0,
+    });
+  } catch {
+    return -1;
+  }
+}
+
 /** When an invoice is finalized, mirror it into the rest of the ERP so the
  *  user never re-enters the same data:
  *    • a linked Sales Order (SO-<invoice number>) appears under Orders
@@ -1487,11 +1550,8 @@ async function propagateInvoice(
     // 2) Decrement inventory for any invoice lines linked to products.
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
-      const { error } = await sb().rpc("adjust_product_stock", {
-        p_id: it.product_id,
-        p_delta: -Math.abs(Number(it.qty)),
-      });
-      if (error) throw error;
+      await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)),
+      );
     }
 
     // 3) Sales revenue entry in Accounting.
@@ -1506,7 +1566,7 @@ async function propagateInvoice(
           txn_date:
             (doc.issue_date as string) || new Date().toISOString().slice(0, 10),
         });
-        await sb().rpc("adjust_account_balance", { p_id: acctId, p_delta: total });
+        await adjustAccountBalance(acctId, total);
       }
     }
   } catch (e) {
@@ -1584,6 +1644,8 @@ export const billing = {
               description: i.description,
               qty: i.qty,
               unit_price: i.unit_price,
+              unit: i.unit || undefined,
+              custom: (i.custom as Record<string, string>) || undefined,
               product_id: i.product_id ?? undefined,
             })),
         } as InvoiceDoc;
@@ -1851,6 +1913,8 @@ export interface QuotationDoc {
   created_at: string;
   updated_at: string;
   items: QuotationItem[];
+  show_stamp?: boolean;
+  show_signature?: boolean;
 }
 export type QuotationInput = Omit<
   QuotationDoc,
@@ -2265,7 +2329,7 @@ export interface PurchaseOrder {
 export type PoInput = Omit<
   PurchaseOrder,
   "id" | "created_at" | "updated_at"
-> & { id?: number };
+> & { id?: number; show_stamp?: boolean; show_signature?: boolean };
 
 export const pos = {
   list: () =>
@@ -2379,11 +2443,7 @@ export const pos = {
       const po = await pos.get(poId);
       for (const it of po.items) {
         if (!it.product_id) continue;
-        const { error } = await sb().rpc("adjust_product_stock", {
-          p_id: it.product_id,
-          p_delta: Math.abs(Number(it.quantity)),
-        });
-        if (error) throw error;
+        await adjustProductStock(it.product_id, Math.abs(Number(it.quantity)));
       }
       await sUpdate("purchase_orders", poId, { status: "received" });
     }),

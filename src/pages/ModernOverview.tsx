@@ -338,7 +338,7 @@ export default function ModernOverview() {
       {show("kpis") && (
         <section
           aria-labelledby="kpi-heading"
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"
         >
           <h2 id="kpi-heading" className="sr-only">
             Key performance indicators
@@ -378,14 +378,6 @@ export default function ModernOverview() {
           />
           <KpiMetric
             loading={loading}
-            label="Open orders"
-            value={orderStats.progress}
-            format={(n) => num(n)}
-            icon={<AppIcon name="orders" className="w-[18px] h-[18px]" />}
-            iconClass="bg-warning/15 text-warning"
-          />
-          <KpiMetric
-            loading={loading}
             label="Products"
             value={stockBreakdown.total}
             format={(n) => num(n)}
@@ -400,9 +392,9 @@ export default function ModernOverview() {
       )}
 
       {/* Two-column main row: orders chart + recent activity ───────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
         <InfoCard
-          className="lg:col-span-2"
+          className="lg:col-span-2 max-h-[340px]"
           title="Orders over time"
           action={
             <div className="flex items-center gap-1 p-0.5 rounded-full bg-brand-100 dark:bg-white/10">
@@ -455,10 +447,11 @@ export default function ModernOverview() {
                   <Badge tone="neutral">{orderStats.returns} returns</Badge>
                 )}
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-[160px]">
                 <TrendChart
                   data={trend.map((d) => ({ name: d.name, value: d.items }))}
                   gradientId="moFill"
+                  height="100%"
                 />
               </div>
             </>

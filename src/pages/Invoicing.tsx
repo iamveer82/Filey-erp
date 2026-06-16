@@ -64,7 +64,6 @@ import TemplateDesigner, {
 } from "../components/TemplateDesigner";
 import TemplateTilePreview from "../components/TemplateTilePreview";
 import {
-  StampSigCard,
   StampSignatureLayer,
   DraggableBlock,
   type StampSig,
@@ -75,6 +74,12 @@ import {
   EMPTY_BANK,
   type BankInfo,
 } from "../components/BankDetails";
+import {
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
 import {
   PageHeader,
   MetricCard,
@@ -101,6 +106,8 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   customColumns: CustomColumn[];
   stamp?: StampSig;
   signature?: StampSig;
+  show_stamp?: boolean;
+  show_signature?: boolean;
 };
 
 const TEMPLATES = [
@@ -124,6 +131,31 @@ const TEMPLATES = [
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+const RESERVED_ITEM_COLUMNS = new Set([
+  "description",
+  "qty",
+  "unit",
+  "unit_price",
+  "amount",
+  "tax",
+  "product_id",
+  "id",
+]);
+const DEFAULT_COLUMN_LABELS = new Set([
+  "description",
+  "qty",
+  "unit",
+  "unit price",
+  "amount",
+  "tax",
+]);
+export const sanitizeCustomColumns = (cols: CustomColumn[]): CustomColumn[] =>
+  cols.filter(
+    (c) =>
+      !RESERVED_ITEM_COLUMNS.has(c.key) &&
+      !DEFAULT_COLUMN_LABELS.has(c.label.toLowerCase().trim())
+  );
 
 function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {
@@ -151,6 +183,8 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
     discount: 0,
     items: [{ description: "", qty: 1, unit_price: 0, unit: "", custom: {} }],
     customColumns: [],
+    show_stamp: false,
+    show_signature: false,
   };
 }
 
@@ -217,7 +251,7 @@ export default function Invoicing() {
     if (company) setForm(blankForm(company, docs.map((d) => d.number)));
   };
 
-  const editInvoice = async (id: number) => {
+const editInvoice = async (id: number) => {
     try {
       const d = await billing.getDoc(id);
       setForm({
@@ -274,6 +308,8 @@ export default function Invoicing() {
               scale: (d.signature as any).scale ?? 100,
             }
           : undefined,
+        show_stamp: d.show_stamp ?? false,
+        show_signature: d.show_signature ?? false,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -282,7 +318,7 @@ export default function Invoicing() {
           custom: i.custom || {},
           product_id: i.product_id,
         })),
-        customColumns: d.custom_columns || [],
+        customColumns: sanitizeCustomColumns(d.custom_columns || []),
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
@@ -345,6 +381,8 @@ export default function Invoicing() {
               scale: (d.signature as any).scale ?? 100,
             }
           : undefined,
+        show_stamp: d.show_stamp ?? false,
+        show_signature: d.show_signature ?? false,
         items: d.items.map((i) => ({
           description: i.description,
           qty: i.qty,
@@ -353,7 +391,7 @@ export default function Invoicing() {
           custom: i.custom || {},
           product_id: i.product_id,
         })),
-        customColumns: d.custom_columns || [],
+        customColumns: sanitizeCustomColumns(d.custom_columns || []),
       });
     } catch (e: any) {
       toast.error(e?.message || "Failed to duplicate invoice");
@@ -390,7 +428,7 @@ export default function Invoicing() {
         // Persist user-defined columns + per-item unit & custom values so they
         // survive a reload (DB columns: invoice_docs.custom_columns,
         // invoice_doc_items.unit / .custom).
-        custom_columns: form.customColumns,
+        custom_columns: sanitizeCustomColumns(form.customColumns),
         items: form.items.map((it) => ({
           description: it.description,
           qty: it.qty,
@@ -405,6 +443,8 @@ export default function Invoicing() {
       // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
       delete (payload as any).doc_type;
+      (payload as any).show_stamp = form.show_stamp ?? false;
+      (payload as any).show_signature = form.show_signature ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id });
       await loadDocs();
@@ -446,7 +486,7 @@ export default function Invoicing() {
       const payload = {
         ...form,
         status,
-        custom_columns: form.customColumns,
+        custom_columns: sanitizeCustomColumns(form.customColumns),
         items: form.items.map((it) => ({
           description: it.description,
           qty: it.qty,
@@ -461,6 +501,8 @@ export default function Invoicing() {
       // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
       delete (payload as any).doc_type;
+      (payload as any).show_stamp = form.show_stamp ?? false;
+      (payload as any).show_signature = form.show_signature ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id, status });
       await loadDocs();
@@ -1077,6 +1119,16 @@ function Editor({
 }) {
   const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  const ITEMS_PER_PREVIEW_PAGE = 7;
+  const previewPages = Math.ceil(form.items.length / ITEMS_PER_PREVIEW_PAGE);
+  const previewForm = {
+    ...form,
+    items: form.items.slice(
+      (previewPage - 1) * ITEMS_PER_PREVIEW_PAGE,
+      previewPage * ITEMS_PER_PREVIEW_PAGE
+    ),
+  };
   const downloadPdf = () => {
     if (invoiceRef.current) {
       // Capture the full A4 sheet (with padding), not just the inner div
@@ -1155,6 +1207,10 @@ function Editor({
     setForm({ ...form, items });
   };
 
+  
+
+  
+
   const addCustomColumn = () => {
     const label = window.prompt("Column name:")?.trim();
     if (!label) return;
@@ -1163,7 +1219,18 @@ function Editor({
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_|_$/g, "") || `col_${Date.now()}`;
-    if (form.customColumns.some((c) => c.key === key)) return;
+    if (RESERVED_ITEM_COLUMNS.has(key)) {
+      toast.error(`"${label}" is a default column and cannot be added again`);
+      return;
+    }
+    if (form.customColumns.some((c) => c.key === key)) {
+      toast.error("A column with that key already exists");
+      return;
+    }
+    if (form.customColumns.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
+      toast.error("A column with that name already exists");
+      return;
+    }
     setForm({ ...form, customColumns: [...form.customColumns, { key, label }] });
   };
 
@@ -1191,11 +1258,15 @@ function Editor({
   const [invOpen, setInvOpen] = useState(false);
   const [showBank, setShowBank] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [bankX, setBankX] = useState(50);
   const [bankY, setBankY] = useState(93);
   useEffect(() => {
     loadBankInfo()
       .then(setBank)
+      .catch(() => {});
+    loadCompanyStampSig()
+      .then(setCompanyStampSig)
       .catch(() => {});
   }, []);
   // Append an inventory product as an invoice line item (fills description &
@@ -1461,9 +1532,10 @@ function Editor({
         }}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
-        {/* ---------- left: builder ---------- */}
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           {/* 1 · Choose template */}
           <Step
             n={1}
@@ -1898,6 +1970,24 @@ function Editor({
               >
                 <Landmark size={13} /> Bank details: {showBank ? "On" : "Off"}
               </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, show_stamp: !form.show_stamp })}
+                className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
+                title="Show company stamp on this invoice"
+                disabled={!companyStampSig.stamp?.data}
+              >
+                <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, show_signature: !form.show_signature })}
+                className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
+                title="Show company signature on this invoice"
+                disabled={!companyStampSig.signature?.data}
+              >
+                <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
+              </button>
               <datalist id="unit-suggestions">
                 <option value="pcs" />
                 <option value="L" />
@@ -2073,48 +2163,14 @@ function Editor({
                   </p>
                 </div>
               </div>
-              <StampSigCard
-                label="Stamp"
-                icon={<Stamp size={15} />}
-                value={form.stamp}
-                onChange={(v) => setForm({ ...form, stamp: v })}
-                defaults={{
-                  data: "",
-                  x: 75,
-                  y: 70,
-                  opacity: 30,
-                  color: "#cc0000",
-                  cropTop: 0,
-                  cropRight: 0,
-                  cropBottom: 0,
-                  cropLeft: 0,
-                  scale: 100,
-                }}
-              />
-              <StampSigCard
-                label="Signature"
-                icon={<PenTool size={15} />}
-                value={form.signature}
-                onChange={(v) => setForm({ ...form, signature: v })}
-                defaults={{
-                  data: "",
-                  x: 75,
-                  y: 85,
-                  opacity: 35,
-                  color: "#0000cc",
-                  cropTop: 0,
-                  cropRight: 0,
-                  cropBottom: 0,
-                  cropLeft: 0,
-                  scale: 100,
-                }}
-              />
+
             </div>
           </Step>
-        </div>
-
-        {/* ---------- right: sticky panel (preview + template designer) ---------- */}
-        <div className="xl:sticky xl:top-2 space-y-3">
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           {/* Template Designer — shown above preview when creating */}
           {designing && (
             <TemplateDesigner
@@ -2154,16 +2210,16 @@ function Editor({
                 >
                   {/* Stamp & Signature — draggable, watermark-style overlay */}
                   <StampSignatureLayer
-                    stamp={form.stamp}
-                    signature={form.signature}
+                    stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
+                    signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
                     onStampMove={(x, y) =>
-                      setForm({ ...form, stamp: { ...form.stamp!, x, y } })
+                      setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))
                     }
                     onSignatureMove={(x, y) =>
-                      setForm({ ...form, signature: { ...form.signature!, x, y } })
+                      setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
                     }
                   />
-                  <InvoiceView form={form} />
+                  <InvoiceView form={previewForm} />
                   {showBank && (
                     <DraggableBlock
                       x={bankX}
@@ -2179,6 +2235,28 @@ function Editor({
                 </div>
               </div>
             </FitPreview>
+
+            {previewPages > 1 && (
+              <div className="no-print flex items-center justify-center gap-2 mt-2">
+                <button
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  disabled={previewPage <= 1}
+                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                >
+                  Back
+                </button>
+                <span className="text-xs text-brand-500 font-medium">
+                  Page {previewPage} / {previewPages}
+                </span>
+                <button
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  disabled={previewPage >= previewPages}
+                  onClick={() => setPreviewPage((p) => Math.min(previewPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            )}
 
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
               <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
@@ -2234,8 +2312,9 @@ function Editor({
               </div>
             </div>
           </div>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {viewOpen && (
         <div
@@ -2276,13 +2355,13 @@ function Editor({
                 >
                   <div style={{ position: "relative", minHeight: 1059 }}>
                     <StampSignatureLayer
-                      stamp={form.stamp}
-                      signature={form.signature}
+                      stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
+                      signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
                       onStampMove={(x, y) =>
-                        setForm({ ...form, stamp: { ...form.stamp!, x, y } })
+                        setCompanyStampSig((s) => ({ ...s, stamp: s.stamp ? { ...s.stamp, x, y } : s.stamp }))
                       }
                       onSignatureMove={(x, y) =>
-                        setForm({ ...form, signature: { ...form.signature!, x, y } })
+                        setCompanyStampSig((s) => ({ ...s, signature: s.signature ? { ...s.signature, x, y } : s.signature }))
                       }
                     />
                     <InvoiceView form={form} />

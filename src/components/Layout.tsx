@@ -44,6 +44,18 @@ import {
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
 
+/** Odoo-style module groups for the sidebar. Order within a group mirrors
+ *  the user's workflow: Overview → Sales → Purchase → Inventory → Accounting → Tools. */
+const MODULE_GROUPS: { title: string; ids: string[] }[] = [
+  { title: "Business", ids: ["overview", "reports"] },
+  { title: "Sales", ids: ["quoting", "orders", "invoicing", "customers", "crm", "follow-ups"] },
+  { title: "Purchases", ids: ["suppliers", "purchase", "purchase-orders"] },
+  { title: "Inventory", ids: ["inventory"] },
+  { title: "Accounting", ids: ["accounting", "bank-accounts", "cheques", "payment-receipts", "declaration", "people"] },
+  { title: "Tools", ids: ["files", "email-templates", "delivery-challans", "tools"] },
+  { title: "System", ids: ["settings"] },
+];
+
 /** Quick-action commands for the ⌘K palette. `create` deep-links a page
  *  to auto-open its create form via the ?new=1 query. */
 const COMMANDS: { label: string; to: string; keywords: string }[] = [
@@ -398,41 +410,51 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
-            {!railMode && (
-              <p className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-                Menu
-              </p>
-            )}
-            <div className="space-y-1">
-              {navModules.map(({ to, label, icon: iconName }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    title={railMode ? label : undefined}
-                    className={({ isActive }) =>
-                      cn(
-                        "group relative flex items-center gap-3 rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 cursor-pointer",
-                        railMode ? "justify-center px-0" : "px-3",
-                        isActive
-                          ? "bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
-                          : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
-                      )
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <span
-                          className={cn(
-                            "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary-400 transition-opacity duration-200",
-                            isActive ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                        <AppIcon name={iconName} className="w-[18px] h-[18px] shrink-0" />
-                        {!railMode && <span className="truncate">{label}</span>}
-                      </>
+            <div className="space-y-5">
+              {MODULE_GROUPS.map((group) => {
+                const items = navModules.filter((m) => group.ids.includes(m.id));
+                if (items.length === 0) return null;
+                return (
+                  <div key={group.title}>
+                    {!railMode && (
+                      <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-brand-400">
+                        {group.title}
+                      </p>
                     )}
-                  </NavLink>
-                ))}
+                    <div className="space-y-0.5">
+                      {items.map(({ to, label, icon: iconName }) => (
+                        <NavLink
+                          key={to}
+                          to={to}
+                          title={railMode ? label : undefined}
+                          className={({ isActive }) =>
+                            cn(
+                              "group relative flex items-center gap-3 rounded-xl py-2 text-sm font-medium transition-colors duration-200 cursor-pointer",
+                              railMode ? "justify-center px-0" : "px-3",
+                              isActive
+                                ? "bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
+                                : "text-brand-500 hover:bg-brand-50 hover:text-ink dark:text-[#B6BAC1] dark:hover:bg-white/5 dark:hover:text-[#F4F5F6]"
+                            )
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              <span
+                                className={cn(
+                                  "absolute left-0 top-1/2 -translate-y-1/2 h-4 w-1 rounded-r-full bg-primary-400 transition-opacity duration-200",
+                                  isActive ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <AppIcon name={iconName} className="w-[18px] h-[18px] shrink-0" />
+                              {!railMode && <span className="truncate">{label}</span>}
+                            </>
+                          )}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </nav>
 
@@ -784,7 +806,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onSelect={() => {
-                      signOut().catch(() => {});
+                      signOut().catch(() => toast.error("Failed to sign out"));
                     }}
                     className="text-danger focus:text-danger focus:bg-danger/10"
                   >

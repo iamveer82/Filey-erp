@@ -22,6 +22,12 @@ import {
   Smartphone,
 } from "lucide-react";
 import {
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
+import {
   pos,
   suppliers as suppliersApi,
   erp,
@@ -110,6 +116,8 @@ type LpoForm = {
   company_phone: string;
   company_stamp: string;
   company_signature: string;
+  show_stamp?: boolean;
+  show_signature?: boolean;
   order_date: string;
   expected_date: string;
   tax_rate: number;
@@ -157,22 +165,12 @@ function loadSavedStamp(): string {
     return "";
   }
 }
-function saveStamp(data: string) {
-  try {
-    localStorage.setItem(STAMP_KEY, data);
-  } catch {}
-}
 function loadSavedSignature(): string {
   try {
     return localStorage.getItem(SIGNATURE_KEY) || "";
   } catch {
     return "";
   }
-}
-function saveSignature(data: string) {
-  try {
-    localStorage.setItem(SIGNATURE_KEY, data);
-  } catch {}
 }
 
 /* ------------------------------------------------------------------ */
@@ -525,6 +523,15 @@ function LPOEditor({
 }) {
   const { toast, confirm } = useUI();
   const lpoRef = useRef<HTMLDivElement>(null);
+  const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
+  const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+
+  useEffect(() => {
+    loadCompanyStampSig()
+      .then(setCompanyStampSig)
+      .catch((e) => console.warn("Failed to load company stamp/signature", e));
+  }, []);
   const downloadPdf = () => {
     if (lpoRef.current) {
       const sheet = lpoRef.current.closest(".invoice-print") as HTMLElement;
@@ -747,9 +754,10 @@ function LPOEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,440px)] gap-5 items-start">
-        {/* ---------- left: builder ---------- */}
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           {/* 1 · Choose template */}
           <Step
             n={1}
@@ -933,26 +941,38 @@ function LPOEditor({
                     onChange={(e) => set("company_trn", e.target.value)}
                   />
                 </Field>
-                <Field label="Company Stamp">
-                  <StampUpload
-                    value={form.company_stamp}
-                    onChange={(data) => {
-                      set("company_stamp", data);
-                      saveStamp(data);
-                    }}
-                    label="Upload Stamp"
-                  />
-                </Field>
-                <Field label="Authorized Signature">
-                  <SignatureUpload
-                    value={form.company_signature}
-                    onChange={(data) => {
-                      set("company_signature", data);
-                      saveSignature(data);
-                    }}
-                    label="Upload Signature"
-                  />
-                </Field>
+                <div className="col-span-1 sm:col-span-2 rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+                  <div className="flex items-center gap-2 text-ink font-medium text-sm mb-3">
+                    <Stamp size={15} /> Company Stamp & Signature
+                  </div>
+                  <p className="text-xs text-brand-500 mb-3">Images are managed in Settings → Company Details.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = !showStamp;
+                        setShowStamp(v);
+                        set("show_stamp", v);
+                      }}
+                      className={`btn-ghost text-xs ${showStamp ? "!bg-brand-50 !text-ink" : ""}`}
+                      disabled={!companyStampSig.stamp?.data}
+                    >
+                      Stamp: {showStamp ? "On" : "Off"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = !showSignature;
+                        setShowSignature(v);
+                        set("show_signature", v);
+                      }}
+                      className={`btn-ghost text-xs ${showSignature ? "!bg-brand-50 !text-ink" : ""}`}
+                      disabled={!companyStampSig.signature?.data}
+                    >
+                      Signature: {showSignature ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </Step>
@@ -1163,10 +1183,12 @@ function LPOEditor({
               </Field>
             </div>
           </Step>
-        </div>
-
-        {/* ---------- right: live preview ---------- */}
-        <div className="xl:sticky xl:top-2 space-y-3">
+        
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           {/* Template designer ABOVE preview */}
           {designing && (
             <div className="mb-4">
@@ -1251,8 +1273,10 @@ function LPOEditor({
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        
+          </div>
+        }
+      />
 
       {/* Supplier Modal */}
       {supplierModal && (
@@ -2233,118 +2257,3 @@ function SupplierQuickAdd({
 /*  Stamp / Signature Upload Components                                */
 /* ------------------------------------------------------------------ */
 
-function StampUpload({
-  value,
-  onChange,
-  label,
-}: {
-  value: string;
-  onChange: (data: string) => void;
-  label: string;
-}) {
-  const stampRef = useRef<HTMLInputElement>(null);
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => onChange(String(reader.result));
-    reader.readAsDataURL(file);
-  };
-  return (
-    <div>
-      <input
-        ref={stampRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFile}
-      />
-      {value ? (
-        <div className="relative inline-block group">
-          <img
-            src={value}
-            alt="Company stamp"
-            className="h-20 object-contain rounded-lg border border-brand-200 p-1 bg-white cursor-pointer hover:border-primary-400 transition-colors"
-            onClick={() => stampRef.current?.click()}
-          />
-          <button
-            aria-label="Remove stamp"
-            className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white text-xs grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onChange("");
-              saveStamp("");
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ) : (
-        <button
-          className="btn-ghost text-xs flex items-center gap-2 border-2 border-dashed border-brand-200 rounded-xl p-4 w-full justify-center hover:border-primary-400 transition-colors cursor-pointer"
-          onClick={() => stampRef.current?.click()}
-        >
-          <Upload size={14} /> {label}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function SignatureUpload({
-  value,
-  onChange,
-  label,
-}: {
-  value: string;
-  onChange: (data: string) => void;
-  label: string;
-}) {
-  const sigRef = useRef<HTMLInputElement>(null);
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => onChange(String(reader.result));
-    reader.readAsDataURL(file);
-  };
-  return (
-    <div>
-      <input
-        ref={sigRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFile}
-      />
-      {value ? (
-        <div className="relative inline-block group">
-          <img
-            src={value}
-            alt="Authorized signature"
-            className="h-14 object-contain rounded-lg border border-brand-200 p-1 bg-white cursor-pointer hover:border-primary-400 transition-colors"
-            onClick={() => sigRef.current?.click()}
-          />
-          <button
-            aria-label="Remove signature"
-            className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-danger text-white text-xs grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              onChange("");
-              saveSignature("");
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ) : (
-        <button
-          className="btn-ghost text-xs flex items-center gap-2 border-2 border-dashed border-brand-200 rounded-xl p-4 w-full justify-center hover:border-primary-400 transition-colors cursor-pointer"
-          onClick={() => sigRef.current?.click()}
-        >
-          <Upload size={14} /> {label}
-        </button>
-      )}
-    </div>
-  );
-}

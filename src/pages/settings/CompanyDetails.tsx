@@ -2,7 +2,7 @@ import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
-import { Building2, Upload, X, Check, Landmark, FileText } from "lucide-react";
+import { Building2, Upload, X, Check, Landmark, FileText, Stamp } from "lucide-react";
 import { numInput } from "../../lib/format";
 import {
   loadBankInfo,
@@ -18,6 +18,13 @@ import {
   LetterheadConfig,
   type LetterheadInfo,
 } from "../../components/Letterhead";
+import {
+  loadCompanyStampSig,
+  saveCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  StampSignatureSettings,
+  type CompanyStampSig,
+} from "../../components/StampSignatureSettings";
 
 const CURRENCIES = ["AED", "USD", "EUR", "GBP", "INR", "SAR"];
 const BUSINESS_TYPES = [
@@ -36,6 +43,7 @@ export default function CompanyDetails() {
   const [c, setC] = useState<CompanyProfile | null>(null);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
+  const [stampSig, setStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -49,10 +57,13 @@ export default function CompanyDetails() {
     billing.getCompany().then(setC).catch(console.error);
     loadBankInfo()
       .then(setBank)
-      .catch(() => {});
+      .catch((e) => console.warn("Failed to load bank details", e));
     loadLetterhead()
       .then(setLh)
-      .catch(() => {});
+      .catch((e) => console.warn("Failed to load letterhead", e));
+    loadCompanyStampSig()
+      .then(setStampSig)
+      .catch((e) => console.warn("Failed to load stamp/signature", e));
   }, []);
 
   const setBankField = (k: keyof BankInfo, v: string) => {
@@ -96,6 +107,7 @@ export default function CompanyDetails() {
       await billing.saveCompany(c);
       await saveBankInfo(bank);
       await saveLetterhead(lh);
+      await saveCompanyStampSig(stampSig);
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
@@ -313,6 +325,24 @@ export default function CompanyDetails() {
             />
           </FormField>
         </div>
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-brand-100">
+        <p className="font-medium text-ink flex items-center gap-2">
+          <Stamp size={16} /> Stamp & Signature
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Upload once here. Then toggle “Stamp” and “Signature” on any invoice,
+          quotation, purchase order, declaration letter or delivery challan to
+          print them.
+        </p>
+        <StampSignatureSettings
+          value={stampSig}
+          onChange={(next) => {
+            setStampSig(next);
+            setSaved(false);
+          }}
+        />
       </div>
 
       <div className="mt-6 pt-5 border-t border-brand-100">

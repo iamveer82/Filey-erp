@@ -12,12 +12,20 @@ import {
   Maximize2,
   X,
   Upload,
+  Stamp,
 } from "lucide-react";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, money, CURRENCIES } from "../lib/format";
 import { nextDocNumber } from "../lib/docNumber";
 import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
+import {
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
+import { StampSignatureLayer } from "../components/StampSignature";
 import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner, {
   loadCustomTemplates,
@@ -58,6 +66,8 @@ type PrForm = {
   font: string;
   currency: string;
   logo?: string;
+  show_stamp?: boolean;
+  show_signature?: boolean;
 };
 
 const METHODS = ["Cash", "Bank Transfer", "Cheque", "Card", "Online"];
@@ -282,6 +292,15 @@ function PrEditor({
   const { toast, confirm } = useUI();
   const prRef = useRef<HTMLDivElement>(null);
   const [viewOpen, setViewOpen] = useState(false);
+  const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
+  const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+
+  useEffect(() => {
+    loadCompanyStampSig()
+      .then(setCompanyStampSig)
+      .catch((e) => console.warn("Failed to load company stamp/signature", e));
+  }, []);
   const downloadPdf = () => {
     if (prRef.current) {
       const sheet = prRef.current.closest(".invoice-print") as HTMLElement;
@@ -452,8 +471,10 @@ function PrEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_minmax(340px,400px)] gap-5 items-start">
-        <div className="no-print space-y-4">
+            <ResizablePanels
+        left={
+          <div className="no-print space-y-4">
+            
           <Step
             n={1}
             title="Template"
@@ -701,9 +722,46 @@ function PrEditor({
               />
             </Field>
           </Step>
-        </div>
-
-        <div className="sticky top-4">
+          <Step n={5} title="Stamp & Signature">
+            <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+              <div className="flex items-center gap-2 text-ink font-medium text-sm mb-3">
+                <Stamp size={15} /> Company Stamp & Signature
+              </div>
+              <p className="text-xs text-brand-500 mb-3">Images are managed in Settings → Company Details.</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = !showStamp;
+                    setShowStamp(v);
+                    set("show_stamp", v);
+                  }}
+                  className={`btn-ghost text-xs ${showStamp ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.stamp?.data}
+                >
+                  Stamp: {showStamp ? "On" : "Off"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = !showSignature;
+                    setShowSignature(v);
+                    set("show_signature", v);
+                  }}
+                  className={`btn-ghost text-xs ${showSignature ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.signature?.data}
+                >
+                  Signature: {showSignature ? "On" : "Off"}
+                </button>
+              </div>
+            </div>
+          </Step>
+        
+          </div>
+        }
+        right={
+          <div className="sticky top-4 space-y-4">
+            
           {designing && (
             <div className="mb-4">
               <TemplateDesigner
@@ -718,9 +776,11 @@ function PrEditor({
               />
             </div>
           )}
-          <PrPreview form={form} prRef={prRef} />
-        </div>
-      </div>
+          <PrPreview form={form} prRef={prRef} companyStampSig={companyStampSig} />
+        
+          </div>
+        }
+      />
 
       {viewOpen && (
         <div
@@ -743,7 +803,7 @@ function PrEditor({
                 </button>
               </div>
             </div>
-            <PrPreview form={form} />
+            <PrPreview form={form} companyStampSig={companyStampSig} />
           </div>
         </div>
       )}
@@ -754,18 +814,26 @@ function PrEditor({
 function PrPreview({
   form,
   prRef,
+  companyStampSig,
 }: {
   form: PrForm;
   prRef?: React.RefObject<HTMLDivElement | null>;
+  companyStampSig?: CompanyStampSig;
 }) {
   const clean = (s: string) => s || "—";
   const a = form.accent || "#222222";
   return (
     <div
       ref={prRef}
-      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
+      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none relative"
       style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
     >
+      <StampSignatureLayer
+        stamp={form.show_stamp && companyStampSig?.stamp?.data ? companyStampSig.stamp : undefined}
+        signature={form.show_signature && companyStampSig?.signature?.data ? companyStampSig.signature : undefined}
+        onStampMove={() => {}}
+        onSignatureMove={() => {}}
+      />
       <div className="p-8 min-h-[500px]">
         <div
           className="text-center mb-8 pb-6"

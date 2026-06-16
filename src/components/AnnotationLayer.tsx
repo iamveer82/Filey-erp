@@ -231,7 +231,7 @@ export default function AnnotationLayer({
           }
           setTool("select");
         },
-      ).catch(() => {});
+      ).catch((e) => console.warn("Failed to prompt for annotation text", e));
     }
   }
 
