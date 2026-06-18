@@ -47,6 +47,26 @@ describe("localdb query shim", () => {
     expect(data.map((r: any) => r.v)).toEqual([1, 2]);
   });
 
+  it("multi-key order is date-wise and stable across updates", async () => {
+    await c.from("d").insert([
+      { issue_date: "2026-01-01", n: "A" },
+      { issue_date: "2026-03-01", n: "B" },
+      { issue_date: "2026-02-01", n: "C" },
+    ]);
+    // Editing the oldest must NOT bump it to the top (no updated_at sort).
+    await c.from("d").update({ n: "A2" }).eq("n", "A");
+    const { data } = await c
+      .from("d")
+      .select()
+      .order("issue_date", { ascending: false })
+      .order("id", { ascending: false });
+    expect(data.map((r: any) => r.issue_date)).toEqual([
+      "2026-03-01",
+      "2026-02-01",
+      "2026-01-01",
+    ]);
+  });
+
   it("upsert replaces on id conflict", async () => {
     await c.from("w").insert({ name: "A" });
     await c.from("w").upsert({ id: 1, name: "A2" });

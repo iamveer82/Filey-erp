@@ -55,8 +55,7 @@ class LocalBuilder implements PromiseLike<Result> {
   private filters: Filter[] = [];
   private matchObj: Row | null = null;
   private payload: Row[] = [];
-  private orderCol?: string;
-  private orderAsc = true;
+  private orders: { col: string; asc: boolean }[] = [];
   private limitN?: number;
   private want: "no" | "single" | "maybe" = "no";
   private returnRows = false; // a write followed by .select()
@@ -106,8 +105,7 @@ class LocalBuilder implements PromiseLike<Result> {
     return this;
   }
   order(col: string, opts?: { ascending?: boolean }): this {
-    this.orderCol = col;
-    this.orderAsc = opts?.ascending !== false;
+    this.orders.push({ col, asc: opts?.ascending !== false });
     return this;
   }
   limit(n: number): this {
@@ -152,12 +150,20 @@ class LocalBuilder implements PromiseLike<Result> {
 
       if (this.op === "select") {
         let out = rows.filter((r) => this.matches(r));
-        if (this.orderCol) {
-          const c = this.orderCol;
-          out = [...out].sort((a, b) =>
-            a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0
-          );
-          if (!this.orderAsc) out.reverse();
+        if (this.orders.length) {
+          // Stable multi-key sort (primary key first), matching PostgREST.
+          out = [...out].sort((a, b) => {
+            for (const o of this.orders) {
+              const av = a[o.col];
+              const bv = b[o.col];
+              if (av == null && bv == null) continue;
+              if (av == null) return 1; // nulls last
+              if (bv == null) return -1;
+              if (av < bv) return o.asc ? -1 : 1;
+              if (av > bv) return o.asc ? 1 : -1;
+            }
+            return 0;
+          });
         }
         if (this.limitN != null) out = out.slice(0, this.limitN);
         result = out;

@@ -1777,7 +1777,10 @@ export const billing = {
       "billing_docs",
       async () => {
         const [docs, items, payments] = await Promise.all([
-          sList<any>("invoice_docs", [{ col: "updated_at", asc: false }]),
+          sList<any>("invoice_docs", [
+            { col: "issue_date", asc: false },
+            { col: "id", asc: false },
+          ]),
           sList<any>("invoice_doc_items"),
           sList<any>("invoice_payments"),
         ]);
@@ -2351,7 +2354,10 @@ export const quotes = {
       "quotation_docs",
       async () => {
         const [docs, items] = await Promise.all([
-          sList<any>("quotations", [{ col: "updated_at", asc: false }]),
+          sList<any>("quotations", [
+            { col: "quote_date", asc: false },
+            { col: "id", asc: false },
+          ]),
           sList<any>("quotation_items"),
         ]);
         const byDoc = new Map<number, any[]>();
@@ -2693,7 +2699,10 @@ export const pos = {
       "purchase_orders",
       async () => {
         const [rows, supRows] = await Promise.all([
-          sList<any>("purchase_orders", [{ col: "updated_at", asc: false }]),
+          sList<any>("purchase_orders", [
+            { col: "order_date", asc: false },
+            { col: "id", asc: false },
+          ]),
           sList<Supplier>("suppliers"),
         ]);
         const byId = new Map(supRows.map((s) => [s.id, s]));
@@ -2926,7 +2935,8 @@ export const receipts = {
       "payment_receipts",
       async () => {
         const rows = await sList<any>("payment_receipts", [
-          { col: "updated_at", asc: false },
+          { col: "issue_date", asc: false },
+          { col: "id", asc: false },
         ]);
         return rows.map((r) => ({
           id: r.id,
