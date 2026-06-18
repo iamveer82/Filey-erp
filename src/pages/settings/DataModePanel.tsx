@@ -1,8 +1,19 @@
-import { useState } from "react";
-import { Cloud, HardDrive, Check, Download } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Cloud, HardDrive, Check, Download, FolderOpen } from "lucide-react";
 import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured } from "../../lib/supabase";
 import { migrateCloudToLocal, type MigrateResult } from "../../lib/migrate";
+import {
+  hasTauri,
+  pickFolder,
+  getDataDir,
+  setDataDir,
+  restartApp,
+  getExportDir,
+  setExportDir,
+  clearExportDir,
+  openFolder,
+} from "../../lib/localPaths";
 
 // Switch where data lives. Changing mode reloads the app; it does NOT migrate
 // data — local data stays on this device, cloud data stays in your account.
@@ -12,6 +23,36 @@ export default function DataModePanel() {
   const [progress, setProgress] = useState("");
   const [result, setResult] = useState<MigrateResult[] | null>(null);
   const [err, setErr] = useState("");
+  const [dataDir, setDataDirState] = useState("");
+  const [exportDir, setExportDirState] = useState(getExportDir());
+
+  useEffect(() => {
+    if (hasTauri) getDataDir().then(setDataDirState).catch(() => {});
+  }, []);
+
+  const changeDataDir = async () => {
+    const dir = await pickFolder();
+    if (!dir) return;
+    if (
+      !window.confirm(
+        `Move the Filey database to:\n${dir}\n\nThe app will restart. Your current data is copied to the new location.`
+      )
+    )
+      return;
+    try {
+      await setDataDir(dir);
+      await restartApp();
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    }
+  };
+
+  const changeExportDir = async () => {
+    const dir = await pickFolder();
+    if (!dir) return;
+    setExportDir(dir);
+    setExportDirState(dir);
+  };
 
   const switchTo = (m: DataMode) => {
     if (m === mode) return;
@@ -113,6 +154,75 @@ export default function DataModePanel() {
           disabled={!cloudConfigured}
         />
       </div>
+
+      {hasTauri && (
+        <div className="border-t border-brand-100 pt-4 space-y-4">
+          {/* Database location */}
+          <div>
+            <p className="font-medium text-ink flex items-center gap-2">
+              <HardDrive size={16} /> Data location
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5 mb-2">
+              Where the Filey database (all data &amp; files) is stored on this
+              computer. Move it to your Desktop, a USB drive, or any folder.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="text-xs bg-brand-100 dark:bg-white/12 px-2 py-1.5 rounded flex-1 min-w-0 truncate">
+                {dataDir || "…"}
+              </code>
+              <button className="btn-ghost shrink-0" onClick={changeDataDir}>
+                Change folder
+              </button>
+              {dataDir && (
+                <button
+                  className="btn-ghost shrink-0"
+                  onClick={() => openFolder(dataDir)}
+                >
+                  <FolderOpen size={14} /> Open
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Documents export folder */}
+          <div>
+            <p className="font-medium text-ink flex items-center gap-2">
+              <FolderOpen size={16} /> Documents folder
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5 mb-2">
+              Save generated documents (invoices, quotes…) as real PDF files
+              here, in addition to keeping them in the app.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="text-xs bg-brand-100 dark:bg-white/12 px-2 py-1.5 rounded flex-1 min-w-0 truncate">
+                {exportDir || "Not set — documents stay in the app only"}
+              </code>
+              <button className="btn-ghost shrink-0" onClick={changeExportDir}>
+                {exportDir ? "Change" : "Choose folder"}
+              </button>
+              {exportDir && (
+                <>
+                  <button
+                    className="btn-ghost shrink-0"
+                    onClick={() => openFolder(exportDir)}
+                  >
+                    <FolderOpen size={14} /> Open
+                  </button>
+                  <button
+                    className="btn-ghost shrink-0 text-danger"
+                    onClick={() => {
+                      clearExportDir();
+                      setExportDirState("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {cloudConfigured && (
         <div className="border-t border-brand-100 pt-4 space-y-3">

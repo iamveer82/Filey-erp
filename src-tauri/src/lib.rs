@@ -11,10 +11,14 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let dir = app.path().app_data_dir().expect("app data dir");
-            std::fs::create_dir_all(&dir).ok();
-            let conn = Connection::open(dir.join("filey-erp.db")).expect("open db");
+            // DB lives in the user-chosen folder (or the default app-data dir).
+            let db_path = modules::storage::resolve_db_path(app.handle());
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            let conn = Connection::open(&db_path).expect("open db");
             db::init(&conn).expect("init db");
             app.manage(Db(Mutex::new(conn)));
             Ok(())
@@ -94,6 +98,11 @@ pub fn run() {
             modules::tools::tools_log_action,
             // Email (SMTP)
             modules::email::send_email,
+            // Storage locations (data folder + document export)
+            modules::storage::get_data_dir,
+            modules::storage::set_data_dir,
+            modules::storage::restart_app,
+            modules::storage::write_doc_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

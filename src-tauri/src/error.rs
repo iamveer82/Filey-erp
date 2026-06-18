@@ -12,6 +12,8 @@ pub enum AppError {
     Validation(String),
     #[error("email error: {0}")]
     Email(String),
+    #[error("io error: {0}")]
+    Io(String),
 }
 
 impl Serialize for AppError {

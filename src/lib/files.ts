@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { sb, isConfigured } from "./supabase";
+import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
 import type { OutFile } from "./pdfTools";
+
+/** Best-effort: write a generated document as a real file to the user's chosen
+ *  documents folder (desktop only, when a folder is set). */
+async function exportToFolder(name: string, bytes: Uint8Array): Promise<void> {
+  if (!hasTauri) return;
+  const dir = getExportDir();
+  if (!dir) return;
+  try {
+    await writeDocFile(dir, name, bytes);
+  } catch (e) {
+    console.warn("Export to documents folder failed:", e);
+  }
+}
 
 /* "My Files" — tool outputs the user chooses to keep in their account. Bytes
  * live in the private `files` Storage bucket under {uid}/{id}/{name}; metadata
@@ -95,7 +109,9 @@ export async function autoSaveDocument(
     if (!(await canSaveFiles())) return false;
     const existing = await listFiles();
     if (existing.some((f) => f.name === name && f.tool === tool)) return false;
-    await saveOutput(await gen(), tool);
+    const out = await gen();
+    await saveOutput(out, tool);
+    await exportToFolder(name, out.bytes); // real file to the chosen folder
     return true;
   } catch (e) {
     console.warn("autoSaveDocument failed:", e);

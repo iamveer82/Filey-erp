@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-desktop-shortcut.ps1",
+    "setup": "npm run tauri build && npm run shortcut"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.7.1",
@@ -35,6 +37,7 @@
     "@sentry/react": "^10.55.0",
     "@supabase/supabase-js": "^2.106.1",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "@uiw/color-convert": "^2.10.2",
     "@uiw/react-color-hue": "^2.10.2",
