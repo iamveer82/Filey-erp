@@ -13,6 +13,10 @@ import {
   setExportDir,
   clearExportDir,
   openFolder,
+  pickSaveFile,
+  pickBackupFile,
+  backupDb,
+  restoreDb,
 } from "../../lib/localPaths";
 
 // Switch where data lives. Changing mode reloads the app; it does NOT migrate
@@ -52,6 +56,38 @@ export default function DataModePanel() {
     if (!dir) return;
     setExportDir(dir);
     setExportDirState(dir);
+  };
+
+  const [backupMsg, setBackupMsg] = useState("");
+
+  const runBackup = async () => {
+    const name = `filey-backup-${new Date().toISOString().slice(0, 10)}.db`;
+    const dest = await pickSaveFile(name);
+    if (!dest) return;
+    setBackupMsg("");
+    try {
+      const path = await backupDb(dest);
+      setBackupMsg(`Backup saved: ${path}`);
+    } catch (e: any) {
+      setBackupMsg(`Backup failed: ${e?.message ?? e}`);
+    }
+  };
+
+  const runRestore = async () => {
+    const src = await pickBackupFile();
+    if (!src) return;
+    if (
+      !window.confirm(
+        `Restore from:\n${src}\n\nThis REPLACES all current data on this device. The app will restart. Make a backup first if unsure.`
+      )
+    )
+      return;
+    try {
+      await restoreDb(src);
+      await restartApp();
+    } catch (e: any) {
+      setBackupMsg(`Restore failed: ${e?.message ?? e}`);
+    }
   };
 
   const switchTo = (m: DataMode) => {
@@ -220,6 +256,28 @@ export default function DataModePanel() {
                 </>
               )}
             </div>
+          </div>
+
+          {/* Backup & restore */}
+          <div>
+            <p className="font-medium text-ink flex items-center gap-2">
+              <Download size={16} /> Backup &amp; restore
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5 mb-2">
+              Save a full copy of your data to a file, or restore from one. Your
+              offline safety net — keep a backup somewhere safe.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button className="btn-ghost" onClick={runBackup}>
+                Export backup
+              </button>
+              <button className="btn-ghost" onClick={runRestore}>
+                Restore backup
+              </button>
+            </div>
+            {backupMsg && (
+              <p className="text-xs text-brand-500 mt-2 break-all">{backupMsg}</p>
+            )}
           </div>
         </div>
       )}

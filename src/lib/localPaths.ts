@@ -2,7 +2,7 @@
 // where generated documents are written as real files.
 
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 export const hasTauri =
@@ -33,3 +33,21 @@ export const writeDocFile = (dir: string, filename: string, bytes: Uint8Array) =
   invoke<string>("write_doc_file", { dir, filename, bytes: Array.from(bytes) });
 
 export const openFolder = (path: string) => openPath(path);
+
+// ---- backup / restore ----
+const BACKUP_FILTER = [{ name: "Filey backup", extensions: ["db"] }];
+
+/** Save-file dialog for an export. Returns the chosen path or null. */
+export async function pickSaveFile(defaultName: string): Promise<string | null> {
+  const res = await saveDialog({ defaultPath: defaultName, filters: BACKUP_FILTER });
+  return res ?? null;
+}
+
+/** Open-file dialog for a backup to restore. Returns the chosen path or null. */
+export async function pickBackupFile(): Promise<string | null> {
+  const res = await openDialog({ multiple: false, filters: BACKUP_FILTER });
+  return typeof res === "string" ? res : null;
+}
+
+export const backupDb = (dest: string) => invoke<string>("backup_db", { dest });
+export const restoreDb = (src: string) => invoke("restore_db", { src });
