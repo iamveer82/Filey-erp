@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "../lib/i18n";
 import {
   X,
   ArrowUpRight,
@@ -87,11 +88,12 @@ export function PageHeader({
   subtitle?: string;
   action?: ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
       <div>
-        <h1 className="text-[28px] leading-9 font-semibold text-ink">{title}</h1>
-        {subtitle && <p className="text-sm text-brand-500 mt-1">{subtitle}</p>}
+        <h1 className="text-[28px] leading-9 font-semibold text-ink">{t(title)}</h1>
+        {subtitle && <p className="text-sm text-brand-500 mt-1">{t(subtitle)}</p>}
       </div>
       {action}
     </div>

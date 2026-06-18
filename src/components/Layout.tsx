@@ -101,7 +101,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { modules, enabledModules } = useModules();
   const navModules = enabledModules();
   const name = profile?.name || "User";
-  const { lang, setLang } = useLang();
+  const { lang, setLang, t } = useLang();
 
   // Online/offline state for connectivity indicator
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -359,7 +359,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* Offline banner */}
         {!isOnline && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
-            You are offline — changes will sync when reconnected
+            {t("You are offline — changes will sync when reconnected")}
           </div>
         )}
         {/* Mobile drawer backdrop */}
@@ -402,7 +402,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <span className="leading-tight">
                   <span className="block font-bold text-ink text-lg">Filey</span>
                   <span className="block text-[11px] font-semibold text-brand-400">
-                    Business Suite
+                    {t("Business Suite")}
                   </span>
                 </span>
               )}
@@ -418,7 +418,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <div key={group.title}>
                     {!railMode && (
                       <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-brand-400">
-                        {group.title}
+                        {t(group.title)}
                       </p>
                     )}
                     <div className="space-y-0.5">
@@ -426,7 +426,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                         <NavLink
                           key={to}
                           to={to}
-                          title={railMode ? label : undefined}
+                          title={railMode ? t(label) : undefined}
                           className={({ isActive }) =>
                             cn(
                               "group relative flex items-center gap-3 rounded-xl py-2 text-sm font-medium transition-colors duration-200 cursor-pointer",
@@ -446,7 +446,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                                 )}
                               />
                               <AppIcon name={iconName} className="w-[18px] h-[18px] shrink-0" />
-                              {!railMode && <span className="truncate">{label}</span>}
+                              {!railMode && <span className="truncate">{t(label)}</span>}
                             </>
                           )}
                         </NavLink>
@@ -461,14 +461,14 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="px-3 py-3 border-t border-brand-100 dark:border-[#2A2C33] space-y-1">
             <button
               onClick={signOut}
-              title={railMode ? "Sign out" : undefined}
+              title={railMode ? t("Sign out") : undefined}
               className={cn(
                 "flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-semibold text-brand-500 hover:bg-danger/10 hover:text-danger transition-colors cursor-pointer",
                 railMode ? "justify-center px-0" : "px-3"
               )}
             >
               <LogOut size={18} className="shrink-0" />
-              {!railMode && "Sign out"}
+              {!railMode && t("Sign out")}
             </button>
           </div>
         </aside>
@@ -529,7 +529,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <AppIcon name={pageMeta.icon} className="w-[18px] h-[18px]" />
                 </span>
                 <span className="hidden sm:block font-display text-base font-bold text-ink truncate">
-                  {pageMeta.label}
+                  {t(pageMeta.label)}
                 </span>
               </div>
             )}
@@ -539,7 +539,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <input
                 ref={inputRef}
                 aria-label="Search"
-                placeholder="Search products, orders, invoices, customers…"
+                placeholder={t("Search products, orders, invoices, customers…")}
                 className="input pl-3.5 pr-10"
                 value={q}
                 onChange={(e) => {
@@ -559,7 +559,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     {cmdHits.length > 0 && (
                       <div className="mb-1">
                         <p className="px-3 pt-2 pb-1 text-[13px] font-medium text-brand-400">
-                          Actions
+                          {t("Actions")}
                         </p>
                         {cmdHits.map((c) => (
                           <button
@@ -633,7 +633,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   onClick={() => nav(newTo)}
                   className="btn-primary h-10 hidden sm:inline-flex"
                 >
-                  <Plus size={16} /> New
+                  <Plus size={16} /> {t("New")}
                 </button>
               )}
 
@@ -683,7 +683,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 {notifOpen && (
                   <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A2C33]">
-                      <p className="text-sm font-bold text-ink">Notifications</p>
+                      <p className="text-sm font-bold text-ink">{t("Notifications")}</p>
                       {unread > 0 && (
                         <button
                           onClick={async () => {
@@ -692,13 +692,13 @@ export default function Layout({ children }: { children: ReactNode }) {
                           }}
                           className="text-xs font-semibold text-brand-700 hover:text-ink cursor-pointer"
                         >
-                          Mark all read
+                          {t("Mark all read")}
                         </button>
                       )}
                     </div>
                     {inbox.length === 0 && alerts.length === 0 ? (
                       <p className="px-4 py-8 text-center text-sm text-brand-400">
-                        You’re all caught up.
+                        {t("You’re all caught up.")}
                       </p>
                     ) : (
                       <div className="p-1.5">
@@ -798,10 +798,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <DropdownMenuContent align="end" className="min-w-52">
                   <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
                   <DropdownMenuItem onSelect={() => nav("/settings?section=account")}>
-                    <UserRound size={14} /> Account
+                    <UserRound size={14} /> {t("Account")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => nav("/settings")}>
-                    <Settings size={14} /> Settings
+                    <Settings size={14} /> {t("Settings")}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -810,7 +810,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     }}
                     className="text-danger focus:text-danger focus:bg-danger/10"
                   >
-                    <LogOut size={14} /> Sign out
+                    <LogOut size={14} /> {t("Sign out")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

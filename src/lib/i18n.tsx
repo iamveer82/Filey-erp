@@ -5,8 +5,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import ar from "./locales/ar";
 
 export type Lang = "en" | "ar" | "hi";
+
+const CATALOGS: Partial<Record<Lang, Record<string, string>>> = { ar };
 
 export const LANGS: Record<
   Lang,
@@ -20,6 +23,9 @@ export const LANGS: Record<
 interface LangValue {
   lang: Lang;
   setLang: (l: Lang) => void;
+  /** Translate an English source string to the active language. Falls back to
+   *  the source string when no translation exists yet. */
+  t: (s: string) => string;
 }
 
 const Ctx = createContext<LangValue | null>(null);
@@ -48,11 +54,18 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <Ctx.Provider value={{ lang, setLang }}>{children}</Ctx.Provider>;
+  const t = (s: string) => CATALOGS[lang]?.[s] ?? s;
+
+  return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }
 
 export function useLang(): LangValue {
   const c = useContext(Ctx);
   if (!c) throw new Error("useLang must be used within LanguageProvider");
   return c;
+}
+
+/** Convenience hook for components that only need the translate function. */
+export function useT(): (s: string) => string {
+  return useLang().t;
 }
