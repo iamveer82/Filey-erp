@@ -1771,6 +1771,83 @@ async function unpropagateInvoice(
   }
 }
 
+async function findOrCreateApAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "liability",
+    "2000",
+    "Accounts Payable",
+    /payable|creditors|ap\b/i
+  );
+}
+async function findOrCreatePurchasesAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "expense",
+    "5100",
+    "Purchases",
+    /purchase|cogs|cost of goods/i
+  );
+}
+
+/** A purchase order's accounting footprint, posted when it's received/done:
+ *  debit Purchases (expense), credit Accounts Payable (the supplier we now owe).
+ *  Idempotent — reverses any prior posting for this PO before re-posting. Stock
+ *  is handled separately by pos.receive. */
+async function propagatePurchase(doc: Record<string, unknown>) {
+  try {
+    const number = String(doc.po_number ?? "").trim();
+    if (!number) return;
+    const ref = `PO ${number}`;
+    await reverseInvoiceTransactions(undefined, ref); // clear prior posting
+    const total = Number(doc.total ?? 0);
+    if (total <= 0) return;
+    const txnDate =
+      (doc.order_date as string) || new Date().toISOString().slice(0, 10);
+    const purchasesId = await findOrCreatePurchasesAccount();
+    const apId = await findOrCreateApAccount();
+    if (purchasesId > 0) {
+      await sInsert("transactions", {
+        account_id: purchasesId,
+        txn_type: "debit",
+        amount: total,
+        description: `${ref} — Purchases`,
+        ref,
+        source: "purchase",
+        txn_date: txnDate,
+      });
+      await adjustAccountBalance(purchasesId, -total);
+    }
+    if (apId > 0) {
+      await sInsert("transactions", {
+        account_id: apId,
+        txn_type: "credit",
+        amount: total,
+        description: `${ref} — Accounts Payable`,
+        ref,
+        source: "purchase",
+        txn_date: txnDate,
+      });
+      await adjustAccountBalance(apId, total);
+    }
+  } catch (e) {
+    console.error("Purchase propagation failed:", e);
+  }
+}
+
+/** Remove a purchase order's accounting footprint (reverted to draft/deleted). */
+async function unpropagatePurchase(doc: Record<string, unknown>) {
+  try {
+    const number = String(doc.po_number ?? "").trim();
+    if (!number) return;
+    await reverseInvoiceTransactions(undefined, `PO ${number}`);
+  } catch (e) {
+    console.error("Purchase unpropagation failed:", e);
+  }
+}
+
+/** A purchase order is "done" (posts to accounting) once received/completed. */
+const PO_DONE = (status: unknown) =>
+  status === "received" || status === "completed";
+
 export const billing = {
   listDocs: () =>
     readCached<InvoiceDocSummary[]>(
@@ -2804,12 +2881,28 @@ export const pos = {
           );
         if (error) throw error;
       }
+      // Post to Accounting once the PO is received/done; clear it otherwise.
+      const saved = { ...row, id: poId };
+      if (PO_DONE((row as Record<string, unknown>).status))
+        await propagatePurchase(saved);
+      else await unpropagatePurchase(saved);
       return poId;
     }),
   setStatus: (poId: number, status: string) =>
     write(
       { k: "update", t: "purchase_orders", id: poId, row: { status } },
-      () => sUpdate("purchase_orders", poId, { status }),
+      async () => {
+        const { data: doc, error } = await sb()
+          .from("purchase_orders")
+          .select("*")
+          .eq("id", poId)
+          .single();
+        if (error) throw error;
+        await sUpdate("purchase_orders", poId, { status });
+        const po = { ...(doc as Record<string, unknown>), status };
+        if (PO_DONE(status)) await propagatePurchase(po);
+        else await unpropagatePurchase(po);
+      },
       undefined
     ),
   shareDoc: (poId: number, shared: boolean) =>
@@ -2841,11 +2934,19 @@ export const pos = {
         await adjustProductStock(it.product_id, Math.abs(Number(it.quantity)));
       }
       await sUpdate("purchase_orders", poId, { status: "received" });
+      // Receiving = done → post Purchases / Accounts Payable to Accounting.
+      await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
     }),
   remove: (poId: number) =>
-    write({ k: "delete", t: "purchase_orders", id: poId }, () =>
-      sDelete("purchase_orders", poId), undefined
-    ),
+    write({ k: "delete", t: "purchase_orders", id: poId }, async () => {
+      const { data: doc } = await sb()
+        .from("purchase_orders")
+        .select("*")
+        .eq("id", poId)
+        .single();
+      if (doc) await unpropagatePurchase(doc as Record<string, unknown>);
+      await sDelete("purchase_orders", poId);
+    }, undefined),
   /* ---- payments ---- */
   payments: (poId: number) =>
     readCached<PoPayment[]>(
