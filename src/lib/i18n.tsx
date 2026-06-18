@@ -6,10 +6,11 @@ import {
   type ReactNode,
 } from "react";
 import ar from "./locales/ar";
+import hi from "./locales/hi";
 
 export type Lang = "en" | "ar" | "hi";
 
-const CATALOGS: Partial<Record<Lang, Record<string, string>>> = { ar };
+const CATALOGS: Partial<Record<Lang, Record<string, string>>> = { ar, hi };
 
 export const LANGS: Record<
   Lang,
@@ -108,10 +109,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }
 
+// Safe default for components rendered outside a LanguageProvider (e.g. an
+// off-screen PDF/print render mounted in its own React root). No crash; such
+// trees simply stay English.
+const DEFAULT_LANG: LangValue = { lang: "en", setLang: () => {}, t: (s) => s };
+
 export function useLang(): LangValue {
-  const c = useContext(Ctx);
-  if (!c) throw new Error("useLang must be used within LanguageProvider");
-  return c;
+  return useContext(Ctx) ?? DEFAULT_LANG;
 }
 
 /** Convenience hook for components that only need the translate function. */
