@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "./supabase";
+import { sb, isConfigured } from "./supabase";
 import type { OutFile } from "./pdfTools";
 
 /* "My Files" — tool outputs the user chooses to keep in their account. Bytes
@@ -41,8 +41,8 @@ const newId = () =>
     : Math.random().toString(36).slice(2, 10);
 
 async function userId(): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
+  if (!isConfigured) return null;
+  const { data } = await sb().auth.getSession();
   return data.session?.user?.id ?? null;
 }
 
@@ -54,16 +54,16 @@ export async function canSaveFiles(): Promise<boolean> {
 /** Upload a tool output to the user's account. */
 export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
   const uid = await userId();
-  if (!uid || !supabase) throw new Error("Sign in to save files to your account.");
+  if (!uid || !isConfigured) throw new Error("Sign in to save files to your account.");
   const id = newId();
   const mime = mimeOf(out.name);
   const path = `${uid}/${id}/${out.name}`;
   const blob = new Blob([out.bytes.slice()], { type: mime });
-  const up = await supabase.storage
+  const up = await sb().storage
     .from(BUCKET)
     .upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
-  const ins = await supabase.from("user_files").insert({
+  const ins = await sb().from("user_files").insert({
     id,
     owner: uid,
     name: out.name,
@@ -74,7 +74,7 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
   });
   if (ins.error) {
     // Roll back the orphaned object if the metadata row failed.
-    await supabase.storage.from(BUCKET).remove([path]);
+    await sb().storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
 }
@@ -105,8 +105,8 @@ export async function autoSaveDocument(
 
 export async function listFiles(): Promise<SavedFile[]> {
   const uid = await userId();
-  if (!uid || !supabase) return [];
-  const { data, error } = await supabase
+  if (!uid || !isConfigured) return [];
+  const { data, error } = await sb()
     .from("user_files")
     .select("id,name,mime,size,storage_path,tool,created_at")
     .eq("owner", uid)
@@ -128,8 +128,8 @@ export async function listFiles(): Promise<SavedFile[]> {
  * Throws on failure so the caller can show the real reason rather than a
  * blank "could not load" state. */
 export async function fileUrl(f: SavedFile): Promise<string | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.storage
+  if (!isConfigured) return null;
+  const { data, error } = await sb().storage
     .from(BUCKET)
     .createSignedUrl(f.storagePath, 300);
   if (error) throw new Error(error.message || "Could not open this file.");
@@ -139,8 +139,8 @@ export async function fileUrl(f: SavedFile): Promise<string | null> {
 /** Signed URL that forces a download (Content-Disposition: attachment) using
  * the file's display name — used by the explicit Download action. */
 export async function downloadUrl(f: SavedFile): Promise<string | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.storage
+  if (!isConfigured) return null;
+  const { data, error } = await sb().storage
     .from(BUCKET)
     .createSignedUrl(f.storagePath, 300, { download: f.name });
   if (error) throw new Error(error.message || "Could not create a download link.");
@@ -157,8 +157,8 @@ export async function renameFile(f: SavedFile, newName: string): Promise<string>
   if (ext && !name.toLowerCase().endsWith(`.${ext.toLowerCase()}`)) {
     name = `${name}.${ext}`;
   }
-  if (!supabase) return name;
-  const { error } = await supabase.from("user_files").update({ name }).eq("id", f.id);
+  if (!isConfigured) return name;
+  const { error } = await sb().from("user_files").update({ name }).eq("id", f.id);
   if (error) throw error;
   return name;
 }
@@ -168,8 +168,8 @@ export async function shareFileLink(
   f: SavedFile,
   expiresSec = 604800
 ): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.storage
+  if (!isConfigured) return null;
+  const { data } = await sb().storage
     .from(BUCKET)
     .createSignedUrl(f.storagePath, expiresSec);
   return data?.signedUrl ?? null;
@@ -194,16 +194,16 @@ export function folderOf(f: SavedFile): string {
 /** Upload a user-selected file directly to My Files. */
 export async function uploadUserFile(file: File, tool?: string): Promise<void> {
   const uid = await userId();
-  if (!uid || !supabase) throw new Error("Sign in to upload files.");
+  if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
   const path = `${uid}/${id}/${file.name}`;
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
-  const ins = await supabase.from("user_files").insert({
+  const ins = await sb().from("user_files").insert({
     id,
     owner: uid,
     name: file.name,
@@ -213,15 +213,15 @@ export async function uploadUserFile(file: File, tool?: string): Promise<void> {
     tool: tool ?? null,
   });
   if (ins.error) {
-    await supabase.storage.from(BUCKET).remove([path]);
+    await sb().storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
 }
 
 export async function deleteFile(f: SavedFile): Promise<void> {
-  if (!supabase) return;
-  await supabase.storage.from(BUCKET).remove([f.storagePath]);
-  await supabase.from("user_files").delete().eq("id", f.id);
+  if (!isConfigured) return;
+  await sb().storage.from(BUCKET).remove([f.storagePath]);
+  await sb().from("user_files").delete().eq("id", f.id);
 }
 
 
@@ -231,7 +231,7 @@ export async function deleteFile(f: SavedFile): Promise<void> {
  * app_settings so the image follows the user across devices and sessions. */
 export async function uploadCompanyAsset(file: File): Promise<{ path: string; url: string }> {
   const uid = await userId();
-  if (!uid || !supabase) throw new Error("Sign in to upload company assets.");
+  if (!uid || !isConfigured) throw new Error("Sign in to upload company assets.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
   const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -239,17 +239,17 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
+  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
   if (up.error) throw up.error;
-  const { data: urlData, error: urlErr } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
+  const { data: urlData, error: urlErr } = await sb().storage.from(BUCKET).createSignedUrl(path, 300);
   if (urlErr) throw urlErr;
   return { path, url: urlData?.signedUrl ?? "" };
 }
 
 /** Re-create a signed URL for a previously-uploaded company asset path. */
 export async function companyAssetUrl(path: string, expiresSec = 300): Promise<string | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, expiresSec);
+  if (!isConfigured) return null;
+  const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(path, expiresSec);
   if (error) {
     console.warn("Failed to create signed URL for company asset", path, error.message);
     return null;

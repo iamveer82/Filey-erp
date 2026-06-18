@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { invoiceTotals, quotationTotals } from "../money";
+import { invoiceTotals, invoiceLineAmount, quotationTotals } from "../money";
+
+describe("invoiceLineAmount", () => {
+  it("uses qty × unit_price by default", () => {
+    expect(invoiceLineAmount({ qty: 3, unit_price: 10 })).toBe(30);
+  });
+
+  it("uses manual amount when calcMode is manual", () => {
+    expect(
+      invoiceLineAmount({ qty: 5, unit_price: 100, calcMode: "manual", amount: 175 })
+    ).toBe(175);
+  });
+
+  it("uses per-line formula over doc-level formula", () => {
+    const item = {
+      qty: 2,
+      unit_price: 50,
+      calcMode: "formula" as const,
+      itemFormula: { a: "qty" },
+      custom: { width: "10" },
+    };
+    // per-line formula uses qty → 2 × 50 = 100
+    expect(invoiceLineAmount(item, { a: "width" })).toBe(100);
+  });
+
+  it("falls back to doc-level formula when per-line formula has no field", () => {
+    const item = {
+      qty: 2,
+      unit_price: 50,
+      calcMode: "formula" as const,
+      itemFormula: { a: "" },
+      custom: { width: "10" },
+    };
+    expect(invoiceLineAmount(item, { a: "width" })).toBe(500);
+  });
+});
 
 describe("invoiceTotals", () => {
   it("computes subtotal, 5% VAT and total", () => {
@@ -36,6 +71,20 @@ describe("invoiceTotals", () => {
       tax: 0,
       total: 0,
     });
+  });
+
+  it("mixes manual and formula lines", () => {
+    const t = invoiceTotals(
+      [
+        { qty: 1, unit_price: 100, calcMode: "manual", amount: 50 },
+        { qty: 2, unit_price: 10, custom: { length: "3" }, calcMode: "formula", itemFormula: { a: "length" } },
+      ],
+      0,
+      5
+    );
+    expect(t.subtotal).toBe(80); // 50 + 2*10*3
+    expect(t.tax).toBe(4);
+    expect(t.total).toBe(84);
   });
 });
 

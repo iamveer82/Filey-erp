@@ -12,6 +12,7 @@ import {
   DatabaseBackup,
   History,
   Sparkles,
+  HardDrive,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
 import CompanyDetails from "./CompanyDetails";
@@ -26,6 +27,7 @@ import NotificationsPanel from "./NotificationsPanel";
 import BillingPanel from "./BillingPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import BackupPanel from "./BackupPanel";
+import DataModePanel from "./DataModePanel";
 import EmailPanel from "./EmailPanel";
 // import { MessageSquare } from "lucide-react";
 
@@ -43,6 +45,7 @@ type Section =
   | "sms"
   | "integrations"
   | "backup"
+  | "datamode"
   | "activity"
   | "ai";
 
@@ -61,6 +64,7 @@ const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   // { id: "sms", label: "SMS", icon: MessageSquare },
   { id: "integrations", label: "Integrations", icon: Plug },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
+  { id: "datamode", label: "Data & Storage", icon: HardDrive },
   { id: "activity", label: "Activity Log", icon: History },
 ];
 
@@ -113,6 +117,7 @@ export default function Settings() {
           {/* {section === "sms" && <SmsPanel />} */}
           {section === "integrations" && <IntegrationsPanel />}
           {section === "backup" && <BackupPanel />}
+          {section === "datamode" && <DataModePanel />}
         </div>
       </div>
       <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />

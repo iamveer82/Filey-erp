@@ -50,12 +50,23 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
-import { invoiceTotals, invoiceLineAmount } from "../lib/money";
+import { invoiceTotals, invoiceLineAmount, r2 } from "../lib/money";
 import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
+import DocView from "../components/DocView";
+import StatStrip from "../components/StatStrip";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
+import {
+  splitItemMeta,
+  mergeItemMeta,
+  PB_KEY,
+  CM_KEY,
+  MA_KEY,
+  FA_KEY,
+  FB_KEY,
+} from "../lib/docItems";
 import ScanDocModal from "../components/ScanDocModal";
 import TemplateDesigner, {
   loadCustomTemplates,
@@ -104,6 +115,12 @@ type Item = {
   custom: Record<string, string>;
   /** Start a new page in the generated PDF/preview at this item. */
   pageBreakBefore?: boolean;
+  /** How this line's amount is calculated: auto (default), manual, or formula. */
+  calcMode: "auto" | "manual" | "formula";
+  /** Directly-entered amount when calcMode === 'manual'. */
+  amount: number;
+  /** Per-line formula multiplier field when calcMode === 'formula'. */
+  itemFormula: { a: string; b?: string } | null;
 };
 
 // Pages are driven only by manual breaks set by the user. Default = one A4 page.
@@ -120,22 +137,6 @@ function paginateItems(items: Item[]): Item[][] {
   return pages;
 }
 
-// The manual page-break flag is persisted inside the item's `custom` jsonb
-// (key "__pagebreak") so it survives a reload with no DB schema change. It is
-// stripped from the in-memory custom map so it never renders as a column value.
-const PB_KEY = "__pagebreak";
-const splitPageBreak = (custom?: Record<string, string> | null) => {
-  const c: Record<string, string> = { ...(custom || {}) };
-  const pageBreakBefore = c[PB_KEY] === "1";
-  delete c[PB_KEY];
-  return { custom: c, pageBreakBefore };
-};
-const mergePageBreak = (it: Item): Record<string, string> | undefined => {
-  const c: Record<string, string> = { ...(it.custom || {}) };
-  if (it.pageBreakBefore) c[PB_KEY] = "1";
-  else delete c[PB_KEY];
-  return Object.keys(c).length ? c : undefined;
-};
 type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   items: Item[];
   customColumns: CustomColumn[];
@@ -178,6 +179,11 @@ const RESERVED_ITEM_COLUMNS = new Set([
   "tax",
   "product_id",
   "id",
+  PB_KEY,
+  CM_KEY,
+  MA_KEY,
+  FA_KEY,
+  FB_KEY,
 ]);
 const DEFAULT_COLUMN_LABELS = new Set([
   "description",
@@ -218,16 +224,25 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
     terms: "Payment due within 30 days.",
     tax_rate: c.default_tax_rate ?? 5,
     discount: 0,
-    items: [{ description: "", qty: 1, unit_price: 0, unit: "", custom: {}, pageBreakBefore: false }],
+    items: [
+      {
+        description: "",
+        qty: 1,
+        unit_price: 0,
+        unit: "",
+        custom: {},
+        pageBreakBefore: false,
+        calcMode: "auto",
+        amount: 0,
+        itemFormula: null,
+      },
+    ],
     customColumns: [],
     show_stamp: false,
     show_signature: false,
     unit_price_formula: null,
   };
 }
-
-const totals = (f: Form) =>
-  invoiceTotals(f.items, f.discount || 0, f.tax_rate || 0, f.unit_price_formula);
 
 export default function Invoicing() {
   const { toast, confirm } = useUI();
@@ -350,7 +365,13 @@ const editInvoice = async (id: number) => {
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         items: d.items.map((i) => {
-          const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+          const {
+            custom,
+            pageBreakBefore,
+            calcMode,
+            amount,
+            itemFormula,
+          } = splitItemMeta(i.custom);
           return {
             description: i.description,
             qty: i.qty,
@@ -359,6 +380,9 @@ const editInvoice = async (id: number) => {
             custom,
             product_id: i.product_id,
             pageBreakBefore,
+            calcMode: calcMode || "auto",
+            amount: amount ?? 0,
+            itemFormula: itemFormula || null,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -428,7 +452,13 @@ const editInvoice = async (id: number) => {
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         items: d.items.map((i) => {
-          const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+          const {
+            custom,
+            pageBreakBefore,
+            calcMode,
+            amount,
+            itemFormula,
+          } = splitItemMeta(i.custom);
           return {
             description: i.description,
             qty: i.qty,
@@ -437,6 +467,9 @@ const editInvoice = async (id: number) => {
             custom,
             product_id: i.product_id,
             pageBreakBefore,
+            calcMode: calcMode || "auto",
+            amount: amount ?? 0,
+            itemFormula: itemFormula || null,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -483,7 +516,7 @@ const editInvoice = async (id: number) => {
           qty: it.qty,
           unit_price: it.unit_price,
           unit: it.unit || undefined,
-          custom: mergePageBreak(it),
+          custom: mergeItemMeta(it),
           product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
@@ -541,7 +574,7 @@ const editInvoice = async (id: number) => {
           qty: it.qty,
           unit_price: it.unit_price,
           unit: it.unit || undefined,
-          custom: mergePageBreak(it),
+          custom: mergeItemMeta(it),
           product_id: it.product_id,
         })),
         issue_date: form.issue_date || undefined,
@@ -629,6 +662,12 @@ const editInvoice = async (id: number) => {
           d.customer_name.toLowerCase().includes(search.toLowerCase())
       )
     : docs;
+
+  // Totals for the current search/filter — shown on top when filtering so the
+  // user sees a customer's invoiced / collected / outstanding at a glance.
+  const fPaid = filteredDocs.reduce((s, d) => s + (d.paid ?? 0), 0);
+  const fOutstanding = filteredDocs.reduce((s, d) => s + (d.balance ?? 0), 0);
+  const fInvoiced = fPaid + fOutstanding;
 
   return (
     <div>
@@ -727,6 +766,38 @@ const editInvoice = async (id: number) => {
           className="max-w-xs"
         />
       </div>
+
+      {search && filteredDocs.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 text-sm text-brand-500">
+            Totals for <span className="font-medium text-ink">“{search}”</span>
+          </p>
+          <StatStrip
+            items={[
+              {
+                label: "Invoices",
+                value: num(filteredDocs.length),
+                icon: <FileText size={16} />,
+              },
+              {
+                label: "Invoiced",
+                value: money(fInvoiced, statCcy),
+                icon: <FileText size={16} />,
+              },
+              {
+                label: "Collected",
+                value: money(fPaid, statCcy),
+                icon: <CheckCircle2 size={16} />,
+              },
+              {
+                label: "Outstanding",
+                value: money(fOutstanding, statCcy),
+                icon: <Wallet size={16} />,
+              },
+            ]}
+          />
+        </div>
+      )}
 
       <DataTable<InvoiceDocSummary>
         rows={filteredDocs}
@@ -1247,14 +1318,26 @@ function Editor({
       ...form,
       items: [
         ...form.items,
-        { description: "", qty: 1, unit_price: 0, unit: "", custom: {}, pageBreakBefore: false },
+        {
+          description: "",
+          qty: 1,
+          unit_price: 0,
+          unit: "",
+          custom: {},
+          pageBreakBefore: false,
+          calcMode: "auto",
+          amount: 0,
+          itemFormula: null,
+        },
       ],
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
 
   const setItemCustom = (idx: number, key: string, value: string) => {
-    if (key === PB_KEY) return; // reserved for page-break flag
+    // reserved meta keys are persisted through split/merge helpers, not as custom columns
+    if (key === PB_KEY || key === CM_KEY || key === MA_KEY || key === FA_KEY || key === FB_KEY)
+      return;
     const items = form.items.map((it, i) =>
       i === idx ? { ...it, custom: { ...it.custom, [key]: value } } : it
     );
@@ -1338,6 +1421,9 @@ function Editor({
           unit: "",
           custom: {},
           product_id: p.id,
+          calcMode: "auto",
+          amount: 0,
+          itemFormula: null,
         },
       ],
     });
@@ -1875,6 +1961,7 @@ function Editor({
                     <th className="py-2 px-2">Description</th>
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
                     <th className="py-2 px-2 w-24 text-right">Unit</th>
+                    <th className="py-2 px-2 w-28 text-right">Calc</th>
                     {form.customColumns.map((col, idx) => (
                       <th
                         key={col.key}
@@ -1949,7 +2036,17 @@ function Editor({
                           className="input text-right !px-2"
                           value={it.qty || ""}
                           placeholder="0"
-                          onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
+                          onChange={(e) => {
+                            const qty = numInput(e.target.value);
+                            if (it.calcMode === "manual") {
+                              setItem(i, {
+                                qty,
+                                unit_price: qty ? r2(it.amount / qty) : it.amount,
+                              });
+                            } else {
+                              setItem(i, { qty });
+                            }
+                          }}
                         />
                       </td>
                       <td className="py-2 px-2">
@@ -1960,6 +2057,54 @@ function Editor({
                           list="unit-suggestions"
                           onChange={(e) => setItem(i, { unit: e.target.value })}
                         />
+                      </td>
+                      <td className="py-2 px-2">
+                        <select
+                          className="input text-right !px-2 !py-1 text-xs"
+                          value={
+                            it.calcMode === "manual"
+                              ? "manual"
+                              : it.calcMode === "formula" && it.itemFormula?.a
+                                ? it.itemFormula.a === "qty"
+                                  ? "qty"
+                                  : `formula:${it.itemFormula.a}`
+                                : "auto"
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === "auto") {
+                              setItem(i, { calcMode: "auto", itemFormula: null });
+                            } else if (v === "manual") {
+                              const amount = invoiceLineAmount(it, form.unit_price_formula);
+                              setItem(i, {
+                                calcMode: "manual",
+                                amount,
+                                unit_price: it.qty ? r2(amount / it.qty) : amount,
+                                itemFormula: null,
+                              });
+                            } else if (v === "qty") {
+                              setItem(i, {
+                                calcMode: "formula",
+                                itemFormula: { a: "qty", b: "unit_price" },
+                              });
+                            } else if (v.startsWith("formula:")) {
+                              const field = v.slice("formula:".length);
+                              setItem(i, {
+                                calcMode: "formula",
+                                itemFormula: { a: field, b: "unit_price" },
+                              });
+                            }
+                          }}
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="manual">Manual</option>
+                          <option value="qty">Formula: Qty</option>
+                          {form.customColumns.map((c) => (
+                            <option key={c.key} value={`formula:${c.key}`}>
+                              Formula: {c.label}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       {form.customColumns.map((col) => (
                         <td key={col.key} className="py-2 px-2">
@@ -1975,11 +2120,14 @@ function Editor({
                         <input
                           type="number"
                           className={`input text-right !px-2 ${
-                            form.unit_price_formula?.a && form.unit_price_formula?.b
+                            it.calcMode !== "manual" &&
+                            form.unit_price_formula?.a &&
+                            form.unit_price_formula?.b
                               ? "bg-brand-50/50"
                               : ""
-                          }`}
+                          } ${it.calcMode === "manual" ? "opacity-60 cursor-not-allowed" : ""}`}
                           placeholder="0"
+                          disabled={it.calcMode === "manual"}
                           value={it.unit_price || ""}
                           onChange={(e) =>
                             setItem(i, { unit_price: numInput(e.target.value) })
@@ -1992,7 +2140,23 @@ function Editor({
                         </td>
                       )}
                       <td className="py-2 px-2 text-right font-medium text-ink">
-                        {m(invoiceLineAmount(it, form.unit_price_formula))}
+                        {it.calcMode === "manual" ? (
+                          <input
+                            type="number"
+                            className="input text-right !px-2"
+                            placeholder="0"
+                            value={it.amount || ""}
+                            onChange={(e) => {
+                              const amount = numInput(e.target.value);
+                              setItem(i, {
+                                amount,
+                                unit_price: it.qty ? r2(amount / it.qty) : amount,
+                              });
+                            }}
+                          />
+                        ) : (
+                          m(invoiceLineAmount(it, form.unit_price_formula))
+                        )}
                       </td>
                       <td className="py-2">
                         <div className="flex items-center gap-0.5">
@@ -2418,7 +2582,7 @@ function Editor({
                       if (base) setForm({ ...form, signature: { ...base, x, y } });
                     }}
                   />
-                  <InvoiceView
+                  <DocView
                     form={form}
                     pageItems={pages[curPageIdx] ?? []}
                     itemStartIndex={pageStartIndex}
@@ -2500,7 +2664,7 @@ function Editor({
                               onSignatureMove={() => {}}
                             />
                           )}
-                          <InvoiceView
+                          <DocView
                             form={form}
                             pageItems={group}
                             itemStartIndex={startIdx}
@@ -2679,7 +2843,7 @@ function Editor({
                         if (base) setForm({ ...form, signature: { ...base, x, y } });
                       }}
                     />
-                    <InvoiceView
+                    <DocView
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
                       itemStartIndex={viewPageStart}
@@ -2874,1293 +3038,6 @@ function CustomerModal({
         </button>
       </div>
     </Modal>
-  );
-}
-
-/* ---------------- Invoice templates ---------------- */
-
-function InvoiceView({
-  form,
-  pageItems,
-  itemStartIndex = 0,
-  showTotals = true,
-  showFooter = true,
-}: {
-  form: Form;
-  /** When set, render only these items (one page of a multi-page invoice). */
-  pageItems?: Item[];
-  /** SL/serial offset so numbering continues across pages. */
-  itemStartIndex?: number;
-  /** Subtotal/total block — shown only on the final page of a multi-page doc. */
-  showTotals?: boolean;
-  /** Notes/terms footer — shown only on the final page. */
-  showFooter?: boolean;
-}) {
-  // Totals always reflect the WHOLE invoice (full form.items), even though a
-  // single page may render only a slice — so the last-page total is correct.
-  const t = totals(form);
-  const ccy = form.currency || "AED";
-  const m = (v: number) => money(v, ccy);
-  const itemsToRender = pageItems ?? form.items;
-
-  // Resolve custom templates to their base layout for rendering
-  const templateId = form.template?.startsWith("custom-")
-    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.layout || "modern"
-    : form.template;
-
-  // Override accent color for custom templates
-  const resolvedAccent = form.template?.startsWith("custom-")
-    ? loadCustomTemplates().find((ct) => ct.id === form.template)?.accent ||
-      form.accent ||
-      "#222222"
-    : form.accent || "#222222";
-  const a = resolvedAccent;
-
-  const Items = ({ headerBg, bordered }: { headerBg?: string; bordered?: boolean }) => (
-    <table className="w-full text-sm border-collapse mt-2">
-      <thead>
-        <tr
-          style={{ background: headerBg, color: headerBg ? "#fff" : a }}
-          className={bordered ? "" : "border-b-2"}
-        >
-          <th className="text-right py-2 px-2 font-semibold w-8">SL</th>
-          <th className="text-left py-2 px-2 font-semibold">Description</th>
-          <th className="text-right py-2 px-2 font-semibold w-14">Qty</th>
-          <th className="text-right py-2 px-2 font-semibold w-14">Unit</th>
-          {form.customColumns.map((col) => (
-            <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">
-              {col.label}
-            </th>
-          ))}
-          <th className="text-right py-2 px-2 font-semibold w-24">Unit Price</th>
-          <th className="text-right py-2 px-2 font-semibold w-28">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        {itemsToRender.map((it, i) => (
-          <tr
-            key={i}
-            className="border-b border-neutral-200"
-            style={bordered ? { borderColor: "#000" } : undefined}
-          >
-            <td className="py-2 px-2 text-right text-neutral-500 tabular-nums">
-              {itemStartIndex + i + 1}
-            </td>
-            <td className="py-2 px-2">{it.description || "—"}</td>
-            <td className="py-2 px-2 text-right">{it.qty}</td>
-            <td className="py-2 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
-            {form.customColumns.map((col) => (
-              <td
-                key={col.key}
-                className="py-2 px-2 text-right text-[10px] text-neutral-500"
-              >
-                {it.custom?.[col.key] || "—"}
-              </td>
-            ))}
-            <td className="py-2 px-2 text-right">{m(it.unit_price)}</td>
-            <td className="py-2 px-2 text-right">
-              {m(invoiceLineAmount(it, form.unit_price_formula))}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-
-  const Totals = () =>
-    showTotals ? (
-      <div className="ml-auto w-72 mt-6 text-sm">
-        <Row k="Subtotal" v={m(t.subtotal)} />
-        {form.discount > 0 && <Row k="Discount" v={`- ${m(form.discount)}`} />}
-        {(form.tax_rate || 0) > 0 && <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />}
-        <div
-          className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
-          style={{ borderColor: a, color: a }}
-        >
-          <span>Total</span>
-          <span>{m(t.total)}</span>
-        </div>
-      </div>
-    ) : null;
-
-  const Footer = () =>
-    showFooter && (form.notes || form.terms) ? (
-      <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
-        {form.notes && <p>{form.notes}</p>}
-        {form.terms && <p className="text-neutral-400">{form.terms}</p>}
-      </div>
-    ) : null;
-
-  const Logo = ({ size = 56 }: { size?: number }) =>
-    form.logo ? (
-      <img
-        src={form.logo}
-        alt="logo"
-        style={{ height: size }}
-        className="object-contain"
-      />
-    ) : null;
-
-  // --- File-based (uploaded image/PDF) template ---
-  const customTemplate = form.template?.startsWith("custom-")
-    ? loadCustomTemplates().find((ct) => ct.id === form.template)
-    : null;
-
-  if (customTemplate?.type === "file" && customTemplate.fileData) {
-    const pw = customTemplate.paperSize === "Letter" ? 816 : 794;
-    const ph = customTemplate.paperSize === "Letter" ? 1056 : 1122;
-    const pos = customTemplate.positions || {};
-    const ac = customTemplate.accent || a;
-
-    // Helper: position a section using %-based coords
-    const Section = ({ k, children }: { k: string; children: React.ReactNode }) => {
-      const p = pos[k];
-      if (!p) return null;
-      return (
-        <div className="absolute" style={{ left: `${p.x}%`, top: `${p.y}%` }}>
-          {children}
-        </div>
-      );
-    };
-
-    return (
-      <div
-        className="relative text-neutral-900 overflow-hidden"
-        style={{ width: pw, minHeight: ph, background: "#fff" }}
-      >
-        {/* Background image */}
-        <img
-          src={customTemplate.fileData}
-          alt="Template background"
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ objectFit: "cover", opacity: 0.92 }}
-        />
-
-        {/* Seller — Company Info */}
-        <Section k="seller">
-          {form.logo && (
-            <img
-              src={form.logo}
-              alt="logo"
-              style={{ height: 40 }}
-              className="object-contain mb-1.5"
-            />
-          )}
-          <p className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
-          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
-            {form.seller_address}
-          </p>
-          {form.seller_trn && (
-            <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.seller_trn}</p>
-          )}
-        </Section>
-
-        {/* Header — Invoice title + number + dates */}
-        <Section k="header">
-          <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>
-            {form.doc_title || "INVOICE"}
-          </p>
-          <p className="text-xs font-medium text-neutral-800 mt-0.5">{form.number}</p>
-          <p className="text-[10px] text-neutral-500 mt-0.5">
-            {fmtDate(form.issue_date)}
-          </p>
-          {form.due_date && (
-            <p className="text-[10px] text-neutral-500">Due: {fmtDate(form.due_date)}</p>
-          )}
-        </Section>
-
-        {/* Customer — Bill To */}
-        <Section k="customer">
-          <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">
-            Bill To
-          </p>
-          <p className="font-semibold text-xs text-neutral-900">{form.customer_name}</p>
-          <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">
-            {form.customer_address}
-          </p>
-          {form.customer_trn && (
-            <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.customer_trn}</p>
-          )}
-        </Section>
-
-        {/* Items table */}
-        {pos.items && (
-          <div
-            className="absolute overflow-auto"
-            style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
-          >
-            <Items headerBg={ac} />
-          </div>
-        )}
-
-        {/* Totals */}
-        {pos.totals && (
-          <div
-            className="absolute"
-            style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}
-          >
-            <Totals />
-          </div>
-        )}
-
-        {/* Footer — Notes/Terms */}
-        <Section k="footer">
-          {form.notes && <p className="text-[10px] text-neutral-600">{form.notes}</p>}
-          {form.terms && (
-            <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>
-          )}
-        </Section>
-
-        {/* Badge */}
-        <div className="absolute bottom-2 right-2 z-20">
-          <span className="text-[8px] text-neutral-400 bg-white/60 px-1.5 py-0.5 rounded-full">
-            {customTemplate.name}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- MINIMAL ----
-  if (templateId === "minimal") {
-    return (
-      <div className="text-neutral-900">
-        <div className="flex justify-between items-start">
-          <div>
-            <Logo />
-            <p className="font-bold text-lg mt-3">{form.seller_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.seller_address}
-            </p>
-            {form.seller_trn && (
-              <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
-            )}
-          </div>
-          <div className="text-right">
-            <p className="text-3xl font-extrabold tracking-tight" style={{ color: a }}>
-              {form.doc_title || "INVOICE"}
-            </p>
-            <p className="text-sm font-medium mt-1">{form.number}</p>
-          </div>
-        </div>
-
-        <div className="flex justify-between mt-10 text-sm">
-          <div>
-            <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
-            <p className="font-semibold mt-1">{form.customer_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
-            )}
-          </div>
-          <div className="text-right text-xs text-neutral-500">
-            <p>Issued: {fmtDate(form.issue_date)}</p>
-            <p>Due: {fmtDate(form.due_date)}</p>
-          </div>
-        </div>
-
-        <Items />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- CLASSIC ----
-  if (templateId === "classic") {
-    return (
-      <div className="text-neutral-900">
-        <div
-          className="flex justify-between items-center px-6 py-5 -mx-12 -mt-12 mb-8"
-          style={{ background: a, color: "#fff" }}
-        >
-          <div className="flex items-center gap-3">
-            <Logo size={88} />
-            <p className="font-bold text-xl">{form.seller_name}</p>
-          </div>
-          <p className="text-2xl font-extrabold tracking-widest">
-            {form.doc_title || "INVOICE"}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="border border-neutral-300 p-4">
-            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">From</p>
-            <p className="font-semibold">{form.seller_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.seller_address}
-            </p>
-            {form.seller_trn && (
-              <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
-            )}
-            {form.seller_email && (
-              <p className="text-xs text-neutral-500">{form.seller_email}</p>
-            )}
-          </div>
-          <div className="border border-neutral-300 p-4">
-            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">
-              Bill To
-            </p>
-            <p className="font-semibold">{form.customer_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex justify-between text-xs text-neutral-500 mt-4">
-          <p className="font-medium">{form.number}</p>
-          <p>
-            Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
-          </p>
-        </div>
-
-        <Items headerBg={a} bordered />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  const SellerContact = ({ cls = "text-neutral-500" }: { cls?: string }) => (
-    <>
-      {form.seller_email && <p className={`text-xs ${cls}`}>{form.seller_email}</p>}
-      {form.seller_phone && <p className={`text-xs ${cls}`}>{form.seller_phone}</p>}
-    </>
-  );
-
-  const Parties = () => (
-    <div className="grid grid-cols-2 gap-8 text-sm mt-8">
-      <div>
-        <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
-        <p className="font-semibold mt-1">{form.seller_name}</p>
-        <p className="text-xs text-neutral-500 whitespace-pre-line">
-          {form.seller_address}
-        </p>
-        {form.seller_trn && (
-          <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
-        )}
-        <SellerContact />
-      </div>
-      <div>
-        <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
-        <p className="font-semibold mt-1">{form.customer_name}</p>
-        <p className="text-xs text-neutral-500 whitespace-pre-line">
-          {form.customer_address}
-        </p>
-        {form.customer_trn && (
-          <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
-        )}
-      </div>
-    </div>
-  );
-
-  const Meta = () => (
-    <div className="flex justify-between text-xs text-neutral-500 mt-4">
-      <p className="font-medium">{form.number}</p>
-      <p>
-        Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
-      </p>
-    </div>
-  );
-
-  const Initial = ({ size = 48 }: { size?: number }) =>
-    form.logo ? (
-      <Logo size={size * 2} />
-    ) : (
-      <div
-        className="grid place-items-center rounded-full font-bold text-white"
-        style={{ width: size, height: size, background: a }}
-      >
-        {(form.seller_name || "C").trim().charAt(0).toUpperCase()}
-      </div>
-    );
-
-  // ---- CORPORATE ----
-  if (templateId === "corporate") {
-    return (
-      <div className="text-neutral-900">
-        <div
-          className="flex justify-between items-start border-b-4 pb-5"
-          style={{ borderColor: a }}
-        >
-          <div className="flex items-center gap-3">
-            <Logo size={96} />
-            <div>
-              <p className="font-bold text-xl">{form.seller_name}</p>
-              <p className="text-xs text-neutral-500 whitespace-pre-line">
-                {form.seller_address}
-              </p>
-              <SellerContact />
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
-              {(
-                form.doc_title || ((form.tax_rate || 0) > 0 ? "Tax Invoice" : "Invoice")
-              ).toUpperCase()}
-            </p>
-            <p className="text-sm font-medium mt-1">{form.number}</p>
-            {form.seller_trn && (
-              <p className="text-xs text-neutral-500 mt-1">TRN {form.seller_trn}</p>
-            )}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-sm mt-6">
-          <div className="bg-neutral-50 p-4 rounded">
-            <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">
-              Bill To
-            </p>
-            <p className="font-semibold">{form.customer_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-xs text-neutral-500">TRN: {form.customer_trn}</p>
-            )}
-          </div>
-          <div className="bg-neutral-50 p-4 rounded text-right">
-            <p className="text-xs text-neutral-500">Issued {fmtDate(form.issue_date)}</p>
-            <p className="text-xs text-neutral-500">Due {fmtDate(form.due_date)}</p>
-          </div>
-        </div>
-        <Items headerBg={a} />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- ELEGANT ----
-  if (templateId === "elegant") {
-    return (
-      <div className="text-neutral-800 font-serif">
-        <div className="text-center">
-          <Logo size={104} />
-          <p className="text-3xl tracking-[0.3em] mt-4" style={{ color: a }}>
-            {form.doc_title || "INVOICE"}
-          </p>
-          <div className="mx-auto w-16 h-px my-3" style={{ background: a }} />
-          <p className="text-xs tracking-widest text-neutral-500">
-            {form.number} · {fmtDate(form.issue_date)}
-          </p>
-        </div>
-        <div className="flex justify-between mt-10 text-sm">
-          <div>
-            <p className="text-[11px] uppercase tracking-widest text-neutral-400">From</p>
-            <p className="font-semibold mt-1">{form.seller_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.seller_address}
-            </p>
-            <SellerContact />
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] uppercase tracking-widest text-neutral-400">
-              Billed To
-            </p>
-            <p className="font-semibold mt-1">{form.customer_name}</p>
-            <p className="text-xs text-neutral-500 whitespace-pre-line">
-              {form.customer_address}
-            </p>
-          </div>
-        </div>
-        <Items />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- BOLD ----
-  if (templateId === "bold") {
-    return (
-      <div className="text-neutral-900">
-        <div
-          className="-mx-12 -mt-12 px-12 pt-12 pb-10 mb-8"
-          style={{ background: a, color: "#fff" }}
-        >
-          <div className="flex justify-between items-start">
-            <Logo size={100} />
-            <p className="text-5xl font-extrabold tracking-tight">
-              {form.doc_title || "INVOICE"}
-            </p>
-          </div>
-          <div className="flex justify-between items-end mt-8">
-            <div>
-              <p className="text-lg font-bold">{form.seller_name}</p>
-              <p className="text-xs opacity-80 whitespace-pre-line">
-                {form.seller_address}
-              </p>
-            </div>
-            <div className="text-right text-sm">
-              <p className="font-medium">{form.number}</p>
-              <p className="opacity-80">Due {fmtDate(form.due_date)}</p>
-            </div>
-          </div>
-        </div>
-        <div className="text-sm">
-          <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
-          <p className="font-semibold mt-1">{form.customer_name}</p>
-          <p className="text-xs text-neutral-500 whitespace-pre-line">
-            {form.customer_address}
-          </p>
-        </div>
-        <Items headerBg={a} />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- TECH ----
-  if (templateId === "tech") {
-    return (
-      <div className="text-neutral-900 font-medium">
-        <div className="flex justify-between items-start">
-          <div>
-            <Logo size={80} />
-            <p className="text-sm font-bold mt-2">{form.seller_name}</p>
-            <p className="text-[11px] text-neutral-500 whitespace-pre-line">
-              {form.seller_address}
-            </p>
-            <SellerContact cls="text-neutral-500" />
-          </div>
-          <div
-            className="px-4 py-3 rounded-lg text-right"
-            style={{ background: `${a}15`, border: `1px solid ${a}` }}
-          >
-            <p className="text-lg font-bold" style={{ color: a }}>
-              ./invoice
-            </p>
-            <p className="text-xs">{form.number}</p>
-            <p className="text-[11px] text-neutral-500">
-              {fmtDate(form.issue_date)} → {fmtDate(form.due_date)}
-            </p>
-          </div>
-        </div>
-        <div className="mt-8 text-xs">
-          <span className="text-neutral-400">{"// bill_to"}</span>
-          <p className="font-bold text-sm mt-1">{form.customer_name}</p>
-          <p className="text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
-        </div>
-        <Items headerBg={a} />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- CREATIVE ----
-  if (templateId === "creative") {
-    return (
-      <div className="text-neutral-900 relative overflow-hidden">
-        <div
-          className="absolute -top-16 -right-16 w-48 h-48 rounded-full opacity-20"
-          style={{ background: a }}
-        />
-        <div className="relative flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Initial size={52} />
-            <div>
-              <p className="font-bold text-lg">{form.seller_name}</p>
-              <SellerContact />
-            </div>
-          </div>
-          <p className="text-4xl font-extrabold italic" style={{ color: a }}>
-            Invoice
-          </p>
-        </div>
-        <div
-          className="relative mt-8 rounded-2xl p-5 text-sm"
-          style={{ background: `${a}12` }}
-        >
-          <div className="flex justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wider text-neutral-500">
-                Billed To
-              </p>
-              <p className="font-semibold mt-1">{form.customer_name}</p>
-              <p className="text-xs text-neutral-500 whitespace-pre-line">
-                {form.customer_address}
-              </p>
-            </div>
-            <div className="text-right text-xs text-neutral-500">
-              <p className="font-medium">{form.number}</p>
-              <p>Issued {fmtDate(form.issue_date)}</p>
-              <p>Due {fmtDate(form.due_date)}</p>
-            </div>
-          </div>
-        </div>
-        <Items />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- RECEIPT ----
-  if (templateId === "receipt") {
-    return (
-      <div className="text-neutral-900 max-w-sm mx-auto text-center">
-        <Initial size={44} />
-        <p className="font-bold text-lg mt-2">{form.seller_name}</p>
-        <p className="text-[11px] text-neutral-500 whitespace-pre-line">
-          {form.seller_address}
-        </p>
-        <SellerContact />
-        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
-        <div className="flex justify-between text-xs">
-          <span className="text-neutral-500">{form.doc_title || "Invoice"}</span>
-          <span className="font-medium">{form.number}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-neutral-500">Date</span>
-          <span>{fmtDate(form.issue_date)}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-neutral-500">Customer</span>
-          <span className="font-semibold">{form.customer_name}</span>
-        </div>
-        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
-        <div className="text-left">
-          <Items />
-        </div>
-        <div className="border-t-2 border-dashed border-neutral-300 my-4" />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- MONOGRAM ----
-  if (templateId === "monogram") {
-    return (
-      <div className="text-neutral-900">
-        <div className="flex flex-col items-center">
-          <Initial size={64} />
-          <p className="font-bold text-xl mt-3">{form.seller_name}</p>
-          <p className="text-xs text-neutral-500 whitespace-pre-line text-center">
-            {form.seller_address}
-          </p>
-          <SellerContact />
-        </div>
-        <div
-          className="mt-6 py-2 text-center text-sm font-semibold tracking-[0.25em]"
-          style={{
-            borderTop: `1px solid ${a}`,
-            borderBottom: `1px solid ${a}`,
-            color: a,
-          }}
-        >
-          {form.doc_title || "INVOICE"} {form.number}
-        </div>
-        <Parties />
-        <Meta />
-        <Items />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- GREEN GOLD (UAE Manufacturing) ----
-  if (templateId === "green-gold") {
-    return (
-      <div
-        className="text-neutral-900"
-        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
-      >
-        {/* Top gold band */}
-        <div
-          className="-mx-12 -mt-12 mb-0"
-          style={{
-            background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)",
-            height: 6,
-          }}
-        />
-
-        {/* Header with logo */}
-        <div
-          className="flex justify-between items-start mt-8 pb-6"
-          style={{ borderBottom: `3px solid #D4A017` }}
-        >
-          <div className="flex items-center gap-4">
-            <Logo size={64} />
-            <div>
-              <p
-                className="font-extrabold text-xl tracking-tight"
-                style={{ color: "#1B5E20" }}
-              >
-                {form.seller_name}
-              </p>
-              <p className="text-xs text-neutral-500 whitespace-pre-line leading-relaxed">
-                {form.seller_address}
-              </p>
-              {form.seller_trn && (
-                <p className="text-[11px] text-neutral-400 mt-0.5">
-                  TRN: {form.seller_trn}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="text-right">
-            <p
-              className="text-4xl font-black tracking-tighter"
-              style={{ color: "#D4A017" }}
-            >
-              {form.doc_title || "INVOICE"}
-            </p>
-            <p className="text-sm font-medium text-neutral-600 mt-1">{form.number}</p>
-            <div className="mt-3 pt-3" style={{ borderTop: "1px solid #E8D5A3" }}>
-              <p className="text-[11px] text-neutral-500">{fmtDate(form.issue_date)}</p>
-              <p className="text-[11px] text-neutral-400">
-                Due: {fmtDate(form.due_date)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Bill To + Company Info */}
-        <div className="grid grid-cols-2 gap-8 mt-6">
-          <div
-            className="rounded-lg p-4"
-            style={{ background: "#F1F8E9", border: "1px solid #C8E6C9" }}
-          >
-            <p
-              className="text-[10px] uppercase tracking-[0.2em] font-semibold mb-2"
-              style={{ color: "#1B5E20" }}
-            >
-              Bill To
-            </p>
-            <p className="font-bold text-sm">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line leading-relaxed mt-1">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-[10px] text-neutral-400 mt-1">
-                TRN: {form.customer_trn}
-              </p>
-            )}
-          </div>
-          <div
-            className="rounded-lg p-4"
-            style={{ background: "#FFF8E1", border: "1px solid #FFE082" }}
-          >
-            <div className="flex justify-between text-xs text-neutral-600">
-              <span>Invoice Date</span>
-              <span className="font-medium">{fmtDate(form.issue_date)}</span>
-            </div>
-            <div className="flex justify-between text-xs text-neutral-600 mt-2">
-              <span>Due Date</span>
-              <span className="font-medium">{fmtDate(form.due_date)}</span>
-            </div>
-            <div className="flex justify-between text-xs text-neutral-600 mt-2">
-              <span>Reference</span>
-              <span className="font-medium font-medium">{form.number}</span>
-            </div>
-            {form.po_number && (
-              <div className="flex justify-between text-xs text-neutral-600 mt-2">
-                <span>PO Number</span>
-                <span className="font-medium">{form.po_number}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <Items headerBg="#1B5E20" />
-        <Totals />
-        <Footer />
-
-        {/* Bottom gold band */}
-        <div
-          className="-mx-12 mt-8"
-          style={{
-            background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)",
-            height: 3,
-          }}
-        />
-        <p className="text-center text-[10px] text-neutral-400 mt-3">
-          Thank you for your business
-        </p>
-      </div>
-    );
-  }
-
-  // ---- UAE PROFESSIONAL ----
-  if (templateId === "uae") {
-    return (
-      <div
-        className="text-neutral-900"
-        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
-      >
-        {/* UAE flag-inspired accent bar */}
-        <div className="-mx-12 -mt-12 mb-8 flex" style={{ height: 4 }}>
-          <div style={{ flex: 1, background: "#00732E" }} />
-          <div
-            style={{
-              flex: 1,
-              background: "#FFFFFF",
-              borderLeft: "1px solid #ddd",
-              borderRight: "1px solid #ddd",
-            }}
-          />
-          <div style={{ flex: 1, background: "#000000" }} />
-          <div style={{ width: 8, background: "#CE1126" }} />
-        </div>
-
-        <div className="flex justify-between items-start">
-          <div>
-            <Logo size={56} />
-            <p className="font-bold text-lg mt-2">{form.seller_name}</p>
-            <p className="text-[11px] text-neutral-500 whitespace-pre-line">
-              {form.seller_address}
-            </p>
-            <SellerContact />
-          </div>
-          <div className="text-right">
-            <div
-              className="inline-block px-6 py-3 rounded-sm"
-              style={{ background: "#1a1a1a" }}
-            >
-              <p className="text-white text-2xl font-bold tracking-widest">
-                {form.doc_title || "INVOICE"}
-              </p>
-            </div>
-            <p className="text-sm font-medium mt-3">{form.number}</p>
-            <p className="text-xs text-neutral-500 mt-1">{fmtDate(form.issue_date)}</p>
-          </div>
-        </div>
-
-        <div className="mt-8 grid grid-cols-2 gap-6">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-semibold">
-              Bill To
-            </p>
-            <p className="font-bold mt-2">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-[10px] text-neutral-400 mt-1">
-                TRN: {form.customer_trn}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2 text-xs">
-            <div
-              className="flex justify-between py-1.5 px-3 rounded"
-              style={{ background: "#f5f5f5" }}
-            >
-              <span className="text-neutral-500">Date</span>
-              <span className="font-medium">{fmtDate(form.issue_date)}</span>
-            </div>
-            <div
-              className="flex justify-between py-1.5 px-3 rounded"
-              style={{ background: "#f5f5f5" }}
-            >
-              <span className="text-neutral-500">Due</span>
-              <span className="font-medium">{fmtDate(form.due_date)}</span>
-            </div>
-            <div
-              className="flex justify-between py-1.5 px-3 rounded"
-              style={{ background: "#f5f5f5" }}
-            >
-              <span className="text-neutral-500">Reference</span>
-              <span className="font-medium font-medium">{form.number}</span>
-            </div>
-          </div>
-        </div>
-
-        <Items headerBg="#1a1a1a" />
-        <Totals />
-        <Footer />
-      </div>
-    );
-  }
-
-  // ---- INDUSTRIAL ----
-  if (templateId === "industrial") {
-    return (
-      <div
-        className="text-neutral-900"
-        style={{ fontFamily: "'IBM Plex Mono', 'Plus Jakarta Sans', monospace" }}
-      >
-        {/* Industrial top bar with rivet-style circles */}
-        <div
-          className="-mx-12 -mt-12 mb-8 flex items-center"
-          style={{ background: "#2C3E50", height: 48 }}
-        >
-          <div className="flex gap-2 px-4">
-            <div
-              className="rounded-full"
-              style={{ width: 10, height: 10, background: "#E74C3C" }}
-            />
-            <div
-              className="rounded-full"
-              style={{ width: 10, height: 10, background: "#F39C12" }}
-            />
-            <div
-              className="rounded-full"
-              style={{ width: 10, height: 10, background: "#2ECC71" }}
-            />
-          </div>
-          <p className="text-white font-bold tracking-[0.3em] text-sm uppercase mx-auto">
-            Industrial Invoice
-          </p>
-        </div>
-
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2">
-            <div className="flex items-start gap-3">
-              <Logo size={48} />
-              <div>
-                <p
-                  className="font-extrabold text-lg tracking-tight"
-                  style={{ color: "#2C3E50" }}
-                >
-                  {form.seller_name}
-                </p>
-                <p className="text-[10px] text-neutral-500 whitespace-pre-line uppercase tracking-wide">
-                  {form.seller_address}
-                </p>
-                {form.seller_trn && (
-                  <p className="text-[9px] text-neutral-400 mt-0.5">
-                    TRN: {form.seller_trn}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div
-              className="mt-6 p-4 rounded"
-              style={{ background: "#ECF0F1", borderLeft: "4px solid #E74C3C" }}
-            >
-              <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-neutral-500 mb-1">
-                Bill To
-              </p>
-              <p className="font-bold">{form.customer_name}</p>
-              <p className="text-xs text-neutral-600 whitespace-pre-line">
-                {form.customer_address}
-              </p>
-              {form.customer_trn && (
-                <p className="text-[10px] text-neutral-400">TRN: {form.customer_trn}</p>
-              )}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="p-4 rounded" style={{ background: "#2C3E50", color: "#fff" }}>
-              <p className="text-xs uppercase tracking-widest opacity-70">Document</p>
-              <p className="text-2xl font-black tracking-tighter mt-1">
-                {form.doc_title || "INVOICE"}
-              </p>
-              <div
-                className="mt-3 pt-3"
-                style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}
-              >
-                <p className="text-xs font-medium">{form.number}</p>
-                <p className="text-[10px] opacity-70 mt-1">{fmtDate(form.issue_date)}</p>
-                <p className="text-[10px] opacity-70">Due: {fmtDate(form.due_date)}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <Items headerBg="#2C3E50" bordered />
-        <Totals />
-        <Footer />
-
-        <div className="mt-8 pt-4 text-center" style={{ borderTop: "2px solid #2C3E50" }}>
-          <p className="text-[9px] text-neutral-400 uppercase tracking-[0.3em]">
-            Industrial Grade Products
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- EXECUTIVE ----
-  if (templateId === "executive") {
-    return (
-      <div
-        className="text-neutral-900"
-        style={{ fontFamily: "'Lora', 'Plus Jakarta Sans', Georgia, serif" }}
-      >
-        {/* Premium dark header */}
-        <div
-          className="-mx-12 -mt-12 mb-10 px-12 py-10"
-          style={{
-            background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)",
-            color: "#fff",
-          }}
-        >
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <Logo size={72} />
-              <div>
-                <p
-                  className="text-xl font-bold tracking-tight"
-                  style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-                >
-                  {form.seller_name}
-                </p>
-                <p className="text-xs opacity-60 whitespace-pre-line mt-1 leading-relaxed">
-                  {form.seller_address}
-                </p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p
-                className="text-sm uppercase tracking-[0.5em] opacity-50"
-                style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-              >
-                {form.doc_title || "Invoice"}
-              </p>
-              <p
-                className="text-4xl font-light mt-1 tracking-tight"
-                style={{ color: "#C9A84C" }}
-              >
-                {form.number}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-10">
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
-              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">
-                Bill To
-              </p>
-            </div>
-            <p
-              className="font-bold text-base"
-              style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-            >
-              {form.customer_name}
-            </p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1 leading-relaxed">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-[10px] text-neutral-400 mt-1">
-                TRN: {form.customer_trn}
-              </p>
-            )}
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div style={{ width: 24, height: 1, background: "#C9A84C" }} />
-              <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">
-                Details
-              </p>
-            </div>
-            <div
-              className="space-y-3 text-sm"
-              style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-            >
-              <div className="flex justify-between">
-                <span className="text-neutral-400">Issued</span>
-                <span className="font-medium">{fmtDate(form.issue_date)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-400">Due</span>
-                <span className="font-medium">{fmtDate(form.due_date)}</span>
-              </div>
-              {form.po_number && (
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">PO #</span>
-                  <span className="font-medium font-medium text-xs">{form.po_number}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8 pt-6" style={{ borderTop: "1px solid #e5e5e5" }}>
-          <Items headerBg="#0a0a0a" />
-        </div>
-        <Totals />
-        <Footer />
-
-        <div
-          className="mt-10 pt-6 text-center"
-          style={{ borderTop: `2px solid #C9A84C` }}
-        >
-          <p
-            className="text-[10px] text-neutral-400 tracking-widest uppercase"
-            style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-          >
-            Payment Terms: {form.terms || "Net 30"}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- FRESH ----
-  if (templateId === "fresh") {
-    return (
-      <div
-        className="text-neutral-900"
-        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
-      >
-        {/* Playful top accent */}
-        <div
-          className="-mx-12 -mt-12 mb-0"
-          style={{
-            background: "linear-gradient(90deg, #667EEA 0%, #764BA2 50%, #F093FB 100%)",
-            height: 5,
-          }}
-        />
-
-        <div className="flex justify-between items-start mt-8">
-          <div>
-            <Logo size={52} />
-            <p className="font-extrabold text-xl mt-3" style={{ color: "#4C51BF" }}>
-              {form.seller_name}
-              <span className="text-neutral-400 font-normal text-sm ml-2">
-                {form.doc_title || "Invoice"}
-              </span>
-            </p>
-            <SellerContact cls="text-neutral-400 text-[11px]" />
-          </div>
-          <div className="text-right">
-            <div
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full"
-              style={{ background: "#EBF4FF" }}
-            >
-              <div className="w-2 h-2 rounded-full" style={{ background: "#667EEA" }} />
-              <span
-                className="text-xs font-bold tracking-wider"
-                style={{ color: "#4C51BF" }}
-              >
-                #{form.number}
-              </span>
-            </div>
-            <div className="mt-3 text-xs text-neutral-500">
-              <p>Issued: {fmtDate(form.issue_date)}</p>
-              <p>Due: {fmtDate(form.due_date)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="grid grid-cols-5 gap-0 mt-8 rounded-2xl overflow-hidden"
-          style={{ border: "1px solid #E8E8F0" }}
-        >
-          <div className="col-span-3 p-5" style={{ background: "#FAFBFF" }}>
-            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400 mb-2">
-              Bill To
-            </p>
-            <p className="font-bold text-base">{form.customer_name}</p>
-            <p className="text-xs text-neutral-600 whitespace-pre-line mt-1">
-              {form.customer_address}
-            </p>
-            {form.customer_trn && (
-              <p className="text-[10px] text-neutral-400 mt-1">
-                TRN: {form.customer_trn}
-              </p>
-            )}
-          </div>
-          <div
-            className="col-span-2 p-5"
-            style={{ background: "#4C51BF", color: "#fff" }}
-          >
-            <p className="text-[10px] uppercase tracking-wider opacity-60">Amount Due</p>
-            <p className="text-3xl font-black mt-2 tracking-tight">{m(t.total)}</p>
-            <div
-              className="mt-3 pt-3 space-y-1 text-xs"
-              style={{ borderTop: "1px solid rgba(255,255,255,0.2)" }}
-            >
-              <div className="flex justify-between">
-                <span className="opacity-60">Subtotal</span>
-                <span>{m(t.subtotal)}</span>
-              </div>
-              {(form.tax_rate || 0) > 0 && (
-                <div className="flex justify-between">
-                  <span className="opacity-60">VAT ({form.tax_rate}%)</span>
-                  <span>{m(t.tax)}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <Items headerBg="#F7F8FC" />
-        <Totals />
-        <Footer />
-
-        <div className="mt-8 text-center">
-          <p className="text-[11px] text-neutral-400">
-            Questions? Contact{" "}
-            <span className="font-medium text-neutral-600">
-              {form.seller_email || form.seller_name}
-            </span>
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- MODERN ----
-  return (
-    <div className="text-neutral-900">
-      <div className="flex justify-between items-end">
-        <div>
-          <p className="text-5xl font-extrabold tracking-tight" style={{ color: a }}>
-            {form.doc_title || "Invoice"}
-          </p>
-          <p className="text-sm font-medium text-neutral-500 mt-2">{form.number}</p>
-        </div>
-        <div className="text-right">
-          <Logo />
-          <p className="font-bold mt-2">{form.seller_name}</p>
-        </div>
-      </div>
-
-      <div className="h-1 w-full my-6" style={{ background: a }} />
-
-      <div className="grid grid-cols-2 gap-8 text-sm">
-        <div>
-          <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
-          <p className="font-semibold mt-1">{form.seller_name}</p>
-          <p className="text-xs text-neutral-500 whitespace-pre-line">
-            {form.seller_address}
-          </p>
-          {form.seller_trn && (
-            <p className="text-xs text-neutral-500">TRN: {form.seller_trn}</p>
-          )}
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wider text-neutral-400">Bill To</p>
-          <p className="font-semibold mt-1">{form.customer_name}</p>
-          <p className="text-xs text-neutral-500 whitespace-pre-line">
-            {form.customer_address}
-          </p>
-          <p className="text-xs text-neutral-500 mt-2">
-            Issued {fmtDate(form.issue_date)} · Due {fmtDate(form.due_date)}
-          </p>
-        </div>
-      </div>
-
-      <Items />
-      <Totals />
-      <Footer />
-    </div>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between py-1 text-neutral-600">
-      <span>{k}</span>
-      <span>{v}</span>
-    </div>
   );
 }
 

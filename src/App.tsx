@@ -1,5 +1,7 @@
 import { Suspense, lazy, useState } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { cloudConfigured } from "./lib/supabase";
+import { getDataMode } from "./lib/dataMode";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { UIProvider } from "./lib/ui";
 import { LanguageProvider } from "./lib/i18n";
@@ -62,9 +64,16 @@ function AppRoutes() {
   );
 }
 
+const hasTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 function Gate() {
   const { loading, configured, user, needsProfile, profileLoading } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
+  // First run: let the user pick where data lives — local (offline) or cloud.
+  // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
+  // straight in so existing users aren't prompted.
+  if (!getDataMode() && (hasTauri || !cloudConfigured)) return <SetupNotice />;
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
   if (!user)

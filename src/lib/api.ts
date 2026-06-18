@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured } from "./supabase";
+import { isLocalMode } from "./dataMode";
 import { quotationTotals, invoiceTotals } from "./money";
+import { splitItemMeta } from "./docItems";
 
 // ===== Types =====
 export interface Product {
@@ -379,6 +381,7 @@ async function outboxRemove(id: number): Promise<void> {
 
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
+  if (isLocalMode()) return; // local mode writes are committed directly, no outbox
   if (flushing || !isConfigured || !onLine()) return;
   flushing = true;
   try {
@@ -427,6 +430,7 @@ async function readCached<T>(
   run: () => Promise<T>,
   empty: T
 ): Promise<T> {
+  if (isLocalMode()) return run(); // local store is the source of truth
   // Namespace the local cache by the active organization so data from
   // one org never bleeds into another on a shared device.
   const k = `${activeCacheOrg}:${key}`;
@@ -457,6 +461,7 @@ async function write<T>(
   run: () => Promise<T>,
   offlineResult: T
 ): Promise<T> {
+  if (isLocalMode()) return run(); // commit straight to the local store
   if (!isConfigured)
     throw new Error("Cloud storage is not configured.");
   if (onLine()) {
@@ -469,6 +474,7 @@ async function write<T>(
 
 /** Multi-step / read-modify-write op — requires a live connection. */
 async function online<T>(run: () => Promise<T>): Promise<T> {
+  if (isLocalMode()) return run(); // no network needed in local mode
   if (!isConfigured)
     throw new Error("Cloud storage is not configured.");
   if (!onLine()) offlineError();
@@ -1537,7 +1543,16 @@ function docTotal(
     custom?: Record<string, string> | null;
   }[]
 ) {
-  return invoiceTotals(items, d.discount, d.tax_rate, d.unit_price_formula).total;
+  const lineItems = items.map((it) => {
+    const { calcMode, amount, itemFormula } = splitItemMeta(it.custom);
+    return {
+      ...it,
+      calcMode,
+      amount,
+      itemFormula,
+    };
+  });
+  return invoiceTotals(lineItems, d.discount, d.tax_rate, d.unit_price_formula).total;
 }
 
 /** Generic account lookup / auto-create. */
@@ -2111,7 +2126,8 @@ export const billing = {
     ),
   saveCompany: async (input: CompanyProfile) => {
     if (!isConfigured) throw new Error("Cloud storage is not configured.");
-    if (!onLine())
+    // Local mode writes straight to the on-device store — no network required.
+    if (!isLocalMode() && !onLine())
       throw new Error(
         "You're offline. Company details need a connection to save."
       );
@@ -2159,6 +2175,8 @@ export interface QuotationItem {
   rate: number;
   discount: number; // percent
   tax: number; // percent
+  unit?: string;
+  custom?: Record<string, string>;
 }
 export interface QuotationSummary {
   id: number;
@@ -2167,6 +2185,7 @@ export interface QuotationSummary {
   status: string;
   template: string;
   total: number;
+  quote_date?: string;
   valid_until?: string;
   shared?: boolean;
   updated_at: string;
@@ -2187,6 +2206,20 @@ export interface QuotationDoc {
   customer_trn?: string;
   customer_email?: string;
   terms?: string;
+  notes?: string;
+  doc_title?: string;
+  custom_columns?: { key: string; label: string }[];
+  unit_price_formula?: { a: string; b: string } | null;
+  discount?: number;
+  tax_rate?: number;
+  shared?: boolean;
+  share_token?: string;
+  logo?: string;
+  seller_name?: string;
+  seller_address?: string;
+  seller_trn?: string;
+  seller_email?: string;
+  seller_phone?: string;
   created_at: string;
   updated_at: string;
   items: QuotationItem[];
@@ -2333,7 +2366,9 @@ export const quotes = {
           customer_name: d.customer_name,
           status: d.status,
           template: d.template,
+          shared: d.shared ?? false,
           total: quoteTotal(byDoc.get(d.id) ?? []),
+          quote_date: d.quote_date ?? undefined,
           valid_until: d.valid_until ?? undefined,
           updated_at: d.updated_at,
         })) as QuotationSummary[];
@@ -2356,6 +2391,8 @@ export const quotes = {
         ]);
         return {
           ...(d as any),
+          custom_columns: Array.isArray(d.custom_columns) ? d.custom_columns : [],
+          unit_price_formula: d.unit_price_formula || null,
           items: items
             .filter((i) => i.quotation_id === docId)
             .map((i) => ({
@@ -2367,6 +2404,8 @@ export const quotes = {
               rate: i.rate,
               discount: i.discount,
               tax: i.tax,
+              unit: i.unit ?? undefined,
+              custom: (i.custom as Record<string, string>) ?? undefined,
             })),
         } as QuotationDoc;
       },
@@ -2401,6 +2440,8 @@ export const quotes = {
               rate: it.rate,
               discount: it.discount,
               tax: it.tax,
+              unit: it.unit ?? null,
+              custom: it.custom ?? null,
               position: i,
             }))
           );
@@ -2428,6 +2469,16 @@ export const quotes = {
         shared
       )
     ),
+  publicLink: async (docId: number) => {
+    await quotes.shareDoc(docId, true);
+    const { data, error } = await sb()
+      .from("quotations")
+      .select("share_token")
+      .eq("id", docId)
+      .single();
+    if (error) throw error;
+    return (data as { share_token: string }).share_token;
+  },
   convertToInvoice: (quotationId: number) =>
     online(async () => {
       const { data: q, error } = await sb()
@@ -2570,6 +2621,7 @@ export interface PoItem {
   quantity: number;
   unit_cost: number;
   unit?: string;
+  custom?: Record<string, string>;
 }
 
 export interface PoPayment {
@@ -2585,20 +2637,47 @@ export interface PoSummary {
   supplier_id?: number;
   supplier_name: string;
   status: string;
+  template?: string;
+  currency?: string;
   total: number;
   order_date: string;
   expected_date?: string;
+  shared?: boolean;
   updated_at: string;
 }
 export interface PurchaseOrder {
   id: number;
   po_number: string;
   supplier_id?: number;
+  supplier_name?: string;
+  supplier_address?: string;
+  supplier_trn?: string;
+  supplier_email?: string;
+  supplier_phone?: string;
   status: string;
+  template: string;
+  accent: string;
+  currency: string;
   total: number;
   order_date: string;
   expected_date?: string;
   notes?: string;
+  terms?: string;
+  doc_title?: string;
+  custom_columns?: { key: string; label: string }[];
+  unit_price_formula?: { a: string; b: string } | null;
+  discount?: number;
+  tax_rate?: number;
+  shared?: boolean;
+  share_token?: string;
+  logo?: string;
+  seller_name?: string;
+  seller_address?: string;
+  seller_trn?: string;
+  seller_email?: string;
+  seller_phone?: string;
+  show_stamp?: boolean;
+  show_signature?: boolean;
   created_at: string;
   updated_at: string;
   items: PoItem[];
@@ -2606,7 +2685,7 @@ export interface PurchaseOrder {
 export type PoInput = Omit<
   PurchaseOrder,
   "id" | "created_at" | "updated_at"
-> & { id?: number; show_stamp?: boolean; show_signature?: boolean };
+> & { id?: number; };
 
 export const pos = {
   list: () =>
@@ -2622,11 +2701,14 @@ export const pos = {
           id: r.id,
           po_number: r.po_number,
           supplier_id: r.supplier_id ?? undefined,
-          supplier_name: byId.get(r.supplier_id)?.name ?? "—",
+          supplier_name: r.supplier_name ?? byId.get(r.supplier_id)?.name ?? "—",
           status: r.status,
+          template: r.template ?? "uae",
+          currency: r.currency ?? "AED",
           total: Number(r.total),
           order_date: r.order_date,
           expected_date: r.expected_date ?? undefined,
+          shared: r.shared ?? false,
           updated_at: r.updated_at,
         })) as PoSummary[];
       },
@@ -2653,9 +2735,14 @@ export const pos = {
             description: i.description,
             quantity: Number(i.quantity),
             unit_cost: Number(i.unit_cost),
+            unit: i.unit ?? undefined,
+            custom: (i.custom as Record<string, string>) ?? undefined,
           }));
         const d = data as any;
         return {
+          ...(d as any),
+          custom_columns: Array.isArray(d.custom_columns) ? d.custom_columns : [],
+          unit_price_formula: d.unit_price_formula || null,
           id: d.id,
           po_number: d.po_number,
           supplier_id: d.supplier_id ?? undefined,
@@ -2701,6 +2788,8 @@ export const pos = {
               description: it.description,
               quantity: it.quantity,
               unit_cost: it.unit_cost,
+              unit: it.unit ?? null,
+              custom: it.custom ?? null,
               position: i,
             }))
           );
@@ -2714,6 +2803,26 @@ export const pos = {
       () => sUpdate("purchase_orders", poId, { status }),
       undefined
     ),
+  shareDoc: (poId: number, shared: boolean) =>
+    online(() =>
+      shareWithItems(
+        "purchase_orders",
+        "purchase_order_items",
+        "po_id",
+        poId,
+        shared
+      )
+    ),
+  publicLink: async (poId: number) => {
+    await pos.shareDoc(poId, true);
+    const { data, error } = await sb()
+      .from("purchase_orders")
+      .select("share_token")
+      .eq("id", poId)
+      .single();
+    if (error) throw error;
+    return (data as { share_token: string }).share_token;
+  },
   /** Receive items into stock: increments products.quantity by each line. */
   receive: (poId: number) =>
     online(async () => {
@@ -2758,6 +2867,131 @@ export const pos = {
     write({ k: "delete", t: "po_payments", id: paymentId }, () =>
       sDelete("po_payments", paymentId), undefined
     ),
+};
+
+// ===== Payment Receipts =====
+export interface ReceiptSummary {
+  id: number;
+  number: string;
+  customer_name: string;
+  status: string;
+  template: string;
+  amount: number;
+  payment_date: string;
+  shared?: boolean;
+  updated_at: string;
+}
+
+export interface ReceiptDoc {
+  id: number;
+  number: string;
+  status: string;
+  template: string;
+  accent: string;
+  currency: string;
+  logo?: string;
+  seller_name?: string;
+  seller_address?: string;
+  seller_trn?: string;
+  seller_email?: string;
+  seller_phone?: string;
+  customer_name: string;
+  customer_address?: string;
+  customer_trn?: string;
+  customer_email?: string;
+  issue_date?: string;
+  due_date?: string;
+  notes?: string;
+  terms?: string;
+  tax_rate?: number;
+  discount?: number;
+  amount: number;
+  amount_words?: string;
+  payment_method?: string;
+  ref_number?: string;
+  for_description?: string;
+  show_stamp?: boolean;
+  show_signature?: boolean;
+  shared?: boolean;
+  share_token?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ReceiptInput = Omit<ReceiptDoc, "id" | "created_at" | "updated_at"> & { id?: number };
+
+export const receipts = {
+  list: () =>
+    readCached<ReceiptSummary[]>(
+      "payment_receipts",
+      async () => {
+        const rows = await sList<any>("payment_receipts", [
+          { col: "updated_at", asc: false },
+        ]);
+        return rows.map((r) => ({
+          id: r.id,
+          number: r.number,
+          customer_name: r.customer_name,
+          status: r.status,
+          template: r.template,
+          amount: Number(r.amount),
+          payment_date: r.issue_date,
+          shared: r.shared ?? false,
+          updated_at: r.updated_at,
+        })) as ReceiptSummary[];
+      },
+      []
+    ),
+  get: (id: number) =>
+    readCached<ReceiptDoc>(
+      `payment_receipt:${id}`,
+      async () => {
+        const { data, error } = await sb()
+          .from("payment_receipts")
+          .select("*")
+          .eq("id", id)
+          .single();
+        if (error) throw error;
+        return { ...(data as any) } as ReceiptDoc;
+      },
+      null as unknown as ReceiptDoc
+    ),
+  save: (input: ReceiptInput) =>
+    online(async () => {
+      const { id, ...fields } = input;
+      const row = clean(fields as Record<string, unknown>);
+      if (id && id > 0) {
+        await sUpdate("payment_receipts", id, row);
+        return id;
+      }
+      return sInsert("payment_receipts", row);
+    }),
+  delete: (id: number) =>
+    write({ k: "delete", t: "payment_receipts", id }, () =>
+      sDelete("payment_receipts", id), undefined
+    ),
+  setStatus: (id: number, status: string) =>
+    write(
+      { k: "update", t: "payment_receipts", id, row: { status } },
+      () => sUpdate("payment_receipts", id, { status }),
+      undefined
+    ),
+  shareDoc: (id: number, shared: boolean) =>
+    write(
+      { k: "update", t: "payment_receipts", id, row: { shared } },
+      () => sUpdate("payment_receipts", id, { shared }),
+      undefined
+    ),
+  publicLink: async (id: number) => {
+    await receipts.shareDoc(id, true);
+    const { data, error } = await sb()
+      .from("payment_receipts")
+      .select("share_token")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return (data as { share_token: string }).share_token;
+  },
 };
 
 export const toolRuns = {

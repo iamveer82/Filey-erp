@@ -15,26 +15,47 @@ const num = (v: string) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** Invoice line amount. When a formula is active, the multiplier is the selected
- * field (custom column or `qty`). Otherwise the standard `qty × unit_price` is
- * used so frontend, backend and PDF all agree. */
+export type CalcMode = "auto" | "manual" | "formula";
+
+export interface InvoiceLineItem {
+  qty: number;
+  unit_price: number;
+  custom?: Record<string, string> | null;
+  /** Override the line amount directly (used when calcMode === 'manual'). */
+  amount?: number;
+  calcMode?: CalcMode;
+  /** Per-line formula overrides the doc-level formula for this line. */
+  itemFormula?: { a: string; b?: string } | null;
+}
+
+/** Invoice line amount. Priority:
+ * 1. Manual amount (`calcMode === 'manual'`).
+ * 2. Per-line formula (`calcMode === 'formula'`).
+ * 3. Doc-level formula.
+ * 4. Standard `qty × unit_price`.
+ * This keeps frontend, backend and PDF in agreement. */
 export function invoiceLineAmount(
-  item: { qty: number; unit_price: number; custom?: Record<string, string> | null },
+  item: InvoiceLineItem,
   formula?: { a: string; b?: string } | null
 ): number {
   const rate = item.unit_price || 0;
-  if (formula?.a) {
+  if (item.calcMode === "manual") {
+    return r2(item.amount || 0);
+  }
+  const activeFormula =
+    item.calcMode === "formula" && item.itemFormula?.a ? item.itemFormula : formula;
+  if (activeFormula?.a) {
     const multiplier =
-      formula.a === "qty" ? item.qty || 0 : num(item.custom?.[formula.a] || "");
+      activeFormula.a === "qty" ? item.qty || 0 : num(item.custom?.[activeFormula.a] || "");
     return r2(multiplier * rate);
   }
   return r2((item.qty || 0) * rate);
 }
 
 /** Invoice totals. `unit_price` is treated as a per-unit rate; the line amount is
- * `qty × unit_price`, or `formula.field × unit_price` when a formula is set. */
+ * `qty × unit_price`, a doc-level formula, or a per-line override. */
 export function invoiceTotals(
-  items: { qty: number; unit_price: number; custom?: Record<string, string> | null }[],
+  items: InvoiceLineItem[],
   discount: number,
   taxRatePct: number,
   formula?: { a: string; b?: string } | null

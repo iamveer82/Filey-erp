@@ -1,941 +1,721 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Plus,
-  Trash2,
   ArrowLeft,
   Download,
   Save,
+  Building2,
+  Copy,
   Check,
-  Calendar,
-  Banknote,
-  Receipt,
-  Maximize2,
-  X,
-  Upload,
-  Stamp,
+  Send,
+  Monitor,
+  PenTool,
+  Trash2,
+  FileText,
+  Wallet,
 } from "lucide-react";
-import { useLiveSync } from "../lib/realtime";
-import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput, money, CURRENCIES } from "../lib/format";
-import { nextDocNumber } from "../lib/docNumber";
-import { PageHeader, MetricCard, DataTable, Field } from "../components/ui";
 import {
-  loadCompanyStampSig,
-  EMPTY_STAMP_SIG,
-  type CompanyStampSig,
-} from "../components/StampSignatureSettings";
-import { ResizablePanels } from "../components/ResizablePanels";
-import { StampSignatureLayer } from "../components/StampSignature";
+  receipts,
+  billing,
+  type CompanyProfile,
+  type ReceiptDoc,
+  type ReceiptSummary,
+} from "../lib/api";
+import { useUI } from "../lib/ui";
+import { fmtDate, money, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
+import { nextDocNumber } from "../lib/docNumber";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
+import DocTemplateGallery from "../components/DocTemplateGallery";
 import TemplateDesigner, {
   loadCustomTemplates,
-  deleteCustomTemplate,
   syncCustomTemplates,
   type CustomTemplate,
 } from "../components/TemplateDesigner";
-import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
-import { autoSaveDocument } from "../lib/files";
-import { tools } from "../lib/api";
+import { StampSignatureLayer, type StampSig } from "../components/StampSignature";
+import { loadCompanyStampSig, type CompanyStampSig } from "../components/StampSignatureSettings";
+import FitPreview from "../components/FitPreview";
+import DocView, { type DocViewForm } from "../components/DocView";
+import { ResizablePanels } from "../components/ResizablePanels";
+import {
+  PageHeader,
+  MetricCard,
+  DataTable,
+  Badge,
+  statusTone,
+  Modal,
+  Field,
+  ShareToggle,
+  SearchInput,
+} from "../components/ui";
 
-const PR_TEMPLATES = [
-  { id: "standard", name: "Standard" },
-  { id: "formal", name: "Formal" },
-  { id: "minimal", name: "Minimal" },
-];
-
-const prNumber = (existing: string[] = []) =>
-  nextDocNumber({ prefix: "RCPT", existing });
 const today = () => new Date().toISOString().slice(0, 10);
 
-type PrForm = {
-  number: string;
-  template: string;
-  accent: string;
-  company_name: string;
-  company_address: string;
-  company_trn: string;
-  payer_name: string;
-  payer_address: string;
-  amount: number;
-  amount_words: string;
-  payment_method: string;
-  payment_date: string;
-  for_description: string;
-  ref_number: string;
-  notes: string;
-  font: string;
-  currency: string;
-  logo?: string;
+type Form = Omit<ReceiptDoc, "id" | "created_at" | "updated_at" | "items"> & {
+  id?: number;
+  stamp?: StampSig;
+  signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
 };
 
-const METHODS = ["Cash", "Bank Transfer", "Cheque", "Card", "Online"];
-
-function blankPr(existing: string[] = []): PrForm {
+function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {
-    number: prNumber(existing),
-    template: "standard",
-    accent: "#222222",
-    company_name: "Your Company",
-    company_address: "",
-    company_trn: "",
-    payer_name: "",
-    payer_address: "",
+    number: nextDocNumber({ prefix: "REC", existing }),
+    status: "draft",
+    template: "receipt",
+    accent: c.default_accent || "#222222",
+    currency: c.currency || "AED",
+    logo: c.logo,
+    seller_name: c.name,
+    seller_address: c.address,
+    seller_trn: c.trn,
+    seller_email: c.email,
+    seller_phone: c.phone,
+    customer_name: "",
+    customer_address: "",
+    customer_trn: "",
+    issue_date: today(),
+    due_date: today(),
+    notes: "Thank you for your business.",
+    terms: "This receipt acknowledges the payment stated above.",
     amount: 0,
     amount_words: "",
-    payment_method: "Bank Transfer",
-    payment_date: today(),
-    for_description: "",
+    payment_method: "Cash",
     ref_number: "",
-    notes: "Received with thanks.",
-    font: "'Plus Jakarta Sans', system-ui, sans-serif",
-    currency: "AED",
+    for_description: "",
+    tax_rate: 0,
+    discount: 0,
+    show_stamp: false,
+    show_signature: false,
   };
 }
 
-const PR_STORAGE_KEY = "filey_payment_receipts";
-const PR_SETTING_KEY = "payment_receipts"; // Supabase (app_settings) mirror for cross-device sync
-interface PrRecord {
-  id: number;
-  number: string;
-  payer_name: string;
-  amount: number;
-  payment_date: string;
-  created_at: string;
-}
-function loadPrs(): PrRecord[] {
-  try {
-    return JSON.parse(localStorage.getItem(PR_STORAGE_KEY) || "[]");
-  } catch (e) {
-    console.warn("Failed to load payment receipts", e);
-    return [];
-  }
-}
-function savePrs(r: PrRecord[]) {
-  try {
-    localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(r));
-  } catch (e) {
-    console.warn("Failed to save payment receipts", e);
-  }
-  // Write-through so receipts follow the user across devices.
-  void tools.setSetting(PR_SETTING_KEY, JSON.stringify(r)).catch(() => {});
-}
-/** Pull receipts saved on the user's other devices; remote wins when present. */
-async function syncPrs(): Promise<PrRecord[]> {
-  try {
-    const settings = await tools.settings();
-    const row = settings.find((s) => s.key === PR_SETTING_KEY);
-    if (row?.value) {
-      const remote: PrRecord[] = JSON.parse(row.value);
-      localStorage.setItem(PR_STORAGE_KEY, JSON.stringify(remote));
-      return remote;
-    }
-  } catch (e) {
-    console.warn("Failed to sync payment receipts from server", e);
-    /* offline / not configured — fall back to local */
-  }
-  return loadPrs();
-}
+const docViewForm = (form: Form | null): DocViewForm => {
+  if (!form) return { template: "receipt", accent: "#222222", currency: "AED", items: [] };
+  const notes = [
+    form.notes,
+    form.amount_words ? `Amount in words: ${form.amount_words}` : null,
+    form.payment_method ? `Payment method: ${form.payment_method}` : null,
+    form.ref_number ? `Reference #: ${form.ref_number}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return {
+    template: form.template || "receipt",
+    accent: form.accent || "#222222",
+    currency: form.currency || "AED",
+    doc_title: "RECEIPT",
+    number: form.number,
+    logo: form.logo || null,
+    seller_name: form.seller_name || null,
+    seller_address: form.seller_address || null,
+    seller_trn: form.seller_trn || null,
+    seller_email: form.seller_email || null,
+    seller_phone: form.seller_phone || null,
+    customer_name: form.customer_name || null,
+    customer_address: form.customer_address || null,
+    customer_trn: form.customer_trn || null,
+    customer_email: null,
+    issue_date: form.issue_date || null,
+    due_date: form.due_date || null,
+    tax_rate: form.tax_rate ?? 0,
+    discount: form.discount ?? 0,
+    notes,
+    terms: form.terms || null,
+    items: [
+      {
+        description: form.for_description || "Payment received",
+        qty: 1,
+        unit_price: form.amount || 0,
+        unit: "",
+      },
+    ],
+  };
+};
 
 export default function PaymentReceipt() {
   const { toast, confirm } = useUI();
-  const [records, setRecords] = useState<PrRecord[]>([]);
-  const [form, setForm] = useState<PrForm | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    syncPrs().then((r) => {
-      setRecords(r);
-      setLoading(false);
-    });
-  }, []);
-  useLiveSync(() => setRecords(loadPrs()));
-
-  const del = async (r: PrRecord) => {
-    const ok = await confirm({
-      title: "Delete receipt",
-      message: `Delete ${r.number}?`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    const next = records.filter((x) => x.id !== r.id);
-    setRecords(next);
-    savePrs(next);
-    toast.success("Deleted.");
-  };
-
-  if (form)
-    return (
-      <PrEditor
-        form={form}
-        setForm={setForm}
-        onBack={() => {
-          setForm(null);
-          setRecords(loadPrs());
-        }}
-        onSave={() => {
-          const next = loadPrs();
-          const existing = next.findIndex((r) => r.number === form.number);
-          const record: PrRecord = {
-            id: existing >= 0 ? next[existing].id : Date.now(),
-            number: form.number,
-            payer_name: form.payer_name,
-            amount: form.amount,
-            payment_date: form.payment_date,
-            created_at: new Date().toISOString(),
-          };
-          if (existing >= 0) next[existing] = record;
-          else next.push(record);
-          savePrs(next);
-          toast.success("Receipt saved.");
-        }}
-      />
-    );
-
-  const totalReceived = records.reduce((s, r) => s + r.amount, 0);
-
-  return (
-    <div className="animate-fade-up">
-      <PageHeader
-        title="Payment Receipts"
-        subtitle="Issue payment receipts to customers & suppliers"
-        action={
-          <button
-            className="btn-primary"
-            onClick={() => setForm(blankPr(records.map((r) => r.number)))}
-          >
-            <Plus size={16} /> New Receipt
-          </button>
-        }
-      />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <MetricCard
-          label="Receipts"
-          value={String(records.length)}
-          icon={<Receipt size={20} />}
-        />
-        <MetricCard
-          label="Total Received"
-          value={aed(totalReceived)}
-          icon={<Banknote size={20} />}
-          iconClass="bg-success/15 text-success"
-        />
-      </div>
-      <DataTable<PrRecord>
-        rows={records}
-        loading={loading}
-        empty="No receipts yet"
-        columns={[
-          {
-            key: "no",
-            label: "Receipt #",
-            sortValue: (r) => r.number,
-            render: (r) => (
-              <span className="font-mono text-xs font-medium">{r.number}</span>
-            ),
-          },
-          {
-            key: "payer",
-            label: "Payer",
-            sortValue: (r) => r.payer_name,
-            render: (r) => (
-              <span className="font-medium text-ink">{r.payer_name || "—"}</span>
-            ),
-          },
-          {
-            key: "amt",
-            label: "Amount",
-            sortValue: (r) => r.amount,
-            render: (r) => (
-              <span className="font-medium text-ink tabular-nums">{aed(r.amount)}</span>
-            ),
-          },
-          {
-            key: "date",
-            label: "Date",
-            sortValue: (r) => r.payment_date,
-            render: (r) => (
-              <span className="text-brand-600">{fmtDate(r.payment_date)}</span>
-            ),
-          },
-          {
-            key: "act",
-            label: "",
-            render: (r) => (
-              <button
-                aria-label={`Delete receipt ${r.number}`}
-                className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                onClick={() => del(r)}
-              >
-                <Trash2 size={15} />
-              </button>
-            ),
-          },
-        ]}
-      />
-    </div>
-  );
-}
-
-function PrEditor({
-  form,
-  setForm,
-  onBack,
-  onSave,
-}: {
-  form: PrForm;
-  setForm: (f: PrForm) => void;
-  onBack: () => void;
-  onSave: () => void;
-}) {
-  const { toast, confirm } = useUI();
-  const prRef = useRef<HTMLDivElement>(null);
-  const [viewOpen, setViewOpen] = useState(false);
-  const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
-  const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
-  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const confirmDelete = (title: string, message?: string) =>
+    confirm({ title, message, danger: true });
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [docs, setDocs] = useState<ReceiptSummary[]>([]);
+  const [view, setView] = useState<"list" | "edit">("list");
+  const [form, setForm] = useState<Form | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates());
+  const [search, setSearch] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+  const [zoom] = useState(100);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>({});
+  const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadCompanyStampSig()
-      .then(setCompanyStampSig)
-      .catch((e) => console.warn("Failed to load company stamp/signature", e));
+    Promise.all([billing.getCompany(), receipts.list()]).then(([c, d]) => {
+      setCompany(c);
+      setDocs(d);
+    });
+    loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
+    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
   }, []);
-  const downloadPdf = () => {
-    if (prRef.current) {
-      const sheet = prRef.current.closest(".invoice-print") as HTMLElement;
-      downloadElementAsPdf(sheet || prRef.current, form.number || "receipt");
-    } else window.print();
+
+  const refreshList = async () => {
+    const d = await receipts.list();
+    setDocs(d);
   };
-  // Save the record, then archive the receipt PDF to My Files (deduped, best-effort).
-  const handleSave = async () => {
-    const el = (prRef.current?.closest(".invoice-print") as HTMLElement) || prRef.current;
-    onSave();
-    if (!el) return;
+
+  const update = (patch: Partial<Form>) => {
+    setForm((f) => (f ? { ...f, ...patch } : f));
+  };
+
+  const applyCompanyDefaults = () => {
+    if (!company) return;
+    update({
+      logo: company.logo,
+      seller_name: company.name,
+      seller_address: company.address,
+      seller_trn: company.trn,
+      seller_email: company.email,
+      seller_phone: company.phone,
+    });
+  };
+
+  const newReceipt = () => {
+    if (!company) return;
+    setForm(blankForm(company, docs.map((d) => d.number)));
+    setView("edit");
+  };
+
+  const loadDoc = async (id: number) => {
     try {
-      const base = form.number || "receipt";
-      const saved = await autoSaveDocument(`${base}.pdf`, "receipt", () =>
-        elementToPdfBytes(el, base)
-      );
-      if (saved) toast.success("Saved a copy to My Files.");
+      const d = await receipts.get(id);
+      const stampSig = await loadCompanyStampSig();
+      setForm({
+        ...d,
+        stamp: stampSig.stamp,
+        signature: stampSig.signature,
+        show_stamp: d.show_stamp || false,
+        show_signature: d.show_signature || false,
+      });
+      setView("edit");
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
-      console.warn("Failed to archive payment receipt PDF", e);
-      /* archiving is a convenience — never block save */
+      toast.error("Failed to load receipt: " + errMsg(e));
     }
   };
-  const set = <K extends keyof PrForm>(k: K, v: PrForm[K]) =>
-    setForm({ ...form, [k]: v });
-  const onLogo = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => set("logo", String(reader.result));
-    reader.readAsDataURL(file);
-  };
-  const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] =
-    useState<CustomTemplate[]>(loadCustomTemplates);
-  // Pull templates saved on the user's other devices (Supabase-backed).
-  useEffect(() => {
-    syncCustomTemplates()
-      .then(setCustomTemplates)
-      .catch(() => {});
-  }, []);
-  const allTemplates = [
-    ...PR_TEMPLATES,
-    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
-  ];
-  const [viewAll, setViewAll] = useState(false);
-  const shown = viewAll ? allTemplates : allTemplates.slice(0, 4);
-  const applyTemplate = (id: string) => {
-    const ct = customTemplates.find((c) => c.id === id);
-    setForm({
-      ...form,
-      template: id,
-      ...(ct ? { accent: ct.accent, font: ct.font } : {}),
-    });
-  };
-  const removeTpl = async (id: string, name: string) => {
-    if (
-      !(await confirm({
-        title: "Delete template",
-        message: `Delete custom template "${name}"? This cannot be undone.`,
-        confirmLabel: "Delete",
-        danger: true,
-      }))
-    )
-      return;
-    setCustomTemplates(deleteCustomTemplate(id));
-    if (form.template === id) set("template", "standard");
-    toast.success("Template deleted.");
-  };
-  useEffect(() => {
-    if (!viewOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setViewOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [viewOpen]);
 
-  const numberToWords = (n: number): string => {
-    if (n === 0) return "Zero";
-    const ones = [
-      "",
-      "One",
-      "Two",
-      "Three",
-      "Four",
-      "Five",
-      "Six",
-      "Seven",
-      "Eight",
-      "Nine",
-      "Ten",
-      "Eleven",
-      "Twelve",
-      "Thirteen",
-      "Fourteen",
-      "Fifteen",
-      "Sixteen",
-      "Seventeen",
-      "Eighteen",
-      "Nineteen",
-    ];
-    const tens = [
-      "",
-      "",
-      "Twenty",
-      "Thirty",
-      "Forty",
-      "Fifty",
-      "Sixty",
-      "Seventy",
-      "Eighty",
-      "Ninety",
-    ];
-    const convert = (num: number): string => {
-      if (num < 20) return ones[num];
-      if (num < 100)
-        return tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : "");
-      if (num < 1000)
-        return (
-          ones[Math.floor(num / 100)] +
-          " Hundred" +
-          (num % 100 ? " and " + convert(num % 100) : "")
-        );
-      if (num < 100000)
-        return (
-          convert(Math.floor(num / 1000)) +
-          " Thousand" +
-          (num % 1000 ? " " + convert(num % 1000) : "")
-        );
-      return (
-        convert(Math.floor(num / 100000)) +
-        " Lakh" +
-        (num % 100000 ? " " + convert(num % 100000) : "")
-      );
-    };
-    return convert(Math.floor(n)) + " Only";
+  const validate = () => {
+    if (!form) return "No form";
+    if (!form.customer_name) return "Received from is required.";
+    if (!form.amount || form.amount <= 0) return "Amount must be greater than 0.";
+    if (!form.issue_date) return "Payment date is required.";
+    return null;
+  };
+
+  const save = async () => {
+    const error = validate();
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { stamp, signature, ...payload } = form!;
+      const id = await receipts.save(payload as any);
+      await refreshList();
+      toast.success(`Receipt ${form!.number} saved.`);
+      if (!form!.id) setForm((f) => f && { ...f, id });
+      await archivePdf();
+    } catch (e) {
+      toast.error("Save failed: " + errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const archivePdf = async () => {
+    const el = previewRef.current;
+    if (!el) return;
+    try {
+      const base = `Receipt-${form?.number || "draft"}`;
+      await autoSaveDocument(`${base}.pdf`, "receipt", () => elementToPdfBytes(el, base));
+    } catch (e) {
+      console.warn("Auto-archive failed", e);
+    }
+  };
+
+  const markStatus = async (status: string) => {
+    if (!form?.id) {
+      toast.error("Save the receipt first.");
+      return;
+    }
+    await receipts.setStatus(form.id, status);
+    update({ status });
+    await refreshList();
+    toast.success(`Receipt marked ${status}.`);
+  };
+
+  const duplicate = () => {
+    const numbers = docs.map((d) => d.number);
+    setForm({
+      ...blankForm(company || ({} as any), numbers),
+      ...form,
+      id: undefined,
+      number: nextDocNumber({ prefix: "REC", existing: numbers }),
+      status: "draft",
+      shared: false,
+      share_token: undefined,
+      issue_date: today(),
+      due_date: today(),
+    });
+    toast.info("Receipt duplicated. Save to create a new copy.");
+  };
+
+  const share = async (shared: boolean) => {
+    if (!form?.id) {
+      toast.error("Save the receipt before sharing.");
+      return;
+    }
+    await receipts.shareDoc(form.id, shared);
+    update({ shared });
+    await refreshList();
+    toast.success(shared ? "Public link enabled." : "Public link disabled.");
+  };
+
+  const copyPublicLink = async () => {
+    if (!form?.id) {
+      toast.error("Save the receipt first.");
+      return;
+    }
+    try {
+      const token = await receipts.publicLink(form.id);
+      const url = `${window.location.origin}/#/portal/${token}`;
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+      update({ shared: true, share_token: token });
+      await refreshList();
+    } catch (e) {
+      toast.error("Could not create public link: " + errMsg(e));
+    }
+  };
+
+  const downloadPdf = () => {
+    const el = previewRef.current;
+    if (!el) return;
+    try {
+      downloadElementAsPdf(el, `Receipt-${form?.number || "draft"}`);
+    } catch (e) {
+      toast.error("PDF export failed: " + errMsg(e));
+    }
+  };
+
+  const remove = async (id: number) => {
+    if (!(await confirmDelete("Delete this receipt?", "This cannot be undone."))) return;
+    try {
+      await receipts.delete(id);
+      await refreshList();
+      if (form?.id === id) {
+        setForm(null);
+        setView("list");
+      }
+      toast.success("Receipt deleted.");
+    } catch (e) {
+      toast.error("Delete failed: " + errMsg(e));
+    }
+  };
+
+  const filtered = docs.filter(
+    (d) =>
+      d.number.toLowerCase().includes(search.toLowerCase()) ||
+      d.customer_name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const stats = {
+    total: docs.length,
+    amount: docs.reduce((s, d) => s + (d.amount || 0), 0),
+    sent: docs.filter((d) => d.status === "sent").length,
+    paid: docs.filter((d) => d.status === "paid").length,
   };
 
   return (
-    <div>
-      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
-        <div className="flex items-start gap-3">
-          <button
-            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
-            onClick={onBack}
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h1 className="text-[28px] leading-9 font-medium text-ink">
-              Payment Receipt
-            </h1>
-            <p className="text-sm text-brand-500 mt-0.5">
-              Issue professional payment receipts
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Maximize2 size={15} /> View
-          </button>
-          <button className="btn-ghost" onClick={downloadPdf}>
-            <Download size={15} /> PDF
-          </button>
-          <button className="btn-ghost" onClick={handleSave}>
-            <Save size={15} /> Save
-          </button>
-        </div>
-      </div>
+    <div className="p-6">
+      <PageHeader title="Payment Receipts" />
 
-            <ResizablePanels
-        left={
-          <div className="no-print space-y-4">
-            
-          <Step
-            n={1}
-            title="Template"
-            action={
-              <div className="flex gap-2">
-                <button
-                  className="btn-ghost text-xs"
-                  onClick={() => setViewAll((v) => !v)}
-                >
-                  {viewAll ? "Less" : "All"}
-                </button>
-                <button
-                  className="btn-ghost text-xs flex items-center gap-1"
-                  onClick={() => setDesigning(true)}
-                >
-                  <Plus size={13} /> Custom
-                </button>
-              </div>
-            }
-          >
-            <div
-              className={
-                viewAll
-                  ? "grid grid-cols-2 sm:grid-cols-3 gap-3"
-                  : "flex gap-3 overflow-x-auto pb-1"
-              }
-            >
-              {shown.map((tpl) => {
-                const active = form.template === tpl.id;
-                const ct = customTemplates.find((c) => c.id === tpl.id);
-                const swatch = ct?.accent ?? "#222222";
-                return (
-                  <button
-                    key={tpl.id}
-                    onClick={() => applyTemplate(tpl.id)}
-                    className={`group relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}
-                  >
-                    {active && (
-                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
-                        <Check size={11} strokeWidth={3} />
-                      </span>
-                    )}
-                    {ct && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Delete template ${tpl.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeTpl(tpl.id, tpl.name);
-                        }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
-                      >
-                        <Trash2 size={11} />
-                      </span>
-                    )}
-                    <div
-                      className="w-full h-14 rounded-lg flex items-center justify-center text-[9px] font-medium"
-                      style={{
-                        background: `${swatch}14`,
-                        color: swatch,
-                        borderTop: `3px solid ${swatch}`,
-                      }}
-                    >
-                      {tpl.name}
+      {view === "list" ? (
+        <>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard label="Total receipts" value={String(stats.total)} icon={<FileText size={18} />} />
+            <MetricCard label="Total received" value={money(stats.amount, company?.currency || "AED")} icon={<Wallet size={18} />} />
+            <MetricCard label="Sent" value={String(stats.sent)} icon={<Send size={18} />} />
+            <MetricCard label="Paid" value={String(stats.paid)} icon={<Check size={18} />} />
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SearchInput value={search} onChange={setSearch} placeholder="Search receipts…" />
+            <button className="btn-primary flex items-center gap-2" onClick={newReceipt}>
+              <Plus size={16} /> New Receipt
+            </button>
+          </div>
+
+          <div className="mt-4 card">
+            <DataTable
+              columns={[
+                { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
+                { key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
+                { key: "payment_date", label: "Date", render: (d) => fmtDate(d.payment_date) },
+                {
+                  key: "amount",
+                  label: "Amount",
+                  render: (d) => money(d.amount, company?.currency || "AED"),
+                },
+                {
+                  key: "status",
+                  label: "Status",
+                  render: (d) => <Badge tone={statusTone(d.status)}>{d.status}</Badge>,
+                },
+                {
+                  key: "shared",
+                  label: "Public",
+                  render: (d) =>
+                    d.shared ? <Badge tone="success">Shared</Badge> : <Badge tone="neutral">Private</Badge>,
+                },
+                {
+                  key: "actions",
+                  label: "",
+                  render: (d) => (
+                    <div className="flex gap-2 justify-end">
+                      <button className="btn-ghost" onClick={() => loadDoc(d.id)}>
+                        <PenTool size={14} />
+                      </button>
+                      <button className="btn-ghost text-danger" onClick={() => remove(d.id)}>
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-brand-100">
-              <span className="text-xs font-medium text-brand-500">Accent</span>
-              <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
-              <span className="text-xs font-medium text-brand-500 ml-2">Font</span>
-              <select
-                className="select h-8 text-xs flex-1"
-                value={form.font}
-                onChange={(e) => set("font", e.target.value)}
-              >
-                <option value="'Plus Jakarta Sans', system-ui, sans-serif">Sans</option>
-                <option value="'Lora', Georgia, serif">Serif</option>
-                <option value="'IBM Plex Mono', monospace">Mono</option>
-              </select>
-            </div>
-          </Step>
-          <Step n={2} title="Receipt Details">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <Field label="Receipt Number">
-                  <input
-                    className="input"
-                    value={form.number}
-                    onChange={(e) => set("number", e.target.value)}
-                  />
-                </Field>
-                <Field label="Payer Name">
-                  <input
-                    className="input"
-                    placeholder="Customer / Company name"
-                    value={form.payer_name}
-                    onChange={(e) => set("payer_name", e.target.value)}
-                  />
-                </Field>
-                <Field label="Payer Address">
-                  <textarea
-                    className="textarea"
-                    rows={2}
-                    value={form.payer_address}
-                    onChange={(e) => set("payer_address", e.target.value)}
-                  />
-                </Field>
-              </div>
-              <div className="space-y-3">
-                <Field label="Payment Date">
-                  <input
-                    type="date"
-                    className="input"
-                    value={form.payment_date}
-                    onChange={(e) => set("payment_date", e.target.value)}
-                  />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={`Amount (${form.currency})`}>
-                    <input
-                      type="number"
-                      className="input text-lg font-medium"
-                      value={form.amount || ""}
-                      onChange={(e) => {
-                        const v = numInput(e.target.value);
-                        set("amount", v);
-                        set("amount_words", numberToWords(v));
-                      }}
-                    />
-                  </Field>
-                  <Field label="Currency">
-                    <select
-                      className="select"
-                      value={form.currency}
-                      onChange={(e) => set("currency", e.target.value)}
-                    >
-                      {CURRENCIES.map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.code}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <Field label="Payment Method">
-                  <select
-                    className="select"
-                    value={form.payment_method}
-                    onChange={(e) => set("payment_method", e.target.value)}
-                  >
-                    {METHODS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-            </div>
-            <div className="mt-3 space-y-3">
-              <Field label="For / Description">
-                <input
-                  className="input"
-                  placeholder="Payment for invoice #, services, etc."
-                  value={form.for_description}
-                  onChange={(e) => set("for_description", e.target.value)}
-                />
-              </Field>
-              <Field label="Reference Number">
-                <input
-                  className="input"
-                  placeholder="Invoice #, PO #"
-                  value={form.ref_number}
-                  onChange={(e) => set("ref_number", e.target.value)}
-                />
-              </Field>
-            </div>
-          </Step>
-          <Step n={3} title="Company Info">
-            <div className="mb-3">
-              {form.logo ? (
-                <div className="flex items-center gap-2">
-                  <img
-                    src={form.logo}
-                    alt="logo"
-                    className="h-12 w-12 object-contain rounded-lg border border-brand-200 bg-white"
-                  />
-                  <button
-                    className="btn-ghost text-xs"
-                    onClick={() => set("logo", undefined)}
-                  >
-                    <X size={13} /> Remove logo
-                  </button>
-                </div>
-              ) : (
-                <label className="btn-ghost text-xs cursor-pointer w-fit">
-                  <Upload size={13} /> Upload logo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => onLogo(e.target.files?.[0])}
-                  />
-                </label>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Company Name">
-                <input
-                  className="input"
-                  value={form.company_name}
-                  onChange={(e) => set("company_name", e.target.value)}
-                />
-              </Field>
-              <Field label="TRN">
-                <input
-                  className="input"
-                  value={form.company_trn}
-                  onChange={(e) => set("company_trn", e.target.value)}
-                />
-              </Field>
-              <div>
-                <Field label="Address">
-                  <textarea
-                    className="textarea"
-                    rows={2}
-                    value={form.company_address}
-                    onChange={(e) => set("company_address", e.target.value)}
-                  />
-                </Field>
-              </div>
-            </div>
-          </Step>
-          <Step n={4} title="Notes">
-            <Field label="Notes">
-              <textarea
-                className="textarea"
-                rows={2}
-                value={form.notes}
-                onChange={(e) => set("notes", e.target.value)}
-              />
-            </Field>
-          </Step>
-          <Step n={5} title="Stamp & Signature">
-            <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
-              <div className="flex items-center gap-2 text-ink font-medium text-sm mb-3">
-                <Stamp size={15} /> Company Stamp & Signature
-              </div>
-              <p className="text-xs text-brand-500 mb-3">Images are managed in Settings → Company Details.</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const v = !showStamp;
-                    setShowStamp(v);
-                    set("show_stamp", v);
-                  }}
-                  className={`btn-ghost text-xs ${showStamp ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!companyStampSig.stamp?.data}
-                >
-                  Stamp: {showStamp ? "On" : "Off"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const v = !showSignature;
-                    setShowSignature(v);
-                    set("show_signature", v);
-                  }}
-                  className={`btn-ghost text-xs ${showSignature ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!companyStampSig.signature?.data}
-                >
-                  Signature: {showSignature ? "On" : "Off"}
-                </button>
-              </div>
-            </div>
-          </Step>
-        
+                  ),
+                },
+              ]}
+              rows={filtered}
+              rowKey={(d: ReceiptSummary) => d.id}
+              empty="No receipts yet."
+            />
           </div>
-        }
-        right={
-          <div className="sticky top-4 space-y-4">
-            
-          {designing && (
-            <div className="mb-4">
-              <TemplateDesigner
-                onSave={() => {
-                  setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
-                }}
-                onClose={() => {
-                  setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
-                }}
-              />
-            </div>
-          )}
-          <PrPreview form={form} prRef={prRef} companyStampSig={companyStampSig} />
-        
-          </div>
-        }
-      />
-
-      {viewOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4"
-          onClick={() => setViewOpen(false)}
-        >
-          <div className="my-4 w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-white">{form.number}</h2>
-              <div className="flex items-center gap-2">
-                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
+        </>
+      ) : (
+        <>
+          {!form ? (
+            <div className="mt-4 text-sm text-brand-500">Loading editor…</div>
+          ) : (
+            <>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  className="btn-ghost flex items-center gap-1.5"
+                  onClick={() => {
+                    setForm(null);
+                    setView("list");
+                  }}
+                >
+                  <ArrowLeft size={14} /> Back to list
+                </button>
+                <button className="btn-primary flex items-center gap-1.5" onClick={save} disabled={saving}>
+                  <Save size={14} /> {saving ? "Saving…" : "Save"}
+                </button>
+                <button className="btn-secondary flex items-center gap-1.5" onClick={downloadPdf}>
                   <Download size={14} /> PDF
                 </button>
-                <button
-                  onClick={() => setViewOpen(false)}
-                  aria-label="Close"
-                  className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                >
-                  <X size={18} />
+                <button className="btn-secondary flex items-center gap-1.5" onClick={duplicate}>
+                  <Copy size={14} /> Duplicate
                 </button>
+                <button
+                  className="btn-secondary flex items-center gap-1.5"
+                  onClick={() => markStatus(form.status === "paid" ? "sent" : "paid")}
+                >
+                  <Check size={14} /> {form.status === "paid" ? "Mark Sent" : "Mark Paid"}
+                </button>
+                <button className="btn-secondary flex items-center gap-1.5" onClick={copyPublicLink}>
+                  {shareCopied ? <Check size={14} /> : <Monitor size={14} />} Copy link
+                </button>
+                <ShareToggle shared={!!form.shared} onToggle={share} />
               </div>
-            </div>
-            <PrPreview form={form} companyStampSig={companyStampSig} />
-          </div>
-        </div>
+
+              <ResizablePanels
+                left={
+                  <div className="space-y-6">
+                    <DocTemplateGallery
+                      key={customTemplates.length}
+                      value={form.template || "receipt"}
+                      onChange={(id) => update({ template: id })}
+                      onDesign={() => setTemplateOpen(true)}
+                      viewAll={false}
+                    />
+
+                    <div className="card p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-ink">Receipt details</h3>
+                        <div className="flex items-center gap-2">
+                          <ColorPicker value={form.accent || "#222222"} onChange={(v) => update({ accent: v })} />
+                          <button
+                            className="btn-ghost"
+                            onClick={() => setCompanyOpen(true)}
+                            title="Company profile"
+                          >
+                            <Building2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Receipt number">
+                          <input
+                            className="input"
+                            value={form.number}
+                            onChange={(e) => update({ number: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="Payment date">
+                          <input
+                            className="input"
+                            type="date"
+                            value={form.issue_date}
+                            onChange={(e) => update({ issue_date: e.target.value, due_date: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+
+                      <Field label="Received from (payer)">
+                        <input
+                          className="input"
+                          value={form.customer_name}
+                          onChange={(e) => update({ customer_name: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Payer address">
+                        <textarea
+                          className="textarea"
+                          rows={3}
+                          value={form.customer_address || ""}
+                          onChange={(e) => update({ customer_address: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Payment for">
+                        <input
+                          className="input"
+                          value={form.for_description || ""}
+                          onChange={(e) => update({ for_description: e.target.value })}
+                        />
+                      </Field>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Amount">
+                          <input
+                            className="input"
+                            type="number"
+                            value={form.amount}
+                            onChange={(e) => update({ amount: Number(e.target.value) || 0 })}
+                          />
+                        </Field>
+                        <Field label="Amount in words">
+                          <input
+                            className="input"
+                            value={form.amount_words || ""}
+                            onChange={(e) => update({ amount_words: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Payment method">
+                          <input
+                            className="input"
+                            value={form.payment_method || ""}
+                            onChange={(e) => update({ payment_method: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="Reference number">
+                          <input
+                            className="input"
+                            value={form.ref_number || ""}
+                            onChange={(e) => update({ ref_number: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Currency">
+                          <select
+                            className="select"
+                            value={form.currency || "AED"}
+                            onChange={(e) => update({ currency: e.target.value })}
+                          >
+                            {CURRENCIES.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code} — {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Notes">
+                          <textarea
+                            className="textarea"
+                            rows={3}
+                            value={form.notes || ""}
+                            onChange={(e) => update({ notes: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+
+                    <div className="card p-4 space-y-4">
+                      <h3 className="text-sm font-semibold text-ink">Seller / company</h3>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Company name">
+                          <input
+                            className="input"
+                            value={form.seller_name || ""}
+                            onChange={(e) => update({ seller_name: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="TRN">
+                          <input
+                            className="input"
+                            value={form.seller_trn || ""}
+                            onChange={(e) => update({ seller_trn: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Address">
+                        <textarea
+                          className="textarea"
+                          rows={3}
+                          value={form.seller_address || ""}
+                          onChange={(e) => update({ seller_address: e.target.value })}
+                        />
+                      </Field>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Email">
+                          <input
+                            className="input"
+                            value={form.seller_email || ""}
+                            onChange={(e) => update({ seller_email: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="Phone">
+                          <input
+                            className="input"
+                            value={form.seller_phone || ""}
+                            onChange={(e) => update({ seller_phone: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={!!form.show_stamp}
+                          onChange={(e) => update({ show_stamp: e.target.checked })}
+                        />
+                        Show company stamp
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          checked={!!form.show_signature}
+                          onChange={(e) => update({ show_signature: e.target.checked })}
+                        />
+                        Show authorised signature
+                      </label>
+                    </div>
+                  </div>
+                }
+                right={
+                  <FitPreview baseWidth={794} zoom={zoom}>
+                    <div ref={previewRef}>
+                      <div style={{ position: "relative", minHeight: 1027 }}>
+                        <DocView
+                          form={docViewForm(form)}
+                          labels={{
+                            docTitle: "RECEIPT",
+                            partyLabel: "Received From",
+                            issuedLabel: "Date",
+                            dueLabel: "Date",
+                            totalLabel: "Amount Received",
+                          }}
+                        />
+                        <StampSignatureLayer
+                          stamp={
+                            form.show_stamp
+                              ? form.stamp?.data
+                                ? form.stamp
+                                : companyStampSig.stamp
+                              : undefined
+                          }
+                          signature={
+                            form.show_signature
+                              ? form.signature?.data
+                                ? form.signature
+                                : companyStampSig.signature
+                              : undefined
+                          }
+                          onStampMove={(x, y) => {
+                            const base = form.stamp?.data ? form.stamp : companyStampSig.stamp;
+                            if (base) update({ stamp: { ...base, x, y } });
+                          }}
+                          onSignatureMove={(x, y) => {
+                            const base = form.signature?.data ? form.signature : companyStampSig.signature;
+                            if (base) update({ signature: { ...base, x, y } });
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </FitPreview>
+                }
+              />
+
+              <Modal open={companyOpen} onClose={() => setCompanyOpen(false)} title="Company profile">
+                <div className="space-y-4">
+                  <p className="text-sm text-brand-500">
+                    Update company details from Settings &gt; Organization. Use the button below to apply defaults to this receipt.
+                  </p>
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      applyCompanyDefaults();
+                      setCompanyOpen(false);
+                    }}
+                  >
+                    Apply company defaults
+                  </button>
+                </div>
+              </Modal>
+
+              <Modal
+                open={templateOpen}
+                onClose={() => {
+                  setTemplateOpen(false);
+                  syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+                }}
+                title="Template designer"
+                size="xl"
+              >
+                <TemplateDesigner
+                  onSave={(tpl) => {
+                    update({ template: tpl.id });
+                    setTemplateOpen(false);
+                    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+                  }}
+                  onClose={() => {
+                    setTemplateOpen(false);
+                    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
+                  }}
+                />
+              </Modal>
+            </>
+          )}
+        </>
       )}
-    </div>
-  );
-}
-
-function PrPreview({
-  form,
-  prRef,
-  companyStampSig,
-}: {
-  form: PrForm;
-  prRef?: React.RefObject<HTMLDivElement | null>;
-  companyStampSig?: CompanyStampSig;
-}) {
-  const clean = (s: string) => s || "—";
-  const a = form.accent || "#222222";
-  return (
-    <div
-      ref={prRef}
-      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none relative"
-      style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
-    >
-      <StampSignatureLayer
-        stamp={form.show_stamp && companyStampSig?.stamp?.data ? companyStampSig.stamp : undefined}
-        signature={form.show_signature && companyStampSig?.signature?.data ? companyStampSig.signature : undefined}
-        onStampMove={() => {}}
-        onSignatureMove={() => {}}
-      />
-      <div className="p-8 min-h-[500px]">
-        <div
-          className="text-center mb-8 pb-6"
-          style={{ borderBottom: `2px solid ${a}22` }}
-        >
-          {form.logo && (
-            <img src={form.logo} alt="" className="h-12 mx-auto mb-3 object-contain" />
-          )}
-          <h1 className="text-[28px] font-extrabold tracking-tight" style={{ color: a }}>
-            PAYMENT RECEIPT
-          </h1>
-          <p className="font-mono text-lg font-bold mt-2">{form.number}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-6 mb-6">
-          <div>
-            <p className="text-xs font-semibold text-brand-400 uppercase mb-1">
-              Received From
-            </p>
-            <p className="font-bold text-lg">{clean(form.payer_name)}</p>
-            <p className="text-sm text-brand-500">{clean(form.payer_address)}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs font-semibold text-brand-400 uppercase mb-1">
-              Date & Method
-            </p>
-            <p className="text-sm flex items-center justify-end gap-2">
-              <Calendar size={13} /> {form.payment_date}
-            </p>
-            <p className="text-sm flex items-center justify-end gap-2">
-              <Banknote size={13} /> {form.payment_method}
-            </p>
-          </div>
-        </div>
-        <div
-          className="text-center mb-6 p-6 rounded-2xl"
-          style={{ backgroundColor: `${a}0A`, border: `2px solid ${a}22` }}
-        >
-          <p className="text-[40px] font-extrabold tabular-nums" style={{ color: a }}>
-            {money(form.amount, form.currency || "AED")}
-          </p>
-          {form.amount_words && (
-            <p className="text-sm text-brand-500 mt-1 italic">{form.amount_words}</p>
-          )}
-        </div>
-        {form.for_description && (
-          <div className="mb-4">
-            <p className="font-semibold text-sm">For:</p>
-            <p className="text-brand-600">{form.for_description}</p>
-          </div>
-        )}
-        {form.ref_number && (
-          <div className="mb-4">
-            <p className="text-sm text-brand-500">Reference: {form.ref_number}</p>
-          </div>
-        )}
-        <div className="mt-8 pt-6" style={{ borderTop: `2px solid #EAE4D6` }}>
-          <div className="grid grid-cols-2 gap-8">
-            <div>
-              <p className="text-xs font-semibold text-brand-400 mb-4">Received By</p>
-              <div style={{ borderTop: `1px solid ${a}22` }} className="pt-2">
-                <p className="text-[10px] text-brand-400">Signature</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-[15px]" style={{ color: a }}>
-                {clean(form.company_name)}
-              </p>
-              <p className="text-sm text-brand-500">{clean(form.company_address)}</p>
-            </div>
-          </div>
-        </div>
-        {form.notes && (
-          <p className="text-sm text-brand-500 text-center mt-4 italic">{form.notes}</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Step({
-  n,
-  title,
-  action,
-  children,
-}: {
-  n: number;
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">
-            {n}
-          </span>
-          <h3 className="font-bold text-ink">{title}</h3>
-        </div>
-        {action}
-      </div>
-      {children}
     </div>
   );
 }

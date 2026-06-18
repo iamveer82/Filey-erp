@@ -31,7 +31,12 @@ dist-ssr
 # AI coding-assistant skills (hallmark etc.) — local tooling, not app code
 .agents/
 .claude/
+.hermes/
 skills-lock.json
+
+# Local knowledge-graph / assistant DB
+headroom_memory.db
+*.db
 
 # Local dev scratch / CLI temp
 dev-output.txt

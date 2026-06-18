@@ -678,6 +678,9 @@ export const TOOLS: ToolDef[] = [
       await pos.save({
         po_number: poNumber,
         status: "draft",
+        template: "uae",
+        accent: "#222222",
+        currency: "AED",
         order_date: today(),
         total: 0,
         items: items.map((it) => ({

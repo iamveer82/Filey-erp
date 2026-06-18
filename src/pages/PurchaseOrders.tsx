@@ -1,32 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Trash2,
-  PackageCheck,
-  ClipboardList,
-  Wallet,
-  Truck,
-  Download,
   ArrowLeft,
+  Download,
   Save,
-  Upload,
-  Check,
-  Maximize2,
   Building2,
-  Stamp,
-  LayoutTemplate,
-  CreditCard,
+  Upload,
+  X,
   Pencil,
-  Minus,
+  Copy,
   Monitor,
   Smartphone,
+  Minus,
+  Stamp,
+  PenTool,
+  CreditCard,
+  PackageCheck,
+  SeparatorHorizontal,
+  Truck,
+  ClipboardList,
+  Wallet,
+  Send,
 } from "lucide-react";
-import {
-  loadCompanyStampSig,
-  EMPTY_STAMP_SIG,
-  type CompanyStampSig,
-} from "../components/StampSignatureSettings";
-import { ResizablePanels } from "../components/ResizablePanels";
 import {
   pos,
   suppliers as suppliersApi,
@@ -41,10 +38,36 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { downloadCsv } from "../lib/csv";
-import { aed, fmtDate, num, numInput, errMsg } from "../lib/format";
-import { invoiceTotals } from "../lib/money";
+import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
+import {
+  docLineAmount,
+  docTotals,
+  paginateItems,
+  splitPageBreak,
+  mergePageBreak,
+  sanitizeCustomColumns,
+  RESERVED_ITEM_COLUMNS,
+  type DocItem,
+} from "../lib/docItems";
 import { nextDocNumber } from "../lib/docNumber";
+import FitPreview from "../components/FitPreview";
+import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { autoSaveDocument } from "../lib/files";
+import ColorPicker from "../components/ColorPicker";
+import DocTemplateGallery from "../components/DocTemplateGallery";
+import TemplateDesigner, { type CustomTemplate } from "../components/TemplateDesigner";
+import {
+  StampSignatureLayer,
+  StampSigAdjust,
+  type StampSig,
+} from "../components/StampSignature";
+import {
+  loadCompanyStampSig,
+  EMPTY_STAMP_SIG,
+  type CompanyStampSig,
+} from "../components/StampSignatureSettings";
+import { ResizablePanels } from "../components/ResizablePanels";
+import DocView from "../components/DocView";
 import {
   PageHeader,
   MetricCard,
@@ -53,125 +76,111 @@ import {
   statusTone,
   Modal,
   Field,
-  ErrorBanner,
+  ShareToggle,
   SearchInput,
 } from "../components/ui";
-import TemplateDesigner, {
-  loadCustomTemplates,
-  deleteCustomTemplate,
-  type CustomTemplate,
-} from "../components/TemplateDesigner";
-import {
-  LetterheadFrame,
-  loadLetterhead,
-  hasLetterhead,
-  EMPTY_LETTERHEAD,
-  DEFAULT_HEADER_SPACE,
-  DEFAULT_FOOTER_SPACE,
-  type LetterheadInfo,
-} from "../components/Letterhead";
-import FitPreview from "../components/FitPreview";
-import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
-import { autoSaveDocument } from "../lib/files";
 
 /* ------------------------------------------------------------------ */
-/*  Constants                                                          */
+/*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-const LPO_TEMPLATES = [
-  { id: "uae-standard", name: "UAE Standard" },
-  { id: "uae-minimal", name: "UAE Minimal" },
-  { id: "corporate", name: "Corporate" },
-  { id: "modern", name: "Modern" },
-  { id: "classic", name: "Classic" },
-  { id: "simple", name: "Simple" },
-];
+type CustomColumn = { key: string; label: string };
+
+type Item = {
+  product_id?: number;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  unit: string;
+  custom: Record<string, string>;
+  pageBreakBefore?: boolean;
+};
+
+type Form = Omit<PoInput, "items"> & {
+  items: Item[];
+  customColumns: CustomColumn[];
+  stamp?: StampSig;
+  signature?: StampSig;
+  show_stamp?: boolean;
+  show_signature?: boolean;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-type LpoItem = {
-  product_id?: number;
-  description: string;
-  qty: number;
-  unit: string;
-  unit_price: number;
-};
-
-type LpoForm = {
-  id?: number;
-  number: string;
-  status: string;
-  template: string;
-  accent: string;
-  supplier_id?: number;
-  supplier_name: string;
-  supplier_address: string;
-  supplier_trn: string;
-  supplier_email: string;
-  supplier_phone: string;
-  company_name: string;
-  company_address: string;
-  company_trn: string;
-  company_email: string;
-  company_phone: string;
-  company_stamp: string;
-  company_signature: string;
-  show_stamp?: boolean;
-  show_signature?: boolean;
-  order_date: string;
-  expected_date: string;
-  tax_rate: number;
-  notes: string;
-  terms: string;
-  items: LpoItem[];
-};
-
-function blankLpo(c: CompanyProfile, existing: string[] = []): LpoForm {
+function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {
-    number: nextDocNumber({ prefix: "LPO", existing }),
+    po_number: nextDocNumber({ prefix: "PO", existing }),
     status: "draft",
-    template: c.default_template || "uae-standard",
+    total: 0,
+    doc_title: "Purchase Order",
+    template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
+    currency: c.currency || "AED",
+    seller_name: c.name,
+    seller_address: c.address,
+    seller_trn: c.trn,
+    seller_email: c.email,
+    seller_phone: c.phone,
+    logo: c.logo,
     supplier_id: undefined,
     supplier_name: "",
     supplier_address: "",
     supplier_trn: "",
     supplier_email: "",
     supplier_phone: "",
-    company_name: c.name,
-    company_address: c.address || "",
-    company_trn: c.trn || "",
-    company_email: c.email || "",
-    company_phone: c.phone || "",
-    company_stamp: loadSavedStamp(),
-    company_signature: loadSavedSignature(),
     order_date: today(),
-    expected_date: "",
-    tax_rate: c.default_tax_rate ?? 5,
+    expected_date: undefined,
     notes: "Thank you for your business.",
-    terms:
-      "1. Payment due within 30 days of invoice.\n2. Goods remain property of seller until paid in full.\n3. All prices are in AED unless otherwise stated.\n4. Delivery within 7-14 working days.",
-    items: [{ description: "", qty: 1, unit: "PCS", unit_price: 0 }],
+    terms: "Payment due within 30 days of invoice.",
+    tax_rate: 0,
+    discount: 0,
+    items: [
+      {
+        description: "",
+        quantity: 1,
+        unit_cost: 0,
+        unit: "",
+        custom: {},
+        pageBreakBefore: false,
+      },
+    ],
+    customColumns: [],
+    show_stamp: false,
+    show_signature: false,
+    unit_price_formula: null,
   };
 }
 
-const STAMP_KEY = "filey_lpo_stamp";
-const SIGNATURE_KEY = "filey_lpo_signature";
+const toDocItem = (it: Item): DocItem => ({
+  description: it.description,
+  qty: it.quantity,
+  unit_price: it.unit_cost,
+  custom: it.custom,
+  pageBreakBefore: it.pageBreakBefore,
+});
 
-function loadSavedStamp(): string {
-  try {
-    return localStorage.getItem(STAMP_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-function loadSavedSignature(): string {
-  try {
-    return localStorage.getItem(SIGNATURE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
+const normStamp = (
+  v: Partial<StampSig> | null | undefined,
+  def?: StampSig
+): StampSig | undefined => {
+  if (!v || !v.data) return undefined;
+  return {
+    data: v.data,
+    x: v.x ?? def?.x ?? 60,
+    y: v.y ?? def?.y ?? 60,
+    opacity: v.opacity ?? def?.opacity ?? 1,
+    color: v.color ?? def?.color ?? "#000000",
+    cropTop: v.cropTop ?? 0,
+    cropRight: v.cropRight ?? 0,
+    cropBottom: v.cropBottom ?? 0,
+    cropLeft: v.cropLeft ?? 0,
+    scale: v.scale ?? def?.scale ?? 1,
+  };
+};
 
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
@@ -179,168 +188,120 @@ function loadSavedSignature(): string {
 
 export default function PurchaseOrders() {
   const { toast, confirm } = useUI();
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [rows, setRows] = useState<PoSummary[]>([]);
+  const [form, setForm] = useState<Form | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [lpoForm, setLpoForm] = useState<LpoForm | null>(null);
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
   const [payFor, setPayFor] = useState<PoSummary | null>(null);
+  const [search, setSearch] = useState("");
+  const [tplRev, setTplRev] = useState(0);
 
-  useEffect(() => {
+  const loadRows = () =>
+    pos
+      .list()
+      .then(setRows)
+      .catch((e) => {
+        setError(`Could not load purchase orders: ${errMsg(e)}`);
+        toast.error("Failed to load purchase orders");
+      })
+      .finally(() => setLoading(false));
+
+  const reload = () => {
     billing
       .getCompany()
       .then(setCompany)
-      .catch(() => {});
-  }, []);
-
-  const load = () => {
-    return pos
-      .list()
-      .then(setRows)
-      .catch((e) =>
-        setError(`Could not load purchase orders: ${e instanceof Error ? e.message : e}`)
-      )
-      .finally(() => setLoading(false));
+      .catch(() => toast.error("Failed to load company profile"));
+    loadRows();
   };
+
+  useEffect(reload, []);
+  useLiveSync(reload);
+
+  // ⌘K deep-link: ?new=1 opens a blank PO once company is loaded.
+  const [params, setParams] = useSearchParams();
   useEffect(() => {
-    load();
-  }, []);
-  useLiveSync(load);
-
-  const stats = useMemo(() => {
-    const open = rows.filter((r) => r.status !== "received").length;
-    const received = rows.filter((r) => r.status === "received").length;
-    const value = rows.reduce((s, r) => s + r.total, 0);
-    return { total: rows.length, open, received, value };
-  }, [rows]);
-
-  const receive = async (r: PoSummary) => {
-    const ok = await confirm({
-      title: "Receive stock",
-      message: `Receive all items on ${r.po_number} into inventory? This increases product stock.`,
-      confirmLabel: "Receive",
-    });
-    if (!ok) return;
-    try {
-      await pos.receive(r.id);
-      load();
-      toast.success("Stock received.");
-    } catch (e) {
-      toast.error(errMsg(e));
+    if (params.get("new") === "1" && company && !form) {
+      setForm(blankForm(company, rows.map((r) => r.po_number)));
+      setParams({}, { replace: true });
     }
+  }, [params, company, form, setParams, rows]);
+
+  const newPo = () => {
+    if (company) setForm(blankForm(company, rows.map((r) => r.po_number)));
   };
 
-  const del = async (r: PoSummary) => {
-    const ok = await confirm({
-      title: "Delete purchase order",
-      message: `Delete ${r.po_number}?`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await pos.remove(r.id);
-      load();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to delete purchase order");
-    }
-  };
+  const onSaved = () => loadRows();
 
-  const editPo = async (poId: number) => {
-    try {
-      const [po, supps] = await Promise.all([pos.get(poId), suppliersApi.list()]);
-      if (!po) return;
-      const supplier = supps.find((s) => s.id === po.supplier_id);
-      setLpoForm({
-        id: po.id,
-        number: po.po_number || "",
-        status: po.status || "draft",
-        template: "uae-standard",
-        accent: "#222222",
-        supplier_id: po.supplier_id,
-        supplier_name: supplier?.name || "",
-        supplier_address: supplier?.address || "",
-        supplier_trn: (supplier as any)?.trn || "",
-        supplier_email: supplier?.email || "",
-        supplier_phone: supplier?.phone || "",
-        company_name: company?.name || "",
-        company_address: company?.address || "",
-        company_trn: company?.trn || "",
-        company_email: company?.email || "",
-        company_phone: company?.phone || "",
-        company_stamp: loadSavedStamp(),
-        company_signature: loadSavedSignature(),
-        order_date: po.order_date || today(),
-        expected_date: po.expected_date || "",
-        tax_rate: (po as any).tax_rate ?? company?.default_tax_rate ?? 5,
-        notes: po.notes || "",
-        terms: "",
-        items: po.items.map((i: any) => ({
-          product_id: i.product_id ?? undefined,
-          description: i.description || "",
-          qty: i.quantity || 1,
-          unit: (i as any).unit || "MT",
-          unit_price: i.unit_cost || 0,
-        })),
-      });
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load PO");
-    }
-  };
-
-  /* Show LPO Editor if form is active */
-  if (lpoForm) {
+  if (form) {
     return (
-      <LPOEditor
-        form={lpoForm}
-        setForm={setLpoForm}
-        onBack={() => {
-          setLpoForm(null);
-          load();
-        }}
-        onSave={async () => {
-          await saveLpo(lpoForm, setLpoForm, toast);
-          load();
-        }}
-      />
+      <>
+        {company && (
+          <CompanyModal
+            open={companyOpen}
+            company={company}
+            onClose={() => setCompanyOpen(false)}
+            onSaved={(c) => {
+              setCompany(c);
+              setForm((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  seller_name: c.name,
+                  seller_address: c.address ?? prev.seller_address,
+                  seller_trn: c.trn ?? prev.seller_trn,
+                  seller_email: c.email ?? prev.seller_email,
+                  seller_phone: c.phone ?? prev.seller_phone,
+                  logo: c.logo ?? prev.logo,
+                };
+              });
+            }}
+          />
+        )}
+        <Editor
+          form={form}
+          setForm={setForm}
+          rows={rows}
+          company={company}
+          onBack={() => {
+            setForm(null);
+            loadRows();
+          }}
+          onSaved={onSaved}
+          onEditCompany={() => setCompanyOpen(true)}
+          tplRev={tplRev}
+          onTplRev={() => setTplRev((v) => v + 1)}
+        />
+      </>
     );
   }
 
+  const statCcy = company?.currency || "AED";
+  const totalValue = rows.reduce((s, r) => s + r.total, 0);
+  const sentCount = rows.filter((r) => r.status === "sent").length;
+  const receivedCount = rows.filter((r) => r.status === "received").length;
+
+  const filtered = search
+    ? rows.filter(
+        (r) =>
+          r.po_number.toLowerCase().includes(search.toLowerCase()) ||
+          r.supplier_name.toLowerCase().includes(search.toLowerCase())
+      )
+    : rows;
+
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="Purchase Orders"
-        subtitle="Create local purchase orders with custom templates — print or email to suppliers"
+        subtitle="Create purchase orders for suppliers, share them, and receive stock"
         action={
           <div className="flex gap-2">
-            <button
-              className="btn-ghost"
-              onClick={() =>
-                downloadCsv(
-                  "purchase-orders",
-                  rows as unknown as Record<string, unknown>[],
-                  [
-                    { key: "po_number", label: "PO #" },
-                    { key: "supplier_name", label: "Supplier" },
-                    { key: "status", label: "Status" },
-                    { key: "total", label: "Total" },
-                    { key: "order_date", label: "Order date" },
-                    { key: "expected_date", label: "Expected" },
-                  ]
-                )
-              }
-            >
-              <Download size={15} /> Export
+            <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
+              <Building2 size={16} /> Company
             </button>
-            <button
-              className="btn-primary"
-              disabled={!company}
-              onClick={() =>
-                company &&
-                setLpoForm(blankLpo(company, rows.map((r) => r.po_number)))
-              }
-            >
-              <Plus size={16} /> New LPO
+            <button className="btn-primary" onClick={newPo}>
+              <Plus size={16} /> New PO
             </button>
           </div>
         }
@@ -348,62 +309,133 @@ export default function PurchaseOrders() {
 
       {error && (
         <div className="mb-4">
-          <ErrorBanner message={error} />
+          <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm font-semibold text-danger">
+            <span>{error}</span>
+          </div>
         </div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <MetricCard
           label="Purchase Orders"
-          value={num(stats.total)}
+          value={num(rows.length)}
           icon={<ClipboardList size={20} />}
         />
         <MetricCard
-          label="Open"
-          value={num(stats.open)}
-          icon={<Truck size={20} />}
+          label="Total Value"
+          value={money(totalValue, statCcy)}
+          icon={<Wallet size={20} />}
+          iconClass="bg-info/15 text-info"
+        />
+        <MetricCard
+          label="Sent"
+          value={num(sentCount)}
+          icon={<Send size={20} />}
           iconClass="bg-secondary-400/20 text-secondary-600"
         />
         <MetricCard
           label="Received"
-          value={num(stats.received)}
+          value={num(receivedCount)}
           icon={<PackageCheck size={20} />}
           iconClass="bg-success/15 text-success"
         />
-        <MetricCard
-          label="Total Value"
-          value={aed(stats.value)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-info/15 text-info"
+      </div>
+
+      <div className="mb-4">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search POs by number or supplier…"
+          className="max-w-xs"
         />
       </div>
 
       <DataTable<PoSummary>
-        rows={rows}
+        rows={filtered}
         loading={loading}
-        empty="No purchase orders yet — create your first LPO"
+        empty={
+          search
+            ? "No purchase orders match your search"
+            : "No purchase orders yet — create your first one"
+        }
+        rowKey={(r) => r.id}
+        bulkActions={[
+          {
+            label: "Share",
+            run: async (sel) => {
+              for (const r of sel) await pos.shareDoc(r.id, true);
+              loadRows();
+              toast.success(`Shared ${sel.length}.`);
+            },
+          },
+          {
+            label: "Mark sent",
+            run: async (sel) => {
+              for (const r of sel) await pos.setStatus(r.id, "sent");
+              loadRows();
+              toast.success(`Updated ${sel.length}.`);
+            },
+          },
+          {
+            label: "Copy public link",
+            run: async (sel) => {
+              const token = await pos.publicLink(sel[0].id);
+              const url = `${location.origin}${location.pathname}#/portal/${token}`;
+              await navigator.clipboard.writeText(url);
+              loadRows();
+              toast.success("Public PO link copied");
+            },
+          },
+          {
+            label: "Delete",
+            danger: true,
+            run: async (sel) => {
+              const ok = await confirm({
+                title: "Delete purchase orders",
+                message: `Delete ${sel.length} purchase order(s)?`,
+                danger: true,
+              });
+              if (!ok) return;
+              for (const r of sel) await pos.remove(r.id);
+              loadRows();
+              toast.success(`Deleted ${sel.length}.`);
+            },
+          },
+        ]}
         columns={[
           {
             key: "no",
-            label: "LPO #",
+            label: "PO #",
             sortValue: (r) => r.po_number,
             render: (r) => (
-              <span className="font-medium text-xs">{r.po_number}</span>
+              <span className="font-mono text-xs font-medium">{r.po_number}</span>
             ),
           },
           {
             key: "sup",
             label: "Supplier",
             sortValue: (r) => r.supplier_name,
-            render: (r) => (
-              <span className="font-medium text-ink">{r.supplier_name}</span>
-            ),
+            render: (r) => <span className="font-medium">{r.supplier_name}</span>,
+          },
+          {
+            key: "order_date",
+            label: "Order Date",
+            sortValue: (r) => r.order_date,
+            render: (r) => fmtDate(r.order_date),
+          },
+          {
+            key: "expected",
+            label: "Expected",
+            sortValue: (r) => r.expected_date ?? "",
+            render: (r) => (r.expected_date ? fmtDate(r.expected_date) : "—"),
           },
           {
             key: "total",
             label: "Total",
             sortValue: (r) => r.total,
-            render: (r) => aed(r.total),
+            render: (r) => (
+              <span className="font-medium">{money(r.total, statCcy)}</span>
+            ),
           },
           {
             key: "status",
@@ -412,10 +444,22 @@ export default function PurchaseOrders() {
             render: (r) => <Badge tone={statusTone(r.status)}>{r.status}</Badge>,
           },
           {
-            key: "exp",
-            label: "Expected",
-            sortValue: (r) => r.expected_date ?? "",
-            render: (r) => (r.expected_date ? fmtDate(r.expected_date) : "—"),
+            key: "share",
+            label: "Sharing",
+            render: (r) => (
+              <ShareToggle
+                shared={r.shared}
+                onToggle={async (next) => {
+                  try {
+                    await pos.shareDoc(r.id, next);
+                    loadRows();
+                    toast.success(next ? "Shared with team." : "Set to private.");
+                  } catch (e) {
+                    toast.error(errMsg(e));
+                  }
+                }}
+              />
+            ),
           },
           {
             key: "act",
@@ -425,7 +469,7 @@ export default function PurchaseOrders() {
                 <button
                   aria-label="Record payment"
                   title="Record payment"
-                  className="text-brand-500 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
+                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
                   onClick={() => setPayFor(r)}
                 >
                   <CreditCard size={15} />
@@ -433,8 +477,8 @@ export default function PurchaseOrders() {
                 <button
                   aria-label="Edit"
                   title="Edit PO"
-                  className="text-brand-500 hover:bg-brand-100 rounded-lg p-1.5 cursor-pointer"
-                  onClick={() => editPo(r.id)}
+                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  onClick={() => editPo(r.id, setForm, company, toast)}
                 >
                   <Pencil size={15} />
                 </button>
@@ -442,16 +486,16 @@ export default function PurchaseOrders() {
                   <button
                     aria-label="Receive stock"
                     title="Receive into inventory"
-                    className="text-success hover:bg-success/10 rounded-lg p-1.5 cursor-pointer"
-                    onClick={() => receive(r)}
+                    className="text-success hover:bg-success/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    onClick={() => receiveRow(r, confirm, toast, loadRows)}
                   >
                     <PackageCheck size={15} />
                   </button>
                 )}
                 <button
                   aria-label="Delete"
-                  className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer"
-                  onClick={() => del(r)}
+                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  onClick={() => deleteRow(r, confirm, toast, loadRows)}
                 >
                   <Trash2 size={15} />
                 </button>
@@ -461,185 +505,203 @@ export default function PurchaseOrders() {
         ]}
       />
 
-      {payFor && (
-        <PoPaymentsModal po={payFor} onClose={() => setPayFor(null)} onSaved={load} />
+      {company && (
+        <CompanyModal
+          open={companyOpen}
+          company={company}
+          onClose={() => setCompanyOpen(false)}
+          onSaved={(c) => setCompany(c)}
+        />
       )}
+
+      {payFor && <PoPaymentsModal po={payFor} onClose={() => setPayFor(null)} onSaved={loadRows} />}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Save helper                                                        */
+/*  List actions                                                       */
 /* ------------------------------------------------------------------ */
 
-async function saveLpo(
-  form: LpoForm,
-  setForm: (f: LpoForm) => void,
-  toast: ReturnType<typeof useUI>["toast"]
+async function receiveRow(
+  r: PoSummary,
+  confirm: ReturnType<typeof useUI>["confirm"],
+  toast: ReturnType<typeof useUI>["toast"],
+  refresh: () => void
 ) {
-  const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  const ok = await confirm({
+    title: "Receive stock",
+    message: `Receive all items on ${r.po_number} into inventory? This increases product stock.`,
+  });
+  if (!ok) return;
   try {
-    const input: PoInput = {
-      id: form.id,
-      po_number: form.number,
-      supplier_id: form.supplier_id || undefined,
-      status: (form.status as "draft" | "sent" | "received") || "draft",
-      total,
-      order_date: form.order_date,
-      expected_date: form.expected_date || undefined,
-      notes: form.notes || undefined,
-      items: form.items
-        .filter((i) => i.description.trim())
-        .map((i) => ({
-          description: i.description,
-          quantity: i.qty,
-          unit_cost: i.unit_price,
-          unit: i.unit || undefined,
-          product_id: i.product_id,
-        })),
-    };
-    const id = await pos.save(input);
-    setForm({ ...form, id, status: "draft" });
-    toast.success("Purchase order saved.");
+    await pos.receive(r.id);
+    refresh();
+    toast.success("Stock received.");
   } catch (e) {
     toast.error(errMsg(e));
   }
 }
 
+async function deleteRow(
+  r: PoSummary,
+  confirm: ReturnType<typeof useUI>["confirm"],
+  toast: ReturnType<typeof useUI>["toast"],
+  refresh: () => void
+) {
+  const ok = await confirm({
+    title: "Delete purchase order",
+    message: `Delete ${r.po_number}?`,
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await pos.remove(r.id);
+    refresh();
+    toast.success(`Deleted ${r.po_number}`);
+  } catch (e) {
+    toast.error(errMsg(e));
+  }
+}
+
+async function editPo(
+  id: number,
+  setForm: (f: Form) => void,
+  company: CompanyProfile | null,
+  toast: ReturnType<typeof useUI>["toast"]
+) {
+  try {
+    const po = await pos.get(id);
+    const supps = await suppliersApi.list();
+    const supplier = supps.find((s) => s.id === po.supplier_id);
+    setForm({
+      id: po.id,
+      po_number: po.po_number,
+      status: po.status,
+      doc_title: po.doc_title || "Purchase Order",
+      template: po.template || company?.default_template || "minimal",
+      accent: po.accent || company?.default_accent || "#222222",
+      currency: po.currency || company?.currency || "AED",
+      seller_name: po.seller_name || company?.name || "",
+      seller_address: po.seller_address || company?.address,
+      seller_trn: po.seller_trn || company?.trn,
+      seller_email: po.seller_email || company?.email,
+      seller_phone: po.seller_phone || company?.phone,
+      logo: po.logo || company?.logo,
+      supplier_id: po.supplier_id,
+      supplier_name: supplier?.name || po.supplier_name || "",
+      supplier_address: supplier?.address || po.supplier_address || "",
+      supplier_trn: supplier?.tax_id || po.supplier_trn || "",
+      supplier_email: supplier?.email || po.supplier_email || "",
+      supplier_phone: supplier?.phone || po.supplier_phone || "",
+      order_date: po.order_date || today(),
+      expected_date: po.expected_date,
+      notes: po.notes,
+      terms: po.terms,
+      tax_rate: po.tax_rate ?? 0,
+      discount: po.discount ?? 0,
+      total: po.total,
+      stamp: normStamp((po as any).stamp as Partial<StampSig> | undefined, EMPTY_STAMP_SIG.stamp),
+      signature: normStamp(
+        (po as any).signature as Partial<StampSig> | undefined,
+        EMPTY_STAMP_SIG.signature
+      ),
+      show_stamp: po.show_stamp ?? false,
+      show_signature: po.show_signature ?? false,
+      unit_price_formula: po.unit_price_formula || null,
+      items: po.items.map((i) => {
+        const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+        return {
+          product_id: i.product_id,
+          description: i.description,
+          quantity: i.quantity,
+          unit_cost: i.unit_cost,
+          unit: i.unit || "",
+          custom,
+          pageBreakBefore,
+        };
+      }),
+      customColumns: sanitizeCustomColumns(po.custom_columns || []),
+      shared: po.shared,
+      share_token: po.share_token,
+    });
+  } catch (e: any) {
+    toast.error(e?.message || "Failed to load purchase order");
+  }
+}
+
 /* ------------------------------------------------------------------ */
-/*  LPO Editor                                                         */
+/*  Editor                                                             */
 /* ------------------------------------------------------------------ */
 
-function LPOEditor({
+function Editor({
   form,
   setForm,
+  rows,
+  company,
   onBack,
-  onSave,
+  onSaved,
+  onEditCompany,
+  tplRev,
+  onTplRev,
 }: {
-  form: LpoForm;
-  setForm: (f: LpoForm) => void;
+  form: Form;
+  setForm: (f: Form) => void;
+  rows: PoSummary[];
+  company: CompanyProfile | null;
   onBack: () => void;
-  onSave: () => void;
+  onSaved: () => void;
+  onEditCompany: () => void;
+  tplRev: number;
+  onTplRev: () => void;
 }) {
   const { toast, confirm } = useUI();
-  const lpoRef = useRef<HTMLDivElement>(null);
-  const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
-  const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
+  const poRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [designing, setDesigning] = useState(false);
+  const [zoom, setZoom] = useState(100);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewPage, setViewPage] = useState(1);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierModal, setSupplierModal] = useState(false);
+  const [invOpen, setInvOpen] = useState(false);
 
   useEffect(() => {
     loadCompanyStampSig()
       .then(setCompanyStampSig)
-      .catch((e) => console.warn("Failed to load company stamp/signature", e));
-  }, []);
-  const downloadPdf = () => {
-    if (lpoRef.current) {
-      const sheet = lpoRef.current.closest(".invoice-print") as HTMLElement;
-      downloadElementAsPdf(sheet || lpoRef.current, form.number || "lpo");
-    } else window.print();
-  };
-  // Save the LPO, then archive its PDF to My Files (deduped, best-effort).
-  const handleSave = async () => {
-    const el =
-      (lpoRef.current?.closest(".invoice-print") as HTMLElement) || lpoRef.current;
-    onSave();
-    if (!el) return;
-    try {
-      const base = form.number || "lpo";
-      const saved = await autoSaveDocument(`${base}.pdf`, "lpo", () =>
-        elementToPdfBytes(el, base)
-      );
-      if (saved) toast.success("Saved a copy to My Files.");
-    } catch {
-      /* archiving is a convenience — never block save */
-    }
-  };
-  const set = <K extends keyof LpoForm>(k: K, v: LpoForm[K]) =>
-    setForm({ ...form, [k]: v });
-
-  const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] =
-    useState<CustomTemplate[]>(loadCustomTemplates);
-  const [letterhead, setLetterhead] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
-  const [useLetterhead, setUseLetterhead] = useState(false);
-  const [headerSpace, setHeaderSpace] = useState(DEFAULT_HEADER_SPACE);
-  const [footerSpace, setFooterSpace] = useState(DEFAULT_FOOTER_SPACE);
-  useEffect(() => {
-    loadLetterhead()
-      .then((l) => {
-        setLetterhead(l);
-        setUseLetterhead(hasLetterhead(l));
-      })
       .catch(() => {});
   }, []);
-  const allTemplates = [
-    ...LPO_TEMPLATES,
-    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
-  ];
-  const removeTpl = async (id: string, name: string) => {
-    if (
-      !(await confirm({
-        title: "Delete template",
-        message: `Delete custom template "${name}"? This cannot be undone.`,
-        confirmLabel: "Delete",
-        danger: true,
-      }))
-    )
-      return;
-    setCustomTemplates(deleteCustomTemplate(id));
-    if (form.template === id) set("template", "uae-standard");
-    toast.success("Template deleted.");
-  };
 
-  const setItem = (idx: number, patch: Partial<LpoItem>) => {
-    const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
-    setForm({ ...form, items });
-  };
-  const addItem = () =>
-    setForm({
-      ...form,
-      items: [...form.items, { description: "", qty: 1, unit: "PCS", unit_price: 0 }],
-    });
-  const removeItem = (idx: number) =>
-    setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
-
-  const [products, setProducts] = useState<Product[]>([]);
-  const [pickOpen, setPickOpen] = useState(false);
-  const [q, setQ] = useState("");
-  useEffect(() => {
-    erp
-      .products()
-      .then(setProducts)
-      .catch(() => toast.error("Failed to load products"));
-  }, []);
-  const addProduct = (p: Product) => {
-    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
-    setForm({
-      ...form,
-      items: [
-        ...form.items.filter((it) => it.description.trim() || it.unit_price),
-        {
-          product_id: p.id,
-          description: desc,
-          qty: 1,
-          unit: "PCS",
-          unit_price: p.unit_price,
-        },
-      ],
-    });
-    setPickOpen(false);
-    setQ("");
-    toast.success(`Added ${p.name}`);
-  };
-
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierModal, setSupplierModal] = useState(false);
   useEffect(() => {
     suppliersApi
       .list()
       .then(setSuppliers)
       .catch(() => toast.error("Failed to load suppliers"));
   }, []);
+
+  const docItems = useMemo(() => form.items.map(toDocItem), [form.items]);
+  const pages = useMemo(() => paginateItems(docItems), [docItems]);
+  const totals = useMemo(
+    () => docTotals(docItems, 0, 0, form.unit_price_formula),
+    [docItems, form.unit_price_formula]
+  );
+
+  useEffect(() => {
+    setPreviewPage(1);
+  }, [form.items.length]);
+
+  const previewPages = pages.length;
+  const curPageIdx = Math.min(previewPage, previewPages) - 1;
+  const pageStartIndex = pages
+    .slice(0, curPageIdx)
+    .reduce((n, g) => n + g.length, 0);
+  const isLastPreviewPage = curPageIdx === previewPages - 1;
+
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v });
 
   const applySupplier = (s: Supplier) =>
     setForm({
@@ -652,11 +714,312 @@ function LPOEditor({
       supplier_trn: s.tax_id ?? form.supplier_trn,
     });
 
-  const [viewAll, setViewAll] = useState(false);
-  const [viewOpen, setViewOpen] = useState(false);
-  const [zoom, setZoom] = useState(100);
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const baseWidth = device === "desktop" ? 794 : 420;
+  const setItem = (idx: number, patch: Partial<Item>) => {
+    const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
+    setForm({ ...form, items });
+  };
+
+  const addItem = () =>
+    setForm({
+      ...form,
+      items: [
+        ...form.items,
+        { description: "", quantity: 1, unit_cost: 0, unit: "", custom: {}, pageBreakBefore: false },
+      ],
+    });
+
+  const removeItem = (idx: number) =>
+    setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  const setItemCustom = (idx: number, key: string, value: string) => {
+    if (key === "__pagebreak") return;
+    const items = form.items.map((it, i) =>
+      i === idx ? { ...it, custom: { ...it.custom, [key]: value } } : it
+    );
+    setForm({ ...form, items });
+  };
+
+  const addCustomColumn = () => {
+    const label = window.prompt("Column name:")?.trim();
+    if (!label) return;
+    const key =
+      label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_|_$/g, "") || `col_${Date.now()}`;
+    if (key === "__pagebreak") {
+      toast.error("That name is reserved");
+      return;
+    }
+    if (RESERVED_ITEM_COLUMNS.has(key)) {
+      toast.error(`"${label}" is a default column and cannot be added again`);
+      return;
+    }
+    if (form.customColumns.some((c) => c.key === key)) {
+      toast.error("A column with that key already exists");
+      return;
+    }
+    if (form.customColumns.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
+      toast.error("A column with that name already exists");
+      return;
+    }
+    setForm({ ...form, customColumns: [...form.customColumns, { key, label }] });
+  };
+
+  const removeCustomColumn = (key: string) => {
+    setForm({
+      ...form,
+      customColumns: form.customColumns.filter((c) => c.key !== key),
+      items: form.items.map((it) => {
+        const c = { ...it.custom };
+        delete c[key];
+        return { ...it, custom: c };
+      }),
+    });
+  };
+
+  const onLogo = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => set("logo", String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const addItemFromProduct = (p: Product) => {
+    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+    setForm({
+      ...form,
+      items: [
+        ...form.items.filter((it) => it.description.trim() || it.unit_cost),
+        {
+          description: desc,
+          quantity: 1,
+          unit_cost: p.cost_price || p.unit_price,
+          unit: p.unit || "",
+          custom: {},
+          product_id: p.id,
+        },
+      ],
+    });
+  };
+
+  const duplicate = () => {
+    if (!company) return;
+    const next: Form = {
+      ...form,
+      id: undefined,
+      status: "draft",
+      po_number: nextDocNumber({
+        prefix: "PO",
+        existing: rows.map((r) => r.po_number),
+      }),
+      shared: false,
+      share_token: undefined,
+    };
+    setForm(next);
+    toast.success("Duplicated into a new draft PO.");
+  };
+
+  const handleSave = async () => {
+    if (!form.supplier_name?.trim()) {
+      toast.error("Supplier name is required");
+      return;
+    }
+    if (!form.items.length || form.items.every((i) => !i.description.trim())) {
+      toast.error("Add at least one line item");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: PoInput = {
+        ...form,
+        total: totals.total,
+        custom_columns: sanitizeCustomColumns(form.customColumns),
+        items: form.items
+          .filter((i) => i.description.trim())
+          .map((it) => ({
+            description: it.description,
+            quantity: it.quantity,
+            unit_cost: it.unit_cost,
+            unit: it.unit || undefined,
+            custom: mergePageBreak(toDocItem(it)),
+            product_id: it.product_id,
+          })),
+        order_date: form.order_date,
+        expected_date: form.expected_date || undefined,
+        show_stamp: form.show_stamp ?? false,
+        show_signature: form.show_signature ?? false,
+      };
+      // Remove the in-memory aliases that don't exist on the DB model.
+      delete (payload as any).customColumns;
+
+      // TODO: pos.save recomputes total from qty*unit_cost, so formula-driven
+      // line amounts are not reflected in the persisted total. Update the
+      // API helper to accept/respect the total field when a formula is set.
+      const id = await pos.save(payload);
+      setForm({ ...form, id });
+      await onSaved();
+
+      // Auto-archive a PDF copy to My Files (deduped, best-effort).
+      const el = exportRef.current || poRef.current;
+      if (el) {
+        try {
+          const base = form.po_number || "po";
+          const saved = await autoSaveDocument(`${base}.pdf`, "po", () =>
+            elementToPdfBytes(el, base)
+          );
+          if (saved) toast.success("Saved a copy to My Files.");
+        } catch {
+          /* archiving is a convenience — never block save */
+        }
+      }
+    } catch (e) {
+      toast.error(`Could not save: ${errMsg(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setStatus = async (status: string) => {
+    if (!form.id) {
+      toast.error("Save the PO first");
+      return;
+    }
+    setSaving(true);
+    try {
+      await pos.setStatus(form.id, status);
+      setForm({ ...form, status });
+      await onSaved();
+      toast.success(`PO marked ${status}`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReceive = async () => {
+    if (!form.id) {
+      toast.error("Save the PO before receiving stock");
+      return;
+    }
+    const ok = await confirm({
+      title: "Receive stock",
+      message: `Receive all items on ${form.po_number} into inventory?`,
+    });
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await pos.receive(form.id);
+      setForm({ ...form, status: "received" });
+      await onSaved();
+      toast.success("Stock received.");
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyPublicLink = async () => {
+    if (!form.id) {
+      toast.error("Save the PO before sharing a public link");
+      return;
+    }
+    try {
+      const token = await pos.publicLink(form.id);
+      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+      await navigator.clipboard.writeText(url);
+      setForm({ ...form, shared: true });
+      await onSaved();
+      toast.success("Public link copied");
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const downloadPdf = () => {
+    const el = exportRef.current || poRef.current;
+    if (el) downloadElementAsPdf(el, form.po_number || "po");
+    else window.print();
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        downloadPdf();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const docViewForm = useMemo(
+    () => ({
+      template: form.template,
+      accent: form.accent,
+      currency: form.currency,
+      doc_title: form.doc_title,
+      number: form.po_number,
+      logo: form.logo,
+      seller_name: form.seller_name,
+      seller_address: form.seller_address,
+      seller_trn: form.seller_trn,
+      seller_email: form.seller_email,
+      seller_phone: form.seller_phone,
+      customer_name: form.supplier_name,
+      customer_address: form.supplier_address,
+      customer_trn: form.supplier_trn,
+      issue_date: form.order_date,
+      due_date: form.expected_date,
+      tax_rate: 0,
+      discount: 0,
+      notes: form.notes,
+      terms: form.terms,
+      items: form.items.map((it) => ({
+        description: it.description,
+        qty: it.quantity,
+        unit_price: it.unit_cost,
+        unit: it.unit,
+        custom: it.custom,
+      })),
+      customColumns: form.customColumns,
+      unit_price_formula: form.unit_price_formula,
+    }),
+    [form]
+  );
+
+  const docViewLabels = {
+    docTitle: form.doc_title || "Purchase Order",
+    partyLabel: "Supplier",
+    issuedLabel: "Order Date",
+    dueLabel: "Expected",
+    totalLabel: "Total",
+  };
+
+  const viewPages = paginateItems(docItems);
+  const viewPageCount = viewPages.length;
+  const viewPageIdx = Math.min(viewPage, viewPageCount) - 1;
+  const viewPageStart = viewPages
+    .slice(0, viewPageIdx)
+    .reduce((n, g) => n + g.length, 0);
+  const isLastViewPage = viewPageIdx === viewPageCount - 1;
+
+  useEffect(() => {
+    if (viewOpen) setViewPage(1);
+  }, [viewOpen]);
 
   useEffect(() => {
     if (!viewOpen) return;
@@ -667,1275 +1030,1286 @@ function LPOEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
 
-  const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
+  const activeStamp = form.show_stamp
+    ? form.stamp?.data
+      ? form.stamp
+      : companyStampSig.stamp
+    : undefined;
+  const activeSignature = form.show_signature
+    ? form.signature?.data
+      ? form.signature
+      : companyStampSig.signature
+    : undefined;
+
+  const onStampMove = (x: number, y: number) => {
+    const base = form.stamp?.data ? form.stamp : companyStampSig.stamp;
+    if (base) setForm({ ...form, stamp: { ...base, x, y } });
+  };
+  const onSignatureMove = (x: number, y: number) => {
+    const base = form.signature?.data ? form.signature : companyStampSig.signature;
+    if (base) setForm({ ...form, signature: { ...base, x, y } });
+  };
 
   return (
     <div>
-      {/* header bar */}
-      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
+      {/* Header bar */}
+      <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div className="flex items-start gap-3">
           <button
-            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
             onClick={onBack}
             aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-medium text-ink">
-              Local Purchase Order
-            </h1>
+            <h1 className="text-[28px] leading-9 font-semibold text-ink">Create Purchase Order</h1>
             <p className="text-sm text-brand-500 mt-0.5">
-              Create professional LPOs for UAE suppliers with custom templates
+              Create and share purchase orders with your suppliers
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Badge tone={statusTone(form.status)}>{form.status}</Badge>
-          {!form.id && (
-            <span className="text-xs font-medium text-brand-400">Unsaved</span>
-          )}
-          <button
-            className={`btn-ghost ${
-              useLetterhead ? "!bg-primary-100 !text-ink" : ""
-            }`}
-            disabled={!hasLetterhead(letterhead)}
-            title={
-              hasLetterhead(letterhead)
-                ? "Print the body over your A4 letterhead background"
-                : "Set a letterhead in Settings → Company Details"
-            }
-            onClick={() => setUseLetterhead((v) => !v)}
-          >
-            <LayoutTemplate size={15} /> Letterhead{" "}
-            {hasLetterhead(letterhead) ? (useLetterhead ? "On" : "Off") : ""}
-          </button>
-          {useLetterhead && hasLetterhead(letterhead) && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2 py-1">
-              <label className="flex items-center gap-1 text-[11px] font-medium text-brand-500">
-                Header
-                <input
-                  type="number"
-                  min={0}
-                  step={10}
-                  value={headerSpace}
-                  onChange={(e) =>
-                    setHeaderSpace(Math.max(0, Number(e.target.value) || 0))
-                  }
-                  className="w-14 rounded-md border border-brand-200 px-1.5 py-0.5 text-xs tabular-nums text-ink"
-                  title="Top space (px) so the body clears your letterhead header"
-                />
-              </label>
-              <label className="flex items-center gap-1 text-[11px] font-medium text-brand-500">
-                Footer
-                <input
-                  type="number"
-                  min={0}
-                  step={10}
-                  value={footerSpace}
-                  onChange={(e) =>
-                    setFooterSpace(Math.max(0, Number(e.target.value) || 0))
-                  }
-                  className="w-14 rounded-md border border-brand-200 px-1.5 py-0.5 text-xs tabular-nums text-ink"
-                  title="Bottom space (px) so the body clears your letterhead footer"
-                />
-              </label>
-            </div>
-          )}
+          {!form.id && <span className="text-xs font-medium text-brand-400">Unsaved</span>}
+
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Maximize2 size={15} /> View
+            <Plus size={15} /> View
           </button>
-          <button className="btn-ghost" onClick={downloadPdf}>
+          <button className="btn-ghost" onClick={downloadPdf} title="Download PDF (Ctrl+P)">
             <Download size={15} /> PDF
           </button>
-          <button className="btn-ghost" onClick={handleSave}>
-            <Save size={15} /> Save
+          <button className="btn-ghost" onClick={duplicate}>
+            <Copy size={15} /> Duplicate
           </button>
+          <button className="btn-ghost" onClick={handleSave} disabled={saving}>
+            <Save size={15} /> {saving ? "Saving…" : "Save"}
+          </button>
+
+          {form.status === "draft" && (
+            <button className="btn-primary" onClick={() => setStatus("sent")} disabled={saving}>
+              <Send size={15} /> Mark Sent
+            </button>
+          )}
+          {form.status === "sent" && (
+            <>
+              <button className="btn-primary" onClick={handleReceive} disabled={saving}>
+                <Truck size={15} /> Mark Received
+              </button>
+              <button className="btn-ghost" onClick={() => setStatus("cancelled")} disabled={saving}>
+                <X size={15} /> Cancel
+              </button>
+            </>
+          )}
+          {(form.status === "received" || form.status === "cancelled") && (
+            <button className="btn-ghost" onClick={() => setStatus("draft")} disabled={saving}>
+              <Pencil size={15} /> Move to draft
+            </button>
+          )}
+
+          {form.id && (
+            <button className="btn-ghost" onClick={copyPublicLink}>
+              <Copy size={15} /> Public link
+            </button>
+          )}
+
+          {form.id && (
+            <ShareToggle
+              shared={form.shared}
+              onToggle={async (next) => {
+                try {
+                  await pos.shareDoc(form.id!, next);
+                  setForm({ ...form, shared: next });
+                  onSaved();
+                  toast.success(next ? "Shared with team." : "Set to private.");
+                } catch (e) {
+                  toast.error(errMsg(e));
+                }
+              }}
+            />
+          )}
         </div>
       </div>
 
-            <ResizablePanels
+      <SupplierQuickAdd
+        open={supplierModal}
+        onClose={() => setSupplierModal(false)}
+        onSaved={(s) => {
+          applySupplier(s);
+          setSupplierModal(false);
+          suppliersApi.list().then(setSuppliers).catch(() => {});
+        }}
+      />
+
+      <InventoryImportModal
+        open={invOpen}
+        onClose={() => setInvOpen(false)}
+        onPick={(p) => {
+          addItemFromProduct(p);
+          toast.success(`Added ${p.name}`);
+        }}
+      />
+
+      <ResizablePanels
         left={
           <div className="no-print space-y-4">
-            
-          {/* 1 · Choose template */}
-          <Step
-            n={1}
-            title="Choose Template"
-            subtitle="Select a template for your purchase order"
-            action={
-              <div className="flex items-center gap-2">
-                <button
-                  className="btn-ghost text-xs"
-                  onClick={() => setViewAll((v) => !v)}
-                >
-                  {viewAll ? "Show less" : "View all templates"}
-                </button>
-                <button
-                  className="btn-ghost text-xs flex items-center gap-1"
-                  onClick={() => setDesigning(true)}
-                >
-                  <Plus size={13} /> Create Template
-                </button>
+            {/* 1 · Template */}
+            <Step n={1} title="Choose Template">
+              <DocTemplateGallery
+                key={tplRev}
+                value={form.template}
+                onChange={(id) => set("template", id)}
+                onDesign={() => setDesigning(true)}
+              />
+              <div className="flex items-center justify-between mt-3 border border-brand-200 rounded-xl px-3 py-2">
+                <span className="text-xs font-semibold text-brand-500">Accent color</span>
+                <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
               </div>
-            }
-          >
-            <div
-              className={
-                viewAll
-                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
-                  : "flex gap-3 overflow-x-auto pb-1"
-              }
-            >
-              {shown.map((tpl) => {
-                const active = form.template === tpl.id;
-                const isCustom = tpl.id.startsWith("custom-");
-                const ct = isCustom ? customTemplates.find((c) => c.id === tpl.id) : null;
-                const isFile = ct?.type === "file";
-                return (
-                  <button
-                    key={tpl.id}
-                    onClick={() => set("template", tpl.id)}
-                    className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
-                      active
-                        ? "border-primary-400 bg-brand-50 "
-                        : "border-brand-200 bg-white hover:border-primary-300"
-                    }`}
-                  >
-                    {active && (
-                      <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
-                        <Check size={11} strokeWidth={3} />
-                      </span>
-                    )}
-                    {isCustom && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Delete template ${tpl.name}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeTpl(tpl.id, tpl.name);
-                        }}
-                        className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
-                      >
-                        <Trash2 size={11} />
-                      </span>
-                    )}
-                    <LpoTilePreview templateId={tpl.id} />
-                    <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
-                      {tpl.name}
-                      {isFile ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
-                          <Upload size={8} /> Uploaded
-                        </span>
-                      ) : isCustom ? (
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-primary-100 text-ink font-medium">
-                          Custom
-                        </span>
-                      ) : null}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </Step>
+            </Step>
 
-          {/* 2 · LPO Details */}
-          <Step n={2} title="LPO Details">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <Field label="Supplier">
-                  <div className="flex gap-2">
+            {/* 2 · PO Details */}
+            <Step n={2} title="Purchase Order Details">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <Field label="Supplier">
+                    <div className="flex gap-2">
+                      <select
+                        className="select"
+                        value={form.supplier_id ? String(form.supplier_id) : ""}
+                        onChange={(e) => {
+                          const s = suppliers.find((x) => String(x.id) === e.target.value);
+                          if (s) applySupplier(s);
+                        }}
+                      >
+                        <option value="">
+                          {suppliers.length ? "Select saved supplier…" : "No saved suppliers yet"}
+                        </option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn-ghost shrink-0"
+                        onClick={() => setSupplierModal(true)}
+                        title="Add supplier"
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label="Supplier Name">
+                    <input
+                      className="input"
+                      placeholder="Acme Supplies LLC"
+                      value={form.supplier_name}
+                      onChange={(e) => set("supplier_name", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Supplier Address">
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      placeholder="Street, City, Country"
+                      value={form.supplier_address ?? ""}
+                      onChange={(e) => set("supplier_address", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Supplier Email / TRN">
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        className="input"
+                        placeholder="Email"
+                        value={form.supplier_email ?? ""}
+                        onChange={(e) => set("supplier_email", e.target.value)}
+                      />
+                      <input
+                        className="input"
+                        placeholder="TRN"
+                        value={form.supplier_trn ?? ""}
+                        onChange={(e) => set("supplier_trn", e.target.value)}
+                      />
+                    </div>
+                  </Field>
+                </div>
+                <div className="space-y-3">
+                  <Field label="Document Title">
+                    <input
+                      className="input"
+                      placeholder="Purchase Order"
+                      value={form.doc_title || ""}
+                      onChange={(e) => set("doc_title", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="PO Number">
+                    <input
+                      className="input"
+                      value={form.po_number}
+                      onChange={(e) => set("po_number", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Order Date">
+                    <input
+                      type="date"
+                      className="input"
+                      value={form.order_date ?? ""}
+                      onChange={(e) => set("order_date", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Expected Date (optional)">
+                    <input
+                      type="date"
+                      className="input"
+                      value={form.expected_date ?? ""}
+                      onChange={(e) => set("expected_date", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Currency">
                     <select
                       className="select"
-                      value={form.supplier_id ? String(form.supplier_id) : ""}
-                      onChange={(e) => {
-                        const s = suppliers.find((x) => String(x.id) === e.target.value);
-                        if (s) applySupplier(s);
-                      }}
+                      value={form.currency || "AED"}
+                      onChange={(e) => set("currency", e.target.value)}
                     >
-                      <option value="">
-                        {suppliers.length
-                          ? "Select saved supplier…"
-                          : "No saved suppliers yet"}
-                      </option>
-                      {suppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
+                      {CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} — {c.name}
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      className="btn-ghost shrink-0"
-                      onClick={() => setSupplierModal(true)}
-                      title="Add supplier"
-                    >
-                      <Plus size={15} />
-                    </button>
-                  </div>
-                </Field>
-                <Field label="Supplier Name">
-                  <input
-                    className="input"
-                    placeholder="Dune Lubricants LLC"
-                    value={form.supplier_name}
-                    onChange={(e) => set("supplier_name", e.target.value)}
-                  />
-                </Field>
-                <Field label="Supplier Address">
-                  <textarea
-                    className="textarea"
-                    rows={3}
-                    placeholder="Dubai, UAE"
-                    value={form.supplier_address}
-                    onChange={(e) => set("supplier_address", e.target.value)}
-                  />
-                </Field>
-                <Field label="Supplier TRN">
-                  <input
-                    className="input"
-                    placeholder="TRN"
-                    value={form.supplier_trn}
-                    onChange={(e) => set("supplier_trn", e.target.value)}
-                  />
-                </Field>
-              </div>
-              <div className="space-y-3">
-                <Field label="LPO Number">
-                  <input
-                    className="input"
-                    value={form.number}
-                    onChange={(e) => set("number", e.target.value)}
-                  />
-                </Field>
-                <Field label="Order Date">
-                  <input
-                    type="date"
-                    className="input"
-                    value={form.order_date}
-                    onChange={(e) => set("order_date", e.target.value)}
-                  />
-                </Field>
-                <Field label="Expected Delivery">
-                  <input
-                    type="date"
-                    className="input"
-                    value={form.expected_date}
-                    onChange={(e) => set("expected_date", e.target.value)}
-                  />
-                </Field>
-                <Field label="Your Company">
-                  <input
-                    className="input"
-                    placeholder="Your Company Name"
-                    value={form.company_name}
-                    onChange={(e) => set("company_name", e.target.value)}
-                  />
-                </Field>
-                <Field label="Company TRN">
-                  <input
-                    className="input"
-                    placeholder="TRN"
-                    value={form.company_trn}
-                    onChange={(e) => set("company_trn", e.target.value)}
-                  />
-                </Field>
-                <div className="col-span-1 sm:col-span-2 rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
-                  <div className="flex items-center gap-2 text-ink font-medium text-sm mb-3">
-                    <Stamp size={15} /> Company Stamp & Signature
-                  </div>
-                  <p className="text-xs text-brand-500 mb-3">Images are managed in Settings → Company Details.</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = !showStamp;
-                        setShowStamp(v);
-                        set("show_stamp", v);
-                      }}
-                      className={`btn-ghost text-xs ${showStamp ? "!bg-brand-50 !text-ink" : ""}`}
-                      disabled={!companyStampSig.stamp?.data}
-                    >
-                      Stamp: {showStamp ? "On" : "Off"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = !showSignature;
-                        setShowSignature(v);
-                        set("show_signature", v);
-                      }}
-                      className={`btn-ghost text-xs ${showSignature ? "!bg-brand-50 !text-ink" : ""}`}
-                      disabled={!companyStampSig.signature?.data}
-                    >
-                      Signature: {showSignature ? "On" : "Off"}
-                    </button>
-                  </div>
+                  </Field>
+                  <button className="btn-ghost w-full" onClick={onEditCompany}>
+                    <Building2 size={15} /> Apply company defaults
+                  </button>
                 </div>
               </div>
-            </div>
-          </Step>
+            </Step>
 
-          {/* 3 · Items */}
-          <Step n={3} title="Items">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-medium text-brand-400">
-                    <th className="py-2 pr-2 w-6">#</th>
-                    <th className="py-2 px-2">Item Name</th>
-                    <th className="py-2 px-2 w-20 text-right">Qty</th>
-                    <th className="py-2 px-2 w-16 text-right">Unit</th>
-                    <th className="py-2 px-2 w-28 text-right">Cost Price</th>
-                    <th className="py-2 px-2 w-28 text-right">Total</th>
-                    <th className="w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.items.map((it, i) => (
-                    <tr key={i} className="border-t border-brand-100">
-                      <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
-                      <td className="py-2 px-2">
-                        <input
-                          className="input"
-                          placeholder="Item name"
-                          value={it.description}
-                          onChange={(e) => setItem(i, { description: e.target.value })}
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="number"
-                          className="input tabular-nums text-right"
-                          value={it.qty || ""}
-                          onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          className="input text-right"
-                          placeholder="MT"
-                          value={it.unit}
-                          onChange={(e) => setItem(i, { unit: e.target.value })}
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="number"
-                          className="input tabular-nums text-right"
-                          value={it.unit_price || ""}
-                          onChange={(e) =>
-                            setItem(i, {
-                              unit_price: numInput(e.target.value),
-                            })
-                          }
-                        />
-                      </td>
-                      <td className="py-2 px-2 text-right font-medium tabular-nums">
-                        {aed(it.qty * it.unit_price)}
-                      </td>
-                      <td className="py-2 px-2">
-                        {form.items.length > 1 && (
-                          <button
-                            aria-label="Remove line"
-                            className="text-danger hover:bg-danger/10 rounded-lg p-1 cursor-pointer"
-                            onClick={() => removeItem(i)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex items-center gap-2">
-                <button className="btn-ghost text-xs" onClick={addItem}>
-                  <Plus size={14} /> Add item
-                </button>
-                <button className="btn-ghost text-xs" onClick={() => setPickOpen(true)}>
-                  <PackageCheck size={14} /> Add from inventory
-                </button>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-brand-400 mr-2">Total</span>
-                <span className="font-medium text-lg text-ink tabular-nums">
-                  {aed(invoiceTotals(form.items, 0, form.tax_rate || 0).total)}
-                </span>
-              </div>
-            </div>
-
-            <Modal
-              open={pickOpen}
-              onClose={() => {
-                setPickOpen(false);
-                setQ("");
-              }}
-              title="Add from inventory"
-            >
-              <SearchInput
-                value={q}
-                onChange={setQ}
-                placeholder="Search products or SKU…"
-                className="mb-3"
-              />
-              <div className="max-h-72 overflow-y-auto space-y-1">
-                {products
-                  .filter(
-                    (p) =>
-                      p.name.toLowerCase().includes(q.toLowerCase()) ||
-                      p.sku.toLowerCase().includes(q.toLowerCase())
-                  )
-                  .map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => addProduct(p)}
-                      className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left transition-colors"
+            {/* 3 · Items */}
+            <Step n={3} title="Items">
+              <div className="rounded-xl border border-brand-200 p-3 mb-3">
+                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 mb-2">
+                  Multiply field with unit cost
+                  <button
+                    type="button"
+                    onClick={() =>
+                      set(
+                        "unit_price_formula",
+                        form.unit_price_formula ? null : { a: "", b: "unit_price" }
+                      )
+                    }
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      form.unit_price_formula ? "bg-primary-400" : "bg-brand-200"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        form.unit_price_formula ? "translate-x-4" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+                {form.unit_price_formula && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      className="input text-xs py-1.5 h-8"
+                      value={form.unit_price_formula.a || ""}
+                      onChange={(e) =>
+                        set("unit_price_formula", { a: e.target.value, b: "unit_price" })
+                      }
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink truncate">{p.name}</p>
-                        <p className="text-[11px] text-brand-500 font-medium">{p.sku}</p>
-                      </div>
-                      <span className="text-sm font-medium text-ink">
-                        {aed(p.unit_price)}
-                      </span>
-                    </button>
-                  ))}
-                {products.filter(
-                  (p) =>
-                    p.name.toLowerCase().includes(q.toLowerCase()) ||
-                    p.sku.toLowerCase().includes(q.toLowerCase())
-                ).length === 0 && (
-                  <p className="text-sm text-brand-500 text-center py-6">
-                    No products found. Add them in Inventory first.
-                  </p>
+                      <option value="">Select field</option>
+                      <option value="qty">Qty</option>
+                      {form.customColumns.map((c) => (
+                        <option key={c.key} value={c.key}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-brand-400">× unit cost</span>
+                    <span className="text-[10px] text-brand-400">→ Amount</span>
+                  </div>
                 )}
               </div>
-            </Modal>
-          </Step>
 
-          {/* VAT Toggle */}
-          <div className="card p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-ink text-sm">Apply VAT</p>
-                <p className="text-xs text-brand-400">Add VAT to LPO total</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs font-semibold text-brand-500">
+                      <th className="py-2 pr-2 w-6">#</th>
+                      <th className="py-2 px-2">Description</th>
+                      <th className="py-2 px-2 w-24 text-right">Qty</th>
+                      <th className="py-2 px-2 w-24 text-right">Unit</th>
+                      {form.customColumns.map((col, idx) => (
+                        <th
+                          key={col.key}
+                          className="py-2 px-2 text-right group relative cursor-grab active:cursor-grabbing"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/plain", col.key);
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const fromKey = e.dataTransfer.getData("text/plain");
+                            if (fromKey && fromKey !== col.key) {
+                              const fromIdx = form.customColumns.findIndex((c) => c.key === fromKey);
+                              const toIdx = idx;
+                              if (fromIdx >= 0) {
+                                const next = [...form.customColumns];
+                                const [moved] = next.splice(fromIdx, 1);
+                                next.splice(toIdx, 0, moved);
+                                setForm({ ...form, customColumns: next });
+                              }
+                            }
+                          }}
+                        >
+                          <span className="text-[10px]">{col.label}</span>
+                          <button
+                            className="ml-1 opacity-0 group-hover:opacity-100 text-brand-400 hover:text-danger inline cursor-pointer transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeCustomColumn(col.key);
+                            }}
+                            title="Remove column"
+                          >
+                            ×
+                          </button>
+                        </th>
+                      ))}
+                      <th className="py-2 px-2 w-32 text-right">Unit Cost</th>
+                      <th className="py-2 px-2 w-28 text-right">Amount</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.items.map((it, i) => (
+                      <tr key={i} className="border-t border-brand-100">
+                        <td className="py-2 pr-2 text-brand-500">
+                          {i + 1}
+                          {it.pageBreakBefore && i > 0 && (
+                            <span className="ml-1 text-[10px] text-primary-700 font-medium">↳ new page</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2">
+                          <input
+                            className="input"
+                            placeholder="Item description"
+                            value={it.description}
+                            onChange={(e) => setItem(i, { description: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input
+                            type="number"
+                            className="input text-right !px-2"
+                            value={it.quantity || ""}
+                            placeholder="0"
+                            onChange={(e) => setItem(i, { quantity: numInput(e.target.value) })}
+                          />
+                        </td>
+                        <td className="py-2 px-2">
+                          <input
+                            className="input text-right !px-2"
+                            placeholder="pcs"
+                            value={it.unit || ""}
+                            list="unit-suggestions"
+                            onChange={(e) => setItem(i, { unit: e.target.value })}
+                          />
+                        </td>
+                        {form.customColumns.map((col) => (
+                          <td key={col.key} className="py-2 px-2">
+                            <input
+                              className="input text-right !px-2 !py-1 text-xs"
+                              placeholder={col.label}
+                              value={it.custom?.[col.key] || ""}
+                              onChange={(e) => setItemCustom(i, col.key, e.target.value)}
+                            />
+                          </td>
+                        ))}
+                        <td className="py-2 px-2">
+                          <input
+                            type="number"
+                            className={`input text-right !px-2 ${
+                              form.unit_price_formula?.a ? "bg-brand-50/50" : ""
+                            }`}
+                            placeholder="0"
+                            value={it.unit_cost || ""}
+                            onChange={(e) => setItem(i, { unit_cost: numInput(e.target.value) })}
+                          />
+                        </td>
+                        <td className="py-2 px-2 text-right font-medium text-ink">
+                          {money(docLineAmount(toDocItem(it), form.unit_price_formula), form.currency || "AED")}
+                        </td>
+                        <td className="py-2">
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              aria-label={
+                                it.pageBreakBefore
+                                  ? "Remove page break before this item"
+                                  : "Start a new page at this item"
+                              }
+                              title={
+                                i === 0
+                                  ? "First item always starts page 1"
+                                  : it.pageBreakBefore
+                                    ? "Starts a new page here (click to remove)"
+                                    : "Insert page break before this item"
+                              }
+                              disabled={i === 0}
+                              className={`rounded-lg p-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                                it.pageBreakBefore
+                                  ? "text-primary-700 bg-primary-100"
+                                  : "text-brand-400 hover:text-ink hover:bg-brand-50 cursor-pointer"
+                              }`}
+                              onClick={() => setItem(i, { pageBreakBefore: !it.pageBreakBefore })}
+                            >
+                              <SeparatorHorizontal size={14} />
+                            </button>
+                            <button
+                              aria-label="Remove line"
+                              className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                              onClick={() => removeItem(i)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="flex rounded-lg bg-brand-100 p-0.5">
-                {(["Yes", "No"] as const).map((lbl) => {
-                  const on = lbl === "Yes";
-                  const active = (form.tax_rate || 0) > 0 === on;
-                  return (
-                    <button
-                      key={lbl}
-                      type="button"
-                      onClick={() =>
-                        set("tax_rate", on ? (form.tax_rate > 0 ? form.tax_rate : 5) : 0)
-                      }
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors ${
-                        active
-                          ? "bg-white text-ink shadow-bento"
-                          : "text-brand-500 hover:text-ink"
-                      }`}
+
+              {form.customColumns.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-brand-500">
+                  <span className="mr-1">Custom fields (drag to reorder):</span>
+                  {form.customColumns.map((col, idx) => (
+                    <span
+                      key={col.key}
+                      className="inline-flex items-center gap-0.5 bg-brand-50 border border-brand-200 rounded-lg px-2 py-1 cursor-grab active:cursor-grabbing select-none transition-colors hover:bg-brand-100"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", col.key);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const fromKey = e.dataTransfer.getData("text/plain");
+                        if (fromKey && fromKey !== col.key) {
+                          const fromIdx = form.customColumns.findIndex((c) => c.key === fromKey);
+                          const toIdx = idx;
+                          if (fromIdx >= 0) {
+                            const next = [...form.customColumns];
+                            const [moved] = next.splice(fromIdx, 1);
+                            next.splice(toIdx, 0, moved);
+                            setForm({ ...form, customColumns: next });
+                          }
+                        }
+                      }}
                     >
-                      {lbl}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            {(form.tax_rate || 0) > 0 && (
-              <div className="mt-3 max-w-[160px]">
-                <Field label="VAT Rate %">
-                  <input
-                    type="number"
-                    className="input"
-                    placeholder="5"
-                    value={form.tax_rate}
-                    onChange={(e) => set("tax_rate", numInput(e.target.value))}
-                  />
-                </Field>
-              </div>
-            )}
-          </div>
+                      <span className="font-medium text-xs text-ink">{col.label}</span>
+                      <button
+                        className="text-brand-400 hover:text-danger ml-0.5 cursor-pointer transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeCustomColumn(col.key);
+                        }}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
 
-          {/* 4 · Notes & Terms */}
-          <Step n={4} title="Notes & Terms">
-            <div className="space-y-3">
-              <Field label="Notes">
-                <textarea
-                  className="textarea"
-                  rows={2}
-                  value={form.notes}
-                  onChange={(e) => set("notes", e.target.value)}
-                />
-              </Field>
-              <Field label="Terms & Conditions">
-                <textarea
-                  className="textarea"
-                  rows={4}
-                  value={form.terms}
-                  onChange={(e) => set("terms", e.target.value)}
-                />
-              </Field>
-            </div>
-          </Step>
-        
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button className="btn-primary" onClick={addItem}>
+                  <Plus size={14} /> Add Item
+                </button>
+                <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
+                  <PackageCheck size={13} /> Import from Inventory
+                </button>
+                <button className="btn-ghost text-xs" onClick={addCustomColumn}>
+                  <Plus size={12} /> Add Field
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const on = !form.show_stamp;
+                    setForm({
+                      ...form,
+                      show_stamp: on,
+                      stamp:
+                        on && !form.stamp?.data && companyStampSig.stamp?.data
+                          ? { ...companyStampSig.stamp }
+                          : form.stamp,
+                    });
+                  }}
+                  className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.stamp?.data}
+                >
+                  <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const on = !form.show_signature;
+                    setForm({
+                      ...form,
+                      show_signature: on,
+                      signature:
+                        on && !form.signature?.data && companyStampSig.signature?.data
+                          ? { ...companyStampSig.signature }
+                          : form.signature,
+                    });
+                  }}
+                  className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
+                  disabled={!companyStampSig.signature?.data}
+                >
+                  <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
+                </button>
+              </div>
+
+              {(form.show_stamp || form.show_signature) &&
+                (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
+                    {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                      <StampSigAdjust
+                        label="Stamp"
+                        icon={<Stamp size={13} />}
+                        value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
+                        onChange={(v) => setForm({ ...form, stamp: v })}
+                      />
+                    )}
+                    {form.show_signature &&
+                      (form.signature?.data || companyStampSig.signature?.data) && (
+                        <StampSigAdjust
+                          label="Signature"
+                          icon={<PenTool size={13} />}
+                          value={
+                            form.signature?.data ? form.signature : companyStampSig.signature!
+                          }
+                          onChange={(v) => setForm({ ...form, signature: v })}
+                        />
+                      )}
+                  </div>
+                )}
+
+              <datalist id="unit-suggestions">
+                <option value="pcs" />
+                <option value="L" />
+                <option value="mL" />
+                <option value="kg" />
+                <option value="g" />
+                <option value="MT" />
+                <option value="ton" />
+                <option value="m" />
+                <option value="cm" />
+                <option value="ft" />
+                <option value="sqm" />
+                <option value="sqft" />
+                <option value="hrs" />
+                <option value="days" />
+                <option value="set" />
+                <option value="box" />
+                <option value="carton" />
+                <option value="drum" />
+                <option value="barrel" />
+                <option value="pack" />
+                <option value="roll" />
+                <option value="pair" />
+                <option value="dozen" />
+              </datalist>
+            </Step>
+
+            {/* 4 · Notes, terms & logo */}
+            <Step n={4} title="Notes & Attachments">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-brand-500">Status</p>
+                    <select
+                      className="select"
+                      value={form.status}
+                      onChange={(e) => set("status", e.target.value)}
+                    >
+                      {["draft", "sent", "received", "cancelled"].map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Field label="Notes">
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      placeholder="Add notes for this purchase order"
+                      value={form.notes ?? ""}
+                      onChange={(e) => set("notes", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Terms & Conditions">
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      placeholder="Payment terms, delivery terms, etc."
+                      value={form.terms ?? ""}
+                      onChange={(e) => set("terms", e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-brand-500">Logo</p>
+                  {form.logo ? (
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={form.logo}
+                        alt="logo"
+                        className="h-12 w-12 object-contain border border-brand-200 rounded-xl bg-white"
+                      />
+                      <button className="btn-ghost text-xs" onClick={() => set("logo", null as any)}>
+                        <X size={13} /> Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="btn-ghost w-full justify-center cursor-pointer">
+                      <Upload size={14} /> Upload logo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => onLogo(e.target.files?.[0])}
+                      />
+                    </label>
+                  )}
+                  <p className="text-[11px] text-brand-500">
+                    Tip: set this once in Settings → Company Details to auto-fill every PO.
+                  </p>
+                </div>
+              </div>
+            </Step>
           </div>
         }
         right={
           <div className="sticky top-4 space-y-4">
-            
-          {/* Template designer ABOVE preview */}
-          {designing && (
-            <div className="mb-4">
-              <TemplateDesigner
-                onSave={(t: CustomTemplate) => {
-                  setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
-                  set("template", t.id);
-                }}
-                onClose={() => {
-                  setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
-                }}
-              />
-            </div>
-          )}
-
-          <div className="card !p-4">
-            <div className="no-print flex items-start justify-between mb-3">
-              <div>
-                <p className="font-medium text-ink">Preview</p>
-                <p className="text-xs text-brand-400">This is how your LPO will look</p>
-              </div>
-            </div>
-
-            <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
-              <div ref={lpoRef} className="relative">
-                <LPOView
-                  form={form}
-                  letterhead={letterhead}
-                  useLetterhead={useLetterhead}
-                  headerSpace={headerSpace}
-                  footerSpace={footerSpace}
+            {designing && (
+              <div className="mb-4">
+                <TemplateDesigner
+                  onSave={(t: CustomTemplate) => {
+                    setDesigning(false);
+                    onTplRev();
+                    set("template", t.id);
+                  }}
+                  onClose={() => setDesigning(false)}
                 />
               </div>
-            </FitPreview>
+            )}
 
-            {/* preview controls */}
-            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-lg bg-brand-50 p-1">
-                <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "desktop"
-                      ? "bg-primary-100 text-ink"
-                      : "text-brand-400"
-                  }`}
-                  onClick={() => setDevice("desktop")}
-                  aria-label="Desktop preview"
-                >
-                  <Monitor size={15} />
-                </button>
-                <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
-                    device === "mobile"
-                      ? "bg-primary-100 text-ink"
-                      : "text-brand-400"
-                  }`}
-                  onClick={() => setDevice("mobile")}
-                  aria-label="Mobile preview"
-                >
-                  <Smartphone size={15} />
-                </button>
+            <div className="card !p-4">
+              <div className="no-print flex items-start justify-between mb-3">
+                <div>
+                  <p className="font-semibold text-ink flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold">
+                      2
+                    </span>
+                    Preview
+                  </p>
+                  <p className="text-xs text-brand-500 mt-0.5 ml-8">
+                    This is how your PO will look
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
-                  onClick={() => setZoom((z) => Math.max(40, z - 10))}
-                  aria-label="Zoom out"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="text-xs font-medium text-brand-500 w-10 text-center">
-                  {zoom}%
-                </span>
-                <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
-                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
-                  aria-label="Zoom in"
-                >
-                  <Plus size={14} />
-                </button>
+
+              <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom}>
+                <div ref={poRef}>
+                  <div
+                    style={{
+                      position: "relative",
+                      minHeight: device === "desktop" ? 1027 : 498,
+                    }}
+                  >
+                    <StampSignatureLayer
+                      stamp={activeStamp}
+                      signature={activeSignature}
+                      onStampMove={onStampMove}
+                      onSignatureMove={onSignatureMove}
+                    />
+                    <DocView
+                      form={docViewForm as any}
+                      pageItems={
+                        docViewForm.items.slice(
+                          pageStartIndex,
+                          pageStartIndex + (pages[curPageIdx]?.length || 0)
+                        ) as any
+                      }
+                      itemStartIndex={pageStartIndex}
+                      showTotals={isLastPreviewPage}
+                      showFooter={isLastPreviewPage}
+                      labels={docViewLabels}
+                    />
+                  </div>
+                </div>
+              </FitPreview>
+
+              {/* Off-screen export container — captures every page for the PDF. */}
+              {(() => {
+                const exportPages = paginateItems(docItems);
+                return (
+                  <div
+                    ref={exportRef}
+                    aria-hidden
+                    className="fixed left-[-99999px] top-0 pointer-events-none"
+                    style={{ width: 794, background: "#fff" }}
+                  >
+                    {exportPages.map((group, gi) => {
+                      const startIdx = exportPages
+                        .slice(0, gi)
+                        .reduce((n, g) => n + g.length, 0);
+                      const isLast = gi === exportPages.length - 1;
+                      return (
+                        <div
+                          key={gi}
+                          className="invoice-print"
+                          style={{
+                            width: 794,
+                            height: 1123,
+                            background: "#fff",
+                            position: "relative",
+                            overflow: "hidden",
+                            padding: 48,
+                            boxSizing: "border-box",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "relative",
+                              width: "100%",
+                              minHeight: 1027,
+                              background: "#fff",
+                            }}
+                          >
+                            {isLast && (
+                              <StampSignatureLayer
+                                stamp={activeStamp}
+                                signature={activeSignature}
+                                onStampMove={() => {}}
+                                onSignatureMove={() => {}}
+                              />
+                            )}
+                            <DocView
+                              form={docViewForm as any}
+                              pageItems={
+                                docViewForm.items.slice(
+                                  startIdx,
+                                  startIdx + group.length
+                                ) as any
+                              }
+                              itemStartIndex={startIdx}
+                              showTotals={isLast}
+                              showFooter={isLast}
+                              labels={docViewLabels}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {previewPages > 1 && (
+                <div className="no-print flex items-center justify-center gap-2 mt-2">
+                  <button
+                    className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                    disabled={previewPage <= 1}
+                    onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                  >
+                    Back
+                  </button>
+                  <span className="text-xs text-brand-500 font-medium">
+                    Page {previewPage} / {previewPages}
+                  </span>
+                  <button
+                    className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                    disabled={previewPage >= previewPages}
+                    onClick={() => setPreviewPage((p) => Math.min(previewPages, p + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+
+              <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
+                <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+                  <button
+                    className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
+                      device === "desktop"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-brand-500 hover:text-ink"
+                    }`}
+                    onClick={() => setDevice("desktop")}
+                    aria-label="Desktop preview"
+                  >
+                    <Monitor size={15} />
+                  </button>
+                  <button
+                    className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
+                      device === "mobile"
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-brand-500 hover:text-ink"
+                    }`}
+                    onClick={() => setDevice("mobile")}
+                    aria-label="Mobile preview"
+                  >
+                    <Smartphone size={15} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
+                    onClick={() => setZoom((z) => Math.max(50, z - 10))}
+                    aria-label="Zoom out"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span className="text-xs font-semibold text-brand-500 w-10 text-center">
+                    {zoom}%
+                  </span>
+                  <button
+                    className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
+                    onClick={() => setZoom((z) => Math.min(150, z + 10))}
+                    aria-label="Zoom in"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="btn-ghost text-xs" onClick={handleSave} disabled={saving}>
+                    <Save size={14} /> Save
+                  </button>
+                  <button className="btn-primary text-xs" onClick={downloadPdf}>
+                    <Download size={14} /> PDF
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        
           </div>
         }
       />
 
-      {/* Supplier Modal */}
-      {supplierModal && (
-        <SupplierQuickAdd
-          open={supplierModal}
-          onClose={() => setSupplierModal(false)}
-          onSaved={(s) => {
-            applySupplier(s);
-            setSupplierModal(false);
-            suppliersApi
-              .list()
-              .then(setSuppliers)
-              .catch(() => {});
-          }}
-        />
-      )}
-
       {/* Full-screen view modal */}
       {viewOpen && (
-        <Modal open onClose={() => setViewOpen(false)} title="LPO Preview" size="full">
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
+          onClick={() => setViewOpen(false)}
+        >
           <div
-            className="bg-white rounded-lg overflow-y-auto"
-            style={{ maxHeight: "85vh" }}
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] outline-none shadow-bento-hover"
+            onClick={(e) => e.stopPropagation()}
           >
-            <LPOView
-              form={form}
-              letterhead={letterhead}
-              useLetterhead={useLetterhead}
-              headerSpace={headerSpace}
-              footerSpace={footerSpace}
-            />
+            <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold text-ink">
+                  {form.po_number || "PO preview"}
+                </h2>
+                <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
+                  Page {viewPage} of {viewPageCount}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {viewPageCount > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
+                      disabled={viewPage <= 1}
+                      onClick={() => setViewPage((p) => Math.max(1, p - 1))}
+                    >
+                      Prev
+                    </button>
+                    <span className="text-xs text-brand-500 font-medium w-16 text-center">
+                      {viewPage} / {viewPageCount}
+                    </span>
+                    <button
+                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
+                      disabled={viewPage >= viewPageCount}
+                      onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
+                  <Download size={14} /> PDF
+                </button>
+                <button
+                  onClick={() => setViewOpen(false)}
+                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="mx-auto max-w-5xl">
+                <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]">
+                  <div style={{ position: "relative", minHeight: 1059 }}>
+                    <StampSignatureLayer
+                      stamp={activeStamp}
+                      signature={activeSignature}
+                      onStampMove={onStampMove}
+                      onSignatureMove={onSignatureMove}
+                    />
+                    <DocView
+                      form={docViewForm as any}
+                      pageItems={
+                        docViewForm.items.slice(
+                          viewPageStart,
+                          viewPageStart + (viewPages[viewPageIdx]?.length || 0)
+                        ) as any
+                      }
+                      itemStartIndex={viewPageStart}
+                      showTotals={isLastViewPage}
+                      showFooter={isLastViewPage}
+                      labels={docViewLabels}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </Modal>
+        </div>
       )}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  LPO View — renders the LPO with chosen template                   */
+/*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
 
-function LPOView({
-  form,
-  lpoRef,
-  letterhead,
-  useLetterhead = false,
-  headerSpace = DEFAULT_HEADER_SPACE,
-  footerSpace = DEFAULT_FOOTER_SPACE,
+function Step({
+  n,
+  title,
+  subtitle,
+  action,
+  children,
 }: {
-  form: LpoForm;
-  lpoRef?: React.RefObject<HTMLDivElement | null>;
-  letterhead?: LetterheadInfo;
-  useLetterhead?: boolean;
-  headerSpace?: number;
-  footerSpace?: number;
+  n: number;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const customTemplates = loadCustomTemplates();
-  const ct = customTemplates.find((c) => c.id === form.template);
-  const isFileTemplate = ct?.type === "file";
-
-  const total = form.items.reduce((s, i) => s + i.qty * i.unit_price, 0);
-  const totals = invoiceTotals(form.items, 0, form.tax_rate || 0);
-  const clean = (s: string) => s || "—";
-
-  if (isFileTemplate && ct) {
-    return (
-      <div
-        ref={lpoRef}
-        className="relative bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
-      >
-        {ct && (ct as any).imageData && (
-          <img
-            src={(ct as any).imageData}
-            alt="Template background"
-            className="absolute inset-0 w-full h-full object-cover opacity-[0.92]"
-          />
-        )}
-        <div
-          className="relative p-8 min-h-[1123px] flex flex-col gap-6"
-          style={{ width: ct.paperSize === "Letter" ? "816px" : "794px" }}
-        >
-          {ct.positions && Object.keys(ct.positions).length > 0 ? (
-            <FrostedOverlayLpo form={form} template={ct} />
-          ) : (
-            <div className="flex flex-col gap-5 mt-24">
-              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                <h1 className="text-2xl font-bold text-ink">LOCAL PURCHASE ORDER</h1>
-                <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
-                  <div>
-                    <p className="font-semibold">{clean(form.company_name)}</p>
-                    <p className="text-brand-500">{clean(form.company_address)}</p>
-                    <p className="text-brand-500">TRN: {clean(form.company_trn)}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium font-bold text-lg">{form.number}</p>
-                    <p className="text-brand-500">Date: {form.order_date}</p>
-                    {form.expected_date && (
-                      <p className="text-brand-500">Expected: {form.expected_date}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                <p className="font-semibold text-sm text-brand-400 mb-1">SUPPLIER</p>
-                <p className="font-semibold">{clean(form.supplier_name)}</p>
-                <p className="text-brand-500 text-sm">{clean(form.supplier_address)}</p>
-                {form.supplier_trn && (
-                  <p className="text-brand-500 text-sm">TRN: {form.supplier_trn}</p>
-                )}
-              </div>
-              <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-brand-200 text-left text-xs font-semibold text-brand-400">
-                      <th className="pb-2 pr-2 w-6">#</th>
-                      <th className="pb-2 px-2">Item</th>
-                      <th className="pb-2 px-2 w-16 text-right">Qty</th>
-                      <th className="pb-2 px-2 w-14 text-right">Unit</th>
-                      <th className="pb-2 px-2 w-24 text-right">Cost</th>
-                      <th className="pb-2 px-2 w-24 text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.items
-                      .filter((i) => i.description.trim())
-                      .map((it, i) => (
-                        <tr key={i} className="border-b border-brand-100/50">
-                          <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
-                          <td className="py-2 px-2">{it.description}</td>
-                          <td className="py-2 px-2 text-right tabular-nums">{it.qty}</td>
-                          <td className="py-2 px-2 text-right">{it.unit || "—"}</td>
-                          <td className="py-2 px-2 text-right tabular-nums">
-                            {aed(it.unit_price)}
-                          </td>
-                          <td className="py-2 px-2 text-right font-semibold tabular-nums">
-                            {aed(it.qty * it.unit_price)}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-                <div className="flex justify-end mt-3">
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-ink tabular-nums">
-                      {aed(total)}
-                    </p>
-                    <p className="text-xs text-brand-400">Total Amount (AED)</p>
-                  </div>
-                </div>
-              </div>
-              {form.terms && (
-                <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                  <p className="font-semibold text-sm text-brand-400 mb-2">
-                    TERMS & CONDITIONS
-                  </p>
-                  <p className="text-sm text-brand-500 whitespace-pre-line">
-                    {form.terms}
-                  </p>
-                </div>
-              )}
-              {form.notes && (
-                <div className="bg-white/88 rounded-xl p-6 shadow-sm">
-                  <p className="text-sm text-brand-500">{form.notes}</p>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-6 mt-8">
-                <div className="bg-white/88 rounded-xl p-6 shadow-sm text-center">
-                  <p className="text-sm font-semibold text-ink mb-4">For Supplier</p>
-                  <div className="border-t border-brand-200 pt-3">
-                    <p className="text-xs text-brand-400">Authorized Signature</p>
-                  </div>
-                </div>
-                <div className="bg-white/88 rounded-xl p-6 shadow-sm text-center">
-                  <p className="text-sm font-semibold text-ink mb-4">
-                    Company Stamp & Signature
-                  </p>
-                  {form.company_stamp ? (
-                    <img
-                      src={form.company_stamp}
-                      alt="Company stamp"
-                      className="h-20 mx-auto object-contain mb-2"
-                    />
-                  ) : (
-                    <Stamp size={24} className="inline-block mb-2" />
-                  )}
-                  {form.company_signature && (
-                    <img
-                      src={form.company_signature}
-                      alt="Signature"
-                      className="h-12 mx-auto object-contain mb-2 opacity-80"
-                    />
-                  )}
-                  <div className="border-t border-brand-200 pt-3">
-                    <p className="text-xs text-brand-400">Company Stamp & Signature</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  /* Pre-defined templates */
-  const tplId = form.template;
-  const styles = getTemplateStyle(tplId, form.accent);
-
   return (
-    <div
-      ref={lpoRef}
-      className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none"
-      style={styles.wrapper}
-    >
-      <LetterheadFrame
-        letterhead={letterhead}
-        enabled={useLetterhead}
-        minHeight={1123}
-        headerSpace={headerSpace}
-        footerSpace={footerSpace}
-        bodyPadding={32}
-      >
-        <div style={styles.container}>
-          {/* Header — no logo, letterhead provides branding */}
-          <div
-            className="flex items-start justify-between pb-6 mb-6"
-            style={{ borderBottom: styles.headerBorder || "2px solid #EAE4D6" }}
-          >
-            <div>
-              <h1
-                style={styles.title}
-                className="text-[28px] font-extrabold tracking-tight"
-              >
-                LOCAL PURCHASE ORDER
-              </h1>
-              <p className="text-sm text-brand-400 mt-1">LPO #{form.number}</p>
-            </div>
-            <div className="text-right text-sm">
-              <p className="font-bold text-[15px]" style={{ color: styles.accentColor }}>
-                {clean(form.company_name)}
-              </p>
-              <p className="text-brand-500 mt-0.5">{clean(form.company_address)}</p>
-              {form.company_trn && (
-                <p className="text-brand-500">TRN: {form.company_trn}</p>
-              )}
-              <p className="text-brand-500 mt-1">Date: {form.order_date}</p>
-              {form.expected_date && (
-                <p className="text-brand-500">Expected: {form.expected_date}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Supplier */}
-          <div
-            className="mb-6 p-5 rounded-xl"
-            style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}
-          >
-            <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
-              Supplier / Vendor
-            </p>
-            <p className="font-bold text-[17px] text-ink">{clean(form.supplier_name)}</p>
-            <p className="text-sm text-brand-500 mt-0.5">
-              {clean(form.supplier_address)}
-            </p>
-            {form.supplier_trn && (
-              <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>
-            )}
-          </div>
-
-          {/* Items table */}
-          <div className="mb-6">
-            <table className="w-full text-sm">
-              <thead>
-                <tr
-                  className="text-left text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: styles.accentColor || "#6B6B6B" }}
-                >
-                  <th className="pb-3 pr-2 w-6">#</th>
-                  <th className="pb-3 px-2">Item</th>
-                  <th className="pb-3 px-2 w-16 text-right">Qty</th>
-                  <th className="pb-3 px-2 w-14 text-right">Unit</th>
-                  <th className="pb-3 px-2 w-24 text-right">Cost</th>
-                  <th className="pb-3 px-2 w-24 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.items
-                  .filter((i) => i.description.trim())
-                  .map((it, i) => (
-                    <tr
-                      key={i}
-                      className="border-t border-brand-100"
-                      style={{ borderColor: styles.borderColor || "#EAE4D6" }}
-                    >
-                      <td className="py-3 pr-2 text-brand-400">{i + 1}</td>
-                      <td className="py-3 px-2 font-medium">{it.description}</td>
-                      <td className="py-3 px-2 text-right tabular-nums">{it.qty}</td>
-                      <td className="py-3 px-2 text-right">{it.unit || "—"}</td>
-                      <td className="py-3 px-2 text-right tabular-nums">
-                        {aed(it.unit_price)}
-                      </td>
-                      <td className="py-3 px-2 text-right font-semibold tabular-nums">
-                        {aed(it.qty * it.unit_price)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-
-            {/* Total */}
-            <div
-              className="flex justify-end mt-4 pt-4"
-              style={{ borderTop: "2px solid #EAE4D6" }}
-            >
-              <div className="text-right space-y-1 min-w-[200px]">
-                <div className="flex justify-between text-sm">
-                  <span className="text-brand-400">Subtotal</span>
-                  <span className="font-semibold tabular-nums">
-                    {aed(totals.subtotal)}
-                  </span>
-                </div>
-                {(form.tax_rate || 0) > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-brand-400">VAT ({form.tax_rate}%)</span>
-                    <span className="font-semibold tabular-nums">{aed(totals.tax)}</span>
-                  </div>
-                )}
-                <div
-                  className="flex justify-between pt-2"
-                  style={{ borderTop: "2px solid #EAE4D6" }}
-                >
-                  <span className="text-xs font-semibold uppercase tracking-wider text-brand-400">
-                    Total
-                  </span>
-                  <p
-                    className="text-[28px] font-extrabold tracking-tight tabular-nums"
-                    style={{ color: styles.accentColor || "#222222" }}
-                  >
-                    {aed(totals.total)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Terms */}
-          {form.terms && (
-            <div className="mb-6">
-              <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-2">
-                Terms & Conditions
-              </p>
-              <p className="text-sm text-brand-500 whitespace-pre-line leading-relaxed">
-                {form.terms}
-              </p>
-            </div>
-          )}
-
-          {/* Notes */}
-          {form.notes && (
-            <div
-              className="mb-6 p-4 rounded-xl"
-              style={{ backgroundColor: styles.supplierBg || "#F7F2E6" }}
-            >
-              <p className="text-sm text-brand-500 italic">{form.notes}</p>
-            </div>
-          )}
-
-          {/* Signatures */}
-          <div
-            className="grid grid-cols-2 gap-8 mt-12 pt-6"
-            style={{ borderTop: "2px solid #EAE4D6" }}
-          >
-            <div className="text-center">
-              <p className="text-sm font-semibold text-ink mb-4">For Supplier</p>
-              <div
-                style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }}
-                className="pt-3"
-              >
-                <p className="text-xs text-brand-400">Authorized Signature & Date</p>
-              </div>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-semibold text-ink mb-4">
-                Company Stamp & Signature
-              </p>
-              {form.company_stamp ? (
-                <img
-                  src={form.company_stamp}
-                  alt="Company stamp"
-                  className="h-24 mx-auto object-contain mb-2"
-                />
-              ) : (
-                <Building2
-                  size={28}
-                  className="mx-auto mb-2"
-                  style={{ color: styles.accentColor || "#6B6B6B" }}
-                />
-              )}
-              {form.company_signature && (
-                <img
-                  src={form.company_signature}
-                  alt="Authorized signature"
-                  className="h-14 mx-auto object-contain mb-2 opacity-80"
-                />
-              )}
-              <div
-                style={{ borderTop: `1px solid ${styles.borderColor || "#EAE4D6"}` }}
-                className="pt-3"
-              >
-                <p className="text-xs text-brand-400">Authorized Signature</p>
-              </div>
-            </div>
+    <div className="card">
+      <div className="flex items-start justify-between mb-4 gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold shrink-0">
+            {n}
+          </span>
+          <div>
+            <p className="font-semibold text-ink leading-tight">{title}</p>
+            {subtitle && <p className="text-xs text-brand-500 mt-0.5">{subtitle}</p>}
           </div>
         </div>
-      </LetterheadFrame>
+        {action}
+      </div>
+      {children}
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Frosted Overlay LPO (file template with positioned boxes)          */
-/* ------------------------------------------------------------------ */
-
-function FrostedOverlayLpo({
-  form,
-  template,
+function InventoryImportModal({
+  open,
+  onClose,
+  onPick,
 }: {
-  form: LpoForm;
-  template: CustomTemplate;
+  open: boolean;
+  onClose: () => void;
+  onPick: (p: Product) => void;
 }) {
-  const totals = invoiceTotals(form.items, 0, form.tax_rate || 0);
-  const clean = (s: string) => s || "—";
-  const pos = template.positions || {};
+  const { toast } = useUI();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    if (open)
+      erp
+        .products()
+        .then(setProducts)
+        .catch(() => toast.error("Failed to load products"));
+  }, [open]);
+  const filtered = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(q.toLowerCase()) ||
+      p.sku.toLowerCase().includes(q.toLowerCase())
+  );
+  return (
+    <Modal open={open} onClose={onClose} title="Add from Inventory">
+      <SearchInput
+        value={q}
+        onChange={setQ}
+        placeholder="Search products or SKU…"
+        className="mb-3"
+      />
+      <div className="max-h-72 overflow-y-auto space-y-1">
+        {filtered.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onPick(p)}
+            className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer text-left transition-colors"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-ink truncate">{p.name}</p>
+              <p className="text-[11px] text-brand-500 font-medium">{p.sku}</p>
+            </div>
+            <span className="text-sm font-medium text-ink">{money(p.unit_price, "AED")}</span>
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <p className="text-sm text-brand-500 text-center py-6">
+            No products found. Add them in Inventory first.
+          </p>
+        )}
+      </div>
+      <div className="flex justify-end mt-4">
+        <button className="btn-ghost" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
-  const boxStyle = (key: string): React.CSSProperties => {
-    const p = pos[key];
-    if (!p) return { display: "none" };
-    return {
-      position: "absolute",
-      left: `${p.x}%`,
-      top: `${p.y}%`,
-      width: `${(p as any).w || 45}%`,
-      background: "rgba(255,255,255,0.88)",
-      backdropFilter: "blur(6px)",
-      borderRadius: "16px",
-      padding: "20px",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-    };
+function SupplierQuickAdd({
+  open,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: (s: Supplier) => void;
+}) {
+  const { toast } = useUI();
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [trn, setTrn] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) {
+      toast.error("Supplier name is required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const id = await suppliersApi.create({
+        name: name.trim(),
+        address: address.trim() || undefined,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        tax_id: trn.trim() || undefined,
+      });
+      toast.success("Supplier added.");
+      onSaved({
+        id,
+        name: name.trim(),
+        address: address.trim() || undefined,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        tax_id: trn.trim() || undefined,
+        created_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <>
-      <div style={boxStyle("company_info")}>
-        <p className="font-bold text-lg">{clean(form.company_name)}</p>
-        <p className="text-sm text-brand-500">{clean(form.company_address)}</p>
-        <p className="text-sm text-brand-500">TRN: {clean(form.company_trn)}</p>
-      </div>
-      <div style={boxStyle("lpo_header")}>
-        <h1 className="text-xl font-extrabold">LOCAL PURCHASE ORDER</h1>
-        <p className="font-medium text-lg font-bold mt-1">{form.number}</p>
-        <p className="text-sm text-brand-500">Date: {form.order_date}</p>
-        {form.expected_date && (
-          <p className="text-sm text-brand-500">Expected: {form.expected_date}</p>
-        )}
-      </div>
-      <div style={boxStyle("supplier_info")}>
-        <p className="text-xs font-semibold text-brand-400 uppercase mb-1">Supplier</p>
-        <p className="font-bold">{clean(form.supplier_name)}</p>
-        <p className="text-sm text-brand-500">{clean(form.supplier_address)}</p>
-        {form.supplier_trn && (
-          <p className="text-sm text-brand-500">TRN: {form.supplier_trn}</p>
-        )}
-      </div>
-      <div style={boxStyle("items_table")}>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-brand-200 text-xs font-semibold text-brand-400">
-              <th className="pb-1 text-left">Item</th>
-              <th className="pb-1 text-right w-10">Qty</th>
-              <th className="pb-1 text-right w-10">Unit</th>
-              <th className="pb-1 text-right w-16">Cost</th>
-              <th className="pb-1 text-right w-16">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {form.items
-              .filter((i) => i.description.trim())
-              .map((it, i) => (
-                <tr key={i} className="border-b border-brand-100/50">
-                  <td className="py-1.5">{it.description}</td>
-                  <td className="py-1.5 text-right">{it.qty}</td>
-                  <td className="py-1.5 text-right">{it.unit || "—"}</td>
-                  <td className="py-1.5 text-right">{aed(it.unit_price)}</td>
-                  <td className="py-1.5 text-right font-semibold">
-                    {aed(it.qty * it.unit_price)}
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-        <div className="text-right mt-2 space-y-1">
-          <div className="text-sm">
-            <span className="text-brand-400">Subtotal</span>{" "}
-            <span className="font-semibold tabular-nums ml-2">
-              {aed(totals.subtotal)}
-            </span>
-          </div>
-          {(form.tax_rate || 0) > 0 && (
-            <div className="text-sm">
-              <span className="text-brand-400">VAT ({form.tax_rate}%)</span>{" "}
-              <span className="font-semibold tabular-nums ml-2">{aed(totals.tax)}</span>
-            </div>
-          )}
-          <div className="font-bold text-lg tabular-nums">{aed(totals.total)}</div>
+    <Modal open={open} onClose={onClose} title="Quick Add Supplier" size="md">
+      <div className="space-y-3">
+        <Field label="Supplier Name *">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />
+        </Field>
+        <Field label="Address">
+          <textarea
+            className="textarea"
+            rows={2}
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Dubai, UAE"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Email">
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Phone">
+            <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </Field>
         </div>
+        <Field label="TRN">
+          <input
+            className="input"
+            value={trn}
+            onChange={(e) => setTrn(e.target.value)}
+            placeholder="Tax Registration Number"
+          />
+        </Field>
       </div>
-      <div style={boxStyle("totals")}>
-        <p className="text-2xl font-extrabold tabular-nums">{aed(totals.total)}</p>
-        <p className="text-xs text-brand-400">Total Amount (AED)</p>
-        {(form.tax_rate || 0) > 0 && (
-          <p className="text-[10px] text-brand-400 mt-0.5">incl. {form.tax_rate}% VAT</p>
-        )}
+      <div className="flex justify-end gap-2 mt-5">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn-primary" disabled={busy || !name.trim()} onClick={save}>
+          {busy ? "Saving…" : "Add Supplier"}
+        </button>
       </div>
-      <div style={boxStyle("notes_terms")}>
-        {form.terms && (
-          <div className="mb-2">
-            <p className="text-xs font-semibold text-brand-400 uppercase">Terms</p>
-            <p className="text-sm text-brand-500 whitespace-pre-line">{form.terms}</p>
-          </div>
-        )}
-        {form.notes && <p className="text-sm text-brand-500 italic">{form.notes}</p>}
-      </div>
-    </>
+    </Modal>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Template Styles                                                    */
-/* ------------------------------------------------------------------ */
+function CompanyModal({
+  open,
+  company,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  company: CompanyProfile;
+  onClose: () => void;
+  onSaved: (c: CompanyProfile) => void;
+}) {
+  const { toast } = useUI();
+  const [c, setC] = useState<CompanyProfile>(company);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-function getTemplateStyle(tplId: string, accent: string): any {
-  const a = accent || "#222222";
-  switch (tplId) {
-    case "uae-standard":
-      return {
-        wrapper: { borderTop: `4px solid ${a}` },
-        container: {},
-        title: { color: a },
-        accentColor: a,
-        headerBorder: `2px solid ${a}22`,
-        supplierBg: `${a}0A`,
-        borderColor: `${a}22`,
-      };
-    case "uae-minimal":
-      return {
-        wrapper: {},
-        container: { maxWidth: "700px", margin: "0 auto" },
-        title: { color: a, fontSize: "22px", fontWeight: 600 },
-        accentColor: a,
-        headerBorder: `1px solid #EAE4D6`,
-        supplierBg: "#FAFAFA",
-        borderColor: "#EAE4D6",
-      };
-    case "corporate":
-      return {
-        wrapper: { borderLeft: `6px solid ${a}` },
-        container: {},
-        title: {
-          color: a,
-          textTransform: "uppercase",
-          letterSpacing: "2px",
-          fontSize: "20px",
-        },
-        accentColor: a,
-        headerBorder: `3px solid ${a}`,
-        supplierBg: "#F7F7F7",
-        borderColor: "#DDD",
-      };
-    case "modern":
-      return {
-        wrapper: {},
-        container: {},
-        title: {
-          color: "#FFFFFF",
-          background: a,
-          padding: "12px 20px",
-          borderRadius: "8px",
-          display: "inline-block",
-        },
-        accentColor: a,
-        headerBorder: "none",
-        supplierBg: `${a}0D`,
-        borderColor: `${a}20`,
-      };
-    case "classic":
-      return {
-        wrapper: {},
-        container: { fontFamily: "Georgia, serif" },
-        title: { color: a, fontFamily: "Georgia, serif" },
-        accentColor: a,
-        headerBorder: `1px double ${a}`,
-        supplierBg: "transparent",
-        borderColor: "#CCC",
-      };
-    case "simple":
-      return {
-        wrapper: {},
-        container: {},
-        title: { color: a, fontSize: "18px", fontWeight: 600 },
-        accentColor: a,
-        headerBorder: "1px solid #EAE4D6",
-        supplierBg: "transparent",
-        borderColor: "#EAE4D6",
-      };
-    default:
-      return {
-        wrapper: {},
-        container: {},
-        title: { color: a },
-        accentColor: a,
-        headerBorder: "2px solid #EAE4D6",
-        supplierBg: "#F7F2E6",
-        borderColor: "#EAE4D6",
-      };
-  }
-}
+  useEffect(() => {
+    if (open) setC(company);
+  }, [open, company]);
 
-/* ------------------------------------------------------------------ */
-/*  LPO Tile Preview (mini SVG)                                        */
-/* ------------------------------------------------------------------ */
+  const onLogo = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setC({ ...c, logo: String(reader.result) });
+    reader.readAsDataURL(file);
+  };
 
-function LpoTilePreview({ templateId }: { templateId: string }) {
-  const color = templateId.startsWith("custom-") ? "#FFD600" : "#222222";
   return (
-    <svg
-      viewBox="0 0 120 80"
-      className="w-full h-auto rounded-lg"
-      style={{ background: "#FFFFFF" }}
-    >
-      <rect x="4" y="6" width="112" height="4" rx="2" fill={color} opacity="0.8" />
-      <rect x="4" y="14" width="60" height="3" rx="1.5" fill={color} />
-      <rect x="4" y="22" width="40" height="2" rx="1" fill="#6B6B6B" opacity="0.6" />
-      <rect x="4" y="28" width="30" height="2" rx="1" fill="#6B6B6B" opacity="0.4" />
-      <rect x="70" y="22" width="46" height="6" rx="1" fill={color} opacity="0.15" />
-      <rect x="4" y="36" width="112" height="18" rx="3" fill={color} opacity="0.08" />
-      <rect x="10" y="40" width="35" height="2" rx="1" fill={color} opacity="0.4" />
-      <rect x="10" y="46" width="50" height="2" rx="1" fill="#6B6B6B" opacity="0.3" />
-      <rect x="4" y="58" width="112" height="2" rx="1" fill="#EAE4D6" />
-      <rect x="4" y="63" width="112" height="2" rx="1" fill="#EAE4D6" />
-      <rect x="4" y="68" width="112" height="2" rx="1" fill="#EAE4D6" />
-      <rect x="80" y="74" width="36" height="4" rx="2" fill={color} opacity="0.2" />
-    </svg>
+    <Modal open={open} onClose={onClose} title="Company Profile">
+      <div className="space-y-3">
+        <Field label="Company Name">
+          <input className="input" value={c.name} onChange={(e) => setC({ ...c, name: e.target.value })} />
+        </Field>
+        <Field label="Address">
+          <input className="input" value={c.address ?? ""} onChange={(e) => setC({ ...c, address: e.target.value })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="TRN">
+            <input className="input" value={c.trn ?? ""} onChange={(e) => setC({ ...c, trn: e.target.value })} />
+          </Field>
+          <Field label="Phone">
+            <input className="input" value={c.phone ?? ""} onChange={(e) => setC({ ...c, phone: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Email">
+          <input className="input" value={c.email ?? ""} onChange={(e) => setC({ ...c, email: e.target.value })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Default Template">
+            <select
+              className="select"
+              value={c.default_template}
+              onChange={(e) => setC({ ...c, default_template: e.target.value })}
+            >
+              <option value="minimal">Minimal</option>
+              <option value="classic">Classic</option>
+              <option value="modern">Modern</option>
+              <option value="corporate">Corporate</option>
+              <option value="uae">UAE Professional</option>
+            </select>
+          </Field>
+          <Field label="Default Accent">
+            <input
+              type="color"
+              className="input h-[38px] p-1"
+              value={c.default_accent}
+              onChange={(e) => setC({ ...c, default_accent: e.target.value })}
+            />
+          </Field>
+        </div>
+        <Field label="Logo">
+          <div className="flex items-center gap-3">
+            {c.logo && (
+              <img
+                src={c.logo}
+                alt="logo"
+                className="h-12 w-12 object-contain border border-brand-200 rounded-xl"
+              />
+            )}
+            <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
+              <Upload size={14} /> {c.logo ? "Replace" : "Upload"}
+            </button>
+            {c.logo && (
+              <button className="btn-ghost" onClick={() => setC({ ...c, logo: undefined })}>
+                <X size={14} /> Remove
+              </button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onLogo(e.target.files?.[0])}
+            />
+          </div>
+        </Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-5">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          onClick={async () => {
+            try {
+              await billing.saveCompany(c);
+              let fresh: CompanyProfile;
+              try {
+                fresh = await billing.getCompany();
+              } catch {
+                fresh = c;
+              }
+              onSaved(fresh);
+              toast.success("Company details saved.");
+            } catch (e) {
+              toast.error(`Could not save company details: ${errMsg(e)}`);
+            }
+          }}
+        >
+          Save Company
+        </button>
+      </div>
+    </Modal>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  PO Payments Modal                                                  */
-/* ------------------------------------------------------------------ */
 
 function PoPaymentsModal({
   po,
@@ -1982,13 +2356,7 @@ function PoPaymentsModal({
   };
 
   const remove = async (id: number) => {
-    if (
-      !(await confirm({
-        title: "Remove payment",
-        message: "Remove this payment record? This cannot be undone.",
-      }))
-    )
-      return;
+    if (!(await confirm({ title: "Remove payment", message: "Remove this payment record?" }))) return;
     try {
       await pos.removePayment(id);
       load();
@@ -1998,35 +2366,29 @@ function PoPaymentsModal({
     }
   };
 
+  const ccy = po.currency || "AED";
   return (
     <Modal open onClose={onClose} title={`Payments — ${po.po_number}`}>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[10px] uppercase text-brand-400">Total</p>
-          <p className="font-bold text-sm tabular-nums">{aed(total)}</p>
+          <p className="font-bold text-sm tabular-nums">{money(total, ccy)}</p>
         </div>
         <div className="rounded-xl bg-success/10 px-3 py-2.5">
           <p className="text-[10px] uppercase text-success/70">Paid</p>
-          <p className="font-bold text-sm text-success tabular-nums">{aed(paid)}</p>
+          <p className="font-bold text-sm text-success tabular-nums">{money(paid, ccy)}</p>
         </div>
-        <div
-          className={`rounded-xl px-3 py-2.5 ${balance > 0 ? "bg-danger/10" : "bg-success/10"}`}
-        >
+        <div className={`rounded-xl px-3 py-2.5 ${balance > 0 ? "bg-danger/10" : "bg-success/10"}`}>
           <p className="text-[10px] uppercase text-brand-400">Balance</p>
-          <p
-            className={`font-bold text-sm tabular-nums ${balance > 0 ? "text-danger" : "text-success"}`}
-          >
-            {aed(balance)}
+          <p className={`font-bold text-sm tabular-nums ${balance > 0 ? "text-danger" : "text-success"}`}>
+            {money(balance, ccy)}
           </p>
         </div>
       </div>
 
-      {/* New payment form */}
       <div className="flex items-end gap-2 mb-4 p-3 bg-brand-50 rounded-xl">
         <div className="flex-1">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
-            Amount (AED)
-          </label>
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Amount</label>
           <input
             type="number"
             min={0}
@@ -2036,14 +2398,8 @@ function PoPaymentsModal({
           />
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
-            Method
-          </label>
-          <select
-            className="select"
-            value={method}
-            onChange={(e) => setMethod(e.target.value)}
-          >
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Method</label>
+          <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
             <option>bank transfer</option>
             <option>cash</option>
             <option>cheque</option>
@@ -2051,9 +2407,7 @@ function PoPaymentsModal({
           </select>
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">
-            Date
-          </label>
+          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>
           <input
             type="date"
             className="input"
@@ -2061,20 +2415,13 @@ function PoPaymentsModal({
             onChange={(e) => setPaidAt(e.target.value)}
           />
         </div>
-        <button
-          className="btn-primary shrink-0"
-          disabled={busy || amount <= 0}
-          onClick={add}
-        >
+        <button className="btn-primary shrink-0" disabled={busy || amount <= 0} onClick={add}>
           {busy ? "…" : "Add"}
         </button>
       </div>
 
-      {/* Payment list */}
       {rows.length === 0 ? (
-        <p className="text-center text-sm text-brand-400 py-4">
-          No payments recorded yet.
-        </p>
+        <p className="text-center text-sm text-brand-400 py-4">No payments recorded yet.</p>
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -2089,9 +2436,7 @@ function PoPaymentsModal({
             {rows.map((p) => (
               <tr key={p.id} className="border-b border-brand-50">
                 <td className="py-2">{fmtDate(p.paid_at)}</td>
-                <td className="py-2 text-right font-semibold tabular-nums">
-                  {aed(p.amount)}
-                </td>
+                <td className="py-2 text-right font-semibold tabular-nums">{money(p.amount, ccy)}</td>
                 <td className="py-2 capitalize">{p.method || "—"}</td>
                 <td className="py-2">
                   <button
@@ -2110,150 +2455,3 @@ function PoPaymentsModal({
     </Modal>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Helper Components                                                  */
-/* ------------------------------------------------------------------ */
-
-function Step({
-  n,
-  title,
-  subtitle,
-  action,
-  children,
-}: {
-  n: number;
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">
-            {n}
-          </span>
-          <div>
-            <h3 className="font-bold text-ink">{title}</h3>
-            {subtitle && <p className="text-xs text-brand-400">{subtitle}</p>}
-          </div>
-        </div>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function SupplierQuickAdd({
-  open,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSaved: (s: Supplier) => void;
-}) {
-  const { toast } = useUI();
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [trn, setTrn] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const save = async () => {
-    if (!name.trim()) {
-      toast.error("Supplier name is required");
-      return;
-    }
-    setBusy(true);
-    try {
-      const id = await suppliersApi.create({
-        name: name.trim(),
-        address: address.trim() || undefined,
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-        tax_id: trn.trim() || undefined,
-      });
-      toast.success("Supplier added.");
-      onSaved({
-        id,
-        name: name.trim(),
-        address: address.trim() || null,
-        email: email.trim() || null,
-        phone: phone.trim() || null,
-        tax_id: trn.trim() || null,
-        created_at: new Date().toISOString(),
-      } as Supplier);
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Quick Add Supplier" size="md">
-      <div className="space-y-3">
-        <Field label="Supplier Name *">
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Company name"
-          />
-        </Field>
-        <Field label="Address">
-          <textarea
-            className="textarea"
-            rows={2}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Dubai, UAE"
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Email">
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </Field>
-          <Field label="Phone">
-            <input
-              className="input"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </Field>
-        </div>
-        <Field label="TRN">
-          <input
-            className="input"
-            value={trn}
-            onChange={(e) => setTrn(e.target.value)}
-            placeholder="Tax Registration Number"
-          />
-        </Field>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="btn-primary" disabled={busy || !name.trim()} onClick={save}>
-          {busy ? "Saving…" : "Add Supplier"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Stamp / Signature Upload Components                                */
-/* ------------------------------------------------------------------ */
-

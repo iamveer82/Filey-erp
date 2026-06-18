@@ -8,8 +8,37 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured } from "./supabase";
+import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
+
+// ---- Local mode: a single on-device user, no real authentication ----------
+const LOCAL_PROFILE_KEY = "filey_local_profile";
+const LOCAL_USER = {
+  id: "local-user",
+  email: "local@device",
+  app_metadata: {},
+  user_metadata: {},
+  aud: "local",
+  created_at: new Date().toISOString(),
+} as unknown as User;
+
+function loadLocalProfile(): Profile {
+  try {
+    const v = localStorage.getItem(LOCAL_PROFILE_KEY);
+    if (v) return JSON.parse(v) as Profile;
+  } catch {
+    /* ignore */
+  }
+  return { id: LOCAL_USER.id, email: "", name: "You", company: "" };
+}
+function saveLocalProfile(p: Profile): void {
+  try {
+    localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
+  } catch {
+    /* ignore */
+  }
+}
 
 export type Channel = "email" | "phone";
 
@@ -66,14 +95,17 @@ const norm = (c: Credential) =>
     : { phone: c.value.trim() };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
+  const local = isLocalMode();
+  const [loading, setLoading] = useState(!local);
+  const [user, setUser] = useState<User | null>(local ? LOCAL_USER : null);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(
+    local ? loadLocalProfile() : null
+  );
   // Whether we've actually finished checking for a profile for the current
   // user. Until then we must NOT treat a missing profile as "needs setup"
   // (that briefly flashes the profile form right after sign-in).
-  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(local);
   // The user id whose profile is currently loaded — lets us ignore token
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
@@ -95,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (local) return; // no Supabase auth in local mode — synthetic user
     if (!isConfigured || !supabase) {
       setLoading(false);
       return;
@@ -158,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Live multi-client sync follows the session: open the channel once
   // signed in, close it on sign-out so the next user starts clean.
   useEffect(() => {
+    if (local) return; // local mode is single-user, no live sync
     if (session?.user) void startRealtime();
     else stopRealtime();
   }, [session]);
@@ -226,6 +260,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const createProfile = async (firstName: string, lastName: string, company: string) => {
+    if (local) {
+      const np: Profile = {
+        ...(profile ?? { id: LOCAL_USER.id, email: "" }),
+        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        company: company.trim(),
+      };
+      saveLocalProfile(np);
+      setProfile(np);
+      return;
+    }
     if (!supabase || !user) throw new Error("Not signed in");
     const name = `${firstName.trim()} ${lastName.trim()}`.trim();
     // org_id is provisioned by the signup trigger — do NOT set it here,
@@ -243,6 +287,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProfile = async (patch: Partial<Profile>) => {
+    if (local) {
+      const np = { ...(profile ?? { id: LOCAL_USER.id, email: "", name: "", company: "" }), ...patch } as Profile;
+      saveLocalProfile(np);
+      setProfile(np);
+      return;
+    }
     if (!supabase || !user) return;
     const { data, error } = await supabase
       .from("profiles")
