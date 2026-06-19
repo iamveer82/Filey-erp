@@ -1653,7 +1653,7 @@ function ledgerDelta(type: string, txnType: string, amount: number): number {
 async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
   ref: string
-) {
+): Promise<number> {
   const q = sb().from("transactions").select("*");
   if (invoiceId) q.eq("invoice_id", invoiceId);
   else q.eq("ref", ref);
@@ -1677,25 +1677,32 @@ async function reverseInvoiceTransactions(
   else delQ.eq("ref", ref);
   const { error: de } = await delQ;
   if (de) throw de;
+  return txns.length;
 }
 
-/** Remove the linked sales order and restore any stock that was decremented. */
+/** Undo a document's Inventory (and, for sales, Orders) footprint. A sales
+ *  invoice decremented stock (restore by +qty) and has a linked SO; a purchase
+ *  invoice incremented stock (restore by -qty) and has no order. */
 async function reverseInvoiceOrderAndStock(
   number: string,
-  items: { product_id?: number; qty: number; unit_price: number }[]
+  items: { product_id?: number; qty: number; unit_price: number }[],
+  isPurchase = false
 ) {
-  const orderNumber = `SO-${number}`;
-  const { data: order } = await sb()
-    .from("orders")
-    .select("id")
-    .eq("order_number", orderNumber)
-    .maybeSingle();
-  if (order?.id) {
-    await sb().from("orders").delete().eq("id", order.id);
+  if (!isPurchase) {
+    const orderNumber = `SO-${number}`;
+    const { data: order } = await sb()
+      .from("orders")
+      .select("id")
+      .eq("order_number", orderNumber)
+      .maybeSingle();
+    if (order?.id) {
+      await sb().from("orders").delete().eq("id", order.id);
+    }
   }
+  const dir = isPurchase ? -1 : 1;
   for (const it of items) {
     if (!it.product_id || !it.qty) continue;
-    await adjustProductStock(it.product_id, Math.abs(Number(it.qty)));
+    await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)));
   }
 }
 
@@ -1717,36 +1724,73 @@ async function propagateInvoice(
     const id = Number(doc.id ?? 0);
     const number = String(doc.number ?? "").trim();
     if (!number) return;
-    const orderNumber = `SO-${number}`;
-    const ref = `Invoice ${number}`;
+    const isPurchase = doc.doc_type === "purchase";
+    const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+    const source = isPurchase ? "purchase_invoice" : "invoice";
 
-    // 1) Reverse any previous posting for this invoice.
-    await reverseInvoiceTransactions(id || undefined, ref);
-    await reverseInvoiceOrderAndStock(number, items);
+    // 1) Reverse any previous posting for this document. Only touch stock/orders
+    //    if a prior posting actually existed (else first finalize would net to 0).
+    const prior = await reverseInvoiceTransactions(id || undefined, ref);
+    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
 
     const total = docTotal(
       { tax_rate: Number(doc.tax_rate ?? 0), discount: Number(doc.discount ?? 0) },
       items
     );
+    const txnDate =
+      (doc.issue_date as string) || new Date().toISOString().slice(0, 10);
 
-    // 2) Linked sales order.
+    if (isPurchase) {
+      // Purchase invoice (supplier bill): stock IN, debit Purchases, credit AP.
+      for (const it of items) {
+        if (!it.product_id || !it.qty) continue;
+        await adjustProductStock(it.product_id, Math.abs(Number(it.qty)));
+      }
+      if (total > 0) {
+        const purchasesId = await findOrCreatePurchasesAccount();
+        const apId = await findOrCreateApAccount();
+        if (purchasesId > 0) {
+          await sInsert("transactions", {
+            account_id: purchasesId,
+            txn_type: "debit",
+            amount: total,
+            description: `${ref} — Purchases`,
+            ref,
+            source,
+            invoice_id: id || null,
+            txn_date: txnDate,
+          });
+          await adjustAccountBalance(purchasesId, ledgerDelta("expense", "debit", total));
+        }
+        if (apId > 0) {
+          await sInsert("transactions", {
+            account_id: apId,
+            txn_type: "credit",
+            amount: total,
+            description: `${ref} — Accounts Payable`,
+            ref,
+            source,
+            invoice_id: id || null,
+            txn_date: txnDate,
+          });
+          await adjustAccountBalance(apId, ledgerDelta("liability", "credit", total));
+        }
+      }
+      return;
+    }
+
+    // Sales invoice: linked sales order + stock OUT + debit AR / credit Sales.
     await sInsert("orders", {
-      order_number: orderNumber,
+      order_number: `SO-${number}`,
       customer_name: doc.customer_name ?? "—",
       customer_id: (doc.customer_id as number | undefined) ?? null,
       status: "completed",
       total,
     });
-
-    // 3) Decrement inventory for any invoice lines linked to products.
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
       await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)));
     }
-
-    // 4) Double-entry accounting: debit AR, credit Sales Revenue.
-    const txnDate =
-      (doc.issue_date as string) || new Date().toISOString().slice(0, 10);
     if (total > 0) {
       const revenueId = await findOrCreateSalesAccount();
       const arId = await findOrCreateArAccount();
@@ -1757,7 +1801,7 @@ async function propagateInvoice(
           amount: total,
           description: `${ref} — Sales Revenue`,
           ref,
-          source: "invoice",
+          source,
           invoice_id: id || null,
           txn_date: txnDate,
         });
@@ -1770,7 +1814,7 @@ async function propagateInvoice(
           amount: total,
           description: `${ref} — Accounts Receivable`,
           ref,
-          source: "invoice",
+          source,
           invoice_id: id || null,
           txn_date: txnDate,
         });
@@ -1791,8 +1835,10 @@ async function unpropagateInvoice(
     const id = Number(doc.id ?? 0);
     const number = String(doc.number ?? "").trim();
     if (!number) return;
-    await reverseInvoiceTransactions(id || undefined, `Invoice ${number}`);
-    await reverseInvoiceOrderAndStock(number, items);
+    const isPurchase = doc.doc_type === "purchase";
+    const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+    const prior = await reverseInvoiceTransactions(id || undefined, ref);
+    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
   }
@@ -1876,11 +1922,11 @@ const PO_DONE = (status: unknown) =>
   status === "received" || status === "completed";
 
 export const billing = {
-  listDocs: () =>
+  listDocs: (docType: "sales" | "purchase" = "sales") =>
     readCached<InvoiceDocSummary[]>(
-      "billing_docs",
+      `billing_docs:${docType}`,
       async () => {
-        const [docs, items, payments] = await Promise.all([
+        const [allDocs, items, payments] = await Promise.all([
           sList<any>("invoice_docs", [
             { col: "issue_date", asc: false },
             { col: "id", asc: false },
@@ -1888,6 +1934,11 @@ export const billing = {
           sList<any>("invoice_doc_items"),
           sList<any>("invoice_payments"),
         ]);
+        // Only explicit "purchase" rows are purchase invoices; everything else
+        // (including legacy rows whose doc_type held a title) is a sales doc.
+        const docs = allDocs.filter(
+          (d) => (d.doc_type === "purchase" ? "purchase" : "sales") === docType
+        );
         const byDoc = new Map<number, any[]>();
         for (const it of items) {
           const a = byDoc.get(it.invoice_id) ?? [];
