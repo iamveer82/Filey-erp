@@ -960,7 +960,7 @@ export const hr = {
           description: `Payroll ${period}`,
           txn_date: new Date().toISOString().slice(0, 10),
         });
-        await adjustAccountBalance(targetId, -net);
+        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", net));
       }
       return id;
     });
@@ -1099,7 +1099,7 @@ export const fin = {
           description: description ?? category,
           txn_date: expenseDate,
         });
-        await adjustAccountBalance(targetId, -amount);
+        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount));
       }
       return id;
     });
@@ -1636,9 +1636,20 @@ async function findOrCreatePayrollAccount(): Promise<number> {
   }
 }
 
-/** Reverse every accounting transaction linked to an invoice and restore the
- *  account balances. Used before re-posting or when an invoice is reverted
- *  to draft / deleted. */
+/** The signed change a posting makes to an account's (natural-positive) balance.
+ *  Assets & expenses grow on a debit; liabilities, revenue & equity grow on a
+ *  credit. Every ledger posting and reversal goes through this so balances stay
+ *  consistent with how the Reports page sums them by type. */
+function ledgerDelta(type: string, txnType: string, amount: number): number {
+  const debitPositive = type === "asset" || type === "expense";
+  const increases = debitPositive ? txnType === "debit" : txnType === "credit";
+  return increases ? amount : -amount;
+}
+
+/** Reverse every accounting transaction linked to an invoice/PO and restore the
+ *  account balances. Type-aware, so it exactly undoes each posting (an earlier
+ *  fixed-sign version double-counted asset/expense legs). Used before re-posting
+ *  or when a document is reverted to draft / deleted. */
 async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
   ref: string
@@ -1648,9 +1659,18 @@ async function reverseInvoiceTransactions(
   else q.eq("ref", ref);
   const { data, error } = await q;
   if (error) throw error;
-  for (const t of (data ?? []) as any[]) {
-    const delta = t.txn_type === "credit" ? -Number(t.amount) : Number(t.amount);
-    if (t.account_id) await adjustAccountBalance(t.account_id, delta);
+  const txns = (data ?? []) as any[];
+  if (txns.length) {
+    const accts = await sList<Account>("accounts");
+    const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+    for (const t of txns) {
+      if (!t.account_id) continue;
+      const type = typeById.get(t.account_id) ?? "asset";
+      await adjustAccountBalance(
+        t.account_id,
+        -ledgerDelta(type, t.txn_type, Number(t.amount))
+      );
+    }
   }
   const delQ = sb().from("transactions").delete();
   if (invoiceId) delQ.eq("invoice_id", invoiceId);
@@ -1684,7 +1704,14 @@ async function reverseInvoiceOrderAndStock(
  *  posted invoice keeps the three modules in sync. */
 async function propagateInvoice(
   doc: Record<string, unknown>,
-  items: { product_id?: number; qty: number; unit_price: number }[]
+  items: {
+    product_id?: number;
+    qty: number;
+    unit_price: number;
+    // Carries per-line meta (calc mode, manual amount, formula, per-line
+    // tax/discount) so the linked order total matches the invoice exactly.
+    custom?: Record<string, string> | null;
+  }[]
 ) {
   try {
     const id = Number(doc.id ?? 0);
@@ -1694,7 +1721,7 @@ async function propagateInvoice(
     const ref = `Invoice ${number}`;
 
     // 1) Reverse any previous posting for this invoice.
-    await reverseInvoiceTransactions(id || undefined, orderNumber);
+    await reverseInvoiceTransactions(id || undefined, ref);
     await reverseInvoiceOrderAndStock(number, items);
 
     const total = docTotal(
@@ -1734,7 +1761,7 @@ async function propagateInvoice(
           invoice_id: id || null,
           txn_date: txnDate,
         });
-        await adjustAccountBalance(revenueId, total);
+        await adjustAccountBalance(revenueId, ledgerDelta("revenue", "credit", total));
       }
       if (arId > 0) {
         await sInsert("transactions", {
@@ -1747,7 +1774,7 @@ async function propagateInvoice(
           invoice_id: id || null,
           txn_date: txnDate,
         });
-        await adjustAccountBalance(arId, total);
+        await adjustAccountBalance(arId, ledgerDelta("asset", "debit", total));
       }
     }
   } catch (e) {
@@ -1764,7 +1791,7 @@ async function unpropagateInvoice(
     const id = Number(doc.id ?? 0);
     const number = String(doc.number ?? "").trim();
     if (!number) return;
-    await reverseInvoiceTransactions(id || undefined, `SO-${number}`);
+    await reverseInvoiceTransactions(id || undefined, `Invoice ${number}`);
     await reverseInvoiceOrderAndStock(number, items);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
@@ -1814,7 +1841,7 @@ async function propagatePurchase(doc: Record<string, unknown>) {
         source: "purchase",
         txn_date: txnDate,
       });
-      await adjustAccountBalance(purchasesId, -total);
+      await adjustAccountBalance(purchasesId, ledgerDelta("expense", "debit", total));
     }
     if (apId > 0) {
       await sInsert("transactions", {
@@ -1826,7 +1853,7 @@ async function propagatePurchase(doc: Record<string, unknown>) {
         source: "purchase",
         txn_date: txnDate,
       });
-      await adjustAccountBalance(apId, total);
+      await adjustAccountBalance(apId, ledgerDelta("liability", "credit", total));
     }
   } catch (e) {
     console.error("Purchase propagation failed:", e);
@@ -1963,11 +1990,13 @@ export const billing = {
         if (error) throw error;
       }
       // Keep Orders, Inventory and Accounting in sync with the invoice state.
+      // Pass the saved id so postings carry invoice_id and can be reversed.
       // Idempotent + best-effort: failures are logged but never block saving.
-      if (String((row as Record<string, unknown>).status ?? "") === "sent") {
-        await propagateInvoice(row, items);
+      const docRow = { ...(row as Record<string, unknown>), id: docId };
+      if (String(docRow.status ?? "") === "sent") {
+        await propagateInvoice(docRow, items);
       } else {
-        await unpropagateInvoice(row, items);
+        await unpropagateInvoice(docRow, items);
       }
       return docId;
     }),
@@ -2005,10 +2034,18 @@ export const billing = {
         if (error) throw error;
         const items = await sList<any>("invoice_doc_items");
         await sUpdate("invoice_docs", docId, { status });
+        const docItems = items
+          .filter((i) => i.invoice_id === docId)
+          .map((i) => ({
+            product_id: i.product_id ?? undefined,
+            qty: i.qty,
+            unit_price: i.unit_price,
+            custom: i.custom ?? undefined, // keep meta so the order total matches
+          }));
         if (status === "sent") {
-          await propagateInvoice(doc as Record<string, unknown>, items.filter((i) => i.invoice_id === docId).map((i) => ({ product_id: i.product_id ?? undefined, qty: i.qty, unit_price: i.unit_price })));
+          await propagateInvoice(doc as Record<string, unknown>, docItems);
         } else {
-          await unpropagateInvoice(doc as Record<string, unknown>, items.filter((i) => i.invoice_id === docId).map((i) => ({ product_id: i.product_id ?? undefined, qty: i.qty, unit_price: i.unit_price })));
+          await unpropagateInvoice(doc as Record<string, unknown>, docItems);
         }
       },
       undefined
@@ -2108,7 +2145,7 @@ export const billing = {
           invoice_id: invoiceId,
           txn_date: paidAt,
         });
-        await adjustAccountBalance(cashId, amount);
+        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amount));
       }
       if (arId > 0) {
         await sInsert("transactions", {
@@ -2121,7 +2158,7 @@ export const billing = {
           invoice_id: invoiceId,
           txn_date: paidAt,
         });
-        await adjustAccountBalance(arId, -amount);
+        await adjustAccountBalance(arId, ledgerDelta("asset", "credit", amount));
       }
       return paymentId;
     }),
