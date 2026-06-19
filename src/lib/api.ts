@@ -1992,7 +1992,10 @@ export const billing = {
       // Keep Orders, Inventory and Accounting in sync with the invoice state.
       // Pass the saved id so postings carry invoice_id and can be reversed.
       // Idempotent + best-effort: failures are logged but never block saving.
-      const docRow = { ...(row as Record<string, unknown>), id: docId };
+      const docRow: Record<string, unknown> = {
+        ...(row as Record<string, unknown>),
+        id: docId,
+      };
       if (String(docRow.status ?? "") === "sent") {
         await propagateInvoice(docRow, items);
       } else {
