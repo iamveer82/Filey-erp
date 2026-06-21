@@ -196,7 +196,7 @@ async function openaiChat(
         : m.text,
     })),
   };
-  const res = await fetch(url, {
+  const res = await aiFetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -205,7 +205,6 @@ async function openaiChat(
     body: JSON.stringify(body),
     signal: opts.signal,
   });
-  if (!res.ok) throw new AiError(await errText(res));
   const data = await res.json();
   return data?.choices?.[0]?.message?.content?.trim() ?? "";
 }
@@ -238,7 +237,7 @@ async function anthropicChat(
         })),
       ],
     }));
-  const res = await fetch(`${base}/messages`, {
+  const res = await aiFetch(`${base}/messages`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -255,7 +254,6 @@ async function anthropicChat(
     }),
     signal: opts.signal,
   });
-  if (!res.ok) throw new AiError(await errText(res));
   const data = await res.json();
   return (data?.content ?? [])
     .filter((b: { type?: string }) => b.type === "text")
@@ -274,9 +272,49 @@ async function errText(res: Response): Promise<string> {
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Status codes worth retrying: rate limits + transient server faults. */
+const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+/** fetch wrapper that retries transient failures (network error + 429/5xx) with
+ *  exponential backoff, honouring a `Retry-After` header. Throws AiError after
+ *  the final attempt. User aborts (signal) and non-retryable 4xx are never
+ *  retried — they throw immediately. Keeps a long autonomous run alive through
+ *  a rate-limit blip instead of dying at round 19.
+ *  ponytail: backoff sleep ignores abort mid-wait; next attempt throws AbortError. */
+export async function aiFetch(
+  input: string,
+  init: RequestInit,
+  opts: { retries?: number; baseDelayMs?: number } = {}
+): Promise<Response> {
+  const retries = opts.retries ?? 3;
+  const base = opts.baseDelayMs ?? 500;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(input, init);
+      if (res.ok) return res;
+      if (!RETRYABLE.has(res.status) || attempt === retries)
+        throw new AiError(await errText(res));
+      const ra = Number(res.headers.get("retry-after"));
+      await sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt);
+    } catch (e) {
+      if (e instanceof AiError) throw e; // non-retryable HTTP status
+      if ((e as Error)?.name === "AbortError") throw e; // user cancelled
+      lastErr = e; // network failure
+      if (attempt === retries) break;
+      await sleep(base * 2 ** attempt);
+    }
+  }
+  throw new AiError(
+    lastErr instanceof Error ? lastErr.message : "AI request failed after retries"
+  );
+}
+
 /* ── Agentic chat: the model can call the read/draft tools in lib/aiTools ──── */
 
-const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_ROUNDS = 8;
 
 export async function aiAgent(messages: AiMessage[], opts: AgentOpts = {}): Promise<string> {
   const cfg = getAiConfig();
@@ -313,19 +351,18 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts
   const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
 
   for (let round = 0; round < maxRounds; round++) {
-    const res = await fetch(url, {
+    const res = await aiFetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
         model: cfg.model,
-        max_tokens: opts.maxTokens ?? 1024,
+        max_tokens: opts.maxTokens ?? 2048,
         temperature: opts.temperature ?? 0.3,
         messages: convo,
         tools,
       }),
       signal: opts.signal,
     });
-    if (!res.ok) throw new AiError(await errText(res));
     const data = await res.json();
     const msg = data?.choices?.[0]?.message;
     if (!msg) return "";
@@ -385,7 +422,7 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
   const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
 
   for (let round = 0; round < maxRounds; round++) {
-    const res = await fetch(`${base}/messages`, {
+    const res = await aiFetch(`${base}/messages`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -395,14 +432,13 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
       },
       body: JSON.stringify({
         model: cfg.model,
-        max_tokens: opts.maxTokens ?? 1024,
+        max_tokens: opts.maxTokens ?? 2048,
         system: system || undefined,
         messages: convo,
         tools,
       }),
       signal: opts.signal,
     });
-    if (!res.ok) throw new AiError(await errText(res));
     const data = await res.json();
     const content = data?.content ?? [];
     convo.push({ role: "assistant", content });
@@ -483,7 +519,7 @@ export async function aiAutonomous(
     { role: "user", text: goal, images: opts.images },
   ];
   return aiAgent(messages, {
-    maxTokens: opts.maxTokens ?? 1200,
+    maxTokens: opts.maxTokens ?? 4096,
     maxRounds: opts.maxRounds ?? 20,
     extraTools: [TASK_COMPLETE_TOOL],
     finishToolName: "task_complete",
