@@ -6,12 +6,10 @@ pub enum AppError {
     Db(#[from] rusqlite::Error),
     #[error("pool error: {0}")]
     Pool(String),
-    #[error("not found: {0}")]
-    NotFound(String),
-    #[error("validation: {0}")]
-    Validation(String),
     #[error("email error: {0}")]
     Email(String),
+    #[error("composio error: {0}")]
+    Composio(String),
     #[error("io error: {0}")]
     Io(String),
 }

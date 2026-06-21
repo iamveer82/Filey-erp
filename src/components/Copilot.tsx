@@ -37,6 +37,7 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { buildAiContext } from "../lib/aiContext";
+import { memoryDigest } from "../lib/aiMemory";
 import { setAttachment } from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
 import { useAuth } from "../lib/auth";
@@ -237,7 +238,14 @@ export default function Copilot() {
     const convo = afterUser.find((c) => c.id === id)?.turns ?? [];
     try {
       const messages: AiMessage[] = [
-        { role: "system", text: buildSystemPrompt(SYSTEM, getPersona(), ctx) },
+        {
+          role: "system",
+          text: buildSystemPrompt(
+            SYSTEM,
+            getPersona(),
+            [ctx, memoryDigest()].filter(Boolean).join("\n\n")
+          ),
+        },
         ...convo.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
       ];
       if (attached && attached.type.startsWith("image/")) {

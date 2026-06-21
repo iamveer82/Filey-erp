@@ -2,9 +2,14 @@ import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { type AppIconName } from "../components/AppIcon";
 
 const ModernOverview = lazy(() => import("../pages/ModernOverview"));
+const AgentChat = lazy(() => import("../pages/AgentChat"));
 const Inventory = lazy(() => import("../pages/Inventory"));
 const Orders = lazy(() => import("../pages/Orders"));
 const Invoicing = lazy(() => import("../pages/Invoicing"));
+const PurchaseInvoicing = lazy(async () => {
+  const m = await import("../pages/Invoicing");
+  return { default: () => <m.default mode="purchase" /> };
+});
 const Quoting = lazy(() => import("../pages/Quoting"));
 const Crm = lazy(() => import("../pages/Crm"));
 const Customers = lazy(() => import("../pages/Customers"));
@@ -46,6 +51,16 @@ export const MODULES: AppModule[] = [
     icon: "overview",
     to: "/overview-modern",
     Component: ModernOverview,
+    core: true,
+  },
+  {
+    id: "agent",
+    label: "Filey AI",
+    short: "AI",
+    desc: "Your autonomous business agent — chat, automate and act across the app",
+    icon: "agent",
+    to: "/agent",
+    Component: AgentChat,
     core: true,
   },
   {
@@ -137,6 +152,15 @@ export const MODULES: AppModule[] = [
     icon: "po",
     to: "/purchase-orders",
     Component: PurchaseOrders,
+  },
+  {
+    id: "purchase-invoices",
+    label: "Purchase Invoices",
+    short: "Bills",
+    desc: "Record supplier bills — receives stock & posts to Inventory & Payables",
+    icon: "purchase",
+    to: "/purchase-invoices",
+    Component: PurchaseInvoicing,
   },
   {
     id: "reports",

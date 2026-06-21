@@ -11,6 +11,10 @@ import {
 } from "./api";
 import { sendEmail, emailShell, esc } from "./email";
 import { getDisplayCurrency } from "./format";
+import { addMemory, searchMemories } from "./aiMemory";
+import { composioExecute } from "./composio";
+import { findSkill, loadSkills } from "./agentSkills";
+import { isToolAllowed } from "./capabilities";
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
  * finance agent. Reads everything; writes are creates/updates only (no deletes,
@@ -56,6 +60,19 @@ export function setAttachment(f: File | null) {
 }
 export function getAttachment(): File | null {
   return attachment;
+}
+
+// Files produced by run_file_tool, surfaced as downloadable chips in the chat.
+// The chat UI drains this right after each turn (blob URLs live until reload).
+export interface FileOutput {
+  name: string;
+  url: string;
+}
+let fileOutputs: FileOutput[] = [];
+export function drainFileOutputs(): FileOutput[] {
+  const out = fileOutputs;
+  fileOutputs = [];
+  return out;
 }
 
 async function findInvoice(numberOrId: unknown) {
@@ -527,11 +544,47 @@ export const TOOLS: ToolDef[] = [
           return { error: `Unknown operation: ${op}` };
       }
       const list = Array.isArray(out) ? out : [out];
-      for (const o of list) pt.downloadFile(o);
+      for (const o of list) {
+        pt.downloadFile(o);
+        // Surface in-chat as a download chip (in addition to the auto-download).
+        try {
+          fileOutputs.push({
+            name: o.name,
+            url: URL.createObjectURL(new Blob([o.bytes as BlobPart])),
+          });
+        } catch {
+          /* createObjectURL unavailable (non-browser) — chip just won't show */
+        }
+      }
       return {
         ok: true,
         downloaded: list.map((o) => o.name),
-        message: `Done — ${list.length} file(s) downloaded.`,
+        message: `Done — ${list.length} file(s) ready (downloaded + available in chat).`,
+      };
+    },
+  },
+  {
+    name: "read_attached_document",
+    description:
+      "Read the TEXT of the file the user attached to this chat, so you can act on its contents (e.g. read an invoice/receipt then create a draft). PDFs are extracted to text; images are already visible to you directly. Returns the document text (truncated for long files).",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const f = getAttachment();
+      if (!f) return { error: "No file attached — ask the user to attach a PDF or image first." };
+      if (f.type.startsWith("image/"))
+        return {
+          note: "The attached image is already visible to you in this conversation — read it directly.",
+        };
+      const pt = await import("./pdfTools");
+      const out = await pt.pdfToText(f);
+      const first = Array.isArray(out) ? out[0] : out;
+      if (!first?.bytes) return { error: "Could not extract text from this file." };
+      const text = new TextDecoder().decode(first.bytes).trim();
+      if (!text) return { note: "No selectable text found (the PDF may be scanned — use run_file_tool pdf_to_images then read it as an image)." };
+      const LIMIT = 8000;
+      return {
+        text: text.length > LIMIT ? `${text.slice(0, LIMIT)}\n…[truncated]` : text,
+        truncated: text.length > LIMIT,
       };
     },
   },
@@ -755,6 +808,113 @@ export const TOOLS: ToolDef[] = [
       };
     },
   },
+
+  // ---------- memory (learn across chats) ----------
+  {
+    name: "remember",
+    description:
+      "Save a durable fact, preference, or standing instruction about this user/business to long-term memory so you recall it in future chats (e.g. 'VAT is 5%', 'always CC accounts@acme.com', 'main supplier is Acme Trading', 'prefers concise replies'). Use it whenever the user tells you how they work or shares a lasting detail. NEVER store secrets, passwords, or API keys.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The fact to remember." },
+        tag: {
+          type: "string",
+          description: "Optional short bucket, e.g. preference, customer, tax.",
+        },
+      },
+      required: ["text"],
+    },
+    run: async (a) => {
+      const m = addMemory(str(a.text), str(a.tag) || undefined);
+      return { ok: true, message: `Remembered: ${m.text}` };
+    },
+  },
+  {
+    name: "recall",
+    description:
+      "Search your long-term memory for facts/preferences you saved earlier. Omit query to list the most recent memories.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" } },
+    },
+    run: async (a) => {
+      const hits = searchMemories(str(a.query) || undefined, 10);
+      return { memories: hits.map((m) => ({ text: m.text, tag: m.tag })) };
+    },
+  },
+
+  // ---------- messaging via Composio (connect in Settings → Integrations) ----------
+  {
+    name: "send_gmail",
+    sensitive: true,
+    description:
+      "Send an email from the user's connected Gmail via Composio. Requires Gmail connected in Settings → Integrations. Args: recipient_email, subject, body.",
+    parameters: {
+      type: "object",
+      properties: {
+        recipient_email: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["recipient_email", "subject", "body"],
+    },
+    run: async (a) =>
+      composioExecute("GMAIL_SEND_EMAIL", {
+        recipient_email: str(a.recipient_email),
+        subject: str(a.subject),
+        body: str(a.body),
+      }),
+  },
+  {
+    name: "composio_run",
+    sensitive: true,
+    description:
+      "Run any connected Composio tool by its exact slug (e.g. a SLACK_… or TELEGRAM_… action) with an arguments object. Only use when the integration is connected in Settings → Integrations and you know the slug.",
+    parameters: {
+      type: "object",
+      properties: {
+        tool_slug: { type: "string" },
+        arguments: { type: "object" },
+      },
+      required: ["tool_slug"],
+    },
+    run: async (a) =>
+      composioExecute(
+        str(a.tool_slug),
+        (a.arguments as Record<string, unknown>) || {}
+      ),
+  },
+
+  // ---------- skills (reusable procedures, loaded on demand) ----------
+  {
+    name: "list_skills",
+    description:
+      "List the user's saved skills (reusable procedures/workflows) with their descriptions.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const on = loadSkills().filter((s) => s.enabled);
+      return { skills: on.map((s) => ({ name: s.name, description: s.description })) };
+    },
+  },
+  {
+    name: "use_skill",
+    description:
+      "Load the full instructions for a saved skill by name, then follow them for the current task.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const s = findSkill(str(a.name));
+      if (!s)
+        return {
+          error: `No skill named "${str(a.name)}". Use list_skills to see what's available.`,
+        };
+      return { name: s.name, instructions: s.instructions };
+    },
+  },
 ];
 
 export async function runTool(
@@ -763,6 +923,10 @@ export async function runTool(
 ): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { error: `Unknown tool: ${name}` };
+  if (!isToolAllowed(name))
+    return {
+      error: `The "${name}" capability is turned off (Settings → Capabilities). Ask the user to enable it.`,
+    };
   if (tool.sensitive && !(await confirmTool(name, args)))
     return { error: "Cancelled — the user did not approve this action." };
   try {

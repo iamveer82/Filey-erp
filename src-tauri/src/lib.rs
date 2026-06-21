@@ -12,6 +12,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // DB lives in the user-chosen folder (or the default app-data dir).
             let db_path = modules::storage::resolve_db_path(app.handle());
@@ -35,6 +37,11 @@ pub fn run() {
             modules::sync::outbox_clear,
             // Email (SMTP)
             modules::email::send_email,
+            // Composio (managed integrations: Gmail/Slack/Telegram…)
+            modules::composio::composio_connect,
+            modules::composio::composio_connection_status,
+            modules::composio::composio_list_connections,
+            modules::composio::composio_execute,
             // Storage locations + backup/restore
             modules::storage::get_data_dir,
             modules::storage::set_data_dir,
