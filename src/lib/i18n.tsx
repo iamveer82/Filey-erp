@@ -73,6 +73,17 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     if (!cat) return;
 
     const SKIP = "input,textarea,select,code,pre,script,style,svg,[contenteditable=true],[data-no-i18n]";
+    // Visible attributes worth translating — covers input placeholders and the
+    // tooltip/label text on icon-only buttons, which have no child text node.
+    const ATTRS = ["placeholder", "title", "aria-label", "alt"];
+    const translateAttrs = (el: Element) => {
+      if (el.closest("[data-no-i18n]")) return;
+      for (const a of ATTRS) {
+        const v = el.getAttribute(a);
+        const key = v?.trim();
+        if (key && cat[key]) el.setAttribute(a, v!.replace(key, cat[key]));
+      }
+    };
     const apply = (root: Node) => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode(n) {
@@ -89,6 +100,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         const key = raw.trim();
         n.nodeValue = raw.replace(key, cat[key]);
       }
+      // Attributes: the node itself (if an element) plus any descendants.
+      if (root.nodeType === Node.ELEMENT_NODE) translateAttrs(root as Element);
+      (root as Element).querySelectorAll?.(
+        "[placeholder],[title],[aria-label],[alt]"
+      ).forEach(translateAttrs);
     };
 
     apply(document.body);

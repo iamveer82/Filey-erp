@@ -25,6 +25,7 @@ import {
   statusTone,
   Field,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 import {
   loadCompanyStampSig,
   EMPTY_STAMP_SIG,
@@ -598,11 +599,10 @@ function DcEditor({
                   />
                 </Field>
                 <Field label="Date">
-                  <input
-                    type="date"
-                    className="input"
+                  <DateField
                     value={form.issue_date}
-                    onChange={(e) => set("issue_date", e.target.value)}
+                    onChange={(v) => set("issue_date", v)}
+                    clearable={false}
                   />
                 </Field>
                 <Field label="Reference #">

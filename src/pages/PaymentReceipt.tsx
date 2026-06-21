@@ -49,6 +49,7 @@ import {
   ShareToggle,
   SearchInput,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -476,11 +477,10 @@ export default function PaymentReceipt() {
                           />
                         </Field>
                         <Field label="Payment date">
-                          <input
-                            className="input"
-                            type="date"
+                          <DateField
                             value={form.issue_date}
-                            onChange={(e) => update({ issue_date: e.target.value, due_date: e.target.value })}
+                            onChange={(v) => update({ issue_date: v, due_date: v })}
+                            clearable={false}
                           />
                         </Field>
                       </div>

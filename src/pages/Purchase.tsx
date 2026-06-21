@@ -15,6 +15,7 @@ import {
   Field,
   ErrorBanner,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 export default function Purchase() {
   const { confirm, toast } = useUI();
@@ -245,11 +246,10 @@ function PurchaseModal({
           />
         </Field>
         <Field label="Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.expense_date}
-            onChange={(e) => setF({ ...f, expense_date: e.target.value })}
+            onChange={(v) => setF({ ...f, expense_date: v })}
+            clearable={false}
           />
         </Field>
         <Field label="Pay from account (posts to ledger)">

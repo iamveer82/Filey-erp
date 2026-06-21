@@ -24,6 +24,7 @@ import {
   Field,
   ErrorBanner,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -382,11 +383,10 @@ function EmployeeModal({
           />
         </Field>
         <Field label="Hire Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.hire_date}
-            onChange={(e) => setF({ ...f, hire_date: e.target.value })}
+            onChange={(v) => setF({ ...f, hire_date: v })}
+            clearable={false}
           />
         </Field>
       </div>

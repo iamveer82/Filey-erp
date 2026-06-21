@@ -51,6 +51,7 @@ import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals, invoiceLineAmount, r2 } from "../lib/money";
+import { DateField } from "../components/DatePicker";
 import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
@@ -200,11 +201,17 @@ export const sanitizeCustomColumns = (cols: CustomColumn[]): CustomColumn[] =>
       !DEFAULT_COLUMN_LABELS.has(c.label.toLowerCase().trim())
   );
 
-function blankForm(c: CompanyProfile, existing: string[] = []): Form {
+export type DocMode = "sales" | "purchase";
+
+function blankForm(
+  c: CompanyProfile,
+  existing: string[] = [],
+  mode: DocMode = "sales"
+): Form {
   return {
-    number: nextDocNumber({ prefix: "INV", existing }),
+    number: nextDocNumber({ prefix: mode === "purchase" ? "PINV" : "INV", existing }),
     status: "draft",
-    doc_title: "Tax Invoice",
+    doc_title: mode === "purchase" ? "Purchase Invoice" : "Tax Invoice",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
     currency: c.currency || "AED",
@@ -244,7 +251,9 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   };
 }
 
-export default function Invoicing() {
+export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
+  const isPurchase = mode === "purchase";
+  const partyLabel = isPurchase ? "Supplier" : "Customer";
   const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
@@ -257,7 +266,7 @@ export default function Invoicing() {
   const [search, setSearch] = useState("");
   const loadDocs = () =>
     billing
-      .listDocs()
+      .listDocs(mode)
       .then(setDocs)
       .catch(() => toast.error("Failed to load documents"));
   const loadRecurs = () =>
@@ -296,13 +305,13 @@ export default function Invoicing() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, docs.map((d) => d.number)));
+      setForm(blankForm(company, docs.map((d) => d.number), mode));
       setParams({}, { replace: true });
     }
   }, [params, company, form, setParams, docs]);
 
   const newInvoice = () => {
-    if (company) setForm(blankForm(company, docs.map((d) => d.number)));
+    if (company) setForm(blankForm(company, docs.map((d) => d.number), mode));
   };
 
 const editInvoice = async (id: number) => {
@@ -524,7 +533,8 @@ const editInvoice = async (id: number) => {
       };
       // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
-      delete (payload as any).doc_type;
+      if (isPurchase) (payload as any).doc_type = "purchase";
+      else delete (payload as any).doc_type;
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
@@ -582,7 +592,8 @@ const editInvoice = async (id: number) => {
       };
       // Remove Form-only camelCase alias (mapped to custom_columns above).
       delete (payload as any).customColumns;
-      delete (payload as any).doc_type;
+      if (isPurchase) (payload as any).doc_type = "purchase";
+      else delete (payload as any).doc_type;
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
@@ -639,6 +650,7 @@ const editInvoice = async (id: number) => {
           onRevertDraft={() => setDocStatus("draft")}
           saving={saving}
           onEditCompany={() => setCompanyOpen(true)}
+          partyLabel={partyLabel}
         />
       </>
     );
@@ -672,8 +684,12 @@ const editInvoice = async (id: number) => {
   return (
     <div>
       <PageHeader
-        title="Invoicing"
-        subtitle="Create FTA tax invoices — pick a template, fill details, send"
+        title={isPurchase ? "Purchase Invoices" : "Invoicing"}
+        subtitle={
+          isPurchase
+            ? "Record supplier bills — receives stock and posts to Inventory & Payables"
+            : "Create FTA tax invoices — pick a template, fill details, send"
+        }
         action={
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
@@ -683,7 +699,7 @@ const editInvoice = async (id: number) => {
               <Sparkles size={16} /> Scan with AI
             </button>
             <button className="btn-primary" onClick={newInvoice}>
-              <Plus size={16} /> New Invoice
+              <Plus size={16} /> {isPurchase ? "New Purchase Invoice" : "New Invoice"}
             </button>
           </div>
         }
@@ -870,7 +886,7 @@ const editInvoice = async (id: number) => {
           },
           {
             key: "cust",
-            label: "Customer",
+            label: partyLabel,
             sortValue: (d) => d.customer_name,
             render: (d) => <span className="font-medium">{d.customer_name}</span>,
           },
@@ -1137,12 +1153,9 @@ function PaymentsModal({
         </button>
       </div>
       <Field label="Date">
-        <input
-          type="date"
-          className="input mt-2"
-          value={paidAt}
-          onChange={(e) => setPaidAt(e.target.value)}
-        />
+        <div className="mt-2">
+          <DateField value={paidAt} onChange={setPaidAt} clearable={false} />
+        </div>
       </Field>
     </Modal>
   );
@@ -1227,6 +1240,7 @@ function Editor({
   onRevertDraft,
   saving,
   onEditCompany,
+  partyLabel,
 }: {
   form: Form;
   setForm: (f: Form) => void;
@@ -1236,6 +1250,7 @@ function Editor({
   onRevertDraft: () => void;
   saving: boolean;
   onEditCompany: () => void;
+  partyLabel: string;
 }) {
   const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
@@ -1762,7 +1777,7 @@ function Editor({
           <Step n={2} title="Invoice Details">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
-                <Field label="Customer">
+                <Field label={partyLabel}>
                   <div className="flex gap-2">
                     <select
                       className="select"
@@ -1793,7 +1808,7 @@ function Editor({
                     </button>
                   </div>
                 </Field>
-                <Field label="Customer / Company Name">
+                <Field label={`${partyLabel} / Company Name`}>
                   <input
                     className="input"
                     placeholder="Acme Corporation LLC"
@@ -1810,7 +1825,7 @@ function Editor({
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
-                <Field label="Customer Email / TRN">
+                <Field label={`${partyLabel} Email / TRN`}>
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       className="input"
@@ -1866,19 +1881,16 @@ function Editor({
                   </div>
                 </Field>
                 <Field label="Invoice Date">
-                  <input
-                    type="date"
-                    className="input"
+                  <DateField
                     value={form.issue_date ?? ""}
-                    onChange={(e) => set("issue_date", e.target.value)}
+                    onChange={(v) => set("issue_date", v)}
+                    clearable={false}
                   />
                 </Field>
                 <Field label="Due Date (optional)">
-                  <input
-                    type="date"
-                    className="input"
+                  <DateField
                     value={form.due_date ?? ""}
-                    onChange={(e) => set("due_date", e.target.value)}
+                    onChange={(v) => set("due_date", v)}
                   />
                 </Field>
                 <Field label="PO Number (optional)">
@@ -2007,7 +2019,7 @@ function Editor({
                     ))}
                     <th className="py-2 px-2 w-32 text-right">Unit Price</th>
                     {(form.tax_rate || 0) > 0 && (
-                      <th className="py-2 px-2 w-16 text-right">Tax</th>
+                      <th className="py-2 px-2 w-24 text-right">VAT</th>
                     )}
                     <th className="py-2 px-2 w-28 text-right">Amount</th>
                     <th className="w-8" />
@@ -2136,7 +2148,16 @@ function Editor({
                       </td>
                       {(form.tax_rate || 0) > 0 && (
                         <td className="py-2 px-2 text-right text-brand-500">
-                          {form.tax_rate}%
+                          {m(
+                            ((it.calcMode === "manual"
+                              ? it.amount || 0
+                              : invoiceLineAmount(it, form.unit_price_formula)) *
+                              (form.tax_rate || 0)) /
+                              100
+                          )}
+                          <span className="block text-[10px] text-brand-400">
+                            {form.tax_rate}%
+                          </span>
                         </td>
                       )}
                       <td className="py-2 px-2 text-right font-medium text-ink">

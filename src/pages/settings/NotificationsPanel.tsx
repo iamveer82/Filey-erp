@@ -33,8 +33,8 @@ export default function NotificationsPanel() {
         ))}
       </div>
       <p className="text-[11px] text-brand-400 mt-3">
-        Preferences are saved now. Delivery (email/push) activates once a notification
-        integration is configured.
+        These deliver as in-app alerts. Email/push delivery activates once a
+        notification integration is configured.
       </p>
     </div>
   );

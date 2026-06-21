@@ -31,6 +31,7 @@ import warningIcon from "../assets/icons/warning.svg";
 import dangerIcon from "../assets/icons/danger.svg";
 import emptyIcon from "../assets/icons/empty.svg";
 import outstandingIcon from "../assets/icons/low-stock.svg";
+import agentIcon from "../assets/icons/agent.svg";
 
 const iconMap: Record<string, string> = {
   overview: overviewIcon,
@@ -86,6 +87,9 @@ const iconMap: Record<string, string> = {
   money: moneyIcon,
   revenue: moneyIcon,
   outstanding: outstandingIcon,
+  agent: agentIcon,
+  assistant: agentIcon,
+  ai: agentIcon,
   reports: reportsIcon,
   report: reportsIcon,
   analytics: reportsIcon,
@@ -122,12 +126,25 @@ export default function AppIcon({
   style?: CSSProperties;
   alt?: string;
 }) {
+  // The icon SVGs are monochrome and draw with `currentColor`, but loading them
+  // through <img> resolves `currentColor` to the SVG's own default (black) — so
+  // they stayed dark on the dark-mode sidebar. Render them as a CSS mask painted
+  // with `currentColor` instead, so the icon inherits the element's text colour
+  // and tracks light/dark + hover/active states automatically.
+  const src = iconMap[name];
+  const maskValue = `url("${src}") center / contain no-repeat`;
   return (
-    <img
-      src={iconMap[name]}
-      alt={alt || name}
+    <span
+      role="img"
+      aria-label={alt || name}
       className={className}
-      style={style}
+      style={{
+        display: "inline-block",
+        backgroundColor: "currentColor",
+        WebkitMask: maskValue,
+        mask: maskValue,
+        ...style,
+      }}
     />
   );
 }

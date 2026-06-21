@@ -15,6 +15,9 @@ import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
 import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
+import Notifier from "./components/Notifier";
+import UpdateNotice from "./components/UpdateNotice";
+import AgentScheduler from "./components/AgentScheduler";
 import { Toaster } from "./components/Toaster";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
@@ -91,6 +94,9 @@ function Gate() {
         </Layout>
         <CommandPalette />
         <OverdueReminder />
+        <Notifier />
+        <UpdateNotice />
+        <AgentScheduler />
         <Toaster />
       </HashRouter>
     </ModulesProvider>

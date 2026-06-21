@@ -35,14 +35,14 @@ describe("purchase invoice (supplier bill)", () => {
     } as any)) as number;
 
     const accts = await fin.accounts();
-    expect(bal(accts, /purchase/i)).toBe(20); // debit Purchases (expense up)
+    expect(bal(accts, /inventory|stock/i)).toBe(20); // debit Inventory (asset up)
     expect(bal(accts, /payable|creditors/i)).toBe(20); // credit AP (creditor up)
     const prod = (await erp.products()).find((p) => p.sku === "PX");
     expect(prod?.quantity).toBe(15); // stock IN (+5)
 
     await billing.setStatus(id, "draft");
     const accts2 = await fin.accounts();
-    expect(bal(accts2, /purchase/i)).toBe(0); // reversed
+    expect(bal(accts2, /inventory|stock/i)).toBe(0); // reversed
     expect(bal(accts2, /payable|creditors/i)).toBe(0);
     const prod2 = (await erp.products()).find((p) => p.sku === "PX");
     expect(prod2?.quantity).toBe(10); // stock restored

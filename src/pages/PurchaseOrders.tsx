@@ -79,6 +79,7 @@ import {
   ShareToggle,
   SearchInput,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -1251,19 +1252,16 @@ function Editor({
                     />
                   </Field>
                   <Field label="Order Date">
-                    <input
-                      type="date"
-                      className="input"
+                    <DateField
                       value={form.order_date ?? ""}
-                      onChange={(e) => set("order_date", e.target.value)}
+                      onChange={(v) => set("order_date", v)}
+                      clearable={false}
                     />
                   </Field>
                   <Field label="Expected Date (optional)">
-                    <input
-                      type="date"
-                      className="input"
+                    <DateField
                       value={form.expected_date ?? ""}
-                      onChange={(e) => set("expected_date", e.target.value)}
+                      onChange={(v) => set("expected_date", v)}
                     />
                   </Field>
                   <Field label="Currency">
@@ -1383,6 +1381,9 @@ function Editor({
                         </th>
                       ))}
                       <th className="py-2 px-2 w-32 text-right">Unit Cost</th>
+                      {(form.tax_rate || 0) > 0 && (
+                        <th className="py-2 px-2 w-24 text-right">VAT</th>
+                      )}
                       <th className="py-2 px-2 w-28 text-right">Amount</th>
                       <th className="w-8" />
                     </tr>
@@ -1443,6 +1444,19 @@ function Editor({
                             onChange={(e) => setItem(i, { unit_cost: numInput(e.target.value) })}
                           />
                         </td>
+                        {(form.tax_rate || 0) > 0 && (
+                          <td className="py-2 px-2 text-right text-brand-500">
+                            {money(
+                              (docLineAmount(toDocItem(it), form.unit_price_formula) *
+                                (form.tax_rate || 0)) /
+                                100,
+                              form.currency || "AED"
+                            )}
+                            <span className="block text-[10px] text-brand-400">
+                              {form.tax_rate}%
+                            </span>
+                          </td>
+                        )}
                         <td className="py-2 px-2 text-right font-medium text-ink">
                           {money(docLineAmount(toDocItem(it), form.unit_price_formula), form.currency || "AED")}
                         </td>
@@ -2408,12 +2422,7 @@ function PoPaymentsModal({
         </div>
         <div className="w-32">
           <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>
-          <input
-            type="date"
-            className="input"
-            value={paidAt}
-            onChange={(e) => setPaidAt(e.target.value)}
-          />
+          <DateField value={paidAt} onChange={setPaidAt} clearable={false} />
         </div>
         <button className="btn-primary shrink-0" disabled={busy || amount <= 0} onClick={add}>
           {busy ? "…" : "Add"}

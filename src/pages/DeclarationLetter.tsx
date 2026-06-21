@@ -14,6 +14,7 @@ import { billing, tools, type CompanyProfile } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { errMsg, fmtDate } from "../lib/format";
 import { PageHeader, Field, MetricCard, DataTable } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
@@ -491,11 +492,10 @@ function DeclarationEditor({
                 />
               </Field>
               <Field label="Date">
-                <input
-                  type="date"
-                  className="input"
+                <DateField
                   value={form.date}
-                  onChange={(e) => set("date", e.target.value)}
+                  onChange={(v) => set("date", v)}
+                  clearable={false}
                 />
               </Field>
             </div>

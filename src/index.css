@@ -475,6 +475,47 @@
   background-color: rgba(255, 255, 255, 0.06);
 }
 
+/* ── Raw bg-white panels ─────────────────────────────────────────────────────
+   Modals, dropdowns, popovers, sheets and panels that use a bare `bg-white`
+   (no `dark:` sibling) stayed bright white in dark mode — blinding. Darken them
+   centrally to the card surface. Unlayered so it beats the base `.bg-white`
+   utility. Translucent `bg-white/NN` films are a different class and untouched.
+   The invoice/quote print sheet + paper texture are re-whitened (must stay white
+   paper in both themes), and yellow CTA surfaces never use bare bg-white. */
+.dark .bg-white {
+  background-color: #24262c;
+}
+.dark .hover\:bg-white:hover {
+  background-color: #2a2d34;
+}
+.dark .invoice-print,
+.dark .invoice-print .bg-white,
+.dark .paper-texture {
+  background-color: #ffffff;
+}
+/* The on-screen document sheet (FitPreview) carries `invoice-print bg-white`
+   on the SAME element, so the descendant rule above misses it and the sheet
+   darkened to the card colour. Forcing `.dark .invoice-print` white (above)
+   fixes the paper; now undo the global dark text lifts INSIDE the sheet so
+   the document ink reads dark on white, exactly like the printed output.
+   Accent-coloured headings use inline `style.color` and are unaffected. */
+.dark .invoice-print .text-ink {
+  color: #0a0a0a;
+}
+.dark .invoice-print .text-neutral-400,
+.dark .invoice-print .text-brand-400 {
+  color: #94a3b8;
+}
+.dark .invoice-print .text-neutral-500,
+.dark .invoice-print .text-brand-500 {
+  color: #64748b;
+}
+.dark .invoice-print .text-neutral-600,
+.dark .invoice-print .text-brand-600,
+.dark .invoice-print .text-brand-700 {
+  color: #475569;
+}
+
 /* ── ColorOrb (AI copilot icon) ─────────────────────────────────────────────
    Animated conic-gradient orb. Colours/blur fed via inline CSS vars from the
    ColorOrb component. Spin is disabled under prefers-reduced-motion below. */

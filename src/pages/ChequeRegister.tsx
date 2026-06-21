@@ -11,6 +11,7 @@ import {
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Badge, Modal, Field } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 /* ------------------------------------------------------------------ */
 /*  Cheque Register — issued & received cheques                        */
@@ -356,19 +357,17 @@ function ChequeModal({
           </select>
         </Field>
         <Field label="Issue Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.issue_date}
-            onChange={(e) => setF({ ...f, issue_date: e.target.value })}
+            onChange={(v) => setF({ ...f, issue_date: v })}
+            clearable={false}
           />
         </Field>
         <Field label="Due Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.due_date}
-            onChange={(e) => setF({ ...f, due_date: e.target.value })}
+            onChange={(v) => setF({ ...f, due_date: v })}
+            clearable={false}
           />
         </Field>
       </div>

@@ -47,6 +47,7 @@ const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as 
 /** Odoo-style module groups for the sidebar. Order within a group mirrors
  *  the user's workflow: Overview → Sales → Purchase → Inventory → Accounting → Tools. */
 const MODULE_GROUPS: { title: string; ids: string[] }[] = [
+  { title: "Assistant", ids: ["agent"] },
   { title: "Business", ids: ["overview", "reports"] },
   { title: "Sales", ids: ["quoting", "orders", "invoicing", "customers", "crm", "follow-ups"] },
   { title: "Purchases", ids: ["suppliers", "purchase", "purchase-orders"] },

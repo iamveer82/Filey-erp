@@ -593,6 +593,15 @@ async function adjustAccountBalance(accountId: number, delta: number): Promise<v
 }
 
 // ===== ERP Core =====
+
+/** A stock-out record: qty of a product issued against an invoice/reference. */
+export interface StockIssue {
+  qty: number;
+  invoice: string;
+  note?: string;
+  date: string; // ISO
+}
+
 export const erp = {
   products: () =>
     readCached<Product[]>(
@@ -611,6 +620,52 @@ export const erp = {
       // Atomic — avoids lost updates when two clients adjust stock at once.
       await adjustProductStock(productId, delta,
       );
+    }),
+  /** Issue stock against an invoice: logs the movement (in app_settings, so it
+   *  syncs cross-device) and subtracts the qty from the product's stock. */
+  issueStock: (
+    productId: number,
+    qty: number,
+    invoice: string,
+    note?: string,
+    date?: string // yyyy-mm-dd; defaults to now
+  ) =>
+    online(async () => {
+      const q = Math.abs(Number(qty) || 0);
+      if (!productId || q <= 0) return;
+      const { data } = await sb()
+        .from("app_settings")
+        .select("id,value")
+        .eq("key", "stock_issues")
+        .maybeSingle();
+      const map: Record<string, StockIssue[]> = (data as any)?.value
+        ? JSON.parse((data as any).value)
+        : {};
+      const list = map[String(productId)] ?? [];
+      list.push({
+        qty: q,
+        invoice: invoice.trim(),
+        note: note?.trim() || undefined,
+        date: date ? new Date(`${date}T12:00:00`).toISOString() : new Date().toISOString(),
+      });
+      map[String(productId)] = list;
+      const value = JSON.stringify(map);
+      if ((data as any)?.id) await sUpdate("app_settings", (data as any).id, { value });
+      else await sInsert("app_settings", { key: "stock_issues", value });
+      // Subtract from stock (atomic RPC with fallback).
+      await adjustProductStock(productId, -q);
+    }),
+  /** All stock-issue movements, keyed by product id (one read). */
+  allStockIssues: () =>
+    online(async () => {
+      const { data } = await sb()
+        .from("app_settings")
+        .select("value")
+        .eq("key", "stock_issues")
+        .maybeSingle();
+      return ((data as any)?.value
+        ? JSON.parse((data as any).value)
+        : {}) as Record<string, StockIssue[]>;
     }),
   updateProduct: (
     productId: number,
@@ -952,15 +1007,33 @@ export const hr = {
     return online(async () => {
       const id = await sInsert("payroll", row);
       const targetId = accountId ?? (await findOrCreatePayrollAccount());
+      const today = new Date().toISOString().slice(0, 10);
+      const ref = `Payroll ${id}`;
       if (targetId > 0) {
         await sInsert("transactions", {
           account_id: targetId,
           txn_type: "debit",
           amount: net,
           description: `Payroll ${period}`,
-          txn_date: new Date().toISOString().slice(0, 10),
+          ref,
+          source: "payroll",
+          txn_date: today,
         });
         await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", net));
+        // Contra leg — salaries paid from Cash/Bank (keeps the ledger balanced).
+        const cashId = await findOrCreateCashAccount();
+        if (cashId > 0) {
+          await sInsert("transactions", {
+            account_id: cashId,
+            txn_type: "credit",
+            amount: net,
+            description: `Payroll ${period} — paid`,
+            ref,
+            source: "payroll",
+            txn_date: today,
+          });
+          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", net));
+        }
       }
       return id;
     });
@@ -1091,15 +1164,33 @@ export const fin = {
     return online(async () => {
       const id = await sInsert("expenses", row);
       const targetId = accountId ?? (await findOrCreateExpenseAccount());
+      const ref = `Expense ${id}`;
       if (targetId > 0) {
         await sInsert("transactions", {
           account_id: targetId,
           txn_type: "debit",
           amount,
           description: description ?? category,
+          ref,
+          source: "expense",
           txn_date: expenseDate,
         });
         await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount));
+        // Contra leg — expense assumed paid from Cash/Bank, so the books stay
+        // balanced (debit Expense, credit Cash). On-credit spend → manual AP entry.
+        const cashId = await findOrCreateCashAccount();
+        if (cashId > 0) {
+          await sInsert("transactions", {
+            account_id: cashId,
+            txn_type: "credit",
+            amount,
+            description: `${description ?? category} — paid`,
+            ref,
+            source: "expense",
+            txn_date: expenseDate,
+          });
+          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", amount));
+        }
       }
       return id;
     });
@@ -1143,8 +1234,15 @@ export const fin = {
     };
     return online(async () => {
       const id = await sInsert("transactions", row);
-      const delta = txnType === "credit" ? amount : -amount;
-      await adjustAccountBalance(accountId, delta);
+      // Sign depends on the account's normal balance, not a fixed credit=+ rule:
+      // a debit grows an asset/expense but shrinks a liability/revenue.
+      const { data: acct } = await sb()
+        .from("accounts")
+        .select("account_type")
+        .eq("id", accountId)
+        .single();
+      const type = (acct as { account_type: string } | null)?.account_type ?? "asset";
+      await adjustAccountBalance(accountId, ledgerDelta(type, txnType, amount));
       return id;
     });
   },
@@ -1173,13 +1271,65 @@ export const fin = {
           amount: number;
         } | null;
         if (t?.account_id) {
-          const delta = t.txn_type === "credit" ? -Number(t.amount) : Number(t.amount);
-          await adjustAccountBalance(t.account_id, delta);
+          // Undo with the same type-aware delta the posting used, else asset/
+          // expense legs (e.g. an invoice's AR debit) reverse the wrong way.
+          const { data: a } = await sb()
+            .from("accounts")
+            .select("account_type")
+            .eq("id", t.account_id)
+            .single();
+          const type = (a as { account_type: string } | null)?.account_type ?? "asset";
+          await adjustAccountBalance(
+            t.account_id,
+            -ledgerDelta(type, t.txn_type, Number(t.amount))
+          );
         }
         await sDelete("transactions", id);
       },
       undefined
     ),
+  /** Repair the ledger after the legacy duplicate-posting bug: drop exact
+   *  duplicate transactions (same account, type, amount, description and date —
+   *  e.g. an invoice leg posted more than once) and recompute every account
+   *  balance from the survivors so balances match the journal. Idempotent. */
+  repairLedger: () =>
+    online(async () => {
+      const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
+      const seen = new Set<string>();
+      let removed = 0;
+      for (const t of txns) {
+        const key = [
+          t.account_id ?? "",
+          t.txn_type,
+          Number(t.amount),
+          t.description ?? "",
+          t.txn_date ?? "",
+        ].join("|");
+        if (seen.has(key)) {
+          await sDelete("transactions", t.id);
+          removed++;
+        } else {
+          seen.add(key);
+        }
+      }
+      // Recompute every account balance from the surviving transactions.
+      const accts = await sList<Account>("accounts");
+      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+      const bal = new Map<number, number>();
+      const survivors = await sList<any>("transactions");
+      for (const t of survivors) {
+        if (!t.account_id) continue;
+        const type = typeById.get(t.account_id) ?? "asset";
+        bal.set(
+          t.account_id,
+          (bal.get(t.account_id) ?? 0) +
+            ledgerDelta(type, t.txn_type, Number(t.amount))
+        );
+      }
+      for (const a of accts)
+        await sUpdate("accounts", a.id, { balance: bal.get(a.id) ?? 0 });
+      return { removed };
+    }),
   report: () =>
     readCached<FinanceReport>(
       "fin_report",
@@ -1543,16 +1693,35 @@ function docTotal(
     custom?: Record<string, string> | null;
   }[]
 ) {
-  const lineItems = items.map((it) => {
+  return invoiceTotals(
+    docLineItems(items),
+    d.discount,
+    d.tax_rate,
+    d.unit_price_formula
+  ).total;
+}
+
+function docLineItems(
+  items: { qty: number; unit_price: number; custom?: Record<string, string> | null }[]
+) {
+  return items.map((it) => {
     const { calcMode, amount, itemFormula } = splitItemMeta(it.custom);
-    return {
-      ...it,
-      calcMode,
-      amount,
-      itemFormula,
-    };
+    return { ...it, calcMode, amount, itemFormula };
   });
-  return invoiceTotals(lineItems, d.discount, d.tax_rate, d.unit_price_formula).total;
+}
+
+/** Net (ex-VAT, after discount), VAT amount and gross — used to split the ledger
+ *  so revenue/inventory exclude VAT and the tax sits in its own account. */
+function docTotals(
+  d: {
+    tax_rate: number;
+    discount: number;
+    unit_price_formula?: { a: string; b?: string } | null;
+  },
+  items: { qty: number; unit_price: number; custom?: Record<string, string> | null }[]
+) {
+  const t = invoiceTotals(docLineItems(items), d.discount, d.tax_rate, d.unit_price_formula);
+  return { net: Math.round((t.total - t.tax) * 100) / 100, tax: t.tax, total: t.total };
 }
 
 /** Generic account lookup / auto-create. */
@@ -1567,13 +1736,29 @@ async function findOrCreateAccount(
     .select("id,name")
     .eq("account_type", type);
   const list = (data as { id: number; name: string }[] | null) ?? [];
-  const acct = list.find((a) => pattern.test(a.name)) ?? list[0];
+  // Match by name pattern only — no "first account of this type" fallback. That
+  // fallback let e.g. the AP lookup grab an "Output VAT" liability (and vice
+  // versa); a dedicated account is created instead when nothing matches.
+  const acct = list.find((a) => pattern.test(a.name));
   if (acct) return acct.id;
   try {
     return await sInsert("accounts", { code, name, account_type: type, balance: 0 });
   } catch {
     return -1;
   }
+}
+
+async function findOrCreateOutputVatAccount(): Promise<number> {
+  // Named without "Payable" so the AP pattern can't claim it.
+  return findOrCreateAccount("liability", "2100", "Output VAT", /output vat|vat on sales|sales vat/i);
+}
+async function findOrCreateInputVatAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "asset",
+    "1250",
+    "Input VAT",
+    /input vat|vat on purchases|purchase vat|vat recoverable/i
+  );
 }
 
 async function findOrCreateSalesAccount(): Promise<number> {
@@ -1654,12 +1839,23 @@ async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
   ref: string
 ): Promise<number> {
-  const q = sb().from("transactions").select("*");
-  if (invoiceId) q.eq("invoice_id", invoiceId);
-  else q.eq("ref", ref);
-  const { data, error } = await q;
-  if (error) throw error;
-  const txns = (data ?? []) as any[];
+  // Match by BOTH keys. Postings made before invoice_id was tracked carry only
+  // a ref; reversing by either key keeps re-finalize from leaving orphan rows
+  // that pile up (the "8 invoices → 15 entries" bug). Dedup by row id so a row
+  // matched on both keys isn't reversed twice.
+  const rows = new Map<number, any>();
+  const byRef = await sb().from("transactions").select("*").eq("ref", ref);
+  if (byRef.error) throw byRef.error;
+  for (const t of (byRef.data ?? []) as any[]) rows.set(t.id, t);
+  if (invoiceId) {
+    const byId = await sb()
+      .from("transactions")
+      .select("*")
+      .eq("invoice_id", invoiceId);
+    if (byId.error) throw byId.error;
+    for (const t of (byId.data ?? []) as any[]) rows.set(t.id, t);
+  }
+  const txns = [...rows.values()];
   if (txns.length) {
     const accts = await sList<Account>("accounts");
     const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
@@ -1672,11 +1868,15 @@ async function reverseInvoiceTransactions(
       );
     }
   }
-  const delQ = sb().from("transactions").delete();
-  if (invoiceId) delQ.eq("invoice_id", invoiceId);
-  else delQ.eq("ref", ref);
-  const { error: de } = await delQ;
-  if (de) throw de;
+  const delRef = await sb().from("transactions").delete().eq("ref", ref);
+  if (delRef.error) throw delRef.error;
+  if (invoiceId) {
+    const delId = await sb()
+      .from("transactions")
+      .delete()
+      .eq("invoice_id", invoiceId);
+    if (delId.error) throw delId.error;
+  }
   return txns.length;
 }
 
@@ -1733,7 +1933,7 @@ async function propagateInvoice(
     const prior = await reverseInvoiceTransactions(id || undefined, ref);
     if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
 
-    const total = docTotal(
+    const { net, tax, total } = docTotals(
       { tax_rate: Number(doc.tax_rate ?? 0), discount: Number(doc.discount ?? 0) },
       items
     );
@@ -1747,21 +1947,40 @@ async function propagateInvoice(
         await adjustProductStock(it.product_id, Math.abs(Number(it.qty)));
       }
       if (total > 0) {
-        const purchasesId = await findOrCreatePurchasesAccount();
+        const inventoryId = await findOrCreateInventoryAccount();
         const apId = await findOrCreateApAccount();
-        if (purchasesId > 0) {
+        // debit Inventory (net, ex-VAT)
+        if (inventoryId > 0) {
           await sInsert("transactions", {
-            account_id: purchasesId,
+            account_id: inventoryId,
             txn_type: "debit",
-            amount: total,
-            description: `${ref} — Purchases`,
+            amount: net,
+            description: `${ref} — Inventory`,
             ref,
             source,
             invoice_id: id || null,
             txn_date: txnDate,
           });
-          await adjustAccountBalance(purchasesId, ledgerDelta("expense", "debit", total));
+          await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net));
         }
+        // debit Input VAT (recoverable) for the tax portion
+        if (tax > 0) {
+          const vatId = await findOrCreateInputVatAccount();
+          if (vatId > 0) {
+            await sInsert("transactions", {
+              account_id: vatId,
+              txn_type: "debit",
+              amount: tax,
+              description: `${ref} — Input VAT`,
+              ref,
+              source,
+              invoice_id: id || null,
+              txn_date: txnDate,
+            });
+            await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax));
+          }
+        }
+        // credit Accounts Payable (gross — what we owe the supplier)
         if (apId > 0) {
           await sInsert("transactions", {
             account_id: apId,
@@ -1791,22 +2010,84 @@ async function propagateInvoice(
       if (!it.product_id || !it.qty) continue;
       await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)));
     }
+    // COGS: relieve Inventory at cost and book the cost of the sale. Only
+    // product-linked lines have a cost; free-text lines are skipped. Tagged with
+    // this invoice's ref/id so it reverses with the rest on revert.
+    {
+      const products = await sList<Product>("products");
+      const costById = new Map(products.map((p) => [p.id, Number(p.cost_price) || 0]));
+      let cogs = 0;
+      for (const it of items) {
+        if (!it.product_id || !it.qty) continue;
+        cogs += (costById.get(it.product_id) ?? 0) * Math.abs(Number(it.qty));
+      }
+      cogs = Math.round(cogs * 100) / 100;
+      if (cogs > 0) {
+        const cogsId = await findOrCreateCogsAccount();
+        const invId = await findOrCreateInventoryAccount();
+        if (cogsId > 0) {
+          await sInsert("transactions", {
+            account_id: cogsId,
+            txn_type: "debit",
+            amount: cogs,
+            description: `${ref} — Cost of Goods Sold`,
+            ref,
+            source,
+            invoice_id: id || null,
+            txn_date: txnDate,
+          });
+          await adjustAccountBalance(cogsId, ledgerDelta("expense", "debit", cogs));
+        }
+        if (invId > 0) {
+          await sInsert("transactions", {
+            account_id: invId,
+            txn_type: "credit",
+            amount: cogs,
+            description: `${ref} — Inventory (COGS)`,
+            ref,
+            source,
+            invoice_id: id || null,
+            txn_date: txnDate,
+          });
+          await adjustAccountBalance(invId, ledgerDelta("asset", "credit", cogs));
+        }
+      }
+    }
     if (total > 0) {
       const revenueId = await findOrCreateSalesAccount();
       const arId = await findOrCreateArAccount();
+      // credit Sales Revenue (net, ex-VAT)
       if (revenueId > 0) {
         await sInsert("transactions", {
           account_id: revenueId,
           txn_type: "credit",
-          amount: total,
+          amount: net,
           description: `${ref} — Sales Revenue`,
           ref,
           source,
           invoice_id: id || null,
           txn_date: txnDate,
         });
-        await adjustAccountBalance(revenueId, ledgerDelta("revenue", "credit", total));
+        await adjustAccountBalance(revenueId, ledgerDelta("revenue", "credit", net));
       }
+      // credit Output VAT (liability owed to the tax authority)
+      if (tax > 0) {
+        const vatId = await findOrCreateOutputVatAccount();
+        if (vatId > 0) {
+          await sInsert("transactions", {
+            account_id: vatId,
+            txn_type: "credit",
+            amount: tax,
+            description: `${ref} — Output VAT`,
+            ref,
+            source,
+            invoice_id: id || null,
+            txn_date: txnDate,
+          });
+          await adjustAccountBalance(vatId, ledgerDelta("liability", "credit", tax));
+        }
+      }
+      // debit Accounts Receivable (gross — what the customer owes)
       if (arId > 0) {
         await sInsert("transactions", {
           account_id: arId,
@@ -1852,54 +2133,77 @@ async function findOrCreateApAccount(): Promise<number> {
     /payable|creditors|ap\b/i
   );
 }
-async function findOrCreatePurchasesAccount(): Promise<number> {
-  return findOrCreateAccount(
-    "expense",
-    "5100",
-    "Purchases",
-    /purchase|cogs|cost of goods/i
-  );
+/** Inventory as a balance-sheet asset — stock you've bought to resell. The cost
+ *  sits here until the goods are sold (then it becomes COGS). */
+async function findOrCreateInventoryAccount(): Promise<number> {
+  return findOrCreateAccount("asset", "1300", "Inventory", /inventory|stock/i);
+}
+async function findOrCreateCogsAccount(): Promise<number> {
+  return findOrCreateAccount("expense", "5050", "Cost of Goods Sold", /cost of goods|cogs/i);
 }
 
 /** A purchase order's accounting footprint, posted when it's received/done:
- *  debit Purchases (expense), credit Accounts Payable (the supplier we now owe).
- *  Idempotent — reverses any prior posting for this PO before re-posting. Stock
- *  is handled separately by pos.receive. */
+ *  debit Inventory (net, ex-VAT), debit Input VAT (recoverable tax portion),
+ *  credit Accounts Payable (gross — what we owe the supplier). The stored PO
+ *  `total` is the net subtotal (Σ qty × unit_cost); VAT is derived from the
+ *  PO's `tax_rate`. Idempotent — reverses any prior posting for this PO before
+ *  re-posting. Stock is handled separately by pos.receive. */
 async function propagatePurchase(doc: Record<string, unknown>) {
   try {
     const number = String(doc.po_number ?? "").trim();
     if (!number) return;
     const ref = `PO ${number}`;
     await reverseInvoiceTransactions(undefined, ref); // clear prior posting
-    const total = Number(doc.total ?? 0);
-    if (total <= 0) return;
+    const net = Number(doc.total ?? 0); // PO total is the net subtotal, ex-VAT
+    if (net <= 0) return;
+    const rate = Number(doc.tax_rate ?? 0);
+    const tax = rate > 0 ? Math.round(net * rate) / 100 : 0; // recoverable Input VAT
+    const gross = net + tax; // what we owe the supplier
     const txnDate =
       (doc.order_date as string) || new Date().toISOString().slice(0, 10);
-    const purchasesId = await findOrCreatePurchasesAccount();
+    const inventoryId = await findOrCreateInventoryAccount();
     const apId = await findOrCreateApAccount();
-    if (purchasesId > 0) {
+    // debit Inventory (net, ex-VAT)
+    if (inventoryId > 0) {
       await sInsert("transactions", {
-        account_id: purchasesId,
+        account_id: inventoryId,
         txn_type: "debit",
-        amount: total,
-        description: `${ref} — Purchases`,
+        amount: net,
+        description: `${ref} — Inventory`,
         ref,
         source: "purchase",
         txn_date: txnDate,
       });
-      await adjustAccountBalance(purchasesId, ledgerDelta("expense", "debit", total));
+      await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net));
     }
+    // debit Input VAT (recoverable) for the tax portion
+    if (tax > 0) {
+      const vatId = await findOrCreateInputVatAccount();
+      if (vatId > 0) {
+        await sInsert("transactions", {
+          account_id: vatId,
+          txn_type: "debit",
+          amount: tax,
+          description: `${ref} — Input VAT`,
+          ref,
+          source: "purchase",
+          txn_date: txnDate,
+        });
+        await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax));
+      }
+    }
+    // credit Accounts Payable (gross — net + recoverable VAT)
     if (apId > 0) {
       await sInsert("transactions", {
         account_id: apId,
         txn_type: "credit",
-        amount: total,
+        amount: gross,
         description: `${ref} — Accounts Payable`,
         ref,
         source: "purchase",
         txn_date: txnDate,
       });
-      await adjustAccountBalance(apId, ledgerDelta("liability", "credit", total));
+      await adjustAccountBalance(apId, ledgerDelta("liability", "credit", gross));
     }
   } catch (e) {
     console.error("Purchase propagation failed:", e);

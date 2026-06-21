@@ -71,6 +71,7 @@ import {
   ShareToggle,
   SearchInput,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 import DocView, { type DocViewItem } from "../components/DocView";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import { ResizablePanels } from "../components/ResizablePanels";
@@ -956,19 +957,16 @@ export default function Quoting() {
                         />
                       </Field>
                       <Field label="Quote Date">
-                        <input
-                          type="date"
-                          className="input"
+                        <DateField
                           value={form.quote_date ?? ""}
-                          onChange={(e) => set("quote_date", e.target.value)}
+                          onChange={(v) => set("quote_date", v)}
+                          clearable={false}
                         />
                       </Field>
                       <Field label="Valid Until">
-                        <input
-                          type="date"
-                          className="input"
+                        <DateField
                           value={form.valid_until ?? ""}
-                          onChange={(e) => set("valid_until", e.target.value)}
+                          onChange={(v) => set("valid_until", v)}
                         />
                       </Field>
                       <div className="grid grid-cols-2 gap-3">

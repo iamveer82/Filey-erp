@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Upload, Sparkles, Loader2, Receipt } from "lucide-react";
 import { Modal } from "./ui";
+import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";
 import { extractExpenseFromImage, aiReady, type ExtractedExpense } from "../lib/ai";
-import { fileToImage } from "../lib/docScan";
+import { fileToImages } from "../lib/docScan";
 import { fin } from "../lib/api";
 import { numInput } from "../lib/format";
 
@@ -51,8 +52,8 @@ export default function ExpenseScanModal({
     setData(null);
     setBusy(true);
     try {
-      const img = await fileToImage(file);
-      setData(await extractExpenseFromImage(img));
+      const imgs = await fileToImages(file);
+      setData(await extractExpenseFromImage(imgs));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -137,11 +138,10 @@ export default function ExpenseScanModal({
               />
             </Labeled>
             <Labeled label="Date">
-              <input
-                type="date"
-                className="input"
+              <DateField
                 value={data.date ?? ""}
-                onChange={(e) => setData({ ...data, date: e.target.value })}
+                onChange={(v) => setData({ ...data, date: v })}
+                clearable={false}
               />
             </Labeled>
             <Labeled label="Category">

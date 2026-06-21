@@ -8,6 +8,7 @@ import {
   Sparkles,
   Pencil,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -23,6 +24,7 @@ import {
   Field,
   ErrorBanner,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"];
 
@@ -57,6 +59,27 @@ export default function Accounting() {
   }, []);
   useLiveSync(load);
 
+  const doRepair = async () => {
+    const ok = await confirm({
+      title: "Repair ledger?",
+      message:
+        "Removes duplicate journal entries and recomputes every account balance from what's left. Your invoices, expenses and accounts are untouched.",
+      confirmLabel: "Repair",
+    });
+    if (!ok) return;
+    try {
+      const { removed } = await fin.repairLedger();
+      toast.success(
+        removed > 0
+          ? `Removed ${removed} duplicate entr${removed === 1 ? "y" : "ies"} and recomputed balances.`
+          : "No duplicates found — balances recomputed."
+      );
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="animate-fade-up">
       <PageHeader
@@ -70,6 +93,14 @@ export default function Accounting() {
               onClick={() => setScanOpen(true)}
             >
               <Sparkles size={15} /> Scan receipt
+            </button>
+            <button
+              className="btn-ghost"
+              aria-label="Repair ledger"
+              title="Remove duplicate entries & recompute balances"
+              onClick={doRepair}
+            >
+              <Wrench size={15} /> Repair
             </button>
             <button
               className="btn-ghost"
@@ -576,11 +607,10 @@ function JournalModal({
           />
         </Field>
         <Field label="Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.txn_date}
-            onChange={(e) => setF({ ...f, txn_date: e.target.value })}
+            onChange={(v) => setF({ ...f, txn_date: v })}
+            clearable={false}
           />
         </Field>
       </div>

@@ -17,7 +17,7 @@ import {
 import { FileIcon } from "../components/BrandIcon";
 import {
   useFiles,
-  fileUrl,
+  fileObjectUrl,
   downloadUrl,
   shareFileLink,
   FILE_FOLDERS,
@@ -439,17 +439,24 @@ function FilePreviewPage({
 
   useEffect(() => {
     let alive = true;
+    let objUrl: string | null = null;
     setUrl(null);
     setErr(null);
-    fileUrl(file)
+    fileObjectUrl(file)
       .then((u) => {
-        if (!alive) return;
-        if (u) setUrl(u);
-        else setErr("This file is no longer available.");
+        if (!alive) {
+          if (u) URL.revokeObjectURL(u);
+          return;
+        }
+        if (u) {
+          objUrl = u;
+          setUrl(u);
+        } else setErr("This file is no longer available.");
       })
       .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
     };
   }, [file.id]);
 

@@ -16,6 +16,8 @@ import {
   Calendar,
   Hash,
   Pencil,
+  PackageMinus,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -23,7 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/DropdownMenu";
-import { erp, shareRecord, Product } from "../lib/api";
+import { erp, shareRecord, billing, Product, type StockIssue } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
@@ -44,6 +46,7 @@ import {
   SearchInput,
   FilterChip,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 
 export default function Inventory() {
   const { toast, confirm } = useUI();
@@ -52,6 +55,8 @@ export default function Inventory() {
   const [cat, setCat] = useState<string>("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [issueFor, setIssueFor] = useState<Product | null>(null);
+  const [issues, setIssues] = useState<Record<string, StockIssue[]>>({});
   const [importOpen, setImportOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [batchFilter, setBatchFilter] = useState("");
@@ -77,6 +82,7 @@ export default function Inventory() {
 
   const load = () => {
     setError("");
+    erp.allStockIssues().then(setIssues).catch(() => {});
     return erp
       .products()
       .then(setProducts)
@@ -87,6 +93,8 @@ export default function Inventory() {
       )
       .finally(() => setLoading(false));
   };
+  const issuedTotal = (p: Product) =>
+    (issues[String(p.id)] ?? []).reduce((s, i) => s + i.qty, 0);
   useEffect(() => {
     load();
   }, []);
@@ -131,8 +139,9 @@ export default function Inventory() {
 
   const lowStock = products.filter((p) => p.quantity <= p.reorder_level);
   const outOfStock = products.filter((p) => p.quantity === 0);
+  // Guard unset/NaN prices so a product with no cost price adds 0 (not NaN).
   const invValue = products.reduce(
-    (s, p) => s + p.quantity * p.cost_price,
+    (s, p) => s + (Number(p.quantity) || 0) * (Number(p.cost_price) || 0),
     0
   );
 
@@ -468,6 +477,19 @@ export default function Inventory() {
             ),
           },
           {
+            key: "issued",
+            label: "Issued out",
+            sortValue: (p) => issuedTotal(p),
+            render: (p) => {
+              const t = issuedTotal(p);
+              return t > 0 ? (
+                <span className="font-medium text-brand-600">{t}</span>
+              ) : (
+                <span className="text-brand-400">—</span>
+              );
+            },
+          },
+          {
             key: "share",
             label: "Sharing",
             render: (p) => (
@@ -491,6 +513,14 @@ export default function Inventory() {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setIssueFor(p);
+                    }}
+                  >
+                    <PackageMinus size={14} /> Issue stock
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.preventDefault();
@@ -530,6 +560,13 @@ export default function Inventory() {
           setOpen(false);
           setEditing(null);
         }}
+        onSaved={load}
+      />
+
+      <IssueStockModal
+        product={issueFor}
+        history={issueFor ? issues[String(issueFor.id)] ?? [] : []}
+        onClose={() => setIssueFor(null)}
         onSaved={load}
       />
 
@@ -625,6 +662,7 @@ function ProductModal({
     reorder_level: 0,
     batch_number: "",
     expiry_date: "",
+    purchase_date: "",
     barcode: "",
     warehouse: "",
     is_serialized: false,
@@ -648,15 +686,18 @@ function ProductModal({
         reorder_level: product.reorder_level ?? 0,
         batch_number: product.batch_number ?? "",
         expiry_date: product.expiry_date ?? "",
+        purchase_date: String(product.custom_fields?.purchase_date ?? ""),
         barcode: product.barcode ?? "",
         warehouse: product.warehouse ?? "",
         is_serialized: product.is_serialized ?? false,
       });
       setCustomFields(
-        Object.entries(product.custom_fields ?? {}).map(([key, value]) => ({
-          key,
-          value: String(value),
-        }))
+        Object.entries(product.custom_fields ?? {})
+          .filter(([key]) => key !== "purchase_date")
+          .map(([key, value]) => ({
+            key,
+            value: String(value),
+          }))
       );
     } else {
       setF({
@@ -669,6 +710,7 @@ function ProductModal({
         reorder_level: 0,
         batch_number: "",
         expiry_date: "",
+        purchase_date: "",
         barcode: "",
         warehouse: "",
         is_serialized: false,
@@ -682,17 +724,20 @@ function ProductModal({
     if (!valid) return;
     setSaving(true);
     try {
-      const custom = Object.fromEntries(
+      // purchase_date isn't a products column — it rides in custom_fields.
+      const { purchase_date, ...fCols } = f;
+      const custom: Record<string, string> = Object.fromEntries(
         customFields
           .filter((c) => c.key.trim())
           .map((c) => [c.key.trim(), c.value])
       );
+      if (purchase_date) custom.purchase_date = purchase_date;
       const payload = {
-        ...f,
-        batch_number: f.batch_number || undefined,
-        expiry_date: f.expiry_date || undefined,
-        barcode: f.barcode || undefined,
-        warehouse: f.warehouse || undefined,
+        ...fCols,
+        batch_number: fCols.batch_number || undefined,
+        expiry_date: fCols.expiry_date || undefined,
+        barcode: fCols.barcode || undefined,
+        warehouse: fCols.warehouse || undefined,
         // Send {} (not undefined) when editing so clearing all fields persists.
         custom_fields: Object.keys(custom).length
           ? custom
@@ -818,11 +863,15 @@ function ProductModal({
           />
         </Field>
         <Field label="Expiry Date">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={f.expiry_date}
-            onChange={(e) => setF({ ...f, expiry_date: e.target.value })}
+            onChange={(v) => setF({ ...f, expiry_date: v })}
+          />
+        </Field>
+        <Field label="Date of purchase">
+          <DateField
+            value={f.purchase_date}
+            onChange={(v) => setF({ ...f, purchase_date: v })}
           />
         </Field>
       </div>
@@ -882,6 +931,166 @@ function ProductModal({
           onClick={save}
         >
           {saving ? "Saving…" : product ? "Save changes" : "Save Product"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function IssueStockModal({
+  product,
+  history,
+  onClose,
+  onSaved,
+}: {
+  product: Product | null;
+  history: StockIssue[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useUI();
+  const [invoice, setInvoice] = useState("");
+  const [qty, setQty] = useState(0);
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [invNumbers, setInvNumbers] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!product) return;
+    setInvoice("");
+    setQty(0);
+    setNote("");
+    setDate(new Date().toISOString().slice(0, 10));
+    billing
+      .listDocs()
+      .then((docs) =>
+        setInvNumbers(
+          (docs as unknown as { number?: string }[])
+            .map((d) => d.number)
+            .filter((n): n is string => !!n)
+        )
+      )
+      .catch(() => setInvNumbers([]));
+  }, [product]);
+
+  if (!product) return null;
+
+  const stock = product.quantity;
+  const issuedSoFar = history.reduce((s, i) => s + i.qty, 0);
+  const qtyErr = qty <= 0 || qty > stock;
+  const invErr = !invoice.trim();
+
+  const submit = async () => {
+    if (qtyErr || invErr) return;
+    setSaving(true);
+    try {
+      await erp.issueStock(product.id, qty, invoice, note, date);
+      toast.success(`Issued ${qty} × ${product.name} to ${invoice.trim()}`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={!!product} onClose={onClose} title={`Issue stock — ${product.name}`}>
+      <div className="mb-4 flex items-center gap-6 rounded-xl bg-brand-50 px-4 py-3 dark:bg-white/5">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">In stock</p>
+          <p className="text-lg font-semibold text-ink">{stock}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">Issued out</p>
+          <p className="text-lg font-semibold text-brand-600">{issuedSoFar}</p>
+        </div>
+        {qty > 0 && !qtyErr && (
+          <div className="ml-auto text-right">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">After this</p>
+            <p className="text-lg font-semibold text-ink">{stock - qty} left</p>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Invoice / reference *">
+          <input
+            className={cn("input", invErr && "border-danger")}
+            list="issue-inv-numbers"
+            placeholder="INV-2026-0001"
+            value={invoice}
+            onChange={(e) => setInvoice(e.target.value)}
+          />
+          <datalist id="issue-inv-numbers">
+            {invNumbers.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="Quantity *">
+          <input
+            type="number"
+            className={cn("input", qty > stock && "border-danger")}
+            placeholder="0"
+            value={qty || ""}
+            onChange={(e) => setQty(numInput(e.target.value))}
+          />
+          {qty > stock && (
+            <p className="mt-1 text-[11px] text-danger">Only {stock} in stock.</p>
+          )}
+        </Field>
+        <Field label="Issue date">
+          <DateField value={date} onChange={setDate} clearable={false} />
+        </Field>
+      </div>
+      <div className="mt-3">
+        <Field label="Note (optional)">
+          <input
+            className="input"
+            placeholder="e.g. delivered to customer site"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-4 border-t border-brand-100 pt-3 dark:border-white/10">
+          <p className="mb-2 text-[13px] font-medium text-brand-500">Issue history</p>
+          <div className="max-h-40 space-y-1.5 overflow-auto">
+            {[...history].reverse().map((h, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="min-w-0 truncate font-medium text-ink">
+                  {h.invoice || "—"}
+                  {h.note ? <span className="text-brand-400"> · {h.note}</span> : null}
+                </span>
+                <span className="shrink-0 text-brand-500">
+                  {h.qty} · {fmtDate(h.date)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button className="btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn-primary"
+          disabled={saving || qtyErr || invErr}
+          onClick={submit}
+        >
+          {saving ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <PackageMinus size={15} />
+          )}
+          Issue stock
         </button>
       </div>
     </Modal>

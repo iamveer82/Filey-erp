@@ -4,6 +4,7 @@ import { followups, type FollowUp } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { cn, fmtDate } from "../lib/format";
+import { DateField } from "./DatePicker";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -40,8 +41,12 @@ export default function FollowUps({
   }, [customerId]);
   useLiveSync(load);
 
+  const [hint, setHint] = useState(false);
   const add = async () => {
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      setHint(true);
+      return;
+    }
     setBusy(true);
     try {
       const selected = customers?.find((c) => c.id === cust);
@@ -152,7 +157,10 @@ export default function FollowUps({
           className="input min-w-[180px] flex-1"
           placeholder="e.g. Ask Mr Sharma about the oil purchase"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            setHint(false);
+          }}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
         {!customerId && customers && (
@@ -169,16 +177,22 @@ export default function FollowUps({
             ))}
           </select>
         )}
-        <input
-          type="date"
-          className="input w-auto"
+        <DateField
+          className="w-44"
           value={due}
-          onChange={(e) => setDue(e.target.value)}
+          onChange={setDue}
+          clearable={false}
         />
         <button className="btn-primary" disabled={busy || !title.trim()} onClick={add}>
           <Plus size={16} /> Add
         </button>
       </div>
+
+      {hint && (
+        <p className="-mt-2 mb-3 text-[11px] text-danger">
+          Type a note before adding.
+        </p>
+      )}
 
       {items.length === 0 && (
         <div className="empty-gradient rounded-3xl p-8 flex flex-col items-center gap-4 text-center">

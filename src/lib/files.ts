@@ -49,6 +49,11 @@ const MIME: Record<string, string> = {
 const mimeOf = (name: string) =>
   MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
 
+/** Make a filename safe as a Storage key segment — strips slashes, traversal
+ *  and control chars. The original name is kept in metadata for display. */
+export const safeName = (name: string) =>
+  name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
+
 const newId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -71,7 +76,7 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
   if (!uid || !isConfigured) throw new Error("Sign in to save files to your account.");
   const id = newId();
   const mime = mimeOf(out.name);
-  const path = `${uid}/${id}/${out.name}`;
+  const path = `${uid}/${id}/${safeName(out.name)}`;
   const blob = new Blob([out.bytes.slice()], { type: mime });
   const up = await sb().storage
     .from(BUCKET)
@@ -139,17 +144,14 @@ export async function listFiles(): Promise<SavedFile[]> {
   }));
 }
 
-/** Short-lived signed URL for previewing a saved file *inline* (so PDFs and
- * images render in the in-app viewer instead of being force-downloaded).
- * Throws on failure so the caller can show the real reason rather than a
- * blank "could not load" state. */
-export async function fileUrl(f: SavedFile): Promise<string | null> {
+/** Object URL (`blob:`) for inline preview. Downloads the bytes (local shim or
+ * cloud) and wraps them — unlike a `data:` URL this renders in an <iframe> under
+ * the desktop CSP and in WebView2's PDF viewer. Caller must revokeObjectURL. */
+export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
   if (!isConfigured) return null;
-  const { data, error } = await sb().storage
-    .from(BUCKET)
-    .createSignedUrl(f.storagePath, 300);
+  const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
   if (error) throw new Error(error.message || "Could not open this file.");
-  return data?.signedUrl ?? null;
+  return data ? URL.createObjectURL(data) : null;
 }
 
 /** Signed URL that forces a download (Content-Disposition: attachment) using
@@ -213,7 +215,7 @@ export async function uploadUserFile(file: File, tool?: string): Promise<void> {
   if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
-  const path = `${uid}/${id}/${file.name}`;
+  const path = `${uid}/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
@@ -250,8 +252,7 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
   if (!uid || !isConfigured) throw new Error("Sign in to upload company assets.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
-  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${uid}/company/${id}/${safe}`;
+  const path = `${uid}/company/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });

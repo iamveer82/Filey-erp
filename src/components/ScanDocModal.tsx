@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, Sparkles, Loader2, FileText } from "lucide-react";
 import { Modal } from "./ui";
+import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";
 import { extractInvoiceFromImage, aiReady, type ExtractedInvoice } from "../lib/ai";
-import { fileToImage } from "../lib/docScan";
+import { fileToImages } from "../lib/docScan";
 import { billing, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
 import { getDisplayCurrency, numInput } from "../lib/format";
 
@@ -43,8 +44,8 @@ export default function ScanDocModal({
     setData(null);
     setBusy(true);
     try {
-      const img = await fileToImage(file);
-      const extracted = await extractInvoiceFromImage(img);
+      const imgs = await fileToImages(file);
+      const extracted = await extractInvoiceFromImage(imgs);
       setData(extracted);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -90,7 +91,12 @@ export default function ScanDocModal({
         issue_date: data.issue_date || today,
         due_date: data.due_date,
         notes: data.notes,
-        tax_rate: co?.default_tax_rate ?? 0,
+        // Prefer the tax rate read off the document (0 is valid = no tax);
+        // fall back to the company default only when nothing was extracted.
+        tax_rate:
+          typeof data.tax_rate === "number"
+            ? data.tax_rate
+            : co?.default_tax_rate ?? 0,
         discount: 0,
         items: (data.items ?? []).map((it) => ({
           description: it.description || "",
@@ -166,19 +172,26 @@ export default function ScanDocModal({
               />
             </Labeled>
             <Labeled label="Issue date">
-              <input
-                type="date"
-                className="input"
+              <DateField
                 value={data.issue_date ?? ""}
-                onChange={(e) => setData({ ...data, issue_date: e.target.value })}
+                onChange={(v) => setData({ ...data, issue_date: v })}
+                clearable={false}
               />
             </Labeled>
             <Labeled label="Due date">
-              <input
-                type="date"
-                className="input"
+              <DateField
                 value={data.due_date ?? ""}
-                onChange={(e) => setData({ ...data, due_date: e.target.value })}
+                onChange={(v) => setData({ ...data, due_date: v })}
+              />
+            </Labeled>
+            <Labeled label="Tax %">
+              <input
+                className="input"
+                value={String(data.tax_rate ?? "")}
+                placeholder="0"
+                onChange={(e) =>
+                  setData({ ...data, tax_rate: numInput(e.target.value) })
+                }
               />
             </Labeled>
           </div>

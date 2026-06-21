@@ -11,8 +11,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
+  BarChart,
   PieChart,
   Pie,
   Cell,
@@ -22,6 +21,15 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  ChartBar,
+  type ChartConfig,
+} from "../components/ui/chart";
 import {
   erp,
   fin,
@@ -44,8 +52,6 @@ import { DateRangePicker } from "../components/DatePicker";
 import { Calendar } from "lucide-react";
 
 const PIE = ["#FFD600", "#E0AE00", "#B88C00", "#FFBA3D", "#F6C954"];
-const CHART_STROKE = "#E0AE00";
-const CHART_FILL_START = "#FFD600";
 const CHART_GRID = "#DEDBD2";
 
 export default function Reports() {
@@ -96,6 +102,10 @@ export default function Reports() {
         .reduce((s, i) => s + (i.balance ?? 0), 0),
     [invoices]
   );
+  // Revenue is recognised when invoiced (accrual), so "Total Revenue" =
+  // collected + still-outstanding. invoiceRevenue alone is cash collected.
+  // This is what Overview labels "Revenue" — keep the two pages in agreement.
+  const totalRevenue = invoiceRevenue + accountsReceivable;
   const totalExpenses = useMemo(
     () => expenses.reduce((s, e) => s + e.amount, 0),
     [expenses]
@@ -122,7 +132,7 @@ export default function Reports() {
     () => posList.filter((p) => p.status === "received").reduce((s, p) => s + p.total, 0),
     [posList]
   );
-  const grossProfit = invoiceRevenue - totalExpenses - payrollCost;
+  const grossProfit = totalRevenue - totalExpenses - payrollCost;
   const invValue = products.reduce((s, p) => s + p.quantity * p.cost_price, 0);
 
   /* ── Expense by category ── */
@@ -137,16 +147,18 @@ export default function Reports() {
       .sort((a, b) => b.value - a.value);
   }, [expenses]);
 
-  /* ── Chart data ── */
-  const trend = useMemo(() => {
+  /* ── Chart data — sales (collected) vs expenses per month, last 6 ── */
+  const monthly = useMemo(() => {
     const now = new Date();
-    const buckets: { name: string; value: number; key: string }[] = [];
+    const buckets: { name: string; key: string; sales: number; expense: number }[] =
+      [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       buckets.push({
         name: d.toLocaleString("en", { month: "short" }),
         key: `${d.getFullYear()}-${d.getMonth()}`,
-        value: 0,
+        sales: 0,
+        expense: 0,
       });
     }
     const byKey = new Map(buckets.map((b) => [b.key, b]));
@@ -156,10 +168,21 @@ export default function Reports() {
       if (collected <= 0) continue;
       const d = new Date(inv.issue_date);
       const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
-      if (b) b.value += collected;
+      if (b) b.sales += collected;
     }
-    return buckets.map(({ name, value }) => ({ name, value }));
-  }, [invoices]);
+    for (const e of expenses) {
+      if (!e.expense_date) continue;
+      const d = new Date(e.expense_date);
+      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
+      if (b) b.expense += e.amount;
+    }
+    return buckets.map(({ name, sales, expense }) => ({ name, sales, expense }));
+  }, [invoices, expenses]);
+
+  const chartConfig = {
+    sales: { label: "Sales", color: "#FFD600" },
+    expense: { label: "Expenses", color: "#B88C00" },
+  } satisfies ChartConfig;
 
   /* ── Transaction tables for PDF ── */
   const invoiceTxns = useMemo(
@@ -194,7 +217,8 @@ export default function Reports() {
 
   const exportCsv = () => {
     const rows = [
-      { metric: "Paid Revenue", amount: invoiceRevenue },
+      { metric: "Total Revenue (billed)", amount: totalRevenue },
+      { metric: "Collected", amount: invoiceRevenue },
       { metric: "Accounts Receivable", amount: accountsReceivable },
       { metric: "PO Value (non-cancelled)", amount: poValue },
       { metric: "PO Received", amount: poReceived },
@@ -266,9 +290,9 @@ export default function Reports() {
           <div className="relative overflow-hidden rounded-full bg-primary-400 p-6 text-ink">
             <div className="flex items-center justify-between mb-3">
               <DollarSign size={22} className="text-ink/70" />
-              <span className="pill bg-ink/15 text-ink text-[11px]">Paid invoices</span>
+              <span className="pill bg-ink/15 text-ink text-[11px]">Billed (all)</span>
             </div>
-            <p className="text-3xl font-medium">{aed(invoiceRevenue)}</p>
+            <p className="text-3xl font-medium">{aed(totalRevenue)}</p>
             <p className="text-sm font-medium text-ink/60 mt-1">Total Revenue</p>
           </div>
           <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#F4F5F6]">
@@ -305,7 +329,7 @@ export default function Reports() {
             icon={<Boxes size={20} />}
           />
           <MetricCard
-            label="Invoice Revenue (paid)"
+            label="Collected"
             value={aed(invoiceRevenue)}
             icon={<Wallet size={20} />}
             iconClass="bg-success/15 text-success"
@@ -356,10 +380,10 @@ export default function Reports() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between py-2 border-b border-brand-100">
               <span className="font-medium text-brand-500">Revenue</span>
-              <span className="font-medium tabular-nums">{aed(invoiceRevenue)}</span>
+              <span className="font-medium tabular-nums">{aed(totalRevenue)}</span>
             </div>
             <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Invoices (paid)</span>
+              <span className="text-brand-500">Collected</span>
               <span className="tabular-nums">{aed(invoiceRevenue)}</span>
             </div>
             <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
@@ -408,47 +432,38 @@ export default function Reports() {
 
         {/* ── Charts (no-print) ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6 no-print">
-          <InfoCard title="Revenue (paid) — last 6 months" className="lg:col-span-2">
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend}>
-                  <defs>
-                    <linearGradient id="rep" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={CHART_FILL_START} stopOpacity={0.5} />
-                      <stop offset="100%" stopColor={CHART_FILL_START} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} />
-                  <XAxis
-                    dataKey="name"
-                    tick={{ fontSize: 12, fill: "#A39B8C" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 12, fill: "#A39B8C" }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={70}
-                  />
-                  <Tooltip
-                    formatter={(v) => aed(Number(v))}
-                    contentStyle={{
-                      borderRadius: 12,
-                      border: "1px solid #DEDBD2",
-                      fontSize: 13,
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke={CHART_STROKE}
-                    strokeWidth={2.5}
-                    fill="url(#rep)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          <InfoCard title="Sales vs expenses — last 6 months" className="lg:col-span-2">
+            <ChartContainer config={chartConfig} className="h-72 w-full aspect-auto">
+              <BarChart data={monthly}>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 12, fill: "#A39B8C" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 12, fill: "#A39B8C" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={70}
+                />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                <ChartBar
+                  dataKey="sales"
+                  fill="var(--color-sales)"
+                  radius={[4, 4, 0, 0]}
+                  seriesIndex={0}
+                />
+                <ChartBar
+                  dataKey="expense"
+                  fill="var(--color-expense)"
+                  radius={[4, 4, 0, 0]}
+                  seriesIndex={1}
+                />
+              </BarChart>
+            </ChartContainer>
           </InfoCard>
 
           <InfoCard title="Spending by category">
@@ -502,7 +517,8 @@ export default function Reports() {
             </thead>
             <tbody>
               {[
-                ["Revenue (paid invoices)", invoiceRevenue],
+                ["Total Revenue (billed)", totalRevenue],
+                ["Collected", invoiceRevenue],
                 ["Accounts Receivable", accountsReceivable],
                 ["Purchase Orders (non-cancelled)", poValue],
                 ["POs Received", poReceived],

@@ -38,6 +38,7 @@ import {
   Spinner,
   ErrorBanner,
 } from "../components/ui";
+import { DateField } from "../components/DatePicker";
 import { Tabs, TabsList, TabsTrigger } from "../components/Tabs";
 
 export default function Crm() {
@@ -556,11 +557,10 @@ function TaskModal({
             </select>
           </Field>
           <Field label="Due date">
-            <input
-              type="date"
-              className="input"
+            <DateField
               value={f.due_date}
-              onChange={(e) => setF({ ...f, due_date: e.target.value })}
+              onChange={(v) => setF({ ...f, due_date: v })}
+              clearable={false}
             />
           </Field>
         </div>
