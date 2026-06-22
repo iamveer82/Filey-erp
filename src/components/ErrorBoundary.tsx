@@ -4,8 +4,15 @@ interface State {
   error: Error | null;
 }
 
+interface Props {
+  children: ReactNode;
+  /** When this value changes, a caught error is cleared. Pass the route path
+   *  so navigating away from a crashed page recovers automatically. */
+  resetKey?: unknown;
+}
+
 /** Stops a render error from white-screening the whole desktop app. */
-export default class ErrorBoundary extends Component<{ children: ReactNode }, State> {
+export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 
   static getDerivedStateFromError(error: Error): State {
@@ -14,6 +21,12 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Unhandled UI error:", error, info.componentStack);
+  }
+
+  componentDidUpdate(prev: Props) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   render() {

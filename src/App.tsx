@@ -1,5 +1,6 @@
 import { Suspense, lazy, useState } from "react";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { cloudConfigured } from "./lib/supabase";
 import { getDataMode } from "./lib/dataMode";
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -42,9 +43,13 @@ function ModuleDisabled({ name }: { name: string }) {
 
 function AppRoutes() {
   const { modules, isEnabled } = useModules();
+  const location = useLocation();
   return (
-    <Suspense fallback={<Splash />}>
-      <Routes>
+    // Per-route boundary: a crash in one page shows a contained error in the
+    // content area (sidebar/nav stay alive), and navigating away recovers.
+    <ErrorBoundary resetKey={location.pathname}>
+      <Suspense fallback={<Splash />}>
+        <Routes>
         <Route path="/" element={<Navigate to="/overview-modern" replace />} />
         {/* Legacy alias — older bookmarks pointing at /overview still work. */}
         <Route path="/overview" element={<ModernOverview />} />
@@ -62,8 +67,9 @@ function AppRoutes() {
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/suppliers/:id" element={<SupplierDetail />} />
         <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
