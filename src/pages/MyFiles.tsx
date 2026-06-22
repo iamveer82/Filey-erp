@@ -15,6 +15,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { FileIcon } from "../components/BrandIcon";
+import PdfCanvas from "../components/PdfCanvas";
 import {
   useFiles,
   fileObjectUrl,
@@ -527,11 +528,7 @@ function FilePreviewPage({
             />
           </div>
         ) : isPdf ? (
-          <iframe
-            title={file.name}
-            src={`${url}#toolbar=1&view=Fit`}
-            className="h-full w-full"
-          />
+          <PdfCanvas url={url} />
         ) : (
           <div className="grid h-full place-items-center text-center px-6">
             <div>
