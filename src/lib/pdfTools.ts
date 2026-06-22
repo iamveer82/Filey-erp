@@ -2544,11 +2544,12 @@ export async function wordToPdf(file: File): Promise<OutFile> {
   return textToPdf(stub);
 }
 
-/* SheetJS is loaded from the official CDN rather than npm: the npm `xlsx`
- * package carries a known high-severity prototype-pollution / ReDoS advisory,
- * and SheetJS ships fixes only through their CDN. The module is cached after
- * first load so each tool fetches it at most once. */
-const XLSX_CDN_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
+/* SheetJS is vendored locally (src/vendor/xlsx.mjs, v0.20.3) rather than the
+ * npm `xlsx` package — npm `xlsx` carries a known high-severity
+ * prototype-pollution / ReDoS advisory and SheetJS ships fixes only through
+ * their own distribution. Self-hosting (vs the CDN) means Excel tools work
+ * OFFLINE and aren't blocked by the script-src CSP. Vite code-splits it into a
+ * lazy chunk loaded on first use. */
 interface XlsxLib {
   read(data: Uint8Array, opts: { type: string }): {
     SheetNames: string[];
@@ -2564,7 +2565,7 @@ interface XlsxLib {
 }
 let xlsxPromise: Promise<XlsxLib> | null = null;
 function loadXlsx(): Promise<XlsxLib> {
-  return (xlsxPromise ??= import(/* @vite-ignore */ XLSX_CDN_URL) as Promise<XlsxLib>);
+  return (xlsxPromise ??= import("../vendor/xlsx.mjs") as unknown as Promise<XlsxLib>);
 }
 
 /** Excel (.xlsx/.xls) → PDF table (one section per sheet). */

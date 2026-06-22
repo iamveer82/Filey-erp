@@ -14,6 +14,7 @@ export default tseslint.config(
       "node_modules",
       ".agents", // vendored agent-skill scripts, not part of the app
       ".claude", // workflow scripts, not part of the app
+      "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
       "src-tauri/target",
       "public/sw.js", // service-worker globals, hand-written
