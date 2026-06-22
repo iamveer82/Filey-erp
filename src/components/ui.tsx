@@ -1,4 +1,11 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../lib/i18n";
 import {
@@ -142,6 +149,30 @@ export function Delta({
 /** Glanceable KPI card — icon chip, metric, delta.
  *  Pass rawValue + formatValue for a live count-up animation when the card
  *  scrolls into view. */
+/** Shrink an element's font-size until its text fits the available width, down
+ *  to a floor — so a big number stays fully visible instead of truncating to an
+ *  ellipsis. Re-fits when `dep` (the value) changes or the window resizes.
+ *  ponytail: scrollWidth-based, no ResizeObserver — window resize covers grid reflow. */
+function useFitText<T extends HTMLElement>(dep: unknown, max = 18, min = 11) {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      let size = max;
+      el.style.fontSize = size + "px";
+      while (el.scrollWidth > el.clientWidth && size > min) {
+        size -= 1;
+        el.style.fontSize = size + "px";
+      }
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [dep, max, min]);
+  return ref;
+}
+
 export function MetricCard({
   label,
   value,
@@ -159,6 +190,8 @@ export function MetricCard({
   rawValue?: number;
   formatValue?: (n: number) => string;
 }) {
+  const display = rawValue !== undefined && formatValue ? formatValue(rawValue) : value;
+  const numRef = useFitText<HTMLParagraphElement>(display);
   return (
     <CardPrimitive className="p-4 h-full">
       <div className="flex items-start gap-3 h-full min-h-0">
@@ -167,8 +200,11 @@ export function MetricCard({
         )}
         <div className="min-w-0 flex-1 flex flex-col justify-center h-full overflow-hidden">
           <p className="text-xs font-medium text-brand-500 leading-4 truncate">{label}</p>
-          <p className="text-base sm:text-lg lg:text-[20px] xl:text-[22px] leading-tight font-semibold text-ink mt-0.5 tabular-nums whitespace-nowrap truncate">
-            {rawValue !== undefined && formatValue ? formatValue(rawValue) : value}
+          <p
+            ref={numRef}
+            className="leading-tight font-semibold text-ink mt-0.5 tabular-nums whitespace-nowrap overflow-hidden"
+          >
+            {display}
           </p>
         </div>
       </div>
