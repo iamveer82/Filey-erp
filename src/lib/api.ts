@@ -264,6 +264,7 @@ export interface InvoiceDoc {
   stamp?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
   signature?: { data: string; x: number; y: number; opacity?: number; color?: string; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number };
   show_stamp?: boolean;
+  show_logo?: boolean;
   show_signature?: boolean;
   unit_price_formula?: { a: string; b: string } | null;
 }
@@ -2699,6 +2700,7 @@ export interface QuotationDoc {
   updated_at: string;
   items: QuotationItem[];
   show_stamp?: boolean;
+  show_logo?: boolean;
   show_signature?: boolean;
 }
 export type QuotationInput = Omit<
@@ -3155,6 +3157,7 @@ export interface PurchaseOrder {
   seller_email?: string;
   seller_phone?: string;
   show_stamp?: boolean;
+  show_logo?: boolean;
   show_signature?: boolean;
   created_at: string;
   updated_at: string;
@@ -3416,6 +3419,7 @@ export interface ReceiptDoc {
   ref_number?: string;
   for_description?: string;
   show_stamp?: boolean;
+  show_logo?: boolean;
   show_signature?: boolean;
   shared?: boolean;
   share_token?: string;

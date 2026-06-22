@@ -32,3 +32,6 @@ alter table quotations add column if not exists show_stamp boolean not null defa
 alter table quotations add column if not exists show_signature boolean not null default false;
 alter table purchase_orders add column if not exists show_stamp boolean not null default false;
 alter table purchase_orders add column if not exists show_signature boolean not null default false;
+
+-- show/hide toggle for the logo per invoice (default off — opt in per document)
+alter table invoice_docs add column if not exists show_logo boolean not null default false;

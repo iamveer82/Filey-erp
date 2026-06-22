@@ -31,6 +31,9 @@ export interface DocViewForm {
   doc_title?: string | null;
   number?: string | null;
   logo?: string | null;
+  /** When false, hide the logo on this document. Undefined = show (other doc
+   *  types that don't expose a logo toggle). */
+  show_logo?: boolean;
   seller_name?: string | null;
   seller_address?: string | null;
   seller_trn?: string | null;
@@ -166,9 +169,13 @@ export default function DocView({
       </div>
     ) : null;
 
+  // Logo is hidden when the doc explicitly turns it off (show_logo === false).
+  // Other doc types leave show_logo undefined, so their logo still shows.
+  const logoSrc = form.show_logo === false ? null : (form.logo ?? null);
+
   const Logo = ({ size = 56 }: { size?: number }) =>
-    form.logo ? (
-      <img src={form.logo} alt="logo" style={{ height: size }} className="object-contain" />
+    logoSrc ? (
+      <img src={logoSrc} alt="logo" style={{ height: size }} className="object-contain" />
     ) : null;
 
   const SellerContact = ({ cls = "text-neutral-500" }: { cls?: string }) => (
@@ -206,7 +213,7 @@ export default function DocView({
   );
 
   const Initial = ({ size = 48 }: { size?: number }) =>
-    form.logo ? (
+    logoSrc ? (
       <Logo size={size * 2} />
     ) : (
       <div
@@ -246,7 +253,7 @@ export default function DocView({
           style={{ objectFit: "cover", opacity: 0.92 }}
         />
         <Section k="seller">
-          {form.logo && <img src={form.logo} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
+          {logoSrc && <img src={logoSrc} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
           <p className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
           <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.seller_address}</p>
           {form.seller_trn && <p className="text-[9px] text-neutral-500 mt-0.5">TRN: {form.seller_trn}</p>}

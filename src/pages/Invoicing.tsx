@@ -21,6 +21,7 @@ import {
   StickyNote,
   Stamp,
   PenTool,
+  Image as ImageIcon,
   Paperclip,
   CreditCard,
   Sparkles,
@@ -146,6 +147,7 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
+  show_logo?: boolean;
   /** Optional formula: unit_price = fieldA × fieldB. */
   unit_price_formula?: { a: string; b: string } | null;
 };
@@ -262,6 +264,7 @@ function blankForm(
     customColumns: [],
     show_stamp: false,
     show_signature: false,
+    show_logo: false,
     unit_price_formula: null,
   };
 }
@@ -390,6 +393,7 @@ const editInvoice = async (id: number) => {
           : undefined,
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
+        show_logo: d.show_logo ?? false,
         items: d.items.map((i) => {
           const {
             custom,
@@ -477,6 +481,7 @@ const editInvoice = async (id: number) => {
           : undefined,
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
+        show_logo: d.show_logo ?? false,
         items: d.items.map((i) => {
           const {
             custom,
@@ -554,6 +559,7 @@ const editInvoice = async (id: number) => {
       else delete (payload as any).doc_type;
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
+      (payload as any).show_logo = form.show_logo ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id });
       await loadDocs();
@@ -613,6 +619,7 @@ const editInvoice = async (id: number) => {
       else delete (payload as any).doc_type;
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
+      (payload as any).show_logo = form.show_logo ?? false;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       setForm({ ...form, id, status });
       await loadDocs();
@@ -2342,6 +2349,15 @@ function Editor({
                 disabled={!companyStampSig.signature?.data}
               >
                 <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, show_logo: !form.show_logo })}
+                className={`btn-ghost text-xs ${form.show_logo ? "!bg-brand-50 !text-ink" : ""}`}
+                title="Show your logo on this invoice"
+                disabled={!form.logo}
+              >
+                <ImageIcon size={13} /> Logo: {form.show_logo ? "On" : "Off"}
               </button>
               <datalist id="unit-suggestions">
                 <option value="pcs" />
