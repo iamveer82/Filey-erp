@@ -529,7 +529,7 @@ function FilePreviewPage({
         ) : isPdf ? (
           <iframe
             title={file.name}
-            src={`${url}#toolbar=1&view=FitH`}
+            src={`${url}#toolbar=1&view=Fit`}
             className="h-full w-full"
           />
         ) : (
