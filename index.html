@@ -29,11 +29,58 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://voyrjqgaypiylwskkwpr.supabase.co" />
+    <!-- Non-render-blocking: paint immediately with the system font and swap
+         the web fonts in once they load. Offline (desktop) never stalls waiting
+         on the CDN — the request fails silently and the system font stays. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@300;400;500&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@300;400;500&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <title>Filey — AI ERP, CRM & PDF Tools</title>
+    <style>
+      /* Pre-mount boot splash: shown the instant the HTML paints — before any
+         JS or app CSS — and replaced automatically when React renders into
+         #root. Mirrors components/FileyLoader so there's no visual jump. */
+      @keyframes filey-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #fdfdfd;
+        font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI",
+          Roboto, sans-serif;
+      }
+      #boot-splash h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: #0a0a0a;
+      }
+      #boot-splash svg {
+        animation: filey-boot-spin 1s linear infinite;
+        transform-origin: 50% 50%;
+      }
+      html.dark #boot-splash {
+        background: #15161a;
+      }
+      html.dark #boot-splash h1 {
+        color: #f4f5f6;
+      }
+    </style>
     <script>
       // Set theme before paint to avoid a flash of the wrong scheme.
       (function () {
@@ -49,7 +96,23 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash" role="status" aria-label="Loading Filey">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 16px">
+          <h1>Filey</h1>
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" fill="none" stroke="#C9CBD6" stroke-width="2" />
+            <path
+              d="M8 2 a6 6 0 0 1 6 6"
+              fill="none"
+              stroke="#2563EB"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
