@@ -94,6 +94,14 @@ const PRESETS: Preset[] = [
   },
 ];
 
+/** Canonical base URL per provider, used to auto-fill when the provider
+ *  dropdown changes (OpenAI-compatible providers can then be narrowed with a
+ *  preset chip or edited by hand). */
+const PROVIDER_DEFAULT_URL: Record<AiProvider, string> = {
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+};
+
 export default function AiSettings() {
   const { toast } = useUI();
   const [cfg, setCfg] = useState<AiConfig>(getAiConfig());
@@ -187,7 +195,10 @@ export default function AiSettings() {
           <select
             className="select"
             value={cfg.provider}
-            onChange={(e) => update({ provider: e.target.value as AiProvider })}
+            onChange={(e) => {
+              const provider = e.target.value as AiProvider;
+              update({ provider, baseUrl: PROVIDER_DEFAULT_URL[provider] });
+            }}
           >
             <option value="openai">OpenAI-compatible</option>
             <option value="anthropic">Anthropic (Claude)</option>
