@@ -62,6 +62,36 @@ const PRESETS: Preset[] = [
     baseUrl: "http://localhost:11434/v1",
     model: "llama3.1",
   },
+  {
+    label: "Ollama Cloud",
+    provider: "openai",
+    baseUrl: "https://ollama.com/v1",
+    model: "gpt-oss:120b",
+  },
+  {
+    label: "xAI (Grok)",
+    provider: "openai",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-2-latest",
+  },
+  {
+    label: "Google Gemini",
+    provider: "openai",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: "gemini-2.0-flash",
+  },
+  {
+    label: "Mistral",
+    provider: "openai",
+    baseUrl: "https://api.mistral.ai/v1",
+    model: "mistral-large-latest",
+  },
+  {
+    label: "Together AI",
+    provider: "openai",
+    baseUrl: "https://api.together.xyz/v1",
+    model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  },
 ];
 
 export default function AiSettings() {
