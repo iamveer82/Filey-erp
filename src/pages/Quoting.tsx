@@ -396,6 +396,76 @@ export default function Quoting() {
   const sentCount = docs.filter((d) => d.status === "sent").length;
   const acceptedCount = docs.filter((d) => d.status === "accepted").length;
 
+  // Editor-only state/effects, hoisted to the component top level so these
+  // hooks run unconditionally on every render (React rules-of-hooks) instead of
+  // inside `if (form)`, which changed the hook count when the editor opened and
+  // could crash it. The editor JSX below reads this state from here.
+  const [showBank, setShowBank] = useState(false);
+  const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [bankX, setBankX] = useState(50);
+  const [bankY, setBankY] = useState(93);
+  const [zoom, setZoom] = useState(100);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewPage, setViewPage] = useState(1);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [designing, setDesigning] = useState(false);
+  const [tplNonce, setTplNonce] = useState(0);
+  const [viewAll, setViewAll] = useState(false);
+
+  useEffect(() => {
+    loadBankInfo().then(setBank).catch(() => {});
+    loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
+    loadCustomers();
+  }, []);
+
+  useEffect(() => {
+    setPreviewPage(1);
+  }, [form?.items.length]);
+
+  useEffect(() => {
+    if (viewOpen) setViewPage(1);
+  }, [viewOpen]);
+
+  useEffect(() => {
+    if (!viewOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewOpen]);
+
+  const downloadPdf = () => {
+    const el = exportRef.current || quoteRef.current;
+    if (el) downloadElementAsPdf(el, form?.number || "quotation");
+    else window.print();
+  };
+
+  // Editor keyboard shortcuts (no-op unless a quote is open).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!form) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        commit();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        downloadPdf();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   if (form) {
     const m = (v: number) => money(v, form.currency || "AED");
     const set = <K extends keyof Form>(k: K, v: Form[K]) =>
@@ -498,43 +568,6 @@ export default function Quoting() {
       });
     };
 
-    const [showBank, setShowBank] = useState(false);
-    const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
-    const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
-    const [bankX, setBankX] = useState(50);
-    const [bankY, setBankY] = useState(93);
-    const [zoom, setZoom] = useState(100);
-    const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-    const [viewOpen, setViewOpen] = useState(false);
-    const [viewPage, setViewPage] = useState(1);
-    const [previewPage, setPreviewPage] = useState(1);
-    const [designing, setDesigning] = useState(false);
-    const [tplNonce, setTplNonce] = useState(0);
-    const [viewAll, setViewAll] = useState(false);
-
-    useEffect(() => {
-      loadBankInfo().then(setBank).catch(() => {});
-      loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
-      loadCustomers();
-    }, []);
-
-    useEffect(() => {
-      setPreviewPage(1);
-    }, [form.items.length]);
-
-    useEffect(() => {
-      if (viewOpen) setViewPage(1);
-    }, [viewOpen]);
-
-    useEffect(() => {
-      if (!viewOpen) return;
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === "Escape") setViewOpen(false);
-      };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
-    }, [viewOpen]);
-
     const pages = paginateItems(form.items as unknown as DocItem[]);
     const previewPages = pages.length;
     const curPageIdx = Math.min(previewPage, previewPages) - 1;
@@ -550,12 +583,6 @@ export default function Quoting() {
       .slice(0, viewPageIdx)
       .reduce((n, g) => n + g.length, 0);
     const isLastViewPage = viewPageIdx === viewPageCount - 1;
-
-    const downloadPdf = () => {
-      const el = exportRef.current || quoteRef.current;
-      if (el) downloadElementAsPdf(el, form.number || "quotation");
-      else window.print();
-    };
 
     const emailQuote = async () => {
       if (!form.customer_email) {
@@ -657,28 +684,6 @@ export default function Quoting() {
         setConverting(false);
       }
     };
-
-    // Keyboard shortcuts
-    useEffect(() => {
-      const onKey = (e: KeyboardEvent) => {
-        if (
-          e.target instanceof HTMLInputElement ||
-          e.target instanceof HTMLTextAreaElement ||
-          e.target instanceof HTMLSelectElement
-        )
-          return;
-        if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-          e.preventDefault();
-          commit();
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === "p") {
-          e.preventDefault();
-          downloadPdf();
-        }
-      };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
-    });
 
     const docViewForm = {
       ...form,

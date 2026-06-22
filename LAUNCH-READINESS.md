@@ -80,7 +80,7 @@ Confidence legend: ✅ logic-tested · 🟢 compiles + wired · 🟡 needs runti
 | Inventory | 🟡 | Compiles; verify stock adjust + low-stock + import |
 | Orders | 🟡 | Verify cross-module post from invoice finalize |
 | Invoicing | ✅🟢 | Numbering + logo toggle added & tested; verify PDF export + finalize→Accounting |
-| Quoting | 🔴 | **Conditional-hooks bug** — the editor's `useState`/`useEffect` live under `if (form) {` (Quoting.tsx:399+), so opening a quote changes the hook count and React throws "rendered more hooks than previous render." Fix: extract a `<QuoteEditor>` component like Invoicing's `<Editor>`. Found via the new ESLint gate. |
+| Quoting | 🟢 | **Conditional-hooks bug FIXED** — the editor's hooks were under `if (form) {`; hoisted them to the component top level (unconditional) with form guards. typecheck + rules-of-hooks clean. Verify the editor opens + saves at runtime. |
 | CRM / Customers / Suppliers | 🟡 | Verify CRUD, deal drawer, activity timeline |
 | Follow-ups | 🟡 | Verify reminder create + due logic |
 | Purchase / POs / Purchase Invoices | ✅🟡 | Purchase-invoice engine tested; verify PO→invoice→accounting + VAT split (known gap: PO VAT split) |

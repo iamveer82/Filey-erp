@@ -60,14 +60,5 @@ export default tseslint.config(
       "no-irregular-whitespace": "warn",
       "no-misleading-character-class": "warn",
     },
-  },
-  {
-    // KNOWN BUG (tracked in LAUNCH-READINESS): Quoting's editor hooks are called
-    // under `if (form) {`, a conditional-hooks violation that can crash the
-    // editor on open. Fix = extract a <QuoteEditor> component (like Invoicing's
-    // <Editor>). Downgraded to warn so CI isn't blocked on the pre-existing
-    // issue; rules-of-hooks stays an error everywhere else.
-    files: ["src/pages/Quoting.tsx"],
-    rules: { "react-hooks/rules-of-hooks": "warn" },
   }
 );
