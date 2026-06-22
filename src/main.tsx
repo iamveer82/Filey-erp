@@ -7,6 +7,7 @@ import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
 import "./index.css";
 
+import "@fontsource-variable/inter/index.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 
 applyTheme();

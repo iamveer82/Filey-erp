@@ -12,7 +12,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://api.openai.com https://api.anthropic.com https://openrouter.ai https://api.groq.com https://api.moonshot.cn https://api.deepseek.com http://localhost:* https:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co https://*.supabase.in https://api.openai.com https://api.anthropic.com https://openrouter.ai https://api.groq.com https://api.moonshot.cn https://api.deepseek.com http://localhost:* https:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';"
     />
     <meta
       name="description"
@@ -26,24 +26,10 @@
     />
     <meta property="og:image" content="/filey-logo.svg" />
     <meta name="twitter:card" content="summary" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://voyrjqgaypiylwskkwpr.supabase.co" />
-    <!-- Non-render-blocking: paint immediately with the system font and swap
-         the web fonts in once they load. Offline (desktop) never stalls waiting
-         on the CDN — the request fails silently and the system font stays. -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@300;400;500&display=swap"
-      rel="stylesheet"
-      media="print"
-      onload="this.media='all'"
-    />
-    <noscript>
-      <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;510;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:wght@300;400;500&display=swap"
-        rel="stylesheet"
-      />
-    </noscript>
+    <!-- Fonts are self-hosted (@fontsource-variable/inter, imported in
+         main.tsx). No Google Fonts CDN — the app renders correctly offline and
+         never stalls on a network font request at launch. -->
     <title>Filey — AI ERP, CRM & PDF Tools</title>
     <style>
       /* Pre-mount boot splash: shown the instant the HTML paints — before any

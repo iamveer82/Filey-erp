@@ -68,11 +68,14 @@ export default {
         border: "#E2E8F0",
       },
       fontFamily: {
-        // Linear-style dense UI face for body/navigation/data (loaded in index.html).
-        // 510 is Linear's signature emphasis weight between regular and medium.
-        sans: ['"Inter"', "system-ui", "-apple-system", "sans-serif"],
-        // Plus Jakarta Sans retained for display/chromatic headings and buttons.
-        display: ['"Plus Jakarta Sans"', '"Inter"', "system-ui", "sans-serif"],
+        // Linear-style dense UI face for body/navigation/data. Self-hosted via
+        // @fontsource-variable/inter (imported in main.tsx) — no CDN, works
+        // offline. "Inter Variable" is the variable-font family name; plain
+        // "Inter" kept as a fallback.
+        sans: ['"Inter Variable"', '"Inter"', "system-ui", "-apple-system", "sans-serif"],
+        // Plus Jakarta Sans is referenced but not bundled — falls back to Inter
+        // (same as before). Self-host it to honour design.md if desired.
+        display: ['"Plus Jakarta Sans"', '"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
       },
