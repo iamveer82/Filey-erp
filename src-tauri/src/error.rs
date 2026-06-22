@@ -10,6 +10,8 @@ pub enum AppError {
     Email(String),
     #[error("composio error: {0}")]
     Composio(String),
+    #[error("http error: {0}")]
+    Http(String),
     #[error("io error: {0}")]
     Io(String),
 }

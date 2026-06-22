@@ -278,6 +278,33 @@ async function errText(res: Response): Promise<string> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/** One request. In the browser this is plain fetch (CORS applies — only
+ *  providers that allow browser calls work). Under Tauri it goes through the
+ *  native `ai_proxy` command, which has no CORS, so any OpenAI-compatible /
+ *  Anthropic endpoint (Ollama Cloud, Groq, Mistral, xAI, …) works on desktop.
+ *  ponytail: the abort signal isn't forwarded to the native call — desktop AI
+ *  requests run to completion; add cancellation if it ever matters. */
+async function transportFetch(input: string, init: RequestInit): Promise<Response> {
+  if (!isTauri) return fetch(input, init);
+  const { invoke } = await import("@tauri-apps/api/core");
+  const headers: Record<string, string> = {};
+  const h = init.headers as Record<string, string> | undefined;
+  if (h) for (const k of Object.keys(h)) headers[k] = h[k];
+  const r = await invoke<{ status: number; body: string }>("ai_proxy", {
+    method: (init.method ?? "GET").toString().toUpperCase(),
+    url: input,
+    headers,
+    body: typeof init.body === "string" ? init.body : undefined,
+  });
+  return new Response(r.body, {
+    status: r.status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 /** Status codes worth retrying: rate limits + transient server faults. */
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -297,7 +324,7 @@ export async function aiFetch(
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(input, init);
+      const res = await transportFetch(input, init);
       if (res.ok) return res;
       if (!RETRYABLE.has(res.status) || attempt === retries)
         throw new AiError(await errText(res));

@@ -35,6 +35,8 @@ pub fn run() {
             modules::sync::outbox_list,
             modules::sync::outbox_remove,
             modules::sync::outbox_clear,
+            // AI provider proxy (bypasses webview CORS for any provider)
+            modules::ai::ai_proxy,
             // Email (SMTP)
             modules::email::send_email,
             // Composio (managed integrations: Gmail/Slack/Telegram…)
