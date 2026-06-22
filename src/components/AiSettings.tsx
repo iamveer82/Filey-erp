@@ -21,16 +21,16 @@ interface Preset {
 
 const PRESETS: Preset[] = [
   {
+    label: "Anthropic (Claude) — recommended",
+    provider: "anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-opus-4-8",
+  },
+  {
     label: "OpenAI",
     provider: "openai",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
-  },
-  {
-    label: "Anthropic (Claude)",
-    provider: "anthropic",
-    baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-sonnet-4-6",
   },
   {
     label: "OpenRouter (any model)",
@@ -169,7 +169,7 @@ export default function AiSettings() {
             className="input"
             value={cfg.model}
             onChange={(e) => update({ model: e.target.value })}
-            placeholder="gpt-4o-mini"
+            placeholder="claude-opus-4-8"
           />
         </div>
       </div>

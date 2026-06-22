@@ -28,9 +28,9 @@ export interface AiConfig {
 const STORE_KEY = "filey.ai.config";
 
 const DEFAULTS: AiConfig = {
-  provider: "openai",
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
+  provider: "anthropic",
+  baseUrl: "https://api.anthropic.com/v1",
+  model: "claude-opus-4-8",
   apiKey: "",
 };
 
