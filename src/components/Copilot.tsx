@@ -57,6 +57,14 @@ const ORB_PRESETS = [
   "#E5484D",
 ];
 
+/** Quick-start prompts shown in an empty chat. */
+const SUGGESTIONS = [
+  "Draft an invoice",
+  "What's overdue?",
+  "Add a new customer",
+  "What's low on stock?",
+];
+
 function shade(hex: string, amt: number): string {
   const c = hex.replace("#", "");
   const full =
@@ -330,8 +338,8 @@ export default function Copilot() {
 
   const bubble = (role: ChatTurn["role"]) =>
     role === "user"
-      ? "ml-auto bg-primary-400 text-[#0A0A0A]"
-      : "mr-auto bg-brand-50 text-ink dark:bg-white/8";
+      ? "ml-auto rounded-br-sm bg-primary-400 text-ink"
+      : "mr-auto rounded-bl-sm bg-brand-50 text-ink dark:bg-white/8";
 
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
@@ -347,7 +355,7 @@ export default function Copilot() {
             >
               <ColorOrb dimension="22px" tones={tones} />
             </button>
-            <span className="truncate font-medium text-sm font-medium text-ink">
+            <span className="truncate text-sm font-medium text-ink">
               {view === "history" ? "Chats" : persona.assistantName || "Filey"}
             </span>
             {ready && persona.onboarded && (
@@ -356,7 +364,7 @@ export default function Copilot() {
                   onClick={startNewChat}
                   aria-label="New chat"
                   title="New chat"
-                  className="rounded-2xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   <Plus size={16} />
                 </button>
@@ -368,7 +376,7 @@ export default function Copilot() {
                   aria-label="History"
                   title="Chat history"
                   className={cn(
-                    "rounded-lg p-1.5 cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
+                    "rounded-xl p-1.5 cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
                     view === "history"
                       ? "text-ink dark:text-[#F4F5F6]"
                       : "text-brand-400 hover:text-ink dark:hover:text-[#F4F5F6]"
@@ -382,7 +390,7 @@ export default function Copilot() {
               onClick={() => setOpen(false)}
               aria-label="Close"
               className={cn(
-                "rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer",
+                "rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer",
                 !(ready && persona.onboarded) && "ml-auto"
               )}
             >
@@ -516,7 +524,7 @@ export default function Copilot() {
                           setView("chat");
                         }}
                         className={cn(
-                          "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
+                          "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
                           c.id === activeId && "bg-brand-50 dark:bg-white/8"
                         )}
                       >
@@ -537,7 +545,7 @@ export default function Copilot() {
                             e.stopPropagation();
                             setMenuFor((m) => (m === c.id ? null : c.id));
                           }}
-                          className="rounded-2xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
+                          className="rounded-xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
                         >
                           <MoreHorizontal size={16} />
                         </span>
@@ -567,16 +575,32 @@ export default function Copilot() {
                 </div>
               )
             ) : turns.length === 0 ? (
-              <p className="text-sm text-brand-400">
-                Ask me to draft an invoice line, a customer email, a product description,
-                or anything about your business.
-              </p>
+              <div className="space-y-3">
+                <p className="text-sm text-brand-400">
+                  Ask me to draft an invoice line, a customer email, a product
+                  description, or anything about your business.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => {
+                        setInput(s);
+                        taRef.current?.focus();
+                      }}
+                      className="chip cursor-pointer hover:bg-brand-100 dark:hover:bg-white/10"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
               turns.map((t, i) => (
                 <div
                   key={i}
                   className={cn(
-                    "w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-md px-3 py-2 text-sm",
+                    "w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm leading-relaxed",
                     bubble(t.role)
                   )}
                 >
@@ -590,7 +614,7 @@ export default function Copilot() {
               </div>
             )}
             {err && view === "chat" && (
-              <div className="rounded-full bg-danger/10 px-3 py-2 text-xs text-danger">
+              <div className="rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger">
                 {err}
               </div>
             )}
@@ -600,12 +624,12 @@ export default function Copilot() {
           {ready && persona.onboarded && view === "chat" && (
             <div className="border-t border-brand-100 p-2.5 dark:border-[#2C2C2E]">
               {!online && (
-                <p className="mb-2 rounded-full bg-warning/10 px-2.5 py-1.5 text-[11px] font-medium text-warning">
+                <p className="mb-2 rounded-xl bg-warning/10 px-2.5 py-1.5 text-[11px] font-medium text-warning">
                   You're offline — Filey AI will reconnect automatically.
                 </p>
               )}
               {file && (
-                <div className="mb-2 flex items-center gap-2 rounded-2xl bg-brand-50 px-2.5 py-1.5 text-xs dark:bg-white/8">
+                <div className="mb-2 flex items-center gap-2 rounded-xl bg-brand-50 px-2.5 py-1.5 text-xs dark:bg-white/8">
                   <Paperclip size={13} className="shrink-0 text-brand-400" />
                   <span className="flex-1 truncate text-ink">{file.name}</span>
                   <button
@@ -629,7 +653,7 @@ export default function Copilot() {
                   onClick={() => fileRef.current?.click()}
                   aria-label="Attach a PDF or image"
                   title="Attach a PDF or image"
-                  className="grid h-10 w-9 shrink-0 place-items-center rounded-2xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="grid h-10 w-9 shrink-0 place-items-center rounded-xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
                 >
                   <Paperclip size={17} />
                 </button>
@@ -662,7 +686,7 @@ export default function Copilot() {
         className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5 transition-colors"
       >
         <ColorOrb dimension="32px" tones={tones} />
-        <span className="font-medium text-sm font-medium text-ink">Ask AI</span>
+        <span className="text-sm font-medium text-ink">Ask AI</span>
       </button>
     </div>
   );
