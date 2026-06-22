@@ -52,7 +52,8 @@ import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format
 import ColorPicker from "../components/ColorPicker";
 import { invoiceTotals, invoiceLineAmount, r2 } from "../lib/money";
 import { DateField } from "../components/DatePicker";
-import { nextDocNumber } from "../lib/docNumber";
+import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
+import { loadInvoiceFormat } from "../lib/numberFormat";
 import { sendEmail, emailShell, esc } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
@@ -203,13 +204,27 @@ export const sanitizeCustomColumns = (cols: CustomColumn[]): CustomColumn[] =>
 
 export type DocMode = "sales" | "purchase";
 
+/** Next document number: a user-defined sales-invoice format when set,
+ *  otherwise the built-in PREFIX-YYYY-NNNN scheme. Purchase invoices always
+ *  use the built-in PINV scheme. */
+function pickInvoiceNumber(
+  mode: DocMode,
+  existing: string[],
+  format?: string
+): string {
+  if (mode === "sales" && format && hasCounter(format))
+    return nextFromPattern({ pattern: format, existing });
+  return nextDocNumber({ prefix: mode === "purchase" ? "PINV" : "INV", existing });
+}
+
 function blankForm(
   c: CompanyProfile,
   existing: string[] = [],
-  mode: DocMode = "sales"
+  mode: DocMode = "sales",
+  format?: string
 ): Form {
   return {
-    number: nextDocNumber({ prefix: mode === "purchase" ? "PINV" : "INV", existing }),
+    number: pickInvoiceNumber(mode, existing, format),
     status: "draft",
     doc_title: mode === "purchase" ? "Purchase Invoice" : "Tax Invoice",
     template: c.default_template || "minimal",
@@ -256,6 +271,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const partyLabel = isPurchase ? "Supplier" : "Customer";
   const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [numFmt, setNumFmt] = useState("");
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -280,6 +296,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       .getCompany()
       .then(setCompany)
       .catch(() => toast.error("Failed to load company profile"));
+    loadInvoiceFormat().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
   };
@@ -305,13 +322,13 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, docs.map((d) => d.number), mode));
+      setForm(blankForm(company, docs.map((d) => d.number), mode, numFmt));
       setParams({}, { replace: true });
     }
-  }, [params, company, form, setParams, docs]);
+  }, [params, company, form, setParams, docs, numFmt, mode]);
 
   const newInvoice = () => {
-    if (company) setForm(blankForm(company, docs.map((d) => d.number), mode));
+    if (company) setForm(blankForm(company, docs.map((d) => d.number), mode, numFmt));
   };
 
 const editInvoice = async (id: number) => {
@@ -406,7 +423,7 @@ const editInvoice = async (id: number) => {
     try {
       const d = await billing.getDoc(id);
       setForm({
-        number: nextDocNumber({ prefix: "INV", existing: docs.map((x) => x.number) }),
+        number: pickInvoiceNumber("sales", docs.map((x) => x.number), numFmt),
         status: "draft",
         doc_title: d.doc_title || d.doc_type,
         template: d.template,

@@ -2,8 +2,10 @@ import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
-import { Building2, Upload, X, Check, Landmark, FileText, Stamp } from "lucide-react";
+import { Building2, Upload, X, Check, Landmark, FileText, Stamp, Hash } from "lucide-react";
 import { numInput } from "../../lib/format";
+import { loadInvoiceFormat, saveInvoiceFormat } from "../../lib/numberFormat";
+import { renderPattern, hasCounter } from "../../lib/docNumber";
 import {
   loadBankInfo,
   saveBankInfo,
@@ -36,6 +38,15 @@ const BUSINESS_TYPES = [
   "Public Limited",
 ];
 
+/** Live preview of the next few numbers a format will produce. */
+function numberPreview(fmt: string): string {
+  if (!fmt.trim()) return "INV-2026-0001, INV-2026-0002, …";
+  if (!hasCounter(fmt)) return "Add a {001} part so a number can count up";
+  const m = fmt.match(/\{(\d+)\}/);
+  const start = m ? parseInt(m[1], 10) || 1 : 1;
+  return [0, 1, 2].map((i) => renderPattern(fmt, start + i)).join(", ") + ", …";
+}
+
 /* ---------------- Company Details ---------------- */
 
 export default function CompanyDetails() {
@@ -44,6 +55,7 @@ export default function CompanyDetails() {
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [stampSig, setStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [numFmt, setNumFmt] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -64,6 +76,9 @@ export default function CompanyDetails() {
     loadCompanyStampSig()
       .then(setStampSig)
       .catch((e) => console.warn("Failed to load stamp/signature", e));
+    loadInvoiceFormat()
+      .then(setNumFmt)
+      .catch((e) => console.warn("Failed to load invoice format", e));
   }, []);
 
   const setBankField = (k: keyof BankInfo, v: string) => {
@@ -108,6 +123,7 @@ export default function CompanyDetails() {
       await saveBankInfo(bank);
       await saveLetterhead(lh);
       await saveCompanyStampSig(stampSig);
+      await saveInvoiceFormat(numFmt);
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
@@ -384,6 +400,39 @@ export default function CompanyDetails() {
             setSaved(false);
           }}
         />
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-brand-100">
+        <p className="font-medium text-ink flex items-center gap-2">
+          <Hash size={16} /> Invoice Numbering
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          Set how new invoice numbers are generated. Put the part that should
+          count up inside braces — its digits set the width and the starting
+          value, so <span className="font-mono">{"{001}"}</span> means 001, 002,
+          003… Everything outside the braces stays fixed. Use{" "}
+          <span className="font-mono">{"{YY}"}</span> or{" "}
+          <span className="font-mono">{"{YYYY}"}</span> for the year. Leave blank
+          to keep the default INV-2026-0001 scheme.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Format">
+            <input
+              className="input font-mono"
+              placeholder="INV-DLS-{001}-26"
+              value={numFmt}
+              onChange={(e) => {
+                setNumFmt(e.target.value);
+                setSaved(false);
+              }}
+            />
+          </FormField>
+          <FormField label="Preview — your next invoices">
+            <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
+              {numberPreview(numFmt)}
+            </div>
+          </FormField>
+        </div>
       </div>
 
       <div className="flex items-center justify-end gap-3 mt-6">
