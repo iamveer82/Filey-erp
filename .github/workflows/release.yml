@@ -8,6 +8,11 @@ on:
       - "v*"
   workflow_dispatch:
 
+# tauri-action creates the GitHub Release, which needs write access to repo
+# contents (otherwise: "Resource not accessible by integration").
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
