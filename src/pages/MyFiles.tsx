@@ -528,7 +528,7 @@ function FilePreviewPage({
             />
           </div>
         ) : isPdf ? (
-          <PdfCanvas url={url} />
+          <PdfCanvas file={file} />
         ) : (
           <div className="grid h-full place-items-center text-center px-6">
             <div>

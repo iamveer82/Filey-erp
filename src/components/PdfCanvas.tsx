@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { fileBytes, type SavedFile } from "../lib/files";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Renders every page of a PDF to canvases, full page fitted to the panel and
  * stacked vertically. Used for the My Files preview instead of an <iframe>,
  * which relied on WebView2's native PDF viewer (inconsistent, ignored
- * view=Fit). Each page fits the panel width; scroll moves through pages. */
-export default function PdfCanvas({ url }: { url: string }) {
+ * view=Fit). Reads bytes via fileBytes (download → arrayBuffer) rather than
+ * fetch(blobURL), which the webview CSP blocks on connect-src. */
+export default function PdfCanvas({ file }: { file: SavedFile }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
@@ -22,9 +24,14 @@ export default function PdfCanvas({ url }: { url: string }) {
 
     (async () => {
       try {
-        const buf = await (await fetch(url)).arrayBuffer();
+        const bytes = await fileBytes(file);
         if (dead) return;
-        const pdf = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+        if (!bytes) {
+          setErr("File not found.");
+          setLoading(false);
+          return;
+        }
+        const pdf = await pdfjs.getDocument({ data: bytes }).promise;
         const host = pagesRef.current;
         const wrap = wrapRef.current;
         if (!host || !wrap || dead) return;
@@ -68,7 +75,7 @@ export default function PdfCanvas({ url }: { url: string }) {
     return () => {
       dead = true;
     };
-  }, [url]);
+  }, [file.id]);
 
   return (
     <div ref={wrapRef} className="h-full w-full overflow-auto p-4">

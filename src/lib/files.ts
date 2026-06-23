@@ -154,6 +154,15 @@ export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
   return data ? URL.createObjectURL(data) : null;
 }
 
+/** Raw bytes of a saved file. Used to render PDFs with pdf.js without going
+ * through a blob: URL + fetch() (which the webview CSP blocks on connect-src). */
+export async function fileBytes(f: SavedFile): Promise<Uint8Array | null> {
+  if (!isConfigured) return null;
+  const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
+  if (error) throw new Error(error.message || "Could not open this file.");
+  return data ? new Uint8Array(await data.arrayBuffer()) : null;
+}
+
 /** Signed URL that forces a download (Content-Disposition: attachment) using
  * the file's display name — used by the explicit Download action. */
 export async function downloadUrl(f: SavedFile): Promise<string | null> {
