@@ -25,6 +25,7 @@ import { PageHeader, StatCard, DataTable, Badge, statusTone } from "../component
 import { aed, num, fmtDate } from "../lib/format";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
+import PartyBankDetails from "../components/PartyBankDetails";
 import FollowUps from "../components/FollowUps";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -194,6 +195,18 @@ export default function CustomerDetail() {
       {id && (
         <div className="mb-5">
           <FollowUps customerId={Number(id)} customerName={display} />
+        </div>
+      )}
+
+      {customer && (
+        <div className="mb-5">
+          <PartyBankDetails
+            value={customer.bank_details}
+            onSave={async (bank) => {
+              await crm.updateCustomer(customer.id, { bank_details: bank });
+              await crm.customers().then(setCustomers).catch(() => {});
+            }}
+          />
         </div>
       )}
 

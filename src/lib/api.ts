@@ -165,6 +165,8 @@ export interface CrmCustomer {
   trn?: string;
   segment?: string;
   custom_fields?: Record<string, string>;
+  /** Per-customer bank details (BankInfo shape: bank_name, account_number, …). */
+  bank_details?: Record<string, string>;
   shared?: boolean;
   created_at: string;
 }
@@ -3062,6 +3064,8 @@ export interface Supplier {
   address?: string;
   tax_id?: string;
   notes?: string;
+  /** Per-supplier bank details (BankInfo shape: bank_name, account_number, …). */
+  bank_details?: Record<string, string>;
   shared?: boolean;
   created_at: string;
 }

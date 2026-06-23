@@ -24,6 +24,7 @@ import { PageHeader, StatCard, DataTable, Badge, statusTone } from "../component
 import { aed, num, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
+import PartyBankDetails from "../components/PartyBankDetails";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -239,6 +240,21 @@ export default function SupplierDetail() {
           />
         </div>
       </div>
+
+      {/* Bank details */}
+      {supplier && (
+        <div className="mb-5">
+          <PartyBankDetails
+            value={supplier.bank_details}
+            onSave={async (bank) => {
+              await suppliersApi.update(supplier.id, { bank_details: bank });
+              setList((prev) =>
+                prev.map((s) => (s.id === supplier.id ? { ...s, bank_details: bank } : s))
+              );
+            }}
+          />
+        </div>
+      )}
 
       {/* Activity Timeline */}
       {supplier && (
