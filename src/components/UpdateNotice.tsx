@@ -2,9 +2,14 @@ import { useEffect, useState } from "react";
 import { X, Loader2, Sparkles } from "lucide-react";
 import { checkForUpdate, installUpdate, type UpdateInfo } from "../lib/updater";
 
+/* localStorage key holding the version the user last dismissed, so we don't
+ * re-nag about the same release on every launch. A newer version clears it. */
+const DISMISS_KEY = "filey.update.dismissed";
+
 /* "New update available" popup. Polls the updater shortly after launch; when a
  * signed release is available it shows the version + notes and lets the user
- * install + relaunch, or defer. Renders nothing unless an update exists. */
+ * install + relaunch, or defer. Renders nothing unless an update exists. Once
+ * dismissed, it stays hidden for that version until a newer one ships. */
 export default function UpdateNotice() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -16,13 +21,35 @@ export default function UpdateNotice() {
     let alive = true;
     // Defer so it doesn't compete with first paint / auth.
     const t = setTimeout(() => {
-      checkForUpdate().then((u) => alive && setInfo(u));
+      checkForUpdate().then((u) => {
+        if (!alive || !u) return;
+        // Skip a version the user already dismissed; a newer one still shows.
+        let last: string | null = null;
+        try {
+          last = localStorage.getItem(DISMISS_KEY);
+        } catch {
+          /* ignore */
+        }
+        if (last === u.version) return;
+        setInfo(u);
+      });
     }, 4000);
     return () => {
       alive = false;
       clearTimeout(t);
     };
   }, []);
+
+  const dismiss = () => {
+    if (info) {
+      try {
+        localStorage.setItem(DISMISS_KEY, info.version);
+      } catch {
+        /* ignore */
+      }
+    }
+    setDismissed(true);
+  };
 
   if (!info || dismissed) return null;
 
@@ -42,7 +69,7 @@ export default function UpdateNotice() {
       <div className="relative w-full max-w-md rounded-3xl border border-brand-200 bg-white p-7 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
         {!busy && (
           <button
-            onClick={() => setDismissed(true)}
+            onClick={dismiss}
             aria-label="Close"
             className="absolute right-4 top-4 text-brand-400 hover:text-ink"
           >
@@ -97,7 +124,7 @@ export default function UpdateNotice() {
         </button>
         {!busy && (
           <button
-            onClick={() => setDismissed(true)}
+            onClick={dismiss}
             className="mt-2 w-full py-1.5 text-center text-sm font-medium text-brand-500 hover:text-ink"
           >
             Maybe later
