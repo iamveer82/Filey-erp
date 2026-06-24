@@ -33,6 +33,7 @@ import {
   PackageSearch,
   Landmark,
   SeparatorHorizontal,
+  FileCode,
 } from "lucide-react";
 import {
   billing,
@@ -96,6 +97,22 @@ import {
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
 import { ResizablePanels } from "../components/ResizablePanels";
+import { validateEInvoice, buildInvoiceXml } from "../lib/einvoiceXml";
+import {
+  INVOICE_TYPE_CODES,
+  PAYMENT_MEANS_CODES,
+  TAX_CATEGORY_CODES,
+  TRANSACTION_TYPE_FLAGS,
+  EMIRATES,
+  DEFAULT_INVOICE_TYPE_CODE,
+  DEFAULT_PAYMENT_MEANS_CODE,
+  DEFAULT_TRANSACTION_TYPE,
+  DEFAULT_TAX_CATEGORY,
+  UAE_COUNTRY_CODE,
+  CORRECTIVE_TYPE_CODES,
+  decodeTransactionType,
+  encodeTransactionType,
+} from "../lib/einvoice";
 import {
   PageHeader,
   MetricCard,
@@ -124,6 +141,8 @@ type Item = {
   amount: number;
   /** Per-line formula multiplier field when calcMode === 'formula'. */
   itemFormula: { a: string; b?: string } | null;
+  /** UAE e-invoice tax category code (S/Z/E/O/AE). */
+  tax_category?: string;
 };
 
 // Pages are driven only by manual breaks set by the user. Default = one A4 page.
@@ -150,10 +169,15 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   show_logo?: boolean;
   /** Optional formula: unit_price = fieldA × fieldB. */
   unit_price_formula?: { a: string; b: string } | null;
+  // e-invoice: corrective-doc reference + AED rate for foreign-currency VAT.
+  original_invoice_number?: string | null;
+  original_invoice_date?: string | null;
+  aed_exchange_rate?: number | null;
 };
 
 const TEMPLATES = [
   { id: "minimal", name: "Minimal" },
+  { id: "fta", name: "UAE FTA Tax Invoice" },
   { id: "classic", name: "Classic" },
   { id: "modern", name: "Modern" },
   { id: "corporate", name: "Corporate" },
@@ -238,6 +262,11 @@ function blankForm(
     seller_email: c.email,
     seller_phone: c.phone,
     logo: c.logo,
+    // UAE e-invoice: autofill seller identity from company settings (once).
+    seller_city: c.city,
+    seller_country_subdivision: c.country_subdivision,
+    seller_legal_id: c.legal_id,
+    seller_legal_id_type: c.legal_id_type,
     customer_name: "",
     customer_address: "",
     customer_trn: "",
@@ -248,6 +277,11 @@ function blankForm(
     terms: "Payment due within 30 days.",
     tax_rate: c.default_tax_rate ?? 5,
     discount: 0,
+    // UAE e-invoice (Peppol PINT-AE) — sensible defaults; user overrides as needed.
+    invoice_type_code: DEFAULT_INVOICE_TYPE_CODE,
+    transaction_type: DEFAULT_TRANSACTION_TYPE,
+    payment_means_code: DEFAULT_PAYMENT_MEANS_CODE,
+    buyer_country_code: UAE_COUNTRY_CODE,
     items: [
       {
         description: "",
@@ -259,6 +293,7 @@ function blankForm(
         calcMode: "auto",
         amount: 0,
         itemFormula: null,
+        tax_category: DEFAULT_TAX_CATEGORY,
       },
     ],
     customColumns: [],
@@ -350,6 +385,10 @@ const editInvoice = async (id: number) => {
         seller_trn: d.seller_trn,
         seller_email: d.seller_email,
         seller_phone: d.seller_phone,
+        seller_city: d.seller_city,
+        seller_country_subdivision: d.seller_country_subdivision,
+        seller_legal_id: d.seller_legal_id,
+        seller_legal_id_type: d.seller_legal_id_type,
         logo: d.logo,
         customer_name: d.customer_name,
         customer_address: d.customer_address,
@@ -363,6 +402,12 @@ const editInvoice = async (id: number) => {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
+        invoice_type_code: d.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE,
+        transaction_type: d.transaction_type || DEFAULT_TRANSACTION_TYPE,
+        payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
+        buyer_city: d.buyer_city,
+        buyer_country_subdivision: d.buyer_country_subdivision,
+        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
         stamp: d.stamp
           ? {
               data: d.stamp.data,
@@ -413,6 +458,7 @@ const editInvoice = async (id: number) => {
             calcMode: calcMode || "auto",
             amount: amount ?? 0,
             itemFormula: itemFormula || null,
+            tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -438,6 +484,10 @@ const editInvoice = async (id: number) => {
         seller_trn: d.seller_trn,
         seller_email: d.seller_email,
         seller_phone: d.seller_phone,
+        seller_city: d.seller_city,
+        seller_country_subdivision: d.seller_country_subdivision,
+        seller_legal_id: d.seller_legal_id,
+        seller_legal_id_type: d.seller_legal_id_type,
         logo: d.logo,
         customer_name: d.customer_name,
         customer_address: d.customer_address,
@@ -451,6 +501,12 @@ const editInvoice = async (id: number) => {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
+        invoice_type_code: d.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE,
+        transaction_type: d.transaction_type || DEFAULT_TRANSACTION_TYPE,
+        payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
+        buyer_city: d.buyer_city,
+        buyer_country_subdivision: d.buyer_country_subdivision,
+        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
         stamp: d.stamp
           ? {
               data: d.stamp.data,
@@ -501,6 +557,7 @@ const editInvoice = async (id: number) => {
             calcMode: calcMode || "auto",
             amount: amount ?? 0,
             itemFormula: itemFormula || null,
+            tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -549,6 +606,7 @@ const editInvoice = async (id: number) => {
           unit: it.unit || undefined,
           custom: mergeItemMeta(it),
           product_id: it.product_id,
+          tax_category: it.tax_category || undefined,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
@@ -609,6 +667,7 @@ const editInvoice = async (id: number) => {
           unit: it.unit || undefined,
           custom: mergeItemMeta(it),
           product_id: it.product_id,
+          tax_category: it.tax_category || undefined,
         })),
         issue_date: form.issue_date || undefined,
         due_date: form.due_date || undefined,
@@ -1301,6 +1360,26 @@ function Editor({
       downloadElementAsPdf(el, form.number || "invoice");
     } else window.print();
   };
+  // Export the UAE e-Invoice (Peppol PINT-AE UBL) XML. Blocks on missing
+  // mandatory fields; surfaces recommended-field gaps as a non-blocking note.
+  const exportXml = () => {
+    const v = validateEInvoice(form as never);
+    if (v.errors.length) {
+      toast.error(`Can't export e-Invoice XML — missing: ${v.errors.join(", ")}`);
+      return;
+    }
+    const xml = buildInvoiceXml(form as never);
+    const blob = new Blob([xml], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${form.number || "invoice"}.xml`;
+    a.click();
+    URL.revokeObjectURL(url);
+    if (v.warnings.length)
+      toast.info(`XML exported. Recommended fields still empty: ${v.warnings.join(", ")}`);
+    else toast.success("e-Invoice XML exported (PINT-AE).");
+  };
   // Finalize, then archive the issued invoice PDF to My Files (best-effort,
   // deduped by name so re-finalizing won't pile up copies).
   const handleFinalize = async () => {
@@ -1487,6 +1566,10 @@ function Editor({
       customer_trn:
         c.trn ??
         (c.segment?.startsWith("TRN:") ? c.segment.slice(4).trim() : form.customer_trn),
+      // UAE e-invoice: snapshot buyer location from the CRM record.
+      buyer_city: c.city ?? form.buyer_city,
+      buyer_country_subdivision: c.country_subdivision ?? form.buyer_country_subdivision,
+      buyer_country_code: c.country_code ?? form.buyer_country_code ?? UAE_COUNTRY_CODE,
     });
 
   const [viewAll, setViewAll] = useState(false);
@@ -1644,6 +1727,15 @@ function Editor({
           >
             <Download size={15} /> PDF
           </button>
+          {partyLabel !== "Supplier" && (
+            <button
+              className="btn-ghost"
+              onClick={exportXml}
+              title="Export UAE e-Invoice XML (Peppol PINT-AE)"
+            >
+              <FileCode size={15} /> XML
+            </button>
+          )}
           <button
             className="btn-ghost"
             onClick={onSave}
@@ -1865,6 +1957,36 @@ function Editor({
                     />
                   </div>
                 </Field>
+                <Field label={`${partyLabel} City / Emirate / Country`}>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      className="input"
+                      placeholder="City"
+                      value={form.buyer_city ?? ""}
+                      onChange={(e) => set("buyer_city", e.target.value)}
+                    />
+                    <select
+                      className="input"
+                      value={form.buyer_country_subdivision ?? ""}
+                      onChange={(e) => set("buyer_country_subdivision", e.target.value)}
+                    >
+                      <option value="">Emirate…</option>
+                      {EMIRATES.map((em) => (
+                        <option key={em.code} value={em.code}>
+                          {em.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className="input"
+                      placeholder="AE"
+                      value={form.buyer_country_code ?? ""}
+                      onChange={(e) =>
+                        set("buyer_country_code", e.target.value.toUpperCase())
+                      }
+                    />
+                  </div>
+                </Field>
               </div>
               <div className="space-y-3">
                 <Field label="Document Title">
@@ -1938,6 +2060,116 @@ function Editor({
                     ))}
                   </select>
                 </Field>
+                <Field label="Invoice Type Code (e-invoice)">
+                  <select
+                    className="select"
+                    value={form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE}
+                    onChange={(e) => set("invoice_type_code", e.target.value)}
+                  >
+                    {INVOICE_TYPE_CODES.map((t) => (
+                      <option key={t.code} value={t.code}>
+                        {t.code} — {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {CORRECTIVE_TYPE_CODES.includes(
+                  form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE
+                ) && (
+                  <>
+                    <Field label="Original Invoice No. (credit/debit note)">
+                      <input
+                        className="input"
+                        placeholder="e.g. INV-2026-001"
+                        value={form.original_invoice_number || ""}
+                        onChange={(e) => set("original_invoice_number", e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Original Invoice Date">
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.original_invoice_date || ""}
+                        onChange={(e) => set("original_invoice_date", e.target.value)}
+                      />
+                    </Field>
+                  </>
+                )}
+                {(form.currency || "AED") !== "AED" && (
+                  <Field label="Exchange Rate to AED (e-invoice)">
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      className="input"
+                      placeholder="1 {currency} = ? AED"
+                      value={form.aed_exchange_rate ?? ""}
+                      onChange={(e) =>
+                        set(
+                          "aed_exchange_rate",
+                          e.target.value === "" ? null : Number(e.target.value)
+                        )
+                      }
+                    />
+                  </Field>
+                )}
+                <Field label="Payment Means (e-invoice)">
+                  <select
+                    className="select"
+                    value={form.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE}
+                    onChange={(e) => set("payment_means_code", e.target.value)}
+                  >
+                    {PAYMENT_MEANS_CODES.map((p) => (
+                      <option key={p.code} value={p.code}>
+                        {p.code} — {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Transaction Type (e-invoice)">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {TRANSACTION_TYPE_FLAGS.map((f) => (
+                      <label
+                        key={f.key}
+                        className="flex items-center gap-1.5 text-xs text-brand-600"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={decodeTransactionType(form.transaction_type)[f.key]}
+                          onChange={(e) => {
+                            const flags = decodeTransactionType(form.transaction_type);
+                            flags[f.key] = e.target.checked;
+                            set("transaction_type", encodeTransactionType(flags));
+                          }}
+                        />
+                        {f.label}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Tax Category — set all lines">
+                  {/* Bulk-set every line's category (the common single-rate case).
+                      Mixed-rate invoices override per line in the items table. */}
+                  <select
+                    className="select"
+                    value={form.items[0]?.tax_category || DEFAULT_TAX_CATEGORY}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        items: form.items.map((it) => ({
+                          ...it,
+                          tax_category: e.target.value,
+                        })),
+                      })
+                    }
+                  >
+                    {TAX_CATEGORY_CODES.map((t) => (
+                      <option key={t.code} value={t.code}>
+                        {t.code} — {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
               </div>
             </div>
           </Step>
@@ -1998,6 +2230,11 @@ function Editor({
                     <th className="py-2 px-2 w-24 text-right">Qty</th>
                     <th className="py-2 px-2 w-24 text-right">Unit</th>
                     <th className="py-2 px-2 w-28 text-right">Calc</th>
+                    {(form.tax_rate || 0) > 0 && (
+                      <th className="py-2 px-2 w-16 text-right" title="Tax category">
+                        Tax
+                      </th>
+                    )}
                     {form.customColumns.map((col, idx) => (
                       <th
                         key={col.key}
@@ -2142,6 +2379,24 @@ function Editor({
                           ))}
                         </select>
                       </td>
+                      {(form.tax_rate || 0) > 0 && (
+                        <td className="py-2 px-2">
+                          <select
+                            className="input text-right !px-2 !py-1 text-xs"
+                            value={it.tax_category || DEFAULT_TAX_CATEGORY}
+                            title="UAE e-invoice tax category"
+                            onChange={(e) =>
+                              setItem(i, { tax_category: e.target.value })
+                            }
+                          >
+                            {TAX_CATEGORY_CODES.map((t) => (
+                              <option key={t.code} value={t.code} title={t.label}>
+                                {t.code}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
                       {form.customColumns.map((col) => (
                         <td key={col.key} className="py-2 px-2">
                           <input
