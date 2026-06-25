@@ -103,6 +103,22 @@ export const EMIRATES: Code[] = [
   { code: "FUJ", label: "Fujairah" },
 ];
 
+/** Map a legacy ISO 3166-2 "AE-xx" emirate to the PINT-AE 3-letter code.
+ *  Passes any other value through unchanged. Belt-and-suspenders for rows saved
+ *  before the code-list switch (esp. local SQLite, which the SQL migration can't
+ *  reach). See supabase/2026-06-25-emirate-code-remap.sql. */
+const EMIRATE_LEGACY: Record<string, string> = {
+  "AE-AZ": "AUH",
+  "AE-DU": "DXB",
+  "AE-SH": "SHJ",
+  "AE-AJ": "AJM",
+  "AE-UQ": "UAQ",
+  "AE-RK": "RAK",
+  "AE-FU": "FUJ",
+};
+export const normalizeEmirate = (c?: string | null): string =>
+  (c && EMIRATE_LEGACY[c.toUpperCase()]) || c || "";
+
 // --- Invoice transaction type code: 8-flag bitstring (spec field 5) ---------
 // Fixed order per spec §4.1. Each flag is "1" (applicable) / "0" (not).
 export const TRANSACTION_TYPE_FLAGS: { key: string; label: string }[] = [

@@ -21,6 +21,7 @@ import {
   TAX_EXEMPTION_REASONS,
   CORRECTIVE_TYPE_CODES,
   tinFromTrn,
+  normalizeEmirate,
 } from "./einvoice";
 
 export interface EInvoiceItem {
@@ -227,7 +228,7 @@ function partyXml(
   return `  <cac:${role}>
     <cac:Party>
 ${endpoint}      <cac:PostalAddress>
-${p.street ? `        <cbc:StreetName>${esc(p.street)}</cbc:StreetName>\n` : ""}${p.city ? `        <cbc:CityName>${esc(p.city)}</cbc:CityName>\n` : ""}${p.emirate ? `        <cbc:CountrySubentity>${esc(p.emirate)}</cbc:CountrySubentity>\n` : ""}        <cac:Country>
+${p.street ? `        <cbc:StreetName>${esc(p.street)}</cbc:StreetName>\n` : ""}${p.city ? `        <cbc:CityName>${esc(p.city)}</cbc:CityName>\n` : ""}${p.emirate ? `        <cbc:CountrySubentity>${esc(normalizeEmirate(p.emirate))}</cbc:CountrySubentity>\n` : ""}        <cac:Country>
           <cbc:IdentificationCode>${esc(country)}</cbc:IdentificationCode>
         </cac:Country>
       </cac:PostalAddress>

@@ -110,6 +110,18 @@ test("buildInvoiceXml: credit note carries BillingReference; foreign currency ad
   expect(fx).toContain('<cbc:TaxAmount currencyID="AED">36.73</cbc:TaxAmount>');
 });
 
+test("buildInvoiceXml: legacy AE-xx emirate is normalized to 3-letter on export", () => {
+  const xml = buildInvoiceXml({
+    ...sample(),
+    seller_country_subdivision: "AE-DU",
+    buyer_country_subdivision: "AE-SH",
+  });
+  expect(xml).toContain("<cbc:CountrySubentity>DXB</cbc:CountrySubentity>");
+  expect(xml).toContain("<cbc:CountrySubentity>SHJ</cbc:CountrySubentity>");
+  expect(xml).not.toContain("AE-DU");
+  expect(xml).not.toContain("AE-SH");
+});
+
 test("buildInvoiceXml: PINT-AE mandatory fields (2025-Q2 conformance)", () => {
   const xml = buildInvoiceXml({ ...sample(), transaction_type: "00000001" });
   // UUID (BTAE-07) — fatal mandatory.
