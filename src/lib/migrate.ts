@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
+import { normalizeEmirate } from "./einvoice";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -49,6 +50,50 @@ const FILES_BUCKET = "files";
 async function localSet(key: string, value: string): Promise<void> {
   if (hasTauri) await invoke("cache_set", { key, value });
   else localStorage.setItem(key, value);
+}
+
+async function localGet(key: string): Promise<string | null> {
+  if (hasTauri) return (await invoke<string | null>("cache_get", { key })) ?? null;
+  return localStorage.getItem(key);
+}
+
+// Local store has no SQL migration path; this is the on-device equivalent of
+// supabase/2026-06-25-emirate-code-remap.sql.
+const EMIRATE_FIELDS: [string, string[]][] = [
+  ["company_profile", ["country_subdivision"]],
+  ["crm_customers", ["country_subdivision"]],
+  ["invoice_docs", ["seller_country_subdivision", "buyer_country_subdivision"]],
+];
+
+/** Rewrite legacy ISO 3166-2 "AE-xx" emirate codes to the PINT-AE 3-letter codes
+ *  across the local store. Idempotent. Returns the number of fields updated. */
+export async function normalizeLocalEmirates(): Promise<number> {
+  let changed = 0;
+  for (const [coll, fields] of EMIRATE_FIELDS) {
+    const raw = await localGet("localdb:" + coll);
+    if (!raw) continue;
+    let rows: any[];
+    try {
+      rows = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(rows)) continue;
+    let dirty = false;
+    for (const r of rows) {
+      for (const f of fields) {
+        const v = r?.[f];
+        const n = normalizeEmirate(v);
+        if (v && n !== v) {
+          r[f] = n;
+          dirty = true;
+          changed++;
+        }
+      }
+    }
+    if (dirty) await localSet("localdb:" + coll, JSON.stringify(rows));
+  }
+  return changed;
 }
 
 function bytesToB64(bytes: Uint8Array): string {
