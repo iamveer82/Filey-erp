@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { Cloud, HardDrive, Check, Download, FolderOpen } from "lucide-react";
 import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured } from "../../lib/supabase";
-import { migrateCloudToLocal, type MigrateResult } from "../../lib/migrate";
+import {
+  migrateCloudToLocal,
+  normalizeLocalEmirates,
+  type MigrateResult,
+} from "../../lib/migrate";
 import {
   hasTauri,
   pickFolder,
@@ -13,10 +17,8 @@ import {
   setExportDir,
   clearExportDir,
   openFolder,
-  pickSaveFile,
-  pickBackupFile,
-  backupDb,
-  restoreDb,
+  backupAll,
+  restoreAll,
 } from "../../lib/localPaths";
 
 // Switch where data lives. Changing mode reloads the app; it does NOT migrate
@@ -59,31 +61,46 @@ export default function DataModePanel() {
   };
 
   const [backupMsg, setBackupMsg] = useState("");
+  const [emirateMsg, setEmirateMsg] = useState("");
+
+  const runEmirateFix = async () => {
+    setEmirateMsg("");
+    try {
+      const n = await normalizeLocalEmirates();
+      setEmirateMsg(
+        n
+          ? `Updated ${n} field${n === 1 ? "" : "s"} to the current emirate codes.`
+          : "All records already use the current emirate codes."
+      );
+    } catch (e: any) {
+      setEmirateMsg(`Failed: ${e?.message ?? e}`);
+    }
+  };
 
   const runBackup = async () => {
-    const name = `filey-backup-${new Date().toISOString().slice(0, 10)}.db`;
-    const dest = await pickSaveFile(name);
-    if (!dest) return;
+    const dir = await pickFolder();
+    if (!dir) return;
+    const dest = `${dir}/filey-backup-${new Date().toISOString().slice(0, 10)}`;
     setBackupMsg("");
     try {
-      const path = await backupDb(dest);
-      setBackupMsg(`Backup saved: ${path}`);
+      const path = await backupAll(dest);
+      setBackupMsg(`Full backup saved (database + files): ${path}`);
     } catch (e: any) {
       setBackupMsg(`Backup failed: ${e?.message ?? e}`);
     }
   };
 
   const runRestore = async () => {
-    const src = await pickBackupFile();
+    const src = await pickFolder();
     if (!src) return;
     if (
       !window.confirm(
-        `Restore from:\n${src}\n\nThis REPLACES all current data on this device. The app will restart. Make a backup first if unsure.`
+        `Restore the full backup in:\n${src}\n\nThis REPLACES all data AND files on this device. The app will restart. Make a backup first if unsure.`
       )
     )
       return;
     try {
-      await restoreDb(src);
+      await restoreAll(src);
       await restartApp();
     } catch (e: any) {
       setBackupMsg(`Restore failed: ${e?.message ?? e}`);
@@ -264,8 +281,9 @@ export default function DataModePanel() {
               <Download size={16} /> Backup &amp; restore
             </p>
             <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Save a full copy of your data to a file, or restore from one. Your
-              offline safety net — keep a backup somewhere safe.
+              Save a full copy — database <em>and</em> your files — into a backup
+              folder, or restore from one. Your offline safety net; keep it
+              somewhere safe (USB drive, synced folder).
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <button className="btn-ghost" onClick={runBackup}>
@@ -277,6 +295,23 @@ export default function DataModePanel() {
             </div>
             {backupMsg && (
               <p className="text-xs text-brand-500 mt-2 break-all">{backupMsg}</p>
+            )}
+          </div>
+
+          {/* Data fixes */}
+          <div>
+            <p className="font-medium text-ink flex items-center gap-2">
+              <Check size={16} /> Fix emirate codes
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5 mb-2">
+              Rewrite older records to the UAE e-invoice emirate codes
+              (AUH/DXB/SHJ…). Safe to run anytime.
+            </p>
+            <button className="btn-ghost" onClick={runEmirateFix}>
+              Normalize emirate codes
+            </button>
+            {emirateMsg && (
+              <p className="text-xs text-brand-500 mt-2 break-all">{emirateMsg}</p>
             )}
           </div>
         </div>
