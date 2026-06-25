@@ -20,6 +20,14 @@ describe("localdb query shim", () => {
     expect(data.id).toBe(2);
   });
 
+  it("eq matches a string param against a numeric stored id (PostgREST coercion)", async () => {
+    const { data: ins } = await c.from("widgets").insert({ name: "A" }).select().single();
+    expect(typeof ins.id).toBe("number"); // shim auto-assigns numeric id
+    // A route param arrives as a string — must still find the row.
+    const { data } = await c.from("widgets").select().eq("id", String(ins.id)).single();
+    expect(data?.name).toBe("A");
+  });
+
   it("single errors when no row matches", async () => {
     const { data, error } = await c.from("widgets").select().eq("name", "X").single();
     expect(data).toBeNull();

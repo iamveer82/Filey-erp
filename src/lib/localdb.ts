@@ -121,9 +121,21 @@ class LocalBuilder implements PromiseLike<Result> {
     return this;
   }
 
+  // PostgREST coerces text↔number in filters (a `?id=eq.5` matches int 5). The
+  // shim is schemaless, so mirror that with a stringified compare — otherwise a
+  // string route param (`"5"`) silently fails to match a numeric stored id and
+  // the row vanishes with no error. ponytail: String() compare, enough for
+  // id/owner/status scalars; revisit if a column ever needs strict-type equality.
+  private looseEq(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    if (typeof a === "object" || typeof b === "object") return false;
+    return String(a) === String(b);
+  }
+
   private matches(r: Row): boolean {
     for (const f of this.filters) {
-      if (f.kind === "eq" && r[f.col] !== f.val) return false;
+      if (f.kind === "eq" && !this.looseEq(r[f.col], f.val)) return false;
       if (f.kind === "lte" && !(r[f.col] <= f.val)) return false;
       if (f.kind === "contains") {
         const cell = r[f.col];
@@ -139,7 +151,7 @@ class LocalBuilder implements PromiseLike<Result> {
     }
     if (this.matchObj)
       for (const k of Object.keys(this.matchObj))
-        if (r[k] !== this.matchObj[k]) return false;
+        if (!this.looseEq(r[k], this.matchObj[k])) return false;
     return true;
   }
 
