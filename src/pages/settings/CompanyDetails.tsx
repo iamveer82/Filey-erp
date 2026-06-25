@@ -6,6 +6,7 @@ import { Building2, Upload, X, Check, Landmark, FileText, Stamp, Hash } from "lu
 import { numInput } from "../../lib/format";
 import { loadInvoiceFormat, saveInvoiceFormat } from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
+import { LEGAL_ID_TYPES, EMIRATES, normalizeEmirate } from "../../lib/einvoice";
 import {
   loadBankInfo,
   saveBankInfo,
@@ -66,7 +67,14 @@ export default function CompanyDetails() {
   const clearFieldErrors = () => setFieldErrors({});
 
   useEffect(() => {
-    billing.getCompany().then(setC).catch(console.error);
+    // Normalize legacy AE-xx emirate on load so the dropdown matches and the
+    // next save persists the canonical 3-letter code (local data has no SQL migration).
+    billing
+      .getCompany()
+      .then((d) =>
+        setC(d ? { ...d, country_subdivision: normalizeEmirate(d.country_subdivision) } : d)
+      )
+      .catch(console.error);
     loadBankInfo()
       .then(setBank)
       .catch((e) => console.warn("Failed to load bank details", e));
@@ -226,6 +234,48 @@ export default function CompanyDetails() {
               value={c.trn ?? ""}
               onChange={(e) => set("trn", e.target.value)}
             />
+          </FormField>
+        </div>
+        {/* UAE e-invoice: seller legal registration + emirate (entered once). */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <FormField
+            label="Legal Registration ID"
+            hint="Trade license / EID / passport no."
+          >
+            <input
+              className="input"
+              placeholder="CN-1234567"
+              value={c.legal_id ?? ""}
+              onChange={(e) => set("legal_id", e.target.value)}
+            />
+          </FormField>
+          <FormField label="ID Type" hint="UAE e-invoice">
+            <select
+              className="select"
+              value={c.legal_id_type ?? ""}
+              onChange={(e) => set("legal_id_type", e.target.value)}
+            >
+              <option value="">Select…</option>
+              {LEGAL_ID_TYPES.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <FormField label="Emirate" hint="Country subdivision">
+            <select
+              className="select"
+              value={c.country_subdivision ?? ""}
+              onChange={(e) => set("country_subdivision", e.target.value)}
+            >
+              <option value="">Select…</option>
+              {EMIRATES.map((em) => (
+                <option key={em.code} value={em.code}>
+                  {em.label}
+                </option>
+              ))}
+            </select>
           </FormField>
         </div>
         <FormField label="Address" error={fieldErrors.address} required>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { EMIRATES, normalizeEmirate } from "../lib/einvoice";
 import {
   Plus,
   Trash2,
@@ -507,6 +508,9 @@ function CustomerModal({
     company: string;
     trn: string;
     address: string;
+    city: string;
+    country_subdivision: string;
+    country_code: string;
     email: string;
     phone: string;
     custom_fields: Record<string, string>;
@@ -516,6 +520,9 @@ function CustomerModal({
     company: "",
     trn: "",
     address: "",
+    city: "",
+    country_subdivision: "",
+    country_code: "AE",
     email: "",
     phone: "",
     custom_fields: {},
@@ -538,6 +545,9 @@ function CustomerModal({
         company: edit.company ?? "",
         trn: edit.trn ?? "",
         address: edit.address ?? "",
+        city: edit.city ?? "",
+        country_subdivision: normalizeEmirate(edit.country_subdivision),
+        country_code: edit.country_code ?? "AE",
         email: edit.email ?? "",
         phone: edit.phone ?? "",
         custom_fields: edit.custom_fields ?? {},
@@ -581,6 +591,9 @@ function CustomerModal({
         email: f.email.trim() || undefined,
         phone: f.phone.trim() || undefined,
         address: f.address.trim() || undefined,
+        city: f.city.trim() || undefined,
+        country_subdivision: f.country_subdivision || undefined,
+        country_code: f.country_code.trim() || undefined,
         phone_e164: e164 ?? undefined,
         custom_fields:
           Object.keys(f.custom_fields || {}).length > 0
@@ -655,6 +668,41 @@ function CustomerModal({
             placeholder="Street, City, Country"
           />
         </Field>
+        {/* UAE e-invoice: buyer location (pulled onto invoices). */}
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <Field label="City">
+            <input
+              className="input"
+              value={f.city}
+              onChange={(e) => setF({ ...f, city: e.target.value })}
+              placeholder="Dubai"
+            />
+          </Field>
+          <Field label="Emirate">
+            <select
+              className="select"
+              value={f.country_subdivision}
+              onChange={(e) => setF({ ...f, country_subdivision: e.target.value })}
+            >
+              <option value="">Select…</option>
+              {EMIRATES.map((em) => (
+                <option key={em.code} value={em.code}>
+                  {em.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Country">
+            <input
+              className="input"
+              value={f.country_code}
+              onChange={(e) =>
+                setF({ ...f, country_code: e.target.value.toUpperCase() })
+              }
+              placeholder="AE"
+            />
+          </Field>
+        </div>
       </div>
 
       {/* User-defined custom fields (Odoo Studio). Only renders
