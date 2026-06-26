@@ -566,13 +566,25 @@ export interface ExtractedInvoice {
   customer_name?: string;
   customer_address?: string;
   customer_trn?: string;
+  /** UAE e-invoice buyer location (for PINT-AE autofill). */
+  buyer_city?: string;
+  buyer_country_subdivision?: string; // ISO 3166-2:AE emirate code (AE-DU…) when UAE
+  buyer_country_code?: string; // ISO alpha-2, e.g. AE
+  invoice_type_code?: string; // 380 invoice, 381 credit note
+  payment_means_code?: string; // UN/ECE 4461: 10 cash, 30 transfer, 48 card…
   issue_date?: string;
   due_date?: string;
   currency?: string;
   /** VAT / sales-tax percentage on the document (e.g. 5), 0 if none. */
   tax_rate?: number;
   notes?: string;
-  items?: { description: string; qty: number; unit_price: number }[];
+  items?: {
+    description: string;
+    qty: number;
+    unit_price: number;
+    /** Tax category: S standard, Z zero-rated, E exempt, O out-of-scope. */
+    tax_category?: string;
+  }[];
 }
 
 /** Normalise a single image or an array (all PDF pages) to a list. */
@@ -590,8 +602,12 @@ export async function extractInvoiceFromImage(
       ? ` The document spans ${images.length} pages (images, in order) — combine them into ONE result and include every line item across all pages.`
       : "";
   const prompt = `You parse business documents. Read this invoice / receipt / quote and return STRICT JSON of this exact shape:
-{"seller_name":"","customer_name":"","customer_address":"","customer_trn":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0}]}
-Rules: use an empty string, 0, or empty array when a field is unknown; numbers must be plain numbers; dates must be YYYY-MM-DD; tax_rate is the VAT/sales-tax percentage as a plain number (e.g. 5), 0 if the document has none; unit_price is the per-unit price excluding tax.${multi} Return ONLY the JSON object — no prose, no markdown fences.`;
+{"seller_name":"","customer_name":"","customer_address":"","customer_trn":"","buyer_city":"","buyer_country_subdivision":"","buyer_country_code":"","invoice_type_code":"380","payment_means_code":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0,"tax_category":"S"}]}
+Rules: use an empty string, 0, or empty array when a field is unknown; numbers must be plain numbers; dates must be YYYY-MM-DD; tax_rate is the VAT/sales-tax percentage as a plain number (e.g. 5), 0 if the document has none; unit_price is the per-unit price excluding tax.
+For the buyer/customer: buyer_city is their city; buyer_country_subdivision is the emirate as an ISO 3166-2:AE code when the address is in the UAE — AE-AZ Abu Dhabi, AE-DU Dubai, AE-SH Sharjah, AE-AJ Ajman, AE-UQ Umm Al Quwain, AE-RK Ras Al Khaimah, AE-FU Fujairah — else "" ; buyer_country_code is the ISO alpha-2 country code (AE for the UAE).
+invoice_type_code is "380" for a normal invoice or "381" for a credit note.
+payment_means_code maps the stated payment method to UN/ECE 4461: 10 cash, 30 bank/credit transfer, 42 to bank account, 48 bank card, 49 direct debit — "" if not stated.
+Each line item's tax_category is "S" standard-rated, "Z" zero-rated (0% but taxable), "E" exempt, or "O" out-of-scope; default "S" when the line is taxed at the standard rate.${multi} Return ONLY the JSON object — no prose, no markdown fences.`;
   const out = await aiChat([{ role: "user", text: prompt, images }], {
     maxTokens: 4096,
     temperature: 0,

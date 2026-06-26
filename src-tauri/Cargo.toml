@@ -37,4 +37,10 @@ lettre = { version = "0.11", default-features = false, features = [
 # HTTP client for the Composio bridge (managed integrations: Gmail/Slack/etc).
 # rustls to share lettre's TLS stack; `json` for send_json/into_json.
 ureq = { version = "2", features = ["json"] }
+# At-rest encryption for My Files blobs. Key is random, stored in the OS secure
+# store (Windows Credential Manager) via `keyring` — transparent per-user unlock.
+aes-gcm = "0.10"
+rand = "0.8"
+keyring = "2"
+base64 = "0.22"
 

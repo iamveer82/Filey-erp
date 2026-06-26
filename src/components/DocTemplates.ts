@@ -17,6 +17,7 @@ export const DOC_TEMPLATES = [
   { id: "monogram", name: "Monogram" },
   { id: "green-gold", name: "Green Gold" },
   { id: "uae", name: "UAE Professional" },
+  { id: "fta", name: "UAE FTA Tax Invoice" },
   { id: "industrial", name: "Industrial" },
   { id: "executive", name: "Executive" },
   { id: "fresh", name: "Fresh" },

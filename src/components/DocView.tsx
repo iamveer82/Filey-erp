@@ -3,6 +3,21 @@ import { docTotals, docLineAmount } from "../lib/docItems";
 import type { CalcMode } from "../lib/money";
 import { loadCustomTemplates } from "./TemplateDesigner";
 import { resolveTemplateId } from "./DocTemplates";
+import {
+  INVOICE_TYPE_CODES,
+  PAYMENT_MEANS_CODES,
+  TAX_CATEGORY_CODES,
+  TRANSACTION_TYPE_FLAGS,
+  EMIRATES,
+  LEGAL_ID_TYPES,
+  decodeTransactionType,
+  tinFromTrn,
+  type Code,
+} from "../lib/einvoice";
+
+/** Map a code to its human label (falls back to the raw code). */
+const codeLabel = (list: Code[], code?: string | null): string =>
+  !code ? "" : list.find((c) => c.code === code)?.label || code;
 
 export interface DocViewItem {
   description: string;
@@ -17,6 +32,8 @@ export interface DocViewItem {
   calcMode?: CalcMode;
   amount?: number;
   itemFormula?: { a: string; b?: string } | null;
+  /** UAE e-invoice tax category code (S/Z/E/O/AE). */
+  tax_category?: string | null;
 }
 
 export interface DocViewCustomColumn {
@@ -39,10 +56,21 @@ export interface DocViewForm {
   seller_trn?: string | null;
   seller_email?: string | null;
   seller_phone?: string | null;
+  seller_city?: string | null;
+  seller_country_subdivision?: string | null;
+  seller_legal_id?: string | null;
+  seller_legal_id_type?: string | null;
   customer_name?: string | null;
   customer_address?: string | null;
   customer_trn?: string | null;
   customer_email?: string | null;
+  buyer_city?: string | null;
+  buyer_country_subdivision?: string | null;
+  buyer_country_code?: string | null;
+  // Per-document UAE e-invoice codes (rendered as readable labels in the FTA template).
+  invoice_type_code?: string | null;
+  transaction_type?: string | null;
+  payment_means_code?: string | null;
   issue_date?: string | null;
   due_date?: string | null;
   po_number?: string | null;
@@ -743,6 +771,245 @@ export default function DocView({
         </div>
         <Items headerBg="#1a1a1a" />
         <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  // ---- UAE FTA TAX INVOICE (Peppol PINT-AE field-complete) ----
+  if (templateId === "fta") {
+    const invType =
+      codeLabel(INVOICE_TYPE_CODES, form.invoice_type_code) || "Tax invoice";
+    const payMeans = codeLabel(PAYMENT_MEANS_CODES, form.payment_means_code);
+    const sellerEmirate = codeLabel(EMIRATES, form.seller_country_subdivision);
+    const buyerEmirate = codeLabel(EMIRATES, form.buyer_country_subdivision);
+    const sellerLegalType = codeLabel(LEGAL_ID_TYPES, form.seller_legal_id_type);
+    const sellerTin = tinFromTrn(form.seller_trn);
+    const buyerTin = tinFromTrn(form.customer_trn);
+    const txFlags = decodeTransactionType(form.transaction_type);
+    const activeTx = TRANSACTION_TYPE_FLAGS.filter((f) => txFlags[f.key]);
+
+    // Category-aware tax math: VAT only on standard-rated lines, document
+    // discount allocated pro-rata by line net so the breakdown reconciles with
+    // the total. ponytail: refine if per-line VAT rates are ever introduced.
+    const lineNets = form.items.map((it) => ({
+      cat: it.tax_category || "S",
+      net: docLineAmount(it, form.unit_price_formula),
+    }));
+    const grossNet = lineNets.reduce((s, l) => s + l.net, 0);
+    const discount = t.discount || 0;
+    const netAfterDisc = grossNet - discount;
+    const byCat: Record<string, number> = {};
+    for (const l of lineNets) byCat[l.cat] = (byCat[l.cat] || 0) + l.net;
+    const breakdown = Object.entries(byCat).map(([cat, net]) => {
+      const taxable = grossNet > 0 ? netAfterDisc * (net / grossNet) : 0;
+      const rate = cat === "S" ? form.tax_rate || 0 : 0;
+      return { cat, taxable, rate, tax: (taxable * rate) / 100 };
+    });
+    const vat = breakdown.reduce((s, b) => s + b.tax, 0);
+    const grandTotal = netAfterDisc + vat;
+
+    return (
+      <div
+        className="text-neutral-900"
+        style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}
+      >
+        {/* Header */}
+        <div
+          className="flex justify-between items-start border-b-2 pb-4"
+          style={{ borderColor: a }}
+        >
+          <div className="flex items-start gap-3">
+            <Logo size={52} />
+            <div>
+              <p className="font-bold text-lg leading-tight">{form.seller_name}</p>
+              {form.seller_address && (
+                <p className="text-[11px] text-neutral-600 whitespace-pre-line">
+                  {form.seller_address}
+                </p>
+              )}
+              {(form.seller_city || sellerEmirate) && (
+                <p className="text-[11px] text-neutral-600">
+                  {[form.seller_city, sellerEmirate].filter(Boolean).join(", ")}
+                </p>
+              )}
+              <p className="text-[11px] text-neutral-600">United Arab Emirates</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>
+              TAX INVOICE
+            </p>
+            <p className="text-[11px] text-neutral-500 mt-1">{invType}</p>
+            <p className="text-sm font-semibold mt-2">{form.number}</p>
+          </div>
+        </div>
+
+        {/* Seller / Buyer identity */}
+        <div className="grid grid-cols-2 gap-6 mt-5 text-[11px]">
+          <div className="rounded-lg p-3" style={{ background: "#f6f7f9" }}>
+            <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
+              Seller
+            </p>
+            <p className="font-semibold text-[12px]">{form.seller_name}</p>
+            {form.seller_trn && <p className="text-neutral-600">TRN: {form.seller_trn}</p>}
+            {sellerTin && <p className="text-neutral-500">TIN: {sellerTin}</p>}
+            {form.seller_legal_id && (
+              <p className="text-neutral-500">
+                {sellerLegalType || "Reg. No"}: {form.seller_legal_id}
+              </p>
+            )}
+            <SellerContact cls="text-neutral-500" />
+          </div>
+          <div className="rounded-lg p-3" style={{ background: "#f6f7f9" }}>
+            <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
+              {partyLabel}
+            </p>
+            <p className="font-semibold text-[12px]">{form.customer_name}</p>
+            {form.customer_address && (
+              <p className="text-neutral-600 whitespace-pre-line">
+                {form.customer_address}
+              </p>
+            )}
+            {(form.buyer_city || buyerEmirate || form.buyer_country_code) && (
+              <p className="text-neutral-500">
+                {[form.buyer_city, buyerEmirate, form.buyer_country_code]
+                  .filter(Boolean)
+                  .join(", ")}
+              </p>
+            )}
+            {form.customer_trn && <p className="text-neutral-600">TRN: {form.customer_trn}</p>}
+            {buyerTin && <p className="text-neutral-500">TIN: {buyerTin}</p>}
+          </div>
+        </div>
+
+        {/* Invoice meta */}
+        <div className="grid grid-cols-4 gap-2 mt-4 text-[11px]">
+          {(
+            [
+              ["Invoice Date", fmtDate(form.issue_date)],
+              [dueLabel, fmtDate(form.due_date)],
+              ["Currency", form.currency || "AED"],
+              ["Payment", payMeans || "—"],
+            ] as [string, string][]
+          ).map(([k, v]) => (
+            <div
+              key={k}
+              className="rounded border px-2.5 py-1.5"
+              style={{ borderColor: "#e5e7eb" }}
+            >
+              <p className="text-[8.5px] uppercase tracking-wider text-neutral-400">{k}</p>
+              <p className="font-medium">{v}</p>
+            </div>
+          ))}
+        </div>
+        {form.po_number && (
+          <p className="text-[10px] text-neutral-500 mt-1.5">
+            PO Reference: {form.po_number}
+          </p>
+        )}
+        {activeTx.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {activeTx.map((f) => (
+              <span
+                key={f.key}
+                className="text-[9px] px-2 py-0.5 rounded-full"
+                style={{ background: a, color: "#fff" }}
+              >
+                {f.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Items */}
+        <table className="w-full text-[12px] border-collapse mt-4">
+          <thead>
+            <tr style={{ background: a, color: "#fff" }}>
+              <th className="text-right py-2 px-2 font-semibold w-8">#</th>
+              <th className="text-left py-2 px-2 font-semibold">Description</th>
+              <th className="text-right py-2 px-2 font-semibold w-12">Qty</th>
+              <th className="text-right py-2 px-2 font-semibold w-12">Unit</th>
+              <th className="text-right py-2 px-2 font-semibold w-24">Unit Price</th>
+              <th className="text-center py-2 px-2 font-semibold w-12">Tax</th>
+              <th className="text-right py-2 px-2 font-semibold w-28">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {itemsToRender.map((it, i) => (
+              <tr key={i} className="border-b border-neutral-200">
+                <td className="py-1.5 px-2 text-right text-neutral-500 tabular-nums">
+                  {itemStartIndex + i + 1}
+                </td>
+                <td className="py-1.5 px-2">{it.description || "—"}</td>
+                <td className="py-1.5 px-2 text-right">{it.qty}</td>
+                <td className="py-1.5 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
+                <td className="py-1.5 px-2 text-right">{m(it.unit_price)}</td>
+                <td className="py-1.5 px-2 text-center text-neutral-500">
+                  {it.tax_category || "S"}
+                </td>
+                <td className="py-1.5 px-2 text-right">
+                  {m(docLineAmount(it, form.unit_price_formula))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {showTotals && (
+          <div className="flex justify-between gap-6 mt-6">
+            <div className="text-[11px]">
+              <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
+                VAT Breakdown
+              </p>
+              <table className="border-collapse">
+                <thead>
+                  <tr className="text-neutral-400">
+                    <th className="text-left pr-4 font-medium">Category</th>
+                    <th className="text-right pr-4 font-medium">Taxable</th>
+                    <th className="text-right pr-4 font-medium">Rate</th>
+                    <th className="text-right font-medium">VAT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {breakdown.map((b) => (
+                    <tr key={b.cat}>
+                      <td className="pr-4">
+                        {b.cat} · {codeLabel(TAX_CATEGORY_CODES, b.cat)}
+                      </td>
+                      <td className="text-right pr-4 tabular-nums">{m(b.taxable)}</td>
+                      <td className="text-right pr-4 tabular-nums">{b.rate}%</td>
+                      <td className="text-right tabular-nums">{m(b.tax)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="w-64 text-sm">
+              <div className="flex justify-between py-1">
+                <span className="text-neutral-500">Subtotal</span>
+                <span>{m(grossNet)}</span>
+              </div>
+              {discount > 0 && (
+                <div className="flex justify-between py-1">
+                  <span className="text-neutral-500">Discount</span>
+                  <span>- {m(discount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-1">
+                <span className="text-neutral-500">VAT</span>
+                <span>{m(vat)}</span>
+              </div>
+              <div
+                className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
+                style={{ borderColor: a, color: a }}
+              >
+                <span>Total ({form.currency || "AED"})</span>
+                <span>{m(grandTotal)}</span>
+              </div>
+            </div>
+          </div>
+        )}
         <Footer />
       </div>
     );

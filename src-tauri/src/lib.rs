@@ -49,8 +49,13 @@ pub fn run() {
             modules::storage::set_data_dir,
             modules::storage::restart_app,
             modules::storage::write_doc_file,
+            modules::storage::blob_write,
+            modules::storage::blob_read,
+            modules::storage::blob_delete,
             modules::storage::backup_db,
             modules::storage::restore_db,
+            modules::storage::backup_all,
+            modules::storage::restore_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

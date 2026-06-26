@@ -88,6 +88,12 @@ export default function ScanDocModal({
         customer_name: data.customer_name || "",
         customer_address: data.customer_address,
         customer_trn: data.customer_trn,
+        // UAE e-invoice fields lifted off the scan (user reviews in the editor).
+        buyer_city: data.buyer_city,
+        buyer_country_subdivision: data.buyer_country_subdivision,
+        buyer_country_code: data.buyer_country_code || "AE",
+        invoice_type_code: data.invoice_type_code || "380",
+        payment_means_code: data.payment_means_code || undefined,
         issue_date: data.issue_date || today,
         due_date: data.due_date,
         notes: data.notes,
@@ -102,6 +108,7 @@ export default function ScanDocModal({
           description: it.description || "",
           qty: Number(it.qty) || 1,
           unit_price: Number(it.unit_price) || 0,
+          tax_category: it.tax_category || "S",
         })),
       };
       await billing.saveDoc(input);

@@ -297,10 +297,11 @@ const localAuth = {
   },
 };
 
-// ---- storage: file bytes kept as base64 blobs in the local store ----------
-// ponytail: base64 in the kv_cache table, one row per path, surfaced as data:
-// URLs. Fine for a single-user desktop (invoices/PDFs are small). Move to real
-// files-on-disk (Tauri fs) only if blobs grow big enough to bloat the DB.
+// ---- storage: file bytes ---------------------------------------------------
+// Desktop (Tauri): real files on disk under {data_dir}/files — bytes stay out of
+// the SQLite DB and never leave the machine (privacy + no DB bloat). Browser dev
+// (no Tauri): base64 in localStorage. Old desktop installs that stored base64 in
+// kv_cache are migrated to disk lazily on first read.
 
 interface Blob64 {
   mime: string;
@@ -315,6 +316,29 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+const EXT_MIME: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+};
+const mimeFromPath = (p: string) =>
+  EXT_MIME[p.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+
+// Old kv-backed base64 store (browser fallback + migration source).
 async function blobGet(path: string): Promise<Blob64 | null> {
   const key = "fileblob:" + path;
   try {
@@ -335,33 +359,83 @@ async function blobSet(path: string, val: Blob64 | null): Promise<void> {
   else localStorage.removeItem(key);
 }
 
+// Real files-on-disk via Tauri. ponytail: bytes sent as a number[] (JSON) — fine
+// for documents up to a few MB; switch to a raw ArrayBuffer/Channel transfer if
+// users start storing very large files.
+async function diskWrite(path: string, bytes: Uint8Array): Promise<void> {
+  await invoke("blob_write", { path, bytes: Array.from(bytes) });
+}
+async function diskRead(path: string): Promise<Uint8Array | null> {
+  try {
+    const arr = await invoke<number[]>("blob_read", { path });
+    return arr ? Uint8Array.from(arr) : null;
+  } catch {
+    return null; // missing file
+  }
+}
+async function diskDelete(path: string): Promise<void> {
+  try {
+    await invoke("blob_delete", { path });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Read bytes for a storage key. Desktop: disk, migrating an old kv base64 blob
+ *  on first read. Browser: kv base64. */
+async function readBlobBytes(path: string): Promise<Uint8Array | null> {
+  if (hasTauri) {
+    const disk = await diskRead(path);
+    if (disk) return disk;
+    const old = await blobGet(path); // migrate legacy base64 blob → disk
+    if (old) {
+      const bytes = b64ToBytes(old.b64);
+      await diskWrite(path, bytes);
+      await blobSet(path, null);
+      return bytes;
+    }
+    return null;
+  }
+  const b = await blobGet(path);
+  return b ? b64ToBytes(b.b64) : null;
+}
+
 function localStorageApi() {
   return {
     from: (_bucket: string) => ({
       async upload(path: string, blob: Blob, opts?: { contentType?: string }) {
         const bytes = new Uint8Array(await blob.arrayBuffer());
-        await blobSet(path, {
-          mime: opts?.contentType || (blob as any).type || "application/octet-stream",
-          b64: bytesToB64(bytes),
-        });
+        if (hasTauri) await diskWrite(path, bytes);
+        else
+          await blobSet(path, {
+            mime: opts?.contentType || (blob as any).type || mimeFromPath(path),
+            b64: bytesToB64(bytes),
+          });
         return { data: { path }, error: null };
       },
       async remove(paths: string[]) {
-        for (const p of paths) await blobSet(p, null);
+        for (const p of paths) {
+          if (hasTauri) await diskDelete(p);
+          else await blobSet(p, null);
+        }
         return { data: null, error: null };
       },
       async createSignedUrl(path: string) {
-        const b = await blobGet(path);
-        if (!b) return { data: null, error: { message: "File not found" } };
-        return { data: { signedUrl: `data:${b.mime};base64,${b.b64}` }, error: null };
+        const bytes = await readBlobBytes(path);
+        if (!bytes) return { data: null, error: { message: "File not found" } };
+        return {
+          data: { signedUrl: `data:${mimeFromPath(path)};base64,${bytesToB64(bytes)}` },
+          error: null,
+        };
       },
       async download(path: string) {
-        const b = await blobGet(path);
-        if (!b) return { data: null, error: { message: "File not found" } };
-        const bin = atob(b.b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        return { data: new Blob([bytes], { type: b.mime }), error: null };
+        const bytes = await readBlobBytes(path);
+        if (!bytes) return { data: null, error: { message: "File not found" } };
+        return {
+          // Fresh ArrayBuffer-backed copy so it satisfies BlobPart under strict TS.
+          data: new Blob([new Uint8Array(bytes)], { type: mimeFromPath(path) }),
+          error: null,
+        };
       },
       getPublicUrl(_path: string) {
         return { data: { publicUrl: "" } };

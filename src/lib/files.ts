@@ -28,6 +28,16 @@ export interface SavedFile {
   size: number;
   storagePath: string;
   tool: string | null;
+  /** User folder the file is filed under (null = root / unfiled). */
+  folderId: string | null;
+  createdAt: number;
+}
+
+/** A user-created folder in My Files (parentId null = top level). */
+export interface UserFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
   createdAt: number;
 }
 
@@ -129,7 +139,7 @@ export async function listFiles(): Promise<SavedFile[]> {
   if (!uid || !isConfigured) return [];
   const { data, error } = await sb()
     .from("user_files")
-    .select("id,name,mime,size,storage_path,tool,created_at")
+    .select("id,name,mime,size,storage_path,tool,folder_id,created_at")
     .eq("owner", uid)
     .order("created_at", { ascending: false });
   if (error || !data) return [];
@@ -140,8 +150,85 @@ export async function listFiles(): Promise<SavedFile[]> {
     size: Number(r.size),
     storagePath: r.storage_path as string,
     tool: (r.tool as string) ?? null,
+    folderId: (r.folder_id as string) ?? null,
     createdAt: new Date(r.created_at as string).getTime(),
   }));
+}
+
+/* ---------------- User folders ---------------- */
+
+export async function listFolders(): Promise<UserFolder[]> {
+  const uid = await userId();
+  if (!uid || !isConfigured) return [];
+  const { data, error } = await sb()
+    .from("user_folders")
+    .select("id,name,parent_id,created_at")
+    .eq("owner", uid)
+    .order("name", { ascending: true });
+  if (error || !data) return [];
+  return data.map((r) => ({
+    id: r.id as string,
+    name: r.name as string,
+    parentId: (r.parent_id as string) ?? null,
+    createdAt: new Date(r.created_at as string).getTime(),
+  }));
+}
+
+export async function createFolder(
+  name: string,
+  parentId: string | null
+): Promise<void> {
+  const uid = await userId();
+  if (!uid || !isConfigured) throw new Error("Sign in to create folders.");
+  const n = name.trim();
+  if (!n) throw new Error("Folder name cannot be empty.");
+  const { error } = await sb()
+    .from("user_folders")
+    .insert({ id: newId(), owner: uid, name: n, parent_id: parentId });
+  if (error) throw error;
+}
+
+export async function renameFolder(id: string, name: string): Promise<void> {
+  const n = name.trim();
+  if (!n) throw new Error("Folder name cannot be empty.");
+  if (!isConfigured) return;
+  const { error } = await sb().from("user_folders").update({ name: n }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Delete a folder. Caller must ensure it is empty (no subfolders, no files);
+ *  the DB still set-nulls any stray files and cascade-removes subfolders as a
+ *  backstop. */
+export async function deleteFolder(id: string): Promise<void> {
+  if (!isConfigured) return;
+  const { error } = await sb().from("user_folders").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/** Move a file into a folder (null = root). */
+export async function moveFile(
+  fileId: string,
+  folderId: string | null
+): Promise<void> {
+  if (!isConfigured) return;
+  const { error } = await sb()
+    .from("user_files")
+    .update({ folder_id: folderId })
+    .eq("id", fileId);
+  if (error) throw error;
+}
+
+/** Re-parent a folder (null = top level). Caller guards against cycles. */
+export async function moveFolder(
+  id: string,
+  parentId: string | null
+): Promise<void> {
+  if (!isConfigured) return;
+  const { error } = await sb()
+    .from("user_folders")
+    .update({ parent_id: parentId })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 /** Object URL (`blob:`) for inline preview. Downloads the bytes (local shim or
@@ -283,14 +370,17 @@ export async function companyAssetUrl(path: string, expiresSec = 300): Promise<s
   return data?.signedUrl ?? null;
 }
 
-/** React hook: the signed-in user's saved files + refresh/remove helpers. */
+/** React hook: the signed-in user's saved files + folders + helpers. */
 export function useFiles() {
   const [files, setFiles] = useState<SavedFile[]>([]);
+  const [folders, setFolders] = useState<UserFolder[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setFiles(await listFiles());
+    const [fs, fl] = await Promise.all([listFiles(), listFolders()]);
+    setFiles(fs);
+    setFolders(fl);
     setLoading(false);
   }, []);
 
@@ -300,10 +390,19 @@ export function useFiles() {
 
   return {
     files,
+    folders,
     loading,
     refresh,
-    upload: async (file: File, tool?: string) => {
+    upload: async (file: File, tool?: string, folderId?: string | null) => {
       await uploadUserFile(file, tool);
+      // uploadUserFile lands the file at root; move it into the open folder.
+      if (folderId) {
+        const fresh = await listFiles();
+        const justAdded = fresh.find(
+          (x) => x.name === file.name && x.folderId === null
+        );
+        if (justAdded) await moveFile(justAdded.id, folderId);
+      }
       await refresh();
     },
     remove: async (f: SavedFile) => {
@@ -314,6 +413,26 @@ export function useFiles() {
       const finalName = await renameFile(f, newName);
       await refresh();
       return finalName;
+    },
+    createFolder: async (name: string, parentId: string | null) => {
+      await createFolder(name, parentId);
+      await refresh();
+    },
+    renameFolder: async (id: string, name: string) => {
+      await renameFolder(id, name);
+      await refresh();
+    },
+    deleteFolder: async (id: string) => {
+      await deleteFolder(id);
+      await refresh();
+    },
+    moveFile: async (fileId: string, folderId: string | null) => {
+      await moveFile(fileId, folderId);
+      await refresh();
+    },
+    moveFolder: async (id: string, parentId: string | null) => {
+      await moveFolder(id, parentId);
+      await refresh();
     },
   };
 }

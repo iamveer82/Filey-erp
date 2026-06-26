@@ -163,6 +163,10 @@ export interface CrmCustomer {
   phone_e164?: string;
   address?: string;
   trn?: string;
+  // --- UAE e-invoice: buyer location (entered once per customer) ---
+  city?: string;
+  country_subdivision?: string; // emirate (ISO 3166-2:AE)
+  country_code?: string;        // default AE
   segment?: string;
   custom_fields?: Record<string, string>;
   /** Per-customer bank details (BankInfo shape: bank_name, account_number, …). */
@@ -206,6 +210,8 @@ export interface InvoiceItem {
   unit_price: number;
   unit?: string;
   custom?: Record<string, string>;
+  /** UAE e-invoice tax category code (S/Z/E/O/AE) — see lib/einvoice.ts. */
+  tax_category?: string;
 }
 export interface InvoiceDocSummary {
   id: number;
@@ -259,6 +265,18 @@ export interface InvoiceDoc {
   tax_rate: number;
   discount: number;
   quotation_id?: number;
+  // --- UAE e-invoice (Peppol PINT-AE) mandatory fields; see lib/einvoice.ts ---
+  invoice_type_code?: string;      // 380 tax invoice, 381 credit note, …
+  transaction_type?: string;       // 8-flag bitstring, see TRANSACTION_TYPE_FLAGS
+  payment_means_code?: string;     // UN/ECE 4461
+  buyer_city?: string;
+  buyer_country_subdivision?: string; // emirate (ISO 3166-2:AE)
+  buyer_country_code?: string;        // default AE
+  // Seller identity snapshot (autofilled from CompanyProfile at creation).
+  seller_city?: string;
+  seller_country_subdivision?: string; // emirate
+  seller_legal_id?: string;            // trade-license / EID / passport no.
+  seller_legal_id_type?: string;       // TL / EID / PAS / CD
   created_at: string;
   updated_at: string;
   items: InvoiceItem[];
@@ -283,6 +301,10 @@ export interface CompanyProfile {
   trn?: string;
   vat_number?: string;
   tax_type?: string;
+  // --- UAE e-invoice: seller legal registration + location (entered once) ---
+  legal_id?: string;            // trade-license / EID / passport / cabinet-decision no.
+  legal_id_type?: string;       // TL / EID / PAS / CD
+  country_subdivision?: string; // emirate (ISO 3166-2:AE)
   email?: string;
   phone?: string;
   website?: string;
@@ -2341,6 +2363,7 @@ export const billing = {
               unit_price: it.unit_price,
               unit: (it as any).unit || undefined,
               custom: (it as any).custom || undefined,
+              tax_category: (it as any).tax_category || undefined,
               position: i,
               product_id: (it as any).product_id ?? null,
             }))

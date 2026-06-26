@@ -1,6 +1,34 @@
 import { describe, it, expect } from "vitest";
 import { invoiceTotals, invoiceLineAmount, quotationTotals } from "../money";
 
+describe("invoiceTotals — category-aware VAT", () => {
+  it("taxes only standard-rated lines (mixed invoice)", () => {
+    const t = invoiceTotals(
+      [
+        { qty: 2, unit_price: 100, tax_category: "S" }, // 200 → taxed
+        { qty: 1, unit_price: 50, tax_category: "Z" }, // 50 → 0
+      ],
+      0,
+      5
+    );
+    expect(t.subtotal).toBe(250);
+    expect(t.tax).toBe(10); // 5% of 200 only
+    expect(t.total).toBe(260);
+  });
+
+  it("no category set = all standard = flat net × rate (back-compat)", () => {
+    const t = invoiceTotals([{ qty: 1, unit_price: 1000 }], 0, 5);
+    expect(t.tax).toBe(50);
+    expect(t.total).toBe(1050);
+  });
+
+  it("zero-rated whole invoice charges no VAT", () => {
+    const t = invoiceTotals([{ qty: 4, unit_price: 25, tax_category: "Z" }], 0, 5);
+    expect(t.tax).toBe(0);
+    expect(t.total).toBe(100);
+  });
+});
+
 describe("invoiceLineAmount", () => {
   it("uses qty × unit_price by default", () => {
     expect(invoiceLineAmount({ qty: 3, unit_price: 10 })).toBe(30);

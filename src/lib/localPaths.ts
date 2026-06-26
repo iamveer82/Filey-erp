@@ -51,3 +51,7 @@ export async function pickBackupFile(): Promise<string | null> {
 
 export const backupDb = (dest: string) => invoke<string>("backup_db", { dest });
 export const restoreDb = (src: string) => invoke("restore_db", { src });
+
+/** Full backup (DB + My Files blobs) into a folder, and restore from one. */
+export const backupAll = (dest: string) => invoke<string>("backup_all", { dest });
+export const restoreAll = (src: string) => invoke("restore_all", { src });

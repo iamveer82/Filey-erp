@@ -26,6 +26,9 @@ export interface InvoiceLineItem {
   calcMode?: CalcMode;
   /** Per-line formula overrides the doc-level formula for this line. */
   itemFormula?: { a: string; b?: string } | null;
+  /** UAE e-invoice tax category (S/Z/E/O/AE). Only "S" (the default) is taxed;
+   *  zero-rated/exempt/out-of-scope/reverse-charge contribute no VAT. */
+  tax_category?: string | null;
 }
 
 /** Invoice line amount. Priority:
@@ -63,7 +66,19 @@ export function invoiceTotals(
   const subtotal = items.reduce((s, i) => s + invoiceLineAmount(i, formula), 0);
   const disc = Math.min(Math.max(0, discount || 0), subtotal);
   const net = subtotal - disc;
-  const tax = net * ((taxRatePct || 0) / 100);
+  // Category-aware VAT: only standard-rated ("S", the default) lines are taxed;
+  // zero-rated / exempt / out-of-scope / reverse-charge contribute no VAT. The
+  // document discount is allocated across lines pro-rata by net. With every line
+  // standard (or no category set) this equals net × rate — the prior flat result.
+  const rate = (taxRatePct || 0) / 100;
+  let tax = 0;
+  if (subtotal > 0) {
+    for (const i of items) {
+      if ((i.tax_category ?? "S") !== "S") continue;
+      const lineNet = invoiceLineAmount(i, formula);
+      tax += (lineNet / subtotal) * net * rate;
+    }
+  }
   return {
     subtotal: r2(subtotal),
     discount: r2(disc),
