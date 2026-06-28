@@ -25,6 +25,7 @@ import { aed, num, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
 import PartyBankDetails from "../components/PartyBankDetails";
+import AdvanceCard from "../components/AdvanceCard";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -240,6 +241,18 @@ export default function SupplierDetail() {
           />
         </div>
       </div>
+
+      {/* Advance paid to supplier */}
+      {supplier && (
+        <div className="mb-5">
+          <AdvanceCard
+            partyType="supplier"
+            partyId={supplier.id}
+            partyName={supplier.name}
+            outstanding={Math.max(0, totalValue - receivedValue)}
+          />
+        </div>
+      )}
 
       {/* Bank details */}
       {supplier && (

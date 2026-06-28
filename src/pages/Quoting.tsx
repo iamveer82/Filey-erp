@@ -1983,11 +1983,15 @@ export default function Quoting() {
           {
             label: "Copy public link",
             run: async (sel) => {
-              const token = await quotes.publicLink(sel[0].id);
-              const url = `${location.origin}${location.pathname}#/portal/${token}`;
-              await navigator.clipboard.writeText(url);
-              loadDocs();
-              toast.success("Public quotation link copied");
+              try {
+                const token = await quotes.publicLink(sel[0].id);
+                const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                await navigator.clipboard.writeText(url);
+                loadDocs();
+                toast.success("Public quotation link copied");
+              } catch (e) {
+                toast.error(errMsg(e));
+              }
             },
           },
           {
@@ -2088,11 +2092,15 @@ export default function Quoting() {
                   aria-label="Copy public link"
                   className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors"
                   onClick={async () => {
-                    const token = await quotes.publicLink(d.id);
-                    const url = `${location.origin}${location.pathname}#/portal/${token}`;
-                    await navigator.clipboard.writeText(url);
-                    loadDocs();
-                    toast.success("Public link copied");
+                    try {
+                      const token = await quotes.publicLink(d.id);
+                      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                      await navigator.clipboard.writeText(url);
+                      loadDocs();
+                      toast.success("Public link copied");
+                    } catch (e) {
+                      toast.error(errMsg(e));
+                    }
                   }}
                 >
                   <Send size={15} />

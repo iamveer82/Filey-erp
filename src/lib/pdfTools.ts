@@ -24,6 +24,7 @@ import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { parseRanges } from "./ranges";
+import { hasTauri, saveBytes } from "./localPaths";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -2751,10 +2752,16 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
   return out;
 }
 
-export function downloadFile(f: OutFile) {
+export async function downloadFile(f: OutFile) {
   const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
-  // Copy into a fresh ArrayBuffer so Blob gets a clean BlobPart.
+  // Copy into a fresh ArrayBuffer so Blob/Rust gets a clean buffer.
   const buf = f.bytes.slice();
+  // Desktop (Tauri WebView2): a blob `<a download>` click silently fails to
+  // save — route through a native save dialog + Rust file write instead.
+  if (hasTauri) {
+    await saveBytes(f.name, buf);
+    return;
+  }
   const blob = new Blob([buf], {
     type: MIME[ext] ?? "application/octet-stream",
   });
@@ -2899,8 +2906,9 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
 
 export async function downloadElementAsPdf(el: HTMLElement, name: string) {
   try {
-    downloadFile(await elementToPdfBytes(el, name));
+    await downloadFile(await elementToPdfBytes(el, name));
   } catch (e) {
+    console.error("PDF export failed:", e);
     window.print();
   }
 }

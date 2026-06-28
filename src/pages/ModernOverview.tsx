@@ -81,6 +81,7 @@ export default function ModernOverview() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [quotations, setQuotations] = useState<QuotationSummary[]>([]);
   const [posList, setPosList] = useState<PoSummary[]>([]);
+  const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState<Period>("month");
@@ -102,7 +103,7 @@ export default function ModernOverview() {
   const load = async () => {
     setError("");
     try {
-      const [p, o, i, e, c, q, po] = await Promise.all([
+      const [p, o, i, e, c, q, po, comp] = await Promise.all([
         erp.products().catch(() => [] as Product[]),
         erp.orders().catch(() => [] as Order[]),
         billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
@@ -110,6 +111,7 @@ export default function ModernOverview() {
         crm.customers().catch(() => [] as CrmCustomer[]),
         quotes.listDocs().catch(() => [] as QuotationSummary[]),
         pos.list().catch(() => [] as PoSummary[]),
+        billing.getCompany().catch(() => null),
       ]);
       setProducts(p);
       setOrders(o);
@@ -118,6 +120,7 @@ export default function ModernOverview() {
       setCustomers(c);
       setQuotations(q);
       setPosList(po);
+      setCompanyName((comp as { name?: string } | null)?.name || "");
     } catch (err: unknown) {
       setError((err as Error)?.message || "Failed to load overview data");
     } finally {
@@ -279,10 +282,10 @@ export default function ModernOverview() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-[28px] leading-9 font-semibold text-ink">
-            Good {greeting()}, Virendra
+            Good {greeting()}
           </h1>
           <p className="text-sm text-brand-500 mt-1">
-            Here's how Green Gold Grease is moving today.
+            Here's how {companyName || "your business"} is moving today.
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -15,6 +15,7 @@ import {
   HardDrive,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
+import { cloudConfigured } from "../../lib/supabase";
 import CompanyDetails from "./CompanyDetails";
 import AccountProfile from "./AccountProfile";
 import AiSettings from "../../components/AiSettings";
@@ -49,7 +50,7 @@ type Section =
   | "activity"
   | "ai";
 
-const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
+const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
@@ -67,6 +68,11 @@ const NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "datamode", label: "Data & Storage", icon: HardDrive },
   { id: "activity", label: "Activity Log", icon: History },
 ];
+
+// Offline edition has no cloud account/org/billing — hide those tabs so the
+// user never lands on a panel of dead/erroring controls.
+const CLOUD_ONLY = new Set<Section>(["account-mgmt", "users", "billing", "security"]);
+const NAV = ALL_NAV.filter((n) => cloudConfigured || !CLOUD_ONLY.has(n.id));
 
 export default function Settings() {
   const [params] = useSearchParams();

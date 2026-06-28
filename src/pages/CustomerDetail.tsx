@@ -27,6 +27,7 @@ import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
 import PartyBankDetails from "../components/PartyBankDetails";
 import FollowUps from "../components/FollowUps";
+import AdvanceCard from "../components/AdvanceCard";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -191,6 +192,17 @@ export default function CustomerDetail() {
           />
         </div>
       </div>
+
+      {customer && (
+        <div className="mb-5">
+          <AdvanceCard
+            partyType="customer"
+            partyId={customer.id}
+            partyName={display}
+            outstanding={outstanding}
+          />
+        </div>
+      )}
 
       {id && (
         <div className="mb-5">

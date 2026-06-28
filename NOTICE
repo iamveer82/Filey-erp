@@ -1,0 +1,21 @@
+Filey ERP
+Copyright 2026 Virendra (github: iamveer82, iamveer82@gmail.com)
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"); see the LICENSE file or http://www.apache.org/licenses/LICENSE-2.0.
+
+--------------------------------------------------------------------------------
+Bundled third-party components (retain their own original licenses)
+--------------------------------------------------------------------------------
+
+The following directories are bundled with this product and are NOT covered by
+the Apache-2.0 license above. Each retains its own original LICENSE file, which
+governs that directory's contents:
+
+  * design-templates/guizang-ppt/
+      MIT License — Copyright (c) op7418 (@op7418)
+
+  * design-templates/html-ppt/
+      MIT License — Copyright (c) lewislulu (@lewislulu)
+
+See the LICENSE file inside each of those directories for the full terms.

@@ -380,11 +380,15 @@ export default function PurchaseOrders() {
           {
             label: "Copy public link",
             run: async (sel) => {
-              const token = await pos.publicLink(sel[0].id);
-              const url = `${location.origin}${location.pathname}#/portal/${token}`;
-              await navigator.clipboard.writeText(url);
-              loadRows();
-              toast.success("Public PO link copied");
+              try {
+                const token = await pos.publicLink(sel[0].id);
+                const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                await navigator.clipboard.writeText(url);
+                loadRows();
+                toast.success("Public PO link copied");
+              } catch (e) {
+                toast.error(errMsg(e));
+              }
             },
           },
           {

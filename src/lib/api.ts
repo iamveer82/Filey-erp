@@ -2447,6 +2447,8 @@ export const billing = {
   /** Ensure the invoice is shared and return its public portal token. */
   publicLink: (docId: number) =>
     online(async () => {
+      if (isLocalMode())
+        throw new Error("Public links need Cloud mode — they don't work offline.");
       await shareWithItems(
         "invoice_docs",
         "invoice_doc_items",
@@ -2975,6 +2977,8 @@ export const quotes = {
       )
     ),
   publicLink: async (docId: number) => {
+    if (isLocalMode())
+      throw new Error("Public links need Cloud mode — they don't work offline.");
     await quotes.shareDoc(docId, true);
     const { data, error } = await sb()
       .from("quotations")
@@ -3272,10 +3276,12 @@ export const pos = {
   save: (input: PoInput) =>
     online(async () => {
       const { items, id, ...fields } = input;
-      const total = items.reduce(
-        (s, it) => s + it.quantity * it.unit_cost,
-        0
-      );
+      // Trust the caller's precomputed total (it accounts for unit_price_formula
+      // line amounts); only recompute the naive qty*cost when none was passed.
+      const total =
+        (input as { total?: number }).total != null
+          ? Number((input as { total?: number }).total)
+          : items.reduce((s, it) => s + it.quantity * it.unit_cost, 0);
       const row = clean({ ...fields, total } as Record<string, unknown>);
       let poId: number;
       if (id && id > 0) {
@@ -3341,6 +3347,8 @@ export const pos = {
       )
     ),
   publicLink: async (poId: number) => {
+    if (isLocalMode())
+      throw new Error("Public links need Cloud mode — they don't work offline.");
     await pos.shareDoc(poId, true);
     const { data, error } = await sb()
       .from("purchase_orders")
@@ -3402,6 +3410,116 @@ export const pos = {
     write({ k: "delete", t: "po_payments", id: paymentId }, () =>
       sDelete("po_payments", paymentId), undefined
     ),
+};
+
+// ===== Advances (party-level prepayment credit) =====
+// A standalone credit ledger keyed by party, not tied to any one invoice/PO:
+// money a customer paid up front, or money paid to a supplier in advance. The
+// balance is shown on the party's detail card and netted against what they owe.
+export interface Advance {
+  id: number;
+  party_type: "customer" | "supplier";
+  party_id: number;
+  party_name: string;
+  amount: number;
+  note?: string;
+  paid_at: string;
+  created_at: string;
+}
+
+export const advances = {
+  list: () =>
+    readCached<Advance[]>(
+      "advances",
+      () => sList<Advance>("advances", [{ col: "paid_at", asc: false }]),
+      []
+    ),
+  forParty: (partyType: "customer" | "supplier", partyId: number) =>
+    readCached<Advance[]>(
+      `advances:${partyType}:${partyId}`,
+      async () => {
+        const { data } = await sb()
+          .from("advances")
+          .select("*")
+          .eq("party_type", partyType)
+          .eq("party_id", partyId)
+          .order("paid_at", { ascending: false });
+        return (data ?? []) as Advance[];
+      },
+      []
+    ),
+  add: (input: {
+    party_type: "customer" | "supplier";
+    party_id: number;
+    party_name: string;
+    amount: number;
+    note?: string;
+    paid_at?: string;
+  }) => {
+    const row = {
+      party_type: input.party_type,
+      party_id: input.party_id,
+      party_name: input.party_name,
+      amount: input.amount,
+      note: input.note || null,
+      paid_at: input.paid_at || new Date().toISOString().slice(0, 10),
+    };
+    return write({ k: "insert", t: "advances", row }, () =>
+      sInsert("advances", row), -1
+    );
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "advances", id }, () =>
+      sDelete("advances", id), undefined
+    ),
+  /** Apply (consume) advance credit against a specific invoice. Idempotent per
+   *  invoice id: replaces any prior consumption for that invoice, so re-saving
+   *  with a new amount rebalances cleanly. Stored as a NEGATIVE ledger entry so
+   *  the party's credit balance (sum of entries) drops by the applied amount.
+   *  Pass amount 0 to clear. */
+  applyToInvoice: (
+    partyId: number,
+    partyName: string,
+    invoiceId: number,
+    amount: number
+  ) =>
+    online(async () => {
+      const tag = `applied:inv#${invoiceId}`;
+      const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
+      for (const r of rows)
+        if (
+          r.party_type === "customer" &&
+          String(r.party_id) === String(partyId) &&
+          r.note === tag
+        )
+          await sDelete("advances", r.id);
+      if (amount > 0)
+        await sInsert("advances", {
+          party_type: "customer",
+          party_id: partyId,
+          party_name: partyName,
+          amount: -Math.abs(amount),
+          note: tag,
+          paid_at: new Date().toISOString().slice(0, 10),
+        });
+    }),
+  /** Net advance credit currently available for a customer (sum of all their
+   *  ledger entries — positive deposits minus negative consumptions). */
+  creditFor: async (partyId: number): Promise<number> => {
+    const rows = await advances.forParty("customer", partyId);
+    return rows.reduce((s, a) => s + Number(a.amount), 0);
+  },
+  /** Credit applicable to ONE invoice: the customer's net credit with this
+   *  invoice's own prior consumption added back, so editing the applied amount
+   *  rebalances against the right pool. Pass invoiceId undefined for a new doc. */
+  creditForInvoice: async (
+    partyId: number,
+    invoiceId?: number
+  ): Promise<number> => {
+    const rows = await advances.forParty("customer", partyId);
+    const tag = invoiceId ? `applied:inv#${invoiceId}` : null;
+    return rows.reduce((s, a) => s + (a.note === tag ? 0 : Number(a.amount)), 0);
+  },
 };
 
 // ===== Payment Receipts =====
@@ -3520,6 +3638,8 @@ export const receipts = {
       undefined
     ),
   publicLink: async (id: number) => {
+    if (isLocalMode())
+      throw new Error("Public links need Cloud mode — they don't work offline.");
     await receipts.shareDoc(id, true);
     const { data, error } = await sb()
       .from("payment_receipts")

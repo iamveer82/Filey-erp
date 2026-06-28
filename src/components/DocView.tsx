@@ -81,6 +81,9 @@ export interface DocViewForm {
   items: DocViewItem[];
   customColumns?: DocViewCustomColumn[];
   unit_price_formula?: { a: string; b: string } | null;
+  /** Customer advance applied to this document — shown as a deduction with a
+   *  resulting "Balance due" line under the total. */
+  advance_applied?: number | null;
 }
 
 export interface DocViewLabels {
@@ -186,6 +189,18 @@ export default function DocView({
           <span>{totalLabel}</span>
           <span>{m(t.total)}</span>
         </div>
+        {(Number(form.advance_applied) || 0) > 0 && (
+          <>
+            <Row k="Advance applied" v={`- ${m(Number(form.advance_applied))}`} />
+            <div
+              className="flex justify-between py-1.5 font-semibold border-t"
+              style={{ borderColor: a }}
+            >
+              <span>Balance due</span>
+              <span>{m(Math.max(0, t.total - (Number(form.advance_applied) || 0)))}</span>
+            </div>
+          </>
+        )}
       </div>
     ) : null;
 
@@ -1007,6 +1022,21 @@ export default function DocView({
                 <span>Total ({form.currency || "AED"})</span>
                 <span>{m(grandTotal)}</span>
               </div>
+              {(Number(form.advance_applied) || 0) > 0 && (
+                <>
+                  <div className="flex justify-between py-1">
+                    <span className="text-neutral-500">Advance applied</span>
+                    <span>- {m(Number(form.advance_applied))}</span>
+                  </div>
+                  <div
+                    className="flex justify-between py-1.5 font-semibold border-t"
+                    style={{ borderColor: a }}
+                  >
+                    <span>Balance due</span>
+                    <span>{m(Math.max(0, grandTotal - (Number(form.advance_applied) || 0)))}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

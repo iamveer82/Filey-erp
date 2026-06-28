@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { sb, isConfigured } from "./supabase";
+import { isLocalMode } from "./dataMode";
 import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
 import type { OutFile } from "./pdfTools";
+
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error ?? new Error("Could not read file."));
+    r.readAsDataURL(file);
+  });
 
 /** Best-effort: write a generated document as a real file to the user's chosen
  *  documents folder (desktop only, when a folder is set). */
@@ -344,6 +353,14 @@ export async function deleteFile(f: SavedFile): Promise<void> {
  * short-lived signed URL the preview can use. The path is what gets persisted in
  * app_settings so the image follows the user across devices and sessions. */
 export async function uploadCompanyAsset(file: File): Promise<{ path: string; url: string }> {
+  // Local mode: embed the image directly as a data: URL stored in app_settings.
+  // Avoids the Storage path + signed-URL round-trip (disk write, keyring-encrypted
+  // read), which can silently fail to resolve offline and leaves the stamp blank.
+  // Stamp/signature/logo PNGs are small enough to live in settings.
+  if (isLocalMode()) {
+    const dataUrl = await fileToDataUrl(file);
+    return { path: dataUrl, url: dataUrl };
+  }
   const uid = await userId();
   if (!uid || !isConfigured) throw new Error("Sign in to upload company assets.");
   const id = newId();

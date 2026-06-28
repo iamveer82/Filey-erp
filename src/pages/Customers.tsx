@@ -453,16 +453,16 @@ export default function Customers() {
           <TabsContent value="activity">
             <EmptyState
               icon={Activity}
-              title="No recent activity"
-              description="Notes, calls and emails with this customer will appear here."
+              title="Activity is on the full page"
+              description="Open the full customer page to see notes, calls and emails."
             />
           </TabsContent>
 
           <TabsContent value="invoices">
             <EmptyState
               icon={FileText}
-              title="No invoices yet"
-              description="Invoices issued to this customer will be listed here."
+              title="Invoices are on the full page"
+              description="Open the full customer page to see this customer's invoices."
             />
           </TabsContent>
         </Tabs>

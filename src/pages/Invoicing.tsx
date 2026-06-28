@@ -36,6 +36,7 @@ import {
   FileCode,
 } from "lucide-react";
 import {
+  advances,
   billing,
   crm,
   erp,
@@ -72,6 +73,7 @@ import {
   FB_KEY,
 } from "../lib/docItems";
 import ScanDocModal from "../components/ScanDocModal";
+import { CustomerAdvancesPanel } from "../components/AdvanceCard";
 import TemplateDesigner, {
   loadCustomTemplates,
   deleteCustomTemplate,
@@ -88,6 +90,7 @@ import {
 import {
   BankDetailsBlock,
   loadBankInfo,
+  hasBankInfo,
   EMPTY_BANK,
   type BankInfo,
 } from "../components/BankDetails";
@@ -167,6 +170,9 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   show_stamp?: boolean;
   show_signature?: boolean;
   show_logo?: boolean;
+  show_bank?: boolean;
+  /** Customer advance applied to this invoice (subtracted on the document). */
+  advance_applied?: number | null;
   /** Optional formula: unit_price = fieldA × fieldB. */
   unit_price_formula?: { a: string; b: string } | null;
   // e-invoice: corrective-doc reference + AED rate for foreign-currency VAT.
@@ -300,6 +306,8 @@ function blankForm(
     show_stamp: false,
     show_signature: false,
     show_logo: false,
+    show_bank: false,
+    advance_applied: 0,
     unit_price_formula: null,
   };
 }
@@ -318,6 +326,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
   const [search, setSearch] = useState("");
+  const [advancesTotal, setAdvancesTotal] = useState(0);
   const loadDocs = () =>
     billing
       .listDocs(mode)
@@ -337,6 +346,16 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     loadInvoiceFormat().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
+    advances
+      .list()
+      .then((all) =>
+        setAdvancesTotal(
+          all
+            .filter((a) => a.party_type === "customer")
+            .reduce((s, a) => s + Number(a.amount), 0)
+        )
+      )
+      .catch(() => {});
   };
   useEffect(reload, []);
   useLiveSync(reload);
@@ -439,6 +458,8 @@ const editInvoice = async (id: number) => {
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
+        show_bank: (d as any).show_bank ?? false,
+        advance_applied: (d as any).advance_applied ?? 0,
         items: d.items.map((i) => {
           const {
             custom,
@@ -538,6 +559,8 @@ const editInvoice = async (id: number) => {
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
+        show_bank: (d as any).show_bank ?? false,
+        advance_applied: (d as any).advance_applied ?? 0,
         items: d.items.map((i) => {
           const {
             custom,
@@ -618,7 +641,21 @@ const editInvoice = async (id: number) => {
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
       (payload as any).show_logo = form.show_logo ?? false;
+      (payload as any).show_bank = form.show_bank ?? false;
+      (payload as any).advance_applied = Number(form.advance_applied) || 0;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
+      // Consume the applied advance from the customer's credit ledger (idempotent
+      // per invoice id). ponytail: duplicating an invoice carries its applied
+      // amount and re-consumes — rare; clear it on the copy if it matters.
+      if (form.customer_id)
+        await advances
+          .applyToInvoice(
+            form.customer_id,
+            form.customer_name || "",
+            id,
+            Number(form.advance_applied) || 0
+          )
+          .catch(() => {});
       setForm({ ...form, id });
       await loadDocs();
       return id;
@@ -679,7 +716,21 @@ const editInvoice = async (id: number) => {
       (payload as any).show_stamp = form.show_stamp ?? false;
       (payload as any).show_signature = form.show_signature ?? false;
       (payload as any).show_logo = form.show_logo ?? false;
+      (payload as any).show_bank = form.show_bank ?? false;
+      (payload as any).advance_applied = Number(form.advance_applied) || 0;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
+      // Consume the applied advance from the customer's credit ledger (idempotent
+      // per invoice id). ponytail: duplicating an invoice carries its applied
+      // amount and re-consumes — rare; clear it on the copy if it matters.
+      if (form.customer_id)
+        await advances
+          .applyToInvoice(
+            form.customer_id,
+            form.customer_name || "",
+            id,
+            Number(form.advance_applied) || 0
+          )
+          .catch(() => {});
       setForm({ ...form, id, status });
       await loadDocs();
       toast.success(
@@ -788,7 +839,11 @@ const editInvoice = async (id: number) => {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div
+        className={`grid grid-cols-2 ${
+          isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"
+        } gap-4 mb-4`}
+      >
         <MetricCard
           label="Invoices"
           value={num(docs.length)}
@@ -812,6 +867,14 @@ const editInvoice = async (id: number) => {
           icon={<Clock size={20} />}
           iconClass="bg-danger/15 text-danger"
         />
+        {!isPurchase && (
+          <MetricCard
+            label="Customer advances"
+            value={money(advancesTotal, statCcy)}
+            icon={<CreditCard size={20} />}
+            iconClass="bg-primary-400/20 text-primary-600"
+          />
+        )}
       </div>
 
       {recurs.filter((r) => r.active).length > 0 && (
@@ -856,6 +919,8 @@ const editInvoice = async (id: number) => {
           </ul>
         </div>
       )}
+
+      <CustomerAdvancesPanel />
 
       <div className="mb-4">
         <SearchInput
@@ -934,11 +999,15 @@ const editInvoice = async (id: number) => {
           {
             label: "Copy public link",
             run: async (sel) => {
-              const token = await billing.publicLink(sel[0].id);
-              const url = `${location.origin}${location.pathname}#/portal/${token}`;
-              await navigator.clipboard.writeText(url);
-              loadDocs();
-              toast.success("Public invoice link copied");
+              try {
+                const token = await billing.publicLink(sel[0].id);
+                const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                await navigator.clipboard.writeText(url);
+                loadDocs();
+                toast.success("Public invoice link copied");
+              } catch (e) {
+                toast.error(errMsg(e));
+              }
             },
           },
           {
@@ -1511,11 +1580,13 @@ function Editor({
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [custModal, setCustModal] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
-  const [showBank, setShowBank] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  // Free-drag position for the bank-details block (% of the A4 content area).
   const [bankX, setBankX] = useState(50);
-  const [bankY, setBankY] = useState(93);
+  const [bankY, setBankY] = useState(88);
+  // Customer advance credit applicable to the open invoice.
+  const [availAdvance, setAvailAdvance] = useState(0);
   useEffect(() => {
     loadBankInfo()
       .then(setBank)
@@ -1524,6 +1595,16 @@ function Editor({
       .then(setCompanyStampSig)
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    if (!form.customer_id) {
+      setAvailAdvance(0);
+      return;
+    }
+    advances
+      .creditForInvoice(form.customer_id, form.id)
+      .then(setAvailAdvance)
+      .catch(() => {});
+  }, [form.customer_id, form.id]);
   // Append an inventory product as an invoice line item (fills description &
   // unit price); drops a leftover empty row so the first import replaces it.
   const addItemFromProduct = (p: Product) => {
@@ -1941,6 +2022,50 @@ function Editor({
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
+                {form.customer_id != null &&
+                  (availAdvance > 0 || (Number(form.advance_applied) || 0) > 0) && (
+                    <Field label="Apply customer advance">
+                      <div className="flex items-center gap-2">
+                        <input
+                          className="input"
+                          type="number"
+                          min={0}
+                          max={availAdvance}
+                          step="0.01"
+                          placeholder="0.00"
+                          value={form.advance_applied || ""}
+                          onChange={(e) => {
+                            const v = Math.max(
+                              0,
+                              Math.min(availAdvance, parseFloat(e.target.value) || 0)
+                            );
+                            set("advance_applied", v);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-ghost text-xs whitespace-nowrap"
+                          onClick={() => set("advance_applied", availAdvance)}
+                          disabled={availAdvance <= 0}
+                        >
+                          Use {money(availAdvance, form.currency || "AED")}
+                        </button>
+                        {(Number(form.advance_applied) || 0) > 0 && (
+                          <button
+                            type="button"
+                            className="btn-ghost text-xs"
+                            onClick={() => set("advance_applied", 0)}
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-brand-400 mt-1">
+                        {money(availAdvance, form.currency || "AED")} advance available —
+                        subtracted from the invoice total.
+                      </p>
+                    </Field>
+                  )}
                 <Field label={`${partyLabel} Email / TRN`}>
                   <div className="grid grid-cols-2 gap-2">
                     <input
@@ -2102,7 +2227,7 @@ function Editor({
                       step="0.0001"
                       min="0"
                       className="input"
-                      placeholder="1 {currency} = ? AED"
+                      placeholder={`1 ${form.currency || "AED"} = ? AED`}
                       value={form.aed_exchange_rate ?? ""}
                       onChange={(e) =>
                         set(
@@ -2561,11 +2686,12 @@ function Editor({
               </button>
               <button
                 type="button"
-                onClick={() => setShowBank((v) => !v)}
-                className={`btn-ghost text-xs ${showBank ? "!bg-brand-50 !text-ink" : ""}`}
+                onClick={() => setForm({ ...form, show_bank: !form.show_bank })}
+                className={`btn-ghost text-xs ${form.show_bank ? "!bg-brand-50 !text-ink" : ""}`}
                 title="Show your saved bank details on this invoice"
+                disabled={!hasBankInfo(bank)}
               >
-                <Landmark size={13} /> Bank details: {showBank ? "On" : "Off"}
+                <Landmark size={13} /> Bank details: {form.show_bank ? "On" : "Off"}
               </button>
               <button
                 type="button"
@@ -2858,10 +2984,23 @@ function Editor({
               <div ref={invoiceRef}>
                 <div
                   style={{
+                    width: device === "desktop" ? 794 : 420,
+                    minHeight: device === "desktop" ? 1123 : 594,
                     position: "relative",
-                    minHeight: device === "desktop" ? 1027 : 498,
+                    padding: device === "desktop" ? 48 : 25,
+                    boxSizing: "border-box",
+                    background: "#fff",
                   }}
                 >
+                  {/* Inner content area mirrors the export sheet (same padding +
+                      size) so draggable overlays land at the same spot in the PDF. */}
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      minHeight: device === "desktop" ? 1027 : 498,
+                    }}
+                  >
                   {/* Stamp & Signature — draggable, watermark-style overlay.
                       Per-document copy (form.stamp/signature) seeded from the
                       company asset; falls back to the company asset itself. */}
@@ -2898,7 +3037,7 @@ function Editor({
                     showTotals={isLastPreviewPage}
                     showFooter={isLastPreviewPage}
                   />
-                  {showBank && (
+                  {form.show_bank && (
                     <DraggableBlock
                       x={bankX}
                       y={bankY}
@@ -2910,6 +3049,7 @@ function Editor({
                       <BankDetailsBlock bank={bank} accent={form.accent} />
                     </DraggableBlock>
                   )}
+                  </div>
                 </div>
               </div>
             </FitPreview>
@@ -2980,6 +3120,11 @@ function Editor({
                             showTotals={isLast}
                             showFooter={isLast}
                           />
+                          {isLast && form.show_bank && (
+                            <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
+                              <BankDetailsBlock bank={bank} accent={form.accent} />
+                            </DraggableBlock>
+                          )}
                         </div>
                       </div>
                     );
@@ -3159,7 +3304,7 @@ function Editor({
                       showTotals={isLastViewPage}
                       showFooter={isLastViewPage}
                     />
-                    {showBank && isLastViewPage && (
+                    {form.show_bank && isLastViewPage && (
                       <DraggableBlock
                         x={bankX}
                         y={bankY}

@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
 import { companyAssetUrl } from "../lib/files";
 
-/** Render a company asset from either a signed URL or a Supabase Storage path.
- * If the value looks like a storage path, it refreshes a short-lived signed URL. */
+/** A Supabase Storage path looks like `…/company/…` or starts with `files/`.
+ *  A data: URL (local mode) or an http(s)/blob URL is already renderable. */
+const isStoragePath = (s: string) =>
+  !s.startsWith("data:") &&
+  !s.startsWith("blob:") &&
+  !s.startsWith("http") &&
+  (s.includes("/company/") || s.startsWith("files/"));
+
+/** Render a company asset from either a signed/data URL or a Supabase Storage
+ *  path. A storage path is resolved to a signed (cloud) or data: (local) URL
+ *  first; until it resolves — or if it can't — nothing is rendered, so a dead
+ *  path never shows a broken-image placeholder. */
 export function CompanyAssetImage({
   src,
   alt,
@@ -14,12 +24,19 @@ export function CompanyAssetImage({
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const [url, setUrl] = useState(src);
+  // Storage paths start unresolved (undefined) so we never paint a raw path
+  // into <img src> — that's what produced the broken-image placeholder.
+  const [url, setUrl] = useState<string | undefined>(
+    src && isStoragePath(src) ? undefined : src
+  );
 
   useEffect(() => {
-    if (!src) return;
-    // Storage paths contain /company/ or start with {uid}/company/
-    if (src.includes("/company/") || src.startsWith("files/")) {
+    if (!src) {
+      setUrl(undefined);
+      return;
+    }
+    if (isStoragePath(src)) {
+      setUrl(undefined);
       let alive = true;
       companyAssetUrl(src).then((u) => {
         if (alive && u) setUrl(u);

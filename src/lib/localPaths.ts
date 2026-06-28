@@ -32,6 +32,22 @@ export const clearExportDir = () => localStorage.removeItem(EXPORT_DIR_KEY);
 export const writeDocFile = (dir: string, filename: string, bytes: Uint8Array) =>
   invoke<string>("write_doc_file", { dir, filename, bytes: Array.from(bytes) });
 
+/** Desktop "download": prompt for a save location and write the bytes there via
+ *  Rust. A browser `<a download>` blob click does NOT save in the Tauri WebView2
+ *  webview, so anything user-facing must go through here. Returns the saved path,
+ *  or null if the user cancelled the dialog. */
+export async function saveBytes(
+  filename: string,
+  bytes: Uint8Array
+): Promise<string | null> {
+  const dest = await saveDialog({ defaultPath: filename });
+  if (!dest) return null;
+  const sep = Math.max(dest.lastIndexOf("/"), dest.lastIndexOf("\\"));
+  const dir = sep >= 0 ? dest.slice(0, sep) : ".";
+  const name = sep >= 0 ? dest.slice(sep + 1) : dest;
+  return writeDocFile(dir, name, bytes);
+}
+
 export const openFolder = (path: string) => openPath(path);
 
 // ---- backup / restore ----

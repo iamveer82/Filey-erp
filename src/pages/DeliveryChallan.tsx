@@ -42,7 +42,7 @@ import TemplateDesigner, {
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { tools } from "../lib/api";
+import { tools, billing } from "../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -94,7 +94,7 @@ function blankDc(existing: string[] = []): DcForm {
     template: "standard",
     accent: "#222222",
     dc_type: "delivery",
-    company_name: "Your Company",
+    company_name: "",
     company_address: "",
     company_trn: "",
     party_name: "",
@@ -376,6 +376,23 @@ function DcEditor({
     loadCompanyStampSig()
       .then(setCompanyStampSig)
       .catch((e) => console.warn("Failed to load company stamp/signature", e));
+  }, []);
+  // Seed the seller block from the saved company profile (challan has no company
+  // fields of its own) so the header isn't blank / a leftover placeholder.
+  useEffect(() => {
+    billing
+      .getCompany()
+      .then((c) => {
+        if (!c) return;
+        setForm({
+          ...form,
+          company_name: form.company_name || c.name || "",
+          company_address: form.company_address || c.address || "",
+          company_trn: form.company_trn || c.trn || "",
+        });
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [customTemplates, setCustomTemplates] =
     useState<CustomTemplate[]>(loadCustomTemplates);
@@ -830,7 +847,7 @@ function DcPreview({
             </p>
             <p className="text-brand-500">{clean(form.company_address)}</p>
             <p className="text-brand-500 mt-1 flex items-center gap-2 justify-end">
-              <Calendar size={13} /> {form.issue_date}
+              <Calendar size={13} /> {fmtDate(form.issue_date)}
             </p>
           </div>
         </div>

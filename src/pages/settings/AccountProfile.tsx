@@ -1,4 +1,4 @@
-import { supabase } from "../../lib/supabase";
+import { supabase, cloudConfigured } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { useRef, useState } from "react";
@@ -254,18 +254,22 @@ export default function AccountProfile() {
           <p className="text-sm text-brand-500 mt-0.5 mb-4">
             Manage your login email and connected methods
           </p>
-          <label className="label">Login Email</label>
-          <div className="flex gap-2 mb-3">
-            <div className="input flex items-center justify-between">
-              <span className="truncate">{profile?.email}</span>
-              <Badge tone={verified ? "success" : "warn"}>
-                {verified ? "Verified" : "Unverified"}
-              </Badge>
-            </div>
-            <button className="btn-ghost shrink-0" onClick={changeEmail}>
-              Change Email
-            </button>
-          </div>
+          {cloudConfigured && (
+            <>
+              <label className="label">Login Email</label>
+              <div className="flex gap-2 mb-3">
+                <div className="input flex items-center justify-between">
+                  <span className="truncate">{profile?.email}</span>
+                  <Badge tone={verified ? "success" : "warn"}>
+                    {verified ? "Verified" : "Unverified"}
+                  </Badge>
+                </div>
+                <button className="btn-ghost shrink-0" onClick={changeEmail}>
+                  Change Email
+                </button>
+              </div>
+            </>
+          )}
           <label className="label">Username</label>
           <div className="flex gap-2 mb-4">
             <input
@@ -396,7 +400,8 @@ export default function AccountProfile() {
         </div>
       </div>
 
-      {/* right column: Change Password */}
+      {/* right column: Change Password (cloud auth only) */}
+      {cloudConfigured && (
       <div className="card xl:sticky xl:top-2">
         <p className="font-medium text-ink">Change Password</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
@@ -467,6 +472,7 @@ export default function AccountProfile() {
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

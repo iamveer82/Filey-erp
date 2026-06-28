@@ -392,8 +392,10 @@ export default function Reports() {
             </div>
 
             <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-500">Cost of Goods (POs)</span>
-              <span className="font-medium tabular-nums">({aed(poValue)})</span>
+              <span className="font-medium text-brand-500">
+                Purchase commitments (POs) <span className="text-brand-400 font-normal">· informational</span>
+              </span>
+              <span className="font-medium tabular-nums">{aed(poValue)}</span>
             </div>
             <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
               <span className="text-brand-500">Purchase Orders (non-cancelled)</span>

@@ -3,6 +3,7 @@ import { Upload, X, Stamp, PenTool } from "lucide-react";
 import { tools } from "../lib/api";
 import { uploadCompanyAsset, companyAssetUrl } from "../lib/files";
 import { STAMP_DEFAULT, SIGN_DEFAULT, type StampSig } from "./StampSignature";
+import { CompanyAssetImage } from "./CompanyAssetImage";
 
 /* Company-wide stamp & signature images uploaded once in
  * Settings → Company Details, then optionally enabled per document.
@@ -31,11 +32,14 @@ export async function loadCompanyStampSig(): Promise<CompanyStampSig> {
     const stampRow = rows.find((r) => r.key === STAMP_KEY);
     const signRow = rows.find((r) => r.key === SIGN_KEY);
     const out: CompanyStampSig = {};
+    // A data: URL (local mode) is the image itself; only a Storage path needs a
+    // fresh signed URL.
+    const isStoragePath = (d: string) =>
+      !d.startsWith("data:") && (d.startsWith("files/") || d.includes("/company/"));
     if (stampRow?.value) {
       const parsed = JSON.parse(stampRow.value) as Partial<StampSig>;
       if (parsed.data) {
-        // If we only have a storage path, refresh the signed URL
-        if (parsed.data.startsWith("files/") || parsed.data.includes("/company/")) {
+        if (isStoragePath(parsed.data)) {
           const url = await companyAssetUrl(parsed.data);
           if (url) parsed.data = url;
         }
@@ -45,7 +49,7 @@ export async function loadCompanyStampSig(): Promise<CompanyStampSig> {
     if (signRow?.value) {
       const parsed = JSON.parse(signRow.value) as Partial<StampSig>;
       if (parsed.data) {
-        if (parsed.data.startsWith("files/") || parsed.data.includes("/company/")) {
+        if (isStoragePath(parsed.data)) {
           const url = await companyAssetUrl(parsed.data);
           if (url) parsed.data = url;
         }
@@ -108,7 +112,7 @@ function UploadCard({
       <div className="mt-3">
         {previewUrl ? (
           <div className="relative flex items-center justify-center py-4 rounded-3xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
-            <img
+            <CompanyAssetImage
               src={previewUrl}
               alt={label}
               className="object-contain rounded"

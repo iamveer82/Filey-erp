@@ -71,7 +71,8 @@ export default function Suppliers() {
       const key = p.category || "Unsorted";
       const g = m.get(key) ?? { name: key, skus: 0, value: 0, low: 0 };
       g.skus += 1;
-      g.value += p.quantity * p.cost_price;
+      // Guard unset/NaN qty or cost so a product with no cost price adds 0 (not NaN).
+      g.value += (Number(p.quantity) || 0) * (Number(p.cost_price) || 0);
       if (p.quantity <= p.reorder_level) g.low += 1;
       m.set(key, g);
     }

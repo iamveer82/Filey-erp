@@ -42,6 +42,7 @@ import {
   type UserFolder,
 } from "../lib/files";
 import { isConfigured } from "../lib/supabase";
+import { isLocalMode } from "../lib/dataMode";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 
@@ -347,6 +348,10 @@ export default function MyFiles() {
   };
 
   const share = async (f: SavedFile) => {
+    if (isLocalMode()) {
+      toast.error("Share links need Cloud mode — use Download instead.");
+      return;
+    }
     setBusyId(f.id);
     try {
       const url = await shareFileLink(f);
