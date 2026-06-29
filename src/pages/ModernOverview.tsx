@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from "react";
 import {
   Plus,
   Sparkles,
@@ -10,7 +10,8 @@ import {
   EyeOff,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import TrendChart from "../components/TrendChart";
+// ponytail: lazy so recharts (~397kB) splits out of the dashboard entry chunk
+const TrendChart = lazy(() => import("../components/TrendChart"));
 import {
   erp,
   fin,
@@ -451,11 +452,13 @@ export default function ModernOverview() {
                 )}
               </div>
               <div className="flex-1 min-h-[160px]">
-                <TrendChart
-                  data={trend.map((d) => ({ name: d.name, value: d.items }))}
-                  gradientId="moFill"
-                  height="100%"
-                />
+                <Suspense fallback={<Skeleton className="h-full w-full" />}>
+                  <TrendChart
+                    data={trend.map((d) => ({ name: d.name, value: d.items }))}
+                    gradientId="moFill"
+                    height="100%"
+                  />
+                </Suspense>
               </div>
             </>
           )}
