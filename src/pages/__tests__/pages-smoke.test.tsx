@@ -11,9 +11,10 @@
 
 import { describe, it, vi } from "vitest";
 import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
+import { AuthProvider } from "../../lib/auth";
 
 // ── Mock the data boundary: a chainable, awaitable stub that always yields
 // {data:[], error:null}. Covers pages that call sb() directly and via lib/api. ──
@@ -61,12 +62,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => null }));
 function wrap(node: ReactElement) {
   return render(
     <MemoryRouter>
-      <UIProvider>{node}</UIProvider>
+      <AuthProvider>
+        <UIProvider>{node}</UIProvider>
+      </AuthProvider>
     </MemoryRouter>
   );
 }
 
-// Curated low-risk list/index pages. Static imports so vi.mock hoists correctly.
+// Static imports so vi.mock hoists correctly.
 import Customers from "../Customers";
 import Suppliers from "../Suppliers";
 import Inventory from "../Inventory";
@@ -79,6 +82,20 @@ import FollowUps from "../FollowUps";
 import BankAccounts from "../BankAccounts";
 import ChequeRegister from "../ChequeRegister";
 import Crm from "../Crm";
+import ModernOverview from "../ModernOverview";
+import People from "../People";
+import Accounting from "../Accounting";
+import Reports from "../Reports";
+import EmailTemplates from "../EmailTemplates";
+import DeliveryChallan from "../DeliveryChallan";
+import PaymentReceipt from "../PaymentReceipt";
+import DeclarationLetter from "../DeclarationLetter";
+import MyFiles from "../MyFiles";
+import Tools from "../Tools";
+import PdfTools from "../PdfTools";
+import AgentChat from "../AgentChat";
+import CustomerDetail from "../CustomerDetail";
+import SupplierDetail from "../SupplierDetail";
 
 const pages: [string, () => ReactElement][] = [
   ["Customers", () => <Customers />],
@@ -93,6 +110,18 @@ const pages: [string, () => ReactElement][] = [
   ["BankAccounts", () => <BankAccounts />],
   ["ChequeRegister", () => <ChequeRegister />],
   ["Crm", () => <Crm />],
+  ["ModernOverview", () => <ModernOverview />],
+  ["People", () => <People />],
+  ["Accounting", () => <Accounting />],
+  ["Reports", () => <Reports />],
+  ["EmailTemplates", () => <EmailTemplates />],
+  ["DeliveryChallan", () => <DeliveryChallan />],
+  ["PaymentReceipt", () => <PaymentReceipt />],
+  ["DeclarationLetter", () => <DeclarationLetter />],
+  ["MyFiles", () => <MyFiles />],
+  ["Tools", () => <Tools />],
+  ["PdfTools", () => <PdfTools />],
+  ["AgentChat", () => <AgentChat />],
 ];
 
 describe("page render smoke", () => {
@@ -102,4 +131,28 @@ describe("page render smoke", () => {
       unmount();
     });
   }
+});
+
+// Detail pages need a route param; render them at a concrete URL.
+function wrapAt(path: string, route: string, node: ReactElement) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AuthProvider>
+        <UIProvider>
+          <Routes>
+            <Route path={route} element={node} />
+          </Routes>
+        </UIProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+describe("detail page render smoke", () => {
+  it("CustomerDetail mounts without throwing", () => {
+    wrapAt("/customers/1", "/customers/:id", <CustomerDetail />).unmount();
+  });
+  it("SupplierDetail mounts without throwing", () => {
+    wrapAt("/suppliers/1", "/suppliers/:id", <SupplierDetail />).unmount();
+  });
 });
