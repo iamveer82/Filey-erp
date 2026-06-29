@@ -12,16 +12,18 @@ Ordered by leverage — Tier A first (reliability is what "professional" means).
 
 ## Tier A — Trust & quality foundation (do first)
 
-- [x] **Automated UI smoke tests — harness landed.** `src/pages/__tests__/pages-smoke.test.tsx`
-  mounts 12 list pages with a mocked data layer; catches the conditional-hooks
-  crash class (cf. the Quoting bug). Remaining: heavy/route-param pages
-  (Reports, PdfTools, Tools, MyFiles, AgentChat, *Detail/:id), then Playwright e2e.
+- [x] **Automated UI smoke tests — 26 pages.** `src/pages/__tests__/pages-smoke.test.tsx`
+  mounts 26 pages (all list pages + heavy: Reports/PdfTools/Tools/MyFiles/AgentChat,
+  and CustomerDetail/SupplierDetail via route params) with a mocked data layer;
+  catches the conditional-hooks crash class (cf. the Quoting bug). Remaining:
+  Settings panels, auth/marketing pages, then Playwright e2e.
 - [ ] **[partial] RBAC enforced server-side.** Roles UI exists; verify every
   mutation is gated by RLS/policy, not just hidden buttons.
 - [ ] **[partial] Audit trail completeness.** ActivityLog exists; ensure all
   money/doc/permission changes write immutable who/when/before→after rows.
-- [ ] **[gap] Per-route error boundaries** — one exists at top; Sentry wired.
-  Confirm a lazy page crash can't blank the app.
+- [x] **Per-route error boundaries.** `App.tsx` wraps routes in
+  `<ErrorBoundary resetKey={location.pathname}>` — a page crash is contained and
+  recovers on navigation; Sentry wired; ErrorBoundary.test.tsx covers it.
 - [ ] **[partial] Performance budget.** Charts now lazy-loaded; lazy heavy Tools
   chunks, virtualize long lists, measure first-paint.
 - [ ] **[gap] Cut `as any` (86)** in api.ts payloads — each hides a wrong-field bug.
