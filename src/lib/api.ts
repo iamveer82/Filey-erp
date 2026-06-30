@@ -121,6 +121,16 @@ export interface FinanceReport {
   net_profit: number;
   cash_position: number;
 }
+export interface VatReturn {
+  from: string;
+  to: string;
+  rate: number;               // standard VAT rate % applied (UAE = 5)
+  standardSupplyNet: number;  // FTA box 1: standard-rated supplies (net)
+  outputVat: number;          // FTA box 1 / 12: output tax due
+  standardExpenseNet: number; // FTA box 9: standard-rated expenses (net)
+  inputVat: number;           // FTA box 9 / 13: recoverable input tax
+  netVatDue: number;          // FTA box 14: net VAT payable (+) or refundable (-)
+}
 export interface User {
   id: number;
   username: string;
@@ -1103,6 +1113,47 @@ export const hr = {
 };
 
 // ===== Finance =====
+/** Compute the core UAE FTA VAT 201 figures from ledger transactions.
+ *  Output/Input VAT come straight from the VAT account postings (already
+ *  tax-category-aware — only standard-rated "S" lines post VAT; reversals on
+ *  un-finalize net out). Net supply/expense amounts are derived from the tax at
+ *  the standard rate — exact under the single-rate UAE regime. Zero-rated and
+ *  exempt supplies (boxes 4–5) carry no VAT and aren't derivable here; a later
+ *  pass can add them from invoice line tax_category. */
+export function computeVatReturn(
+  txns: Pick<Txn, "account_name" | "txn_type" | "amount" | "txn_date">[],
+  ratePct: number,
+  from?: string,
+  to?: string
+): VatReturn {
+  const inRange = (d: string) => (!from || d >= from) && (!to || d <= to);
+  let outputVat = 0;
+  let inputVat = 0;
+  for (const t of txns) {
+    if (!t.txn_date || !inRange(t.txn_date)) continue;
+    const amt = Number(t.amount) || 0;
+    if (/output vat/i.test(t.account_name)) {
+      // liability: a credit raises tax owed, a debit (reversal) lowers it
+      outputVat += t.txn_type === "credit" ? amt : -amt;
+    } else if (/input vat/i.test(t.account_name)) {
+      // asset: a debit raises recoverable tax, a credit (reversal) lowers it
+      inputVat += t.txn_type === "debit" ? amt : -amt;
+    }
+  }
+  const rate = ratePct > 0 ? ratePct : 5;
+  const r = rate / 100;
+  return {
+    from: from ?? "",
+    to: to ?? "",
+    rate,
+    standardSupplyNet: r ? outputVat / r : 0,
+    outputVat,
+    standardExpenseNet: r ? inputVat / r : 0,
+    inputVat,
+    netVatDue: outputVat - inputVat,
+  };
+}
+
 export const fin = {
   accounts: () =>
     readCached<Account[]>(

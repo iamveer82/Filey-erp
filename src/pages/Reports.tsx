@@ -42,6 +42,8 @@ import {
   Expense,
   Payroll,
   PoSummary,
+  Txn,
+  computeVatReturn,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
@@ -61,6 +63,7 @@ export default function Reports() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [posList, setPosList] = useState<PoSummary[]>([]);
+  const [txns, setTxns] = useState<Txn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
@@ -76,6 +79,7 @@ export default function Reports() {
       fin.expenses().then(setExpenses),
       hr.payroll().then(setPayroll),
       pos.list().then(setPosList),
+      fin.transactions().then(setTxns),
     ])
       .catch((e) =>
         setError(`Could not load reports: ${e instanceof Error ? e.message : e}`)
@@ -207,6 +211,18 @@ export default function Reports() {
     [posList]
   );
 
+  /* ── VAT 201 (FTA) — standard-rated VAT from the ledger over the period ── */
+  const vat = useMemo(
+    () =>
+      computeVatReturn(
+        txns,
+        5, // ponytail: UAE flat 5%; pass company default_tax_rate when multi-rate lands
+        dateFrom?.toISOString().slice(0, 10),
+        dateTo?.toISOString().slice(0, 10)
+      ),
+    [txns, dateFrom, dateTo]
+  );
+
   /* ── PDF download ── */
   const downloadPdf = () => {
     const el = pdfRef.current?.closest(".invoice-print") as HTMLElement;
@@ -227,6 +243,11 @@ export default function Reports() {
       { metric: "Gross Profit", amount: grossProfit },
       { metric: "Inventory Value", amount: invValue },
       { metric: "Cash Position", amount: report?.cash_position ?? 0 },
+      { metric: "VAT 201 — Standard-rated supplies (net)", amount: vat.standardSupplyNet },
+      { metric: "VAT 201 — Output tax (box 1)", amount: vat.outputVat },
+      { metric: "VAT 201 — Standard-rated expenses (net)", amount: vat.standardExpenseNet },
+      { metric: "VAT 201 — Input tax recoverable (box 9)", amount: vat.inputVat },
+      { metric: "VAT 201 — Net VAT due (box 14)", amount: vat.netVatDue },
     ];
     downloadCsv(`filey-report-${new Date().toISOString().slice(0, 10)}`, rows, [
       { key: "metric", label: "Metric" },
@@ -319,6 +340,62 @@ export default function Reports() {
             <p className="text-3xl font-medium">{aed(grossProfit)}</p>
             <p className="text-sm font-medium text-white/60 mt-1">Net Profit</p>
           </div>
+        </div>
+
+        {/* ── VAT 201 (FTA) ── */}
+        <div className="card mb-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Receipt size={16} className="text-brand-500" />
+              <h3 className="font-semibold text-ink">VAT Return (FTA 201)</h3>
+            </div>
+            <span className="text-xs text-brand-500">
+              {vat.from || "start"} → {vat.to || "today"} · standard rate {vat.rate}%
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-brand-500 border-b border-brand-200">
+                  <th className="py-1.5 pr-2 font-medium">Box</th>
+                  <th className="py-1.5 pr-2 font-medium">Description</th>
+                  <th className="py-1.5 pr-2 font-medium text-right">Amount (AED)</th>
+                  <th className="py-1.5 font-medium text-right">VAT (AED)</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums">
+                <tr className="border-b border-brand-100">
+                  <td className="py-1.5 pr-2 text-brand-500">1</td>
+                  <td className="py-1.5 pr-2">Standard-rated supplies</td>
+                  <td className="py-1.5 pr-2 text-right">{aed(vat.standardSupplyNet)}</td>
+                  <td className="py-1.5 text-right">{aed(vat.outputVat)}</td>
+                </tr>
+                <tr className="border-b border-brand-100">
+                  <td className="py-1.5 pr-2 text-brand-500">9</td>
+                  <td className="py-1.5 pr-2">Standard-rated expenses</td>
+                  <td className="py-1.5 pr-2 text-right">{aed(vat.standardExpenseNet)}</td>
+                  <td className="py-1.5 text-right">{aed(vat.inputVat)}</td>
+                </tr>
+                <tr className="font-semibold text-ink">
+                  <td className="py-1.5 pr-2 text-brand-500">14</td>
+                  <td className="py-1.5 pr-2">
+                    Net VAT due{" "}
+                    <span className="font-normal text-brand-500">
+                      ({vat.netVatDue >= 0 ? "payable" : "refundable"})
+                    </span>
+                  </td>
+                  <td className="py-1.5 pr-2" />
+                  <td className="py-1.5 text-right">{aed(Math.abs(vat.netVatDue))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-brand-400 mt-2">
+            Standard-rated figures derived from posted Output/Input VAT for the
+            selected period. Zero-rated &amp; exempt supplies (boxes 4–5) and the
+            per-emirate split are not yet itemised — set a Period above to file a
+            quarter.
+          </p>
         </div>
 
         {/* ── Metric cards ── */}
