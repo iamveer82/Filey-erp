@@ -1154,6 +1154,117 @@ export function computeVatReturn(
   };
 }
 
+export interface TrialBalanceRow {
+  code: string;
+  name: string;
+  type: string;
+  debit: number;
+  credit: number;
+}
+export interface TrialBalance {
+  rows: TrialBalanceRow[];
+  totalDebit: number;
+  totalCredit: number;
+  balanced: boolean;
+}
+
+/** Trial balance: every account on its normal side (asset/expense = debit,
+ *  liability/equity/revenue = credit); a negative balance flips sides. Debit and
+ *  credit totals match when the books balance. */
+export function computeTrialBalance(accounts: Account[]): TrialBalance {
+  const rows: TrialBalanceRow[] = [];
+  let totalDebit = 0;
+  let totalCredit = 0;
+  for (const a of accounts) {
+    const debitNormal = a.account_type === "asset" || a.account_type === "expense";
+    const bal = Number(a.balance) || 0;
+    let debit = 0;
+    let credit = 0;
+    if (debitNormal) {
+      if (bal >= 0) debit = bal;
+      else credit = -bal;
+    } else {
+      if (bal >= 0) credit = bal;
+      else debit = -bal;
+    }
+    if (debit === 0 && credit === 0) continue;
+    rows.push({ code: a.code, name: a.name, type: a.account_type, debit, credit });
+    totalDebit += debit;
+    totalCredit += credit;
+  }
+  return { rows, totalDebit, totalCredit, balanced: Math.abs(totalDebit - totalCredit) < 0.01 };
+}
+
+export interface BalanceSheetLine {
+  code: string;
+  name: string;
+  amount: number;
+}
+export interface BalanceSheet {
+  assets: BalanceSheetLine[];
+  liabilities: BalanceSheetLine[];
+  equity: BalanceSheetLine[];
+  totalAssets: number;
+  totalLiabilities: number;
+  netProfit: number;
+  totalEquity: number;
+  balanced: boolean;
+}
+
+/** Balance sheet from account balances. Current-period profit (revenue −
+ *  expense, since this ledger doesn't post closing entries) is folded into
+ *  equity so Assets = Liabilities + Equity holds. */
+export function computeBalanceSheet(accounts: Account[]): BalanceSheet {
+  const pick = (t: string): BalanceSheetLine[] =>
+    accounts
+      .filter((a) => a.account_type === t)
+      .map((a) => ({ code: a.code, name: a.name, amount: Number(a.balance) || 0 }));
+  const sum = (xs: BalanceSheetLine[]) => xs.reduce((s, x) => s + x.amount, 0);
+  const assets = pick("asset");
+  const liabilities = pick("liability");
+  const equityAccts = pick("equity");
+  const netProfit = sum(pick("revenue")) - sum(pick("expense"));
+  const totalAssets = sum(assets);
+  const totalLiabilities = sum(liabilities);
+  const totalEquity = sum(equityAccts) + netProfit;
+  return {
+    assets,
+    liabilities,
+    equity: [...equityAccts, { code: "", name: "Net profit (current period)", amount: netProfit }],
+    totalAssets,
+    totalLiabilities,
+    netProfit,
+    totalEquity,
+    balanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01,
+  };
+}
+
+export interface CashSummary {
+  inflow: number;
+  outflow: number;
+  net: number;
+}
+/** Direct cash movement over a period: debits to cash/bank accounts are
+ *  inflows, credits are outflows. A simplified statement — not the categorised
+ *  operating/investing/financing breakdown. */
+export function computeCashSummary(
+  txns: Pick<Txn, "account_name" | "txn_type" | "amount" | "txn_date">[],
+  from?: string,
+  to?: string
+): CashSummary {
+  const inRange = (d: string) => (!from || d >= from) && (!to || d <= to);
+  let inflow = 0;
+  let outflow = 0;
+  for (const t of txns) {
+    if (!t.txn_date || !inRange(t.txn_date)) continue;
+    if (!/cash|bank/i.test(t.account_name)) continue;
+    const amt = Number(t.amount) || 0;
+    if (t.txn_type === "debit") inflow += amt;
+    else outflow += amt;
+  }
+  return { inflow, outflow, net: inflow - outflow };
+}
+
 export const fin = {
   accounts: () =>
     readCached<Account[]>(

@@ -43,7 +43,11 @@ import {
   Payroll,
   PoSummary,
   Txn,
+  Account,
   computeVatReturn,
+  computeTrialBalance,
+  computeBalanceSheet,
+  computeCashSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
@@ -64,6 +68,7 @@ export default function Reports() {
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [posList, setPosList] = useState<PoSummary[]>([]);
   const [txns, setTxns] = useState<Txn[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
@@ -80,6 +85,7 @@ export default function Reports() {
       hr.payroll().then(setPayroll),
       pos.list().then(setPosList),
       fin.transactions().then(setTxns),
+      fin.accounts().then(setAccounts),
     ])
       .catch((e) =>
         setError(`Could not load reports: ${e instanceof Error ? e.message : e}`)
@@ -223,6 +229,19 @@ export default function Reports() {
     [txns, dateFrom, dateTo]
   );
 
+  /* ── Financial statements (point-in-time from account balances) ── */
+  const trialBalance = useMemo(() => computeTrialBalance(accounts), [accounts]);
+  const balanceSheet = useMemo(() => computeBalanceSheet(accounts), [accounts]);
+  const cashSummary = useMemo(
+    () =>
+      computeCashSummary(
+        txns,
+        dateFrom?.toISOString().slice(0, 10),
+        dateTo?.toISOString().slice(0, 10)
+      ),
+    [txns, dateFrom, dateTo]
+  );
+
   /* ── PDF download ── */
   const downloadPdf = () => {
     const el = pdfRef.current?.closest(".invoice-print") as HTMLElement;
@@ -248,6 +267,10 @@ export default function Reports() {
       { metric: "VAT 201 — Standard-rated expenses (net)", amount: vat.standardExpenseNet },
       { metric: "VAT 201 — Input tax recoverable (box 9)", amount: vat.inputVat },
       { metric: "VAT 201 — Net VAT due (box 14)", amount: vat.netVatDue },
+      { metric: "Balance Sheet — Total Assets", amount: balanceSheet.totalAssets },
+      { metric: "Balance Sheet — Total Liabilities", amount: balanceSheet.totalLiabilities },
+      { metric: "Balance Sheet — Total Equity", amount: balanceSheet.totalEquity },
+      { metric: "Cash Flow — Net change (period)", amount: cashSummary.net },
     ];
     downloadCsv(`filey-report-${new Date().toISOString().slice(0, 10)}`, rows, [
       { key: "metric", label: "Metric" },
@@ -395,6 +418,147 @@ export default function Reports() {
             selected period. Zero-rated &amp; exempt supplies (boxes 4–5) and the
             per-emirate split are not yet itemised — set a Period above to file a
             quarter.
+          </p>
+        </div>
+
+        {/* ── Financial statements ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          {/* Balance Sheet */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-ink">Balance Sheet</h3>
+              <span
+                className={`pill text-[11px] ${
+                  balanceSheet.balanced
+                    ? "bg-brand-100 text-brand-500"
+                    : "bg-danger/15 text-danger"
+                }`}
+              >
+                {balanceSheet.balanced ? "Balanced" : "Out of balance"}
+              </span>
+            </div>
+            <div className="space-y-3 text-sm tabular-nums">
+              {[
+                { t: "Assets", lines: balanceSheet.assets, total: balanceSheet.totalAssets },
+                {
+                  t: "Liabilities",
+                  lines: balanceSheet.liabilities,
+                  total: balanceSheet.totalLiabilities,
+                },
+                { t: "Equity", lines: balanceSheet.equity, total: balanceSheet.totalEquity },
+              ].map((sec) => (
+                <div key={sec.t}>
+                  <p className="text-xs font-semibold text-brand-500 uppercase tracking-wide mb-1">
+                    {sec.t}
+                  </p>
+                  {sec.lines.length === 0 && (
+                    <p className="text-brand-400 text-xs">No accounts</p>
+                  )}
+                  {sec.lines.map((l, i) => (
+                    <div key={(l.code || l.name) + i} className="flex justify-between py-0.5">
+                      <span className="text-ink/80">{l.name}</span>
+                      <span>{aed(l.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t border-brand-100 mt-1 pt-1 font-semibold text-ink">
+                    <span>Total {sec.t}</span>
+                    <span>{aed(sec.total)}</span>
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-brand-200 pt-2 font-semibold text-ink">
+                <span>Liabilities + Equity</span>
+                <span>{aed(balanceSheet.totalLiabilities + balanceSheet.totalEquity)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Trial Balance */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-ink">Trial Balance</h3>
+              <span
+                className={`pill text-[11px] ${
+                  trialBalance.balanced
+                    ? "bg-brand-100 text-brand-500"
+                    : "bg-danger/15 text-danger"
+                }`}
+              >
+                {trialBalance.balanced
+                  ? "Balanced"
+                  : `Off by ${aed(Math.abs(trialBalance.totalDebit - trialBalance.totalCredit))}`}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm tabular-nums">
+                <thead>
+                  <tr className="text-left text-xs text-brand-500 border-b border-brand-200">
+                    <th className="py-1.5 pr-2 font-medium">Account</th>
+                    <th className="py-1.5 pr-2 font-medium text-right">Debit</th>
+                    <th className="py-1.5 font-medium text-right">Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trialBalance.rows.map((r) => (
+                    <tr key={r.code} className="border-b border-brand-100">
+                      <td className="py-1 pr-2 text-ink/80">{r.name}</td>
+                      <td className="py-1 pr-2 text-right">{r.debit ? aed(r.debit) : "—"}</td>
+                      <td className="py-1 text-right">{r.credit ? aed(r.credit) : "—"}</td>
+                    </tr>
+                  ))}
+                  {trialBalance.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-3 text-center text-brand-400 text-xs">
+                        No account balances yet
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="font-semibold text-ink border-t border-brand-200">
+                    <td className="py-1.5 pr-2">Total</td>
+                    <td className="py-1.5 pr-2 text-right">{aed(trialBalance.totalDebit)}</td>
+                    <td className="py-1.5 text-right">{aed(trialBalance.totalCredit)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Cash flow (summary) ── */}
+        <div className="card mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-ink flex items-center gap-2">
+              <Wallet size={16} className="text-brand-500" /> Cash Flow (summary)
+            </h3>
+            <span className="text-xs text-brand-500">
+              {vat.from || "start"} → {vat.to || "today"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs text-brand-500">Cash in</p>
+              <p className="text-lg font-semibold text-success tabular-nums">
+                {aed(cashSummary.inflow)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-500">Cash out</p>
+              <p className="text-lg font-semibold text-danger tabular-nums">
+                {aed(cashSummary.outflow)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-500">Net change</p>
+              <p className="text-lg font-semibold text-ink tabular-nums">
+                {aed(cashSummary.net)}
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-brand-400 mt-2">
+            Direct cash movement on cash/bank accounts for the period. Not the
+            categorised operating/investing/financing statement.
           </p>
         </div>
 
