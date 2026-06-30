@@ -663,8 +663,9 @@ export const erp = {
         .select("id,value")
         .eq("key", "stock_issues")
         .maybeSingle();
-      const map: Record<string, StockIssue[]> = (data as any)?.value
-        ? JSON.parse((data as any).value)
+      const row = data as { id?: number; value?: string } | null;
+      const map: Record<string, StockIssue[]> = row?.value
+        ? JSON.parse(row.value)
         : {};
       const list = map[String(productId)] ?? [];
       list.push({
@@ -675,7 +676,7 @@ export const erp = {
       });
       map[String(productId)] = list;
       const value = JSON.stringify(map);
-      if ((data as any)?.id) await sUpdate("app_settings", (data as any).id, { value });
+      if (row?.id) await sUpdate("app_settings", row.id, { value });
       else await sInsert("app_settings", { key: "stock_issues", value });
       // Subtract from stock (atomic RPC with fallback).
       await adjustProductStock(productId, -q);
@@ -688,8 +689,9 @@ export const erp = {
         .select("value")
         .eq("key", "stock_issues")
         .maybeSingle();
-      return ((data as any)?.value
-        ? JSON.parse((data as any).value)
+      const row = data as { value?: string } | null;
+      return (row?.value
+        ? JSON.parse(row.value)
         : {}) as Record<string, StockIssue[]>;
     }),
   updateProduct: (
@@ -1439,7 +1441,8 @@ export const tools = {
         .select("id")
         .eq("key", key)
         .maybeSingle();
-      if (data) await sUpdate("app_settings", (data as any).id, { value });
+      const row = data as { id?: number } | null;
+      if (row?.id) await sUpdate("app_settings", row.id, { value });
       else await sInsert("app_settings", { key, value });
     }),
   auditLog: () =>
@@ -1868,17 +1871,18 @@ async function reverseInvoiceTransactions(
   // a ref; reversing by either key keeps re-finalize from leaving orphan rows
   // that pile up (the "8 invoices → 15 entries" bug). Dedup by row id so a row
   // matched on both keys isn't reversed twice.
-  const rows = new Map<number, any>();
+  type TxnRow = { id: number; account_id: number | null; txn_type: string; amount: number | string };
+  const rows = new Map<number, TxnRow>();
   const byRef = await sb().from("transactions").select("*").eq("ref", ref);
   if (byRef.error) throw byRef.error;
-  for (const t of (byRef.data ?? []) as any[]) rows.set(t.id, t);
+  for (const t of (byRef.data ?? []) as TxnRow[]) rows.set(t.id, t);
   if (invoiceId) {
     const byId = await sb()
       .from("transactions")
       .select("*")
       .eq("invoice_id", invoiceId);
     if (byId.error) throw byId.error;
-    for (const t of (byId.data ?? []) as any[]) rows.set(t.id, t);
+    for (const t of (byId.data ?? []) as TxnRow[]) rows.set(t.id, t);
   }
   const txns = [...rows.values()];
   if (txns.length) {
@@ -2320,7 +2324,7 @@ export const billing = {
           ]
         );
         return {
-          ...(d as any),
+          ...(d as InvoiceDoc),
           items: items
             .filter((i) => i.invoice_id === docId)
             .map((i) => ({
@@ -2361,11 +2365,11 @@ export const billing = {
               description: it.description,
               qty: it.qty,
               unit_price: it.unit_price,
-              unit: (it as any).unit || undefined,
-              custom: (it as any).custom || undefined,
-              tax_category: (it as any).tax_category || undefined,
+              unit: it.unit || undefined,
+              custom: it.custom || undefined,
+              tax_category: it.tax_category || undefined,
               position: i,
-              product_id: (it as any).product_id ?? null,
+              product_id: it.product_id ?? null,
             }))
           );
         if (error) throw error;
@@ -2503,21 +2507,29 @@ export const billing = {
           .select("amount")
           .eq("invoice_id", invoiceId),
       ]);
+      const docRow = doc as InvoiceDoc;
       const total = docTotal(
-        doc as any,
-        (items as any[]).filter((i) => i.invoice_id === invoiceId)
+        docRow,
+        (
+          items as {
+            invoice_id: number;
+            qty: number;
+            unit_price: number;
+            custom?: Record<string, string> | null;
+          }[]
+        ).filter((i) => i.invoice_id === invoiceId)
       );
-      const paid = ((pays as any[]) ?? []).reduce(
+      const paid = ((pays as { amount: number | string }[]) ?? []).reduce(
         (s, p) => s + Number(p.amount),
         0
       );
       const status =
-        paid >= total - 0.005 ? "paid" : (doc as any).status === "paid" ? "sent" : (doc as any).status;
-      if (status !== (doc as any).status)
+        paid >= total - 0.005 ? "paid" : docRow.status === "paid" ? "sent" : docRow.status;
+      if (status !== docRow.status)
         await sUpdate("invoice_docs", invoiceId, { status });
 
       // Post the cash receipt to accounting: debit Cash/Bank, credit AR.
-      const ref = `Invoice ${(doc as any)?.number ?? invoiceId} Payment`;
+      const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
       const cashId = await findOrCreateCashAccount();
       const arId = await findOrCreateArAccount();
       if (cashId > 0) {
@@ -2556,7 +2568,7 @@ export const billing = {
         .eq("id", id)
         .single();
       if (error) throw error;
-      const invoiceId = (p as any)?.invoice_id as number | undefined;
+      const invoiceId = (p as { invoice_id?: number } | null)?.invoice_id;
       await sDelete("invoice_payments", id);
       if (invoiceId) {
         // Reverse the accounting entries for this payment.
@@ -2565,10 +2577,11 @@ export const billing = {
           .select("number,status")
           .eq("id", invoiceId)
           .single();
-        const ref = `Invoice ${(doc as any)?.number ?? invoiceId} Payment`;
+        const docMeta = doc as { number?: string; status?: string } | null;
+        const ref = `Invoice ${docMeta?.number ?? invoiceId} Payment`;
         await reverseInvoiceTransactions(invoiceId, ref);
         // If the invoice was fully paid, move it back to sent.
-        if ((doc as any)?.status === "paid") {
+        if (docMeta?.status === "paid") {
           await sUpdate("invoice_docs", invoiceId, { status: "sent" });
         }
       }
@@ -2584,7 +2597,7 @@ export const billing = {
           .maybeSingle();
         if (error) throw error;
         if (data) {
-          const c = data as any;
+          const c = data as CompanyProfile;
           return {
             name: c.name,
             business_type: c.business_type ?? undefined,
@@ -2649,7 +2662,7 @@ export const billing = {
       const { data: updated, error } = await sb()
         .from("company_profile")
         .update(row)
-        .eq("id", (data as any).id)
+        .eq("id", (data as { id: number }).id)
         .select("id");
       if (error) throw error;
       if (!updated || updated.length === 0)
@@ -2897,7 +2910,7 @@ export const quotes = {
           { col: "id", asc: true },
         ]);
         return {
-          ...(d as any),
+          ...(d as QuotationDoc),
           custom_columns: Array.isArray(d.custom_columns) ? d.custom_columns : [],
           unit_price_formula: d.unit_price_formula || null,
           items: items
@@ -2996,7 +3009,7 @@ export const quotes = {
         .eq("id", quotationId)
         .single();
       if (error) throw error;
-      const qd = q as any;
+      const qd = q as QuotationDoc;
       const qItems = await sList<any>(
         "quotation_items",
         [{ col: "position", asc: true }]
@@ -3253,9 +3266,9 @@ export const pos = {
             unit: i.unit ?? undefined,
             custom: (i.custom as Record<string, string>) ?? undefined,
           }));
-        const d = data as any;
+        const d = data as PurchaseOrder;
         return {
-          ...(d as any),
+          ...(d as PurchaseOrder),
           custom_columns: Array.isArray(d.custom_columns) ? d.custom_columns : [],
           unit_price_formula: d.unit_price_formula || null,
           id: d.id,
@@ -3390,7 +3403,15 @@ export const pos = {
           .select("*")
           .eq("po_id", poId)
           .order("paid_at", { ascending: false });
-        return ((data ?? []) as any[]).map((p: any) => ({
+        return (
+          (data ?? []) as {
+            id: number;
+            po_id: number;
+            amount: number | string;
+            method?: string | null;
+            paid_at: string;
+          }[]
+        ).map((p) => ({
           id: p.id,
           po_id: p.po_id,
           amount: Number(p.amount),
@@ -3607,7 +3628,7 @@ export const receipts = {
           .eq("id", id)
           .single();
         if (error) throw error;
-        return { ...(data as any) } as ReceiptDoc;
+        return { ...(data as ReceiptDoc) };
       },
       null as unknown as ReceiptDoc
     ),
