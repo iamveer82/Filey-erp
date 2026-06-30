@@ -31,9 +31,12 @@
 //     updates and make the agent talk.
 //   * The service-role key never leaves this process; clients can only READ
 //     their own channel_messages rows (RLS).
-//   * ponytail: v1 has NO Filey data/write tools — a public channel cannot read
-//     or mutate ERP data yet. Add read tools first (org_id-scoped + tested),
-//     gate writes behind explicit confirmation, before exposing them here.
+//   * Data tools are READ-ONLY and org-scoped (see tools.ts): the agent can look
+//     up invoices, balances, low stock and customers for OWNER_USER_ID's org, but
+//     cannot mutate anything. The service-role client bypasses RLS, so tools.ts
+//     pins .eq("org_id", ...) on every query — that scope IS the tenant boundary.
+//   * ponytail: WRITE tools (create invoice, mark paid, …) are deliberately not
+//     exposed yet — add them behind an explicit confirm step, not as bare tools.
 //   * ponytail: single-owner — every message maps to OWNER_USER_ID (one bot =
 //     one install, matches the single-tenant desktop). Multi-user needs a
 //     pairing table (chat_id -> user_id); add when SaaS multi-tenant lands.
@@ -44,40 +47,96 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { parseTelegramUpdate } from "./parse.ts";
+import { TOOLS, runTool } from "./tools.ts";
 
-async function aiReply(userText: string, name: string): Promise<string> {
+// deno-lint-ignore no-explicit-any
+async function aiReply(userText: string, name: string, client: any, orgId: string | null): Promise<string> {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) return "My AI key isn't set up yet — ask the Filey admin to configure ANTHROPIC_API_KEY.";
   const model = Deno.env.get("AGENT_MODEL") ?? "claude-haiku-4-5-20251001";
+  const canQuery = !!(client && orgId);
+  const system =
+    `You are Filey, ${name}'s personal assistant for their Filey ERP/CRM. ` +
+    `Be concise, friendly and practical. ` +
+    (canQuery
+      ? `You can look up live business data with the provided tools — use them ` +
+        `instead of guessing numbers, and quote figures in AED unless a row says ` +
+        `otherwise. You can READ data but cannot change it yet; if asked to create ` +
+        `or edit something, say that's coming soon.`
+      : `You can chat and help think things through, but live data lookups aren't ` +
+        `configured here — don't invent numbers.`);
+
+  // deno-lint-ignore no-explicit-any
+  const messages: any[] = [{ role: "user", content: userText }];
+
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        system:
-          `You are Filey, ${name}'s personal assistant for their Filey ERP/CRM. ` +
-          `Be concise, friendly, and practical. You can chat and help think things through. ` +
-          `Direct access to invoices, customers and accounting data is coming soon — if asked ` +
-          `to look something up in the system, say that briefly rather than inventing numbers.`,
-        messages: [{ role: "user", content: userText }],
-      }),
-    });
-    if (!res.ok) {
-      console.error("anthropic", res.status, await res.text());
-      return "Sorry — I hit an error reaching my brain. Try again in a moment.";
+    // Tool-use loop: the model may call read tools a few times before answering.
+    for (let round = 0; round < 4; round++) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1024,
+          system,
+          messages,
+          ...(canQuery ? { tools: TOOLS } : {}),
+        }),
+      });
+      if (!res.ok) {
+        console.error("anthropic", res.status, await res.text());
+        return "Sorry — I hit an error reaching my brain. Try again in a moment.";
+      }
+      const data = await res.json();
+      const content = Array.isArray(data?.content) ? data.content : [];
+
+      if (data?.stop_reason === "tool_use" && canQuery) {
+        messages.push({ role: "assistant", content });
+        // deno-lint-ignore no-explicit-any
+        const results: any[] = [];
+        for (const block of content) {
+          if (block?.type !== "tool_use") continue;
+          let out: unknown;
+          try {
+            out = await runTool(client, orgId as string, block.name, block.input);
+          } catch (e) {
+            out = { error: String(e) };
+          }
+          results.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: JSON.stringify(out).slice(0, 6000),
+          });
+        }
+        messages.push({ role: "user", content: results });
+        continue;
+      }
+
+      // deno-lint-ignore no-explicit-any
+      const text = content.find((b: any) => b?.type === "text")?.text;
+      return typeof text === "string" && text.trim() ? text : "…";
     }
-    const data = await res.json();
-    const text = data?.content?.[0]?.text;
-    return typeof text === "string" && text.trim() ? text : "…";
+    return "I looked into that but couldn't wrap it up — try asking a bit more specifically.";
   } catch (e) {
     console.error("anthropic fetch", e);
     return "Sorry — I couldn't reach my brain just now. Try again shortly.";
+  }
+}
+
+/** The org whose data this install can read. Single-owner: derived from the
+ *  owner's profile. Null disables data tools (chat-only fallback). */
+// deno-lint-ignore no-explicit-any
+async function ownerOrgId(client: any, ownerId: string): Promise<string | null> {
+  try {
+    const { data } = await client.from("profiles").select("org_id").eq("id", ownerId).maybeSingle();
+    return data?.org_id ?? null;
+  } catch (e) {
+    console.error("ownerOrgId", e);
+    return null;
   }
 }
 
@@ -139,7 +198,8 @@ serve(async (req) => {
 
   if (client) await log(client, ownerId, { externalId: msg.externalId, direction: "in", body: msg.body, raw: update });
 
-  const reply = await aiReply(msg.body, msg.fromName);
+  const orgId = client ? await ownerOrgId(client, ownerId) : null;
+  const reply = await aiReply(msg.body, msg.fromName, client, orgId);
   await sendTelegram(msg.externalId, reply);
 
   if (client) await log(client, ownerId, { externalId: msg.externalId, direction: "out", body: reply, raw: {} });
