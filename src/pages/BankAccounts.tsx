@@ -1,8 +1,24 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Building2, Wallet, Coins } from "lucide-react";
+import { Plus, Trash2, Building2, Wallet, Coins, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { aed, numInput } from "../lib/format";
-import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
+import {
+  PageHeader,
+  MetricCard,
+  DataTable,
+  Modal,
+  Field,
+  Badge,
+  Spinner,
+  ErrorBanner,
+} from "../components/ui";
+import { fin } from "../lib/api";
+import {
+  parseStatementCsv,
+  matchStatement,
+  type BookTxn,
+  type ReconResult,
+} from "../lib/bankRecon";
 
 const BANK_KEY = "filey_bank_accounts";
 
@@ -39,6 +55,7 @@ export default function BankAccounts() {
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<BankAccount | null>(null);
+  const [reconOpen, setReconOpen] = useState(false);
   useEffect(() => {
     setAccounts(load());
   }, []);
@@ -66,15 +83,20 @@ export default function BankAccounts() {
         title="Bank Accounts"
         subtitle="Manage your company bank accounts & balances"
         action={
-          <button
-            className="btn-primary"
-            onClick={() => {
-              setEdit(null);
-              setOpen(true);
-            }}
-          >
-            <Plus size={16} /> Add Account
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" onClick={() => setReconOpen(true)}>
+              <FileCheck2 size={16} /> Reconcile
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setEdit(null);
+                setOpen(true);
+              }}
+            >
+              <Plus size={16} /> Add Account
+            </button>
+          </div>
         }
       />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -178,6 +200,145 @@ export default function BankAccounts() {
           }}
         />
       )}
+      {reconOpen && (
+        <ReconcileModal open={reconOpen} onClose={() => setReconOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [result, setResult] = useState<ReconResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const onFile = async (file: File) => {
+    setErr("");
+    setBusy(true);
+    setResult(null);
+    try {
+      const lines = parseStatementCsv(await file.text());
+      if (!lines.length) {
+        setErr(
+          "No statement rows found. Expected columns like Date, Description and Amount (or Debit/Credit)."
+        );
+        return;
+      }
+      const txns = await fin.transactions();
+      const book: BookTxn[] = txns
+        .filter((t) => /cash|bank/i.test(t.account_name))
+        .map((t) => ({
+          id: t.id,
+          description: t.description || t.account_name,
+          date: t.txn_date,
+          amount: Number(t.amount),
+        }));
+      setResult(matchStatement(lines, book));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const Stat = ({ n, label, tone }: { n: number; label: string; tone: string }) => (
+    <div className="rounded-xl border border-brand-100 p-3">
+      <p className={`text-2xl font-semibold tabular-nums ${tone}`}>{n}</p>
+      <p className="text-xs text-brand-500 mt-0.5">{label}</p>
+    </div>
+  );
+
+  return (
+    <Modal open={open} onClose={onClose} title="Reconcile bank statement">
+      <input
+        type="file"
+        accept=".csv,text/csv"
+        className="input"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+        }}
+      />
+      <p className="text-xs text-brand-500 mt-1.5">
+        Upload a statement CSV (Date, Description, Amount — or Debit/Credit
+        columns). Lines are matched to your cash/bank ledger by amount and date
+        (±4 days).
+      </p>
+      {busy && (
+        <div className="mt-3">
+          <Spinner label="Matching…" />
+        </div>
+      )}
+      {err && (
+        <div className="mt-3">
+          <ErrorBanner message={err} />
+        </div>
+      )}
+      {result && (
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <Stat n={result.matched.length} label="Matched" tone="text-success" />
+            <Stat n={result.unmatchedLines.length} label="On statement only" tone="text-ink" />
+            <Stat n={result.unmatchedTxns.length} label="In books only" tone="text-ink" />
+          </div>
+          {result.unmatchedLines.length > 0 && (
+            <ReconList
+              title="On the statement, not in your books"
+              hint="Likely missing entries — record these."
+              rows={result.unmatchedLines.map((l) => ({
+                date: l.date,
+                desc: l.description,
+                amount: l.amount,
+              }))}
+            />
+          )}
+          {result.unmatchedTxns.length > 0 && (
+            <ReconList
+              title="In your books, not on the statement"
+              hint="Not yet cleared, or a duplicate/error."
+              rows={result.unmatchedTxns.map((t) => ({
+                date: t.date,
+                desc: t.description,
+                amount: t.amount,
+              }))}
+            />
+          )}
+          <p className="text-[11px] text-brand-400">
+            Review aid — marking entries reconciled (and persisting it) is a later step.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ReconList({
+  title,
+  hint,
+  rows,
+}: {
+  title: string;
+  hint: string;
+  rows: { date: string; desc: string; amount: number }[];
+}) {
+  return (
+    <div>
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      <p className="text-xs text-brand-500 mb-1">{hint}</p>
+      <div className="max-h-40 overflow-y-auto rounded-xl border border-brand-100 divide-y divide-brand-100">
+        {rows.map((r, i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
+          >
+            <span className="text-xs text-brand-500 tabular-nums w-20 shrink-0">
+              {r.date}
+            </span>
+            <span className="flex-1 truncate text-ink/80">{r.desc || "—"}</span>
+            <span className="tabular-nums font-medium">{aed(r.amount)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
