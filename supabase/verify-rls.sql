@@ -19,14 +19,19 @@
 -- ------------------------------------------------------------
 with business_tables (tbl) as (
   values
-    ('products'),('orders'),('order_items'),('invoices'),
+    ('products'),('orders'),('order_items'),
     ('employees'),('attendance'),('payroll'),
     ('accounts'),('expenses'),('transactions'),
     ('app_users'),('app_settings'),('audit_log'),
     ('crm_leads'),('crm_customers'),('crm_opportunities'),('crm_activities'),
-    ('company_profile'),('invoice_docs'),('invoice_doc_items'),
-    ('quotations'),('quotation_items'),('quotation_templates'),('tool_runs')
+    ('company_profile'),('invoice_docs'),('invoice_doc_items'),('invoice_payments'),
+    ('quotations'),('quotation_items'),('quotation_templates'),('tool_runs'),
+    ('suppliers'),('purchase_orders'),('purchase_order_items')
 )
+-- A table is safe if RLS is ON and at least one policy scopes access by the
+-- caller's org (qual/with_check references current_org()). Name-agnostic: it
+-- accepts the generic `<tbl>_access` / `<tbl>_org` policies and the bespoke
+-- ones (company_profile_*, audit_log_*) alike.
 select
   b.tbl                                              as table_name,
   coalesce(c.relrowsecurity, false)                  as rls_enabled,
@@ -34,15 +39,15 @@ select
     select 1 from pg_policies p
     where p.schemaname = 'public'
       and p.tablename  = b.tbl
-      and p.policyname = b.tbl || '_org'
-  )                                                  as org_policy_present,
+      and (coalesce(p.qual, '') || coalesce(p.with_check, '')) like '%current_org%'
+  )                                                  as org_scoped_policy,
   case
     when coalesce(c.relrowsecurity, false)
      and exists (
        select 1 from pg_policies p
        where p.schemaname = 'public'
          and p.tablename  = b.tbl
-         and p.policyname = b.tbl || '_org'
+         and (coalesce(p.qual, '') || coalesce(p.with_check, '')) like '%current_org%'
      )
     then 'PASS'
     else 'FAIL'
@@ -51,6 +56,28 @@ from business_tables b
 left join pg_class     c on c.relname = b.tbl
 left join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
 order by result desc, table_name;
+
+
+-- ------------------------------------------------------------
+--  SECTION 1c — audit_log must be APPEND-ONLY (immutable)
+--
+--  An audit trail you can edit or delete is worthless. audit_log
+--  must expose SELECT + INSERT only; any UPDATE/DELETE/ALL policy
+--  means rows can be tampered with. Expect PASS.
+-- ------------------------------------------------------------
+select
+  'audit_log'                                        as table_name,
+  exists (select 1 from pg_policies where schemaname = 'public'
+            and tablename = 'audit_log' and cmd in ('SELECT', 'ALL')) as can_read,
+  exists (select 1 from pg_policies where schemaname = 'public'
+            and tablename = 'audit_log' and cmd in ('INSERT', 'ALL')) as can_append,
+  case
+    when not exists (
+      select 1 from pg_policies where schemaname = 'public'
+        and tablename = 'audit_log' and cmd in ('UPDATE', 'DELETE', 'ALL'))
+    then 'PASS'
+    else 'FAIL — audit rows are mutable (drop the UPDATE/DELETE/ALL policy)'
+  end                                                as result;
 
 
 -- ------------------------------------------------------------
@@ -94,13 +121,14 @@ declare
   t           text;
   n           bigint;
   tables      text[] := array[
-    'products','orders','order_items','invoices',
+    'products','orders','order_items',
     'employees','attendance','payroll',
     'accounts','expenses','transactions',
     'app_users','app_settings','audit_log',
     'crm_leads','crm_customers','crm_opportunities','crm_activities',
-    'company_profile','invoice_docs','invoice_doc_items',
-    'quotations','quotation_items','quotation_templates','tool_runs'
+    'company_profile','invoice_docs','invoice_doc_items','invoice_payments',
+    'quotations','quotation_items','quotation_templates','tool_runs',
+    'suppliers','purchase_orders','purchase_order_items'
   ];
 begin
   raise notice 'table | distinct_org_count';

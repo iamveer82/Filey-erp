@@ -304,9 +304,11 @@ create table if not exists audit_log (
   action text not null default '',
   entity text not null default '',
   details text,
+  changes jsonb,            -- before->after diff captured by log_audit()
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table audit_log add column if not exists changes jsonb;
 
 -- ===== CRM =====
 create table if not exists crm_leads (
@@ -1255,17 +1257,45 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   actor_name text;
   rid text;
+  diff jsonb;
+  old_j jsonb;
+  new_j jsonb;
 begin
   begin
     select coalesce(name, email, 'system') into actor_name
       from public.profiles where id = auth.uid();
-    if (TG_OP = 'DELETE') then rid := old.id::text; else rid := new.id::text; end if;
-    insert into public.audit_log (actor, action, entity, details, org_id, user_id)
+
+    if (TG_OP = 'DELETE') then
+      rid  := old.id::text;
+      diff := jsonb_build_object('_deleted', to_jsonb(old));
+    elsif (TG_OP = 'INSERT') then
+      rid  := new.id::text;
+      diff := jsonb_build_object('_created', to_jsonb(new));
+    else
+      -- UPDATE: record only the columns that actually changed (old -> new),
+      -- ignoring updated_at noise. A no-op update writes no audit row.
+      rid   := new.id::text;
+      old_j := to_jsonb(old);
+      new_j := to_jsonb(new);
+      select coalesce(
+               jsonb_object_agg(k, jsonb_build_object('old', old_j -> k, 'new', new_j -> k)),
+               '{}'::jsonb)
+        into diff
+        from jsonb_object_keys(new_j) as k
+       where (new_j -> k) is distinct from (old_j -> k)
+         and k <> 'updated_at';
+      if diff = '{}'::jsonb then
+        return new;
+      end if;
+    end if;
+
+    insert into public.audit_log (actor, action, entity, details, changes, org_id, user_id)
     values (
       coalesce(actor_name, 'system'),
       lower(TG_OP),
       TG_TABLE_NAME,
       TG_TABLE_NAME || ' #' || coalesce(rid, '?'),
+      diff,
       public.current_org(),
       auth.uid()
     );
@@ -1281,7 +1311,8 @@ declare
   audited text[] := array[
     'products','orders','invoice_docs','quotations','crm_customers',
     'crm_leads','crm_opportunities','expenses','suppliers',
-    'purchase_orders','employees','payroll'
+    'purchase_orders','employees','payroll',
+    'invoice_payments','po_payments'   -- money movements belong in the trail
   ];
 begin
   foreach t in array audited loop
@@ -1293,6 +1324,20 @@ begin
     );
   end loop;
 end $$;
+
+-- ---------- audit_log is append-only (immutable) ----------
+-- Members may READ their org's trail and APPEND rows (manual logAction + the
+-- log_audit trigger), but NO ONE may update or delete an audit row — not even
+-- an org admin. Immutability is the whole point of an audit log. Replace the
+-- generic `audit_log_org` (for all) policy with explicit select + insert; the
+-- absence of update/delete policies makes RLS deny those by default.
+drop policy if exists audit_log_org on audit_log;
+drop policy if exists audit_log_select on audit_log;
+drop policy if exists audit_log_insert on audit_log;
+create policy audit_log_select on audit_log for select
+  using (org_id = public.current_org());
+create policy audit_log_insert on audit_log for insert
+  with check (org_id = public.current_org());
 
 -- ---------- atomic counter updates (avoid lost-update races) ----------
 -- The app is realtime/multi-client, so client-side read-modify-write on a

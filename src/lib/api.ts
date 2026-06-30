@@ -139,6 +139,9 @@ export interface AuditEntry {
   action: string;
   entity: string;
   details?: string;
+  /** before->after diff from log_audit(): {field:{old,new}} for updates,
+   *  {_created|_deleted: row} for inserts/deletes. Null for manual logAction. */
+  changes?: Record<string, unknown> | null;
   created_at: string;
 }
 

@@ -14,6 +14,24 @@ const ACTION_TONE: Record<string, "success" | "warn" | "danger" | "info"> = {
 const prettyEntity = (e: string) =>
   e.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+const fmtVal = (x: unknown) =>
+  x == null ? "∅" : typeof x === "object" ? JSON.stringify(x) : String(x);
+
+/** Render the log_audit() diff as "field: old → new" pairs (updates only;
+ *  create/delete are already conveyed by the Action column). */
+function summarizeChanges(changes: AuditEntry["changes"]): string {
+  if (!changes || typeof changes !== "object") return "";
+  if ("_created" in changes || "_deleted" in changes) return "";
+  const parts: string[] = [];
+  for (const [field, v] of Object.entries(changes)) {
+    if (v && typeof v === "object" && "old" in v && "new" in v) {
+      const d = v as { old: unknown; new: unknown };
+      parts.push(`${field}: ${fmtVal(d.old)} → ${fmtVal(d.new)}`);
+    }
+  }
+  return parts.join(", ");
+}
+
 export default function ActivityLog() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +140,24 @@ export default function ActivityLog() {
             label: "Details",
             sortValue: (a) => a.details ?? "",
             render: (a) => a.details ?? "—",
+          },
+          {
+            key: "chg",
+            label: "Changes",
+            sortValue: () => "",
+            render: (a) => {
+              const s = summarizeChanges(a.changes);
+              return s ? (
+                <span
+                  className="text-xs text-muted block max-w-[280px] truncate"
+                  title={s}
+                >
+                  {s}
+                </span>
+              ) : (
+                "—"
+              );
+            },
           },
         ]}
       />
