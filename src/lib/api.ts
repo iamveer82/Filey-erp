@@ -3,6 +3,7 @@ import { sb, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { quotationTotals, invoiceTotals } from "./money";
 import { splitItemMeta } from "./docItems";
+import { getExchangeRates } from "./exchange-rates";
 
 // ===== Types =====
 export interface Product {
@@ -300,6 +301,8 @@ export interface InvoiceDoc {
   show_logo?: boolean;
   show_signature?: boolean;
   unit_price_formula?: { a: string; b: string } | null;
+  /** FX rate frozen at save: AED per 1 unit of `currency` (null/absent for AED). */
+  fx_rate?: number | null;
 }
 export type InvoiceDocInput = Omit<
   InvoiceDoc,
@@ -1113,6 +1116,18 @@ export const hr = {
 };
 
 // ===== Finance =====
+/** AED-equivalent of a document amount. `fxRate` is AED per 1 unit of the doc
+ *  currency (frozen at save from lib/exchange-rates). AED docs and unknown rates
+ *  pass through unchanged. */
+export function aedEquivalent(
+  amount: number,
+  currency?: string | null,
+  fxRate?: number | null
+): number {
+  if (!currency || currency === "AED") return amount;
+  return fxRate && fxRate > 0 ? amount * fxRate : amount;
+}
+
 /** Compute the core UAE FTA VAT 201 figures from ledger transactions.
  *  Output/Input VAT come straight from the VAT account postings (already
  *  tax-category-aware — only standard-rated "S" lines post VAT; reversals on
@@ -2509,6 +2524,18 @@ export const billing = {
     online(async () => {
       const { items, id, ...docFields } = input;
       const row = clean(docFields as Record<string, unknown>);
+      // Freeze the FX rate (AED per unit) the first time a non-AED invoice is
+      // saved, so its AED-equivalent doesn't drift with live rates afterward.
+      // Best-effort + cached (lib/exchange-rates); never blocks the save.
+      const cur = String(row.currency ?? "AED");
+      if (cur !== "AED" && !row.fx_rate) {
+        try {
+          const rates = await getExchangeRates();
+          if (rates[cur] > 0) row.fx_rate = rates[cur];
+        } catch (e) {
+          console.warn("FX freeze skipped:", e);
+        }
+      }
       let docId: number;
       if (id && id > 0) {
         await sUpdate("invoice_docs", id, row);

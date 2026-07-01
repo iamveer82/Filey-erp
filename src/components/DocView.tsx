@@ -84,6 +84,9 @@ export interface DocViewForm {
   /** Customer advance applied to this document — shown as a deduction with a
    *  resulting "Balance due" line under the total. */
   advance_applied?: number | null;
+  /** FX rate frozen at save: AED per 1 unit of `currency`. Drives the AED-
+   *  equivalent line shown under the total on non-AED documents. */
+  fx_rate?: number | null;
 }
 
 export interface DocViewLabels {
@@ -1022,6 +1025,18 @@ export default function DocView({
                 <span>Total ({form.currency || "AED"})</span>
                 <span>{m(grandTotal)}</span>
               </div>
+              {ccy !== "AED" && !!form.fx_rate && form.fx_rate > 0 && (
+                <div className="flex justify-between py-1 text-xs text-neutral-500">
+                  <span>Equivalent</span>
+                  <span>
+                    ≈ AED{" "}
+                    {(grandTotal * form.fx_rate).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
               {(Number(form.advance_applied) || 0) > 0 && (
                 <>
                   <div className="flex justify-between py-1">

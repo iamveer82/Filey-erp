@@ -460,6 +460,7 @@ const editInvoice = async (id: number) => {
         show_logo: d.show_logo ?? false,
         show_bank: (d as any).show_bank ?? false,
         advance_applied: (d as any).advance_applied ?? 0,
+        fx_rate: d.fx_rate ?? null,
         items: d.items.map((i) => {
           const {
             custom,
@@ -561,6 +562,7 @@ const editInvoice = async (id: number) => {
         show_logo: d.show_logo ?? false,
         show_bank: (d as any).show_bank ?? false,
         advance_applied: (d as any).advance_applied ?? 0,
+        fx_rate: d.fx_rate ?? null,
         items: d.items.map((i) => {
           const {
             custom,
