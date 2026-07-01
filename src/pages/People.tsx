@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Plus,
   Users,
@@ -7,9 +7,11 @@ import {
   Wallet,
   MoreHorizontal,
   Sliders,
+  FileText,
 } from "lucide-react";
 import { format } from "date-fns";
-import { hr, Employee, HrSummary } from "../lib/api";
+import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
+import { downloadElementAsPdf } from "../lib/pdfTools";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, num, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
@@ -40,12 +42,18 @@ export default function People() {
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
+  const [payslipFor, setPayslipFor] = useState<Employee | null>(null);
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = () => {
     setError("");
-    return Promise.all([hr.employees().then(setEmps), hr.summary().then(setSum)])
+    return Promise.all([
+      hr.employees().then(setEmps),
+      hr.summary().then(setSum),
+      billing.getCompany().then(setCompany).catch(() => {}),
+    ])
       .catch((e) =>
         setError(`Could not load people: ${e instanceof Error ? e.message : e}`)
       )
@@ -264,6 +272,9 @@ export default function People() {
                   <DropdownMenuItem onSelect={() => setLeaveFor(e)}>
                     <CalendarOff size={14} /> Mark leave days
                   </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setPayslipFor(e)}>
+                    <FileText size={14} /> Payslip
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ),
@@ -288,7 +299,152 @@ export default function People() {
           load();
         }}
       />
+
+      <PayslipModal
+        employee={payslipFor}
+        company={company}
+        onClose={() => setPayslipFor(null)}
+      />
     </div>
+  );
+}
+
+function PayslipModal({
+  employee,
+  company,
+  onClose,
+}: {
+  employee: Employee | null;
+  company: CompanyProfile | null;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [allowances, setAllowances] = useState(0);
+  const [deductions, setDeductions] = useState(0);
+  useEffect(() => {
+    if (employee) {
+      setAllowances(0);
+      setDeductions(0);
+      setMonth(new Date().toISOString().slice(0, 7));
+    }
+  }, [employee]);
+  if (!employee) return null;
+
+  const basic = employee.salary || 0;
+  const net = basic + allowances - deductions;
+  const periodLabel = new Date(month + "-01").toLocaleDateString("en", {
+    month: "long",
+    year: "numeric",
+  });
+  const download = () => {
+    const el = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
+    if (el) downloadElementAsPdf(el, `Payslip-${employee.name}-${month}`);
+    else window.print();
+  };
+
+  return (
+    <Modal open={!!employee} onClose={onClose} title={`Payslip — ${employee.name}`}>
+      <div className="grid grid-cols-3 gap-3 mb-4 no-print">
+        <Field label="Month">
+          <input
+            type="month"
+            className="input"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+          />
+        </Field>
+        <Field label={`Allowances (${getDisplayCurrency()})`}>
+          <input
+            type="number"
+            className="input"
+            value={allowances || ""}
+            onChange={(e) => setAllowances(numInput(e.target.value))}
+          />
+        </Field>
+        <Field label={`Deductions (${getDisplayCurrency()})`}>
+          <input
+            type="number"
+            className="input"
+            value={deductions || ""}
+            onChange={(e) => setDeductions(numInput(e.target.value))}
+          />
+        </Field>
+      </div>
+
+      <div ref={ref}>
+        <div className="invoice-print bg-white text-black rounded-xl border border-brand-200 p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              {company?.logo && (
+                <img src={company.logo} alt="" className="h-10 mb-2 object-contain" />
+              )}
+              <p className="font-semibold text-lg">{company?.name || "Company"}</p>
+              {company?.address && (
+                <p className="text-xs text-gray-500">{company.address}</p>
+              )}
+              {company?.trn && <p className="text-xs text-gray-500">TRN: {company.trn}</p>}
+            </div>
+            <div className="text-right">
+              <p className="font-semibold tracking-wide">PAYSLIP</p>
+              <p className="text-xs text-gray-500">{periodLabel}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1 text-sm border-t border-b border-gray-200 py-3 mb-3">
+            <div>
+              <span className="text-gray-500">Employee: </span>
+              {employee.name}
+            </div>
+            <div>
+              <span className="text-gray-500">Code: </span>
+              {employee.employee_code || "—"}
+            </div>
+            <div>
+              <span className="text-gray-500">Department: </span>
+              {employee.department || "—"}
+            </div>
+            <div>
+              <span className="text-gray-500">Position: </span>
+              {employee.position || "—"}
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              <tr className="border-b border-gray-100">
+                <td className="py-1.5">Basic Salary</td>
+                <td className="py-1.5 text-right tabular-nums">{aed(basic)}</td>
+              </tr>
+              <tr className="border-b border-gray-100">
+                <td className="py-1.5">Allowances</td>
+                <td className="py-1.5 text-right tabular-nums">{aed(allowances)}</td>
+              </tr>
+              <tr className="border-b border-gray-100">
+                <td className="py-1.5">Deductions</td>
+                <td className="py-1.5 text-right tabular-nums">{aed(-deductions)}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr className="font-semibold">
+                <td className="py-2">Net Pay</td>
+                <td className="py-2 text-right tabular-nums">{aed(net)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p className="text-[11px] text-gray-400 mt-6">
+            Computer-generated payslip — no signature required.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4 no-print">
+        <button className="btn-ghost" onClick={onClose}>
+          Close
+        </button>
+        <button className="btn-primary" onClick={download}>
+          <FileText size={15} /> Download PDF
+        </button>
+      </div>
+    </Modal>
   );
 }
 
