@@ -495,7 +495,7 @@ const editInvoice = async (id: number) => {
     try {
       const d = await billing.getDoc(id);
       setForm({
-        number: pickInvoiceNumber("sales", docs.map((x) => x.number), numFmt),
+        number: pickInvoiceNumber(mode, docs.map((x) => x.number), numFmt),
         status: "draft",
         doc_title: d.doc_title || d.doc_type,
         template: d.template,
@@ -561,7 +561,10 @@ const editInvoice = async (id: number) => {
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
         show_bank: (d as any).show_bank ?? false,
-        advance_applied: (d as any).advance_applied ?? 0,
+        // Advance application is per-invoice: the copy hasn't consumed any
+        // customer credit, so never carry the original's applied amount
+        // (doing so silently posted ghost consumption rows to `advances`).
+        advance_applied: 0,
         fx_rate: d.fx_rate ?? null,
         items: d.items.map((i) => {
           const {
@@ -594,7 +597,9 @@ const editInvoice = async (id: number) => {
   };
 
   const save = async () => {
-    if (!form) return;
+    // Guard re-entry (Ctrl+S bypasses the disabled buttons): a second call
+    // before the first insert returns would create a duplicate document.
+    if (!form || saving) return;
     // Validate
     if (!form.number.trim()) {
       toast.error("Invoice number is required");
@@ -646,9 +651,9 @@ const editInvoice = async (id: number) => {
       (payload as any).show_bank = form.show_bank ?? false;
       (payload as any).advance_applied = Number(form.advance_applied) || 0;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
-      // Consume the applied advance from the customer's credit ledger (idempotent
-      // per invoice id). ponytail: duplicating an invoice carries its applied
-      // amount and re-consumes — rare; clear it on the copy if it matters.
+      // Consume the applied advance from the customer's credit ledger
+      // (idempotent per invoice id; duplicates start at 0 so copies never
+      // re-consume).
       if (form.customer_id)
         await advances
           .applyToInvoice(
@@ -672,7 +677,7 @@ const editInvoice = async (id: number) => {
   // counts as issued; revert → "draft"). Done at the parent so the freshly
   // saved id is applied to the form without a stale closure.
   const setDocStatus = async (status: "draft" | "sent") => {
-    if (!form) return;
+    if (!form || saving) return;
     // Validate
     if (!form.number.trim()) {
       toast.error("Invoice number is required");
@@ -721,9 +726,9 @@ const editInvoice = async (id: number) => {
       (payload as any).show_bank = form.show_bank ?? false;
       (payload as any).advance_applied = Number(form.advance_applied) || 0;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
-      // Consume the applied advance from the customer's credit ledger (idempotent
-      // per invoice id). ponytail: duplicating an invoice carries its applied
-      // amount and re-consumes — rare; clear it on the copy if it matters.
+      // Consume the applied advance from the customer's credit ledger
+      // (idempotent per invoice id; duplicates start at 0 so copies never
+      // re-consume).
       if (form.customer_id)
         await advances
           .applyToInvoice(

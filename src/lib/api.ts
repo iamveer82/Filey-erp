@@ -2515,6 +2515,7 @@ export const billing = {
               unit: i.unit || undefined,
               custom: (i.custom as Record<string, string>) || undefined,
               product_id: i.product_id ?? undefined,
+              tax_category: i.tax_category || undefined,
             })),
         } as InvoiceDoc;
       },
@@ -2600,6 +2601,16 @@ export const billing = {
             unit_price: i.unit_price,
           }))
       );
+      // Restore any advance credit this invoice had consumed — otherwise the
+      // negative `applied:inv#<id>` ledger row outlives the invoice and the
+      // customer's credit stays reduced by a document that no longer exists.
+      try {
+        const tag = `applied:inv#${docId}`;
+        const advs = await sList<any>("advances");
+        for (const a of advs) if (a.note === tag) await sDelete("advances", a.id);
+      } catch {
+        /* best-effort — never block the delete */
+      }
       return undefined;
     }, undefined),
   setStatus: (docId: number, status: string) =>
@@ -3041,8 +3052,15 @@ export const recurrences = {
           })),
         };
         await billing.saveDoc(input);
+        // Advance next_run past today: if the recurrence lagged several
+        // intervals (app unopened for a while), stepping one interval at a
+        // time would re-fire on every load and mint duplicate invoices with
+        // the same date-suffixed number. Missed occurrences are skipped, not
+        // back-filled — one invoice per catch-up.
+        let next = addInterval(r.next_run, r.interval);
+        while (next <= today) next = addInterval(next, r.interval);
         await sUpdate("invoice_recurrence", r.id, {
-          next_run: addInterval(r.next_run, r.interval),
+          next_run: next,
           last_run: today,
         });
         made++;

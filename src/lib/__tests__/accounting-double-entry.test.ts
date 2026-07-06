@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { fin, billing, erp } from "../api";
+import { fin, billing, erp, advances } from "../api";
 
 // Money path: every posting must keep total debits == total credits, and the
 // balance sign must follow each account's normal balance (asset/expense grow on
@@ -128,5 +128,29 @@ describe("accounting double-entry", () => {
     const { removed } = await fin.repairLedger();
     expect(removed).toBeGreaterThanOrEqual(1);
     expect((await fin.accounts()).find((a) => a.id === id)?.balance).toBeCloseTo(300);
+  });
+
+  it("deleting an invoice restores the advance credit it consumed", async () => {
+    await advances.add({
+      party_type: "customer",
+      party_id: 1,
+      party_name: "Acme",
+      amount: 100,
+    });
+    const id = (await billing.saveDoc({
+      number: "INV-ADV",
+      status: "draft",
+      currency: "AED",
+      tax_rate: 0,
+      discount: 0,
+      customer_id: 1,
+      customer_name: "Acme",
+      items: [{ description: "Widget", qty: 1, unit_price: 100 }],
+    } as never)) as number;
+    await advances.applyToInvoice(1, "Acme", id, 40);
+    expect(await advances.creditFor(1)).toBeCloseTo(60);
+
+    await billing.deleteDoc(id);
+    expect(await advances.creditFor(1)).toBeCloseTo(100); // consumption purged
   });
 });
