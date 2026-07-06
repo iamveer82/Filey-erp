@@ -17,29 +17,51 @@ Ordered by leverage — Tier A first (reliability is what "professional" means).
   and CustomerDetail/SupplierDetail via route params) with a mocked data layer;
   catches the conditional-hooks crash class (cf. the Quoting bug). Remaining:
   Settings panels, auth/marketing pages, then Playwright e2e.
-- [ ] **[partial] RBAC enforced server-side.** Roles UI exists; verify every
-  mutation is gated by RLS/policy, not just hidden buttons.
-- [ ] **[partial] Audit trail completeness.** ActivityLog exists; ensure all
-  money/doc/permission changes write immutable who/when/before→after rows.
+- [x] **RBAC enforced server-side.** Verified: per-member `<tbl>_access` RLS
+  (own rows + admin-all + opt-in shared-read), org-scoped throughout, with a
+  `force_org_id` trigger pinning org on every write. `company_profile` write is
+  admin-only. `verify-rls.sql` rewritten name-agnostically (it was false-FAILing
+  the `_access` tables) + Section 1c asserts audit immutability.
+- [x] **Audit trail — immutable + before→after.** `log_audit()` records a
+  before→after diff (`audit_log.changes` jsonb); `audit_log` is append-only
+  (select+insert, no update/delete — RLS-enforced); coverage now includes money
+  movements (invoice/PO payments). Shown in ActivityLog "Changes" column.
 - [x] **Per-route error boundaries.** `App.tsx` wraps routes in
   `<ErrorBoundary resetKey={location.pathname}>` — a page crash is contained and
   recovers on navigation; Sentry wired; ErrorBoundary.test.tsx covers it.
 - [ ] **[partial] Performance budget.** Charts now lazy-loaded; lazy heavy Tools
   chunks, virtualize long lists, measure first-paint.
-- [ ] **[gap] Cut `as any` (86)** in api.ts payloads — each hides a wrong-field bug.
+- [x] **Cut `as any` in api.ts (86 → 0).** Boundary reads now use typed row casts
+  (InvoiceDoc/QuotationDoc/PurchaseOrder/CompanyProfile/ReceiptDoc + inline shapes);
+  payload-field typos are now compile errors. tsc clean, 97 lib tests pass.
 
 ## Tier B — ERP depth
 
-- [ ] **[gap] Multi-currency** — currency + FX rate per doc, revaluation.
-- [ ] **[partial] Bank reconciliation** — add statement import (CSV/MT940) + match.
+- [~] **[partial] Multi-currency** — invoices freeze an FX rate at save
+  (`invoice_docs.fx_rate`, AED per unit) and show an AED-equivalent under the
+  total (`aedEquivalent`, tested). TODO: quotations/POs, and balance-sheet
+  revaluation of open foreign balances.
+- [~] **[partial] Bank reconciliation** — statement CSV import + amount/date
+  matcher shipped (`lib/bankRecon.ts`, Reconcile modal in Bank Accounts), buckets
+  matched / statement-only / books-only. TODO: MT940, persist reconciled state,
+  one-click "record missing entry".
 - [ ] **[gap] Multi-warehouse/location** + stock transfers.
 - [ ] **[gap] Batch/serial/lot + expiry** tracking.
 - [ ] **[gap] Purchase/expense approval workflows** (threshold → approver).
-- [ ] **[gap] Payroll runs** — HR has attendance only; salary calc, payslips, WPS.
+- [~] **[partial] Payroll** — `runPayroll` posts to the ledger; **payslip** PDF
+  per employee shipped (People → row → Payslip, editable allowances/deductions).
+  TODO: a payroll-run UI (batch a month), and **WPS SIF** export — the latter
+  needs new bank fields (employee IBAN + labour-card, employer MOL establishment
+  id + bank routing) before the SCR/EDR file can be built.
 - [ ] **[gap] Fixed assets + depreciation.**
-- [ ] **[partial] Financial statements** — have P&L; add Balance Sheet, Cash Flow,
-  Trial Balance export.
-- [ ] **[gap] VAT return (FTA 201)** generation.
+- [~] **[mostly] Financial statements** — P&L + **Trial Balance** + **Balance
+  Sheet** (with A=L+E balanced check) shipped in Reports + CSV
+  (`computeTrialBalance`/`computeBalanceSheet`, tested). Cash flow is a simplified
+  in/out/net summary; full categorised (operating/investing/financing) still TODO.
+- [~] **[partial] VAT return (FTA 201).** Core boxes (1 standard supplies, 9
+  standard expenses, 14 net VAT due) computed from the ledger + shown in Reports
+  with period picker + CSV export (`computeVatReturn`, tested). TODO: zero-rated/
+  exempt (boxes 4–5) from invoice line tax_category, per-emirate split, reverse-charge.
 - [ ] **[gap] Budgeting / cost centers.**
 
 ## Tier C — CRM depth
@@ -54,8 +76,10 @@ Ordered by leverage — Tier A first (reliability is what "professional" means).
 
 ## Tier D — AI differentiation (the stated edge)
 
-- [ ] **[in-progress] Agent data tools** — channel-webhook agent has none yet;
-  wire org-scoped READ tools (invoices/balances/stock), then gated writes.
+- [x] **Agent data tools (READ).** channel-webhook agent now has four org-scoped
+  READ tools (financial summary, invoices, low-stock, customer lookup) via
+  Anthropic tool-use (`tools.ts`); org-scoping enforced + tested. Gated WRITE
+  tools (create invoice, mark paid) still TODO behind a confirm step.
 - [ ] **[gap] NL reporting** — "ask your data" → SQL/chart.
 - [ ] **[gap] AI insights** — cashflow forecast, overdue-risk, reorder, anomalies.
 - [ ] **[partial] Doc scanning/OCR** (tesseract + expense/invoice extract) — extend
