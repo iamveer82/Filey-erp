@@ -2,7 +2,7 @@
 
 > An open-source, offline-friendly desktop ERP for small businesses —
 > inventory, orders, FTA-compliant invoicing & quotations, CRM, purchasing,
-> reporting and a local PDF toolkit. Free to use under the MIT license.
+> reporting and a local PDF toolkit. Open source under the AGPL-3.0 license.
 
 **Status:** active beta. Core flows work end-to-end against Supabase; it is
 not yet a fully hardened, signed, multi-tenant product (see _Status &
@@ -122,17 +122,16 @@ are core and always on). Adding a new mini-app is a single registry entry.
 
 ## Status & roadmap
 
-Working: auth, all modules above, Supabase persistence (offline-first
-cache + outbox), local PDF tools, module enable/disable, MIT-licensed.
+Working: auth, all modules above, dual local/cloud persistence (offline-first
+desktop with local SQLite, or Supabase cloud with org multi-tenancy + RBAC),
+double-entry accounting with VAT & COGS, signed auto-updating desktop builds,
+local PDF tools, module enable/disable. AGPL-licensed.
 
-Not done yet (contributions welcome):
+Not done yet (contributions welcome — see [ROADMAP.md](ROADMAP.md)):
 
-- Org/team multi-tenancy + role-based access control (currently data is
-  scoped per individual user).
-- Deeper accounting (double-entry GL), full procure-to-pay, warehouse
-  inventory valuation.
-- Signed/notarized installers + auto-update.
-- Broader automated test coverage and a systematic QA pass.
+- Warehouse inventory valuation & full procure-to-pay depth.
+- UAE e-invoice XML submission (fields captured; serializer awaits the mandate).
+- Broader automated test coverage (Playwright e2e) and a systematic QA pass.
 
 ## Contributing
 
@@ -140,8 +139,10 @@ Issues and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE) © Filey. Free for personal and commercial use, including
-by small businesses.
+[GNU AGPL-3.0](LICENSE) © Filey. Free to use, self-host and modify —
+including commercially. If you distribute a modified version or offer it
+to others as a network service, you must make your modified source
+available under the same license.
 
 ## Acknowledgements
 
