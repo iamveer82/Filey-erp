@@ -67,7 +67,8 @@ function normalizeDate(s: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
   if (m) {
-    let [, d, mo, y] = m;
+    const [, d, mo] = m;
+    let y = m[3];
     if (y.length === 2) y = "20" + y;
     return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
