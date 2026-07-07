@@ -9,8 +9,18 @@ import {
   Plus,
   RotateCcw,
   ArrowLeft,
+  Stamp,
+  PenTool,
 } from "lucide-react";
-import { billing, tools, type CompanyProfile } from "../lib/api";
+import {
+  billing,
+  tools,
+  suppliers as suppliersApi,
+  crm,
+  type CompanyProfile,
+  type Supplier,
+  type CrmCustomer,
+} from "../lib/api";
 import { useUI } from "../lib/ui";
 import { errMsg, fmtDate } from "../lib/format";
 import { PageHeader, Field, MetricCard, DataTable } from "../components/ui";
@@ -18,7 +28,11 @@ import { DateField } from "../components/DatePicker";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { StampSignatureLayer } from "../components/StampSignature";
+import {
+  StampSignatureLayer,
+  StampSigAdjust,
+  type StampSig,
+} from "../components/StampSignature";
 import {
   loadCompanyStampSig,
   EMPTY_STAMP_SIG,
@@ -56,9 +70,13 @@ We also confirm that we shall be responsible to the Federal Tax Authority of Uni
 A copy of the Certificate of Registration for Value Added Tax in the United Arab Emirates is enclosed herewith for your perusal.`;
 
 type DeclForm = {
+  title?: string;
   ref: string;
   show_stamp?: boolean;
   show_signature?: boolean;
+  /** Per-letter stamp/signature copy (position, opacity, crop) seeded from the company asset. */
+  stamp?: StampSig;
+  signature?: StampSig;
   date: string;
   company_name: string;
   company_trn: string;
@@ -80,6 +98,7 @@ interface SavedDecl extends DeclForm {
 
 function blankDecl(company?: CompanyProfile | null): DeclForm {
   return {
+    title: "DECLARATION LETTER",
     ref: "",
     date: today(),
     company_name: company?.name || "Your Company",
@@ -329,9 +348,12 @@ function DeclarationEditor({
 }) {
   const { toast } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [supplierList, setSupplierList] = useState<Supplier[]>([]);
+  const [customerList, setCustomerList] = useState<CrmCustomer[]>([]);
   const [form, setForm] = useState<DeclForm>(() => {
     const { id: _id, updated_at: _u, ...rest } = doc;
-    return rest;
+    // Letters saved before the title field existed default to the old heading.
+    return { ...rest, title: rest.title ?? "DECLARATION LETTER" };
   });
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [useLetterhead, setUseLetterhead] = useState(false);
@@ -366,7 +388,32 @@ function DeclarationEditor({
       })
       .catch(() => {});
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
+    suppliersApi.list().then(setSupplierList).catch(() => {});
+    crm.customers().then(setCustomerList).catch(() => {});
   }, []);
+
+  /** Fill recipient fields from a saved supplier ("s:<id>") or customer ("c:<id>"). */
+  const fillRecipient = (key: string) => {
+    if (key.startsWith("s:")) {
+      const s = supplierList.find((x) => String(x.id) === key.slice(2));
+      if (s)
+        setForm((f) => ({
+          ...f,
+          recipient_name: s.name,
+          recipient_location: s.address || "",
+          recipient_trn: s.tax_id || "",
+        }));
+    } else if (key.startsWith("c:")) {
+      const c = customerList.find((x) => String(x.id) === key.slice(2));
+      if (c)
+        setForm((f) => ({
+          ...f,
+          recipient_name: c.company || c.name,
+          recipient_location: [c.address, c.city].filter(Boolean).join(", "),
+          recipient_trn: c.trn || "",
+        }));
+    }
+  };
 
   const set = <K extends keyof DeclForm>(k: K, v: DeclForm[K]) =>
     setForm({ ...form, [k]: v });
@@ -446,6 +493,17 @@ function DeclarationEditor({
             
           {/* Parties */}
           <div className="card">
+            <div className="mb-4">
+              <Field label="Letter Title">
+                <input
+                  className="input"
+                  placeholder="DECLARATION LETTER"
+                  value={form.title ?? ""}
+                  onChange={(e) => set("title", e.target.value)}
+                />
+              </Field>
+            </div>
+
             <p className="font-medium text-ink mb-3">Your Company</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Company Name">
@@ -466,6 +524,37 @@ function DeclarationEditor({
             </div>
 
             <p className="font-medium text-ink mb-3 mt-5">Recipient (Supplier)</p>
+            {(supplierList.length > 0 || customerList.length > 0) && (
+              <div className="mb-3">
+                <Field label="Fill from saved supplier / buyer">
+                  <select
+                    className="input"
+                    value=""
+                    onChange={(e) => fillRecipient(e.target.value)}
+                  >
+                    <option value="">Select to auto-fill…</option>
+                    {supplierList.length > 0 && (
+                      <optgroup label="Suppliers">
+                        {supplierList.map((s) => (
+                          <option key={`s${s.id}`} value={`s:${s.id}`}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {customerList.length > 0 && (
+                      <optgroup label="Buyers (Customers)">
+                        {customerList.map((c) => (
+                          <option key={`c${c.id}`} value={`c:${c.id}`}>
+                            {c.company || c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </Field>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Name">
                 <input
@@ -634,6 +723,30 @@ function DeclarationEditor({
                 />
               </label>
             </div>
+            {(showStamp || showSignature) &&
+              (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {showStamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                    <StampSigAdjust
+                      label="Stamp"
+                      icon={<Stamp size={13} />}
+                      value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
+                      onChange={(v) => setForm({ ...form, stamp: v })}
+                    />
+                  )}
+                  {showSignature &&
+                    (form.signature?.data || companyStampSig.signature?.data) && (
+                      <StampSigAdjust
+                        label="Signature"
+                        icon={<PenTool size={13} />}
+                        value={
+                          form.signature?.data ? form.signature : companyStampSig.signature!
+                        }
+                        onChange={(v) => setForm({ ...form, signature: v })}
+                      />
+                    )}
+                </div>
+              )}
           </div>
           </div>
         }
@@ -653,10 +766,30 @@ function DeclarationEditor({
             <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
               <div ref={declRef} className="relative">
                 <StampSignatureLayer
-                  stamp={showStamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
-                  signature={showSignature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
-                  onStampMove={() => {}}
-                  onSignatureMove={() => {}}
+                  stamp={
+                    showStamp
+                      ? form.stamp?.data
+                        ? form.stamp
+                        : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
+                      : undefined
+                  }
+                  signature={
+                    showSignature
+                      ? form.signature?.data
+                        ? form.signature
+                        : (companyStampSig ?? EMPTY_STAMP_SIG).signature
+                      : undefined
+                  }
+                  onStampMove={(x, y) => {
+                    const base = form.stamp?.data ? form.stamp : companyStampSig.stamp;
+                    if (base) setForm({ ...form, stamp: { ...base, x, y } });
+                  }}
+                  onSignatureMove={(x, y) => {
+                    const base = form.signature?.data
+                      ? form.signature
+                      : companyStampSig.signature;
+                    if (base) setForm({ ...form, signature: { ...base, x, y } });
+                  }}
                 />
                 <LetterheadFrame
                   letterhead={lh}
@@ -673,7 +806,7 @@ function DeclarationEditor({
                     }}
                   >
                     <h1 className="text-center text-[15px] font-bold underline tracking-wide mb-6">
-                      DECLARATION LETTER
+                      {form.title?.trim() || "DECLARATION LETTER"}
                     </h1>
 
                     <p className="text-right text-sm font-bold mb-6">
