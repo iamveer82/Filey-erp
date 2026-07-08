@@ -17,7 +17,13 @@ export const PLANS: { id: Plan; name: string; price: string; features: string[] 
     id: "free",
     name: "Free",
     price: "$0",
-    features: ["Core ERP & CRM", "Bring-your-own AI key", "Community support"],
+    features: [
+      "Core ERP & CRM — all modules",
+      "25 invoices/month",
+      "“Made with Filey” on documents",
+      "1 device, local only",
+      "Bring-your-own AI key",
+    ],
   },
   {
     id: "pro",

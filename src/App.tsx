@@ -1,9 +1,16 @@
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { cloudConfigured } from "./lib/supabase";
 import { getDataMode } from "./lib/dataMode";
 import { AuthProvider, useAuth } from "./lib/auth";
+import {
+  ENFORCE_LICENSING,
+  CLOUD_DEVICE_LIMIT,
+  listOrgDevices,
+  releaseOrgDevice,
+  type OrgDevice,
+} from "./lib/license";
 import { UIProvider } from "./lib/ui";
 import { LanguageProvider } from "./lib/i18n";
 import { ModulesProvider, useModules } from "./lib/modules";
@@ -76,8 +83,58 @@ function AppRoutes() {
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** Org hit its cloud device limit and this device was refused a slot —
+ *  blocking screen with self-serve release (only when licensing enforced). */
+function DeviceLimitScreen() {
+  const { retryDeviceRegistration, signOut } = useAuth();
+  const [devices, setDevices] = useState<OrgDevice[]>([]);
+  const [busy, setBusy] = useState(false);
+  const load = () => {
+    listOrgDevices().then(setDevices).catch(() => {});
+  };
+  useEffect(load, []);
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="card max-w-md w-full space-y-4">
+        <h1 className="text-lg font-medium text-ink">Device limit reached</h1>
+        <p className="text-sm text-brand-500">
+          Your workspace already has {CLOUD_DEVICE_LIMIT} devices connected.
+          Release one below to use Filey on this device.
+        </p>
+        <ul className="space-y-1.5">
+          {devices.map((d) => (
+            <li key={d.id} className="text-sm flex items-center justify-between gap-2">
+              <span className="text-ink min-w-0 truncate">{d.device_name || "Device"}</span>
+              <button
+                className="text-xs text-danger hover:underline cursor-pointer shrink-0"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await releaseOrgDevice(d.id);
+                    await retryDeviceRegistration();
+                    load();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Release
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button className="btn-ghost w-full" onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Gate() {
-  const { loading, configured, user, needsProfile, profileLoading } = useAuth();
+  const { loading, configured, user, needsProfile, profileLoading, deviceLimitBlocked } =
+    useAuth();
   const [showLogin, setShowLogin] = useState(false);
   // First run: let the user pick where data lives — local (offline) or cloud.
   // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
@@ -91,6 +148,7 @@ function Gate() {
   // profile-setup form (which would otherwise flash for existing users).
   if (profileLoading) return <Splash />;
   if (needsProfile) return <ProfileSetup />;
+  if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 
   return (
     <ModulesProvider>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Cloud, HardDrive, Check, Download, FolderOpen } from "lucide-react";
+import { Cloud, HardDrive, Check, Download, Upload, FolderOpen } from "lucide-react";
 import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured } from "../../lib/supabase";
 import {
   migrateCloudToLocal,
+  migrateLocalToCloud,
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
@@ -126,6 +127,27 @@ export default function DataModePanel() {
     setResult(null);
     try {
       const res = await migrateCloudToLocal(setProgress);
+      setResult(res);
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  };
+
+  const runPush = async () => {
+    if (
+      !window.confirm(
+        "Upload this device's local data to your cloud account? The web version will then show the same data. Requires an empty cloud account (tables that already have cloud data are skipped). You must be signed in."
+      )
+    )
+      return;
+    setBusy(true);
+    setErr("");
+    setResult(null);
+    try {
+      const res = await migrateLocalToCloud(setProgress);
       setResult(res);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -334,7 +356,26 @@ export default function DataModePanel() {
             disabled={busy}
             className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
           >
-            {busy ? progress || "Importing…" : "Import cloud data"}
+            {busy ? progress || "Working…" : "Import cloud data"}
+          </button>
+
+          <div className="pt-2">
+            <p className="font-medium text-ink flex items-center gap-2">
+              <Upload size={16} /> Push local data to the cloud
+            </p>
+            <p className="text-sm text-brand-500 mt-0.5">
+              Uploads everything on this device (invoices, customers, products,
+              files…) to your cloud account, so the web version shows the same
+              data. Works on a fresh cloud account — tables that already have
+              cloud data are skipped to protect them.
+            </p>
+          </div>
+          <button
+            onClick={runPush}
+            disabled={busy}
+            className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+          >
+            {busy ? progress || "Working…" : "Push local data to cloud"}
           </button>
           {err && (
             <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">
@@ -344,7 +385,7 @@ export default function DataModePanel() {
           {result && (
             <div className="text-sm">
               <p className="text-success font-medium mb-1">
-                Imported. Switch to Offline mode above to use it.
+                Done. Per-table summary below.
               </p>
               <ul className="text-brand-500 grid grid-cols-2 gap-x-6 gap-y-0.5">
                 {result

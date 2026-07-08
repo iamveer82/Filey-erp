@@ -4,6 +4,8 @@ import { isLocalMode } from "./dataMode";
 import { quotationTotals, invoiceTotals } from "./money";
 import { splitItemMeta } from "./docItems";
 import { getExchangeRates } from "./exchange-rates";
+import { nextDocNumber } from "./docNumber";
+import { checkFreeInvoiceCap } from "./license";
 
 // ===== Types =====
 export interface Product {
@@ -590,26 +592,121 @@ const clean = <T extends Record<string, unknown>>(o: T) =>
     Object.entries(o).filter(([, v]) => v !== undefined)
   ) as Record<string, unknown>;
 
-async function adjustProductStock(productId: number, delta: number): Promise<void> {
+export type StockMovementType = "sale" | "purchase" | "order" | "in" | "out" | "adjust";
+
+/** One row per stock quantity change. qty is signed: positive = in, negative = out. */
+export interface StockMovement {
+  id: number;
+  product_id: number;
+  qty: number;
+  type: StockMovementType;
+  ref?: string | null;
+  note?: string | null;
+  moved_at: string; // ISO
+  created_at: string;
+}
+
+/** Where a stock change came from — logged alongside the quantity write so
+ *  every product has a full movement history ("why is stock 47?"). */
+type StockCtx = {
+  type: StockMovementType;
+  ref?: string;
+  note?: string;
+  date?: string; // yyyy-mm-dd; defaults to now
+};
+
+/** Weighted-average unit cost after folding a receipt into current stock.
+ *  First stock (or unpriced product) takes the receipt cost as-is. */
+export function nextAvgCost(
+  onHand: number,
+  oldCost: number,
+  recvQty: number,
+  unitCost: number
+): number {
+  const next =
+    oldCost > 0 && onHand > 0
+      ? (onHand * oldCost + recvQty * unitCost) / (onHand + recvQty)
+      : unitCost;
+  return Math.round(next * 100) / 100;
+}
+
+/** Fold a goods receipt into products.cost_price (moving average), so COGS
+ *  and stock valuation track what the stock actually cost. Call BEFORE the
+ *  quantity is incremented — onHand must be the pre-receipt quantity.
+ *  Best-effort: a cost update failure must not block receiving. */
+async function applyMovingAverageCost(
+  productId: number,
+  recvQty: number,
+  unitCost: number
+): Promise<void> {
+  if (!productId || !(recvQty > 0) || !(unitCost > 0)) return;
+  try {
+    const { data } = await sb()
+      .from("products")
+      .select("quantity,cost_price")
+      .eq("id", productId)
+      .single();
+    const onHand = Math.max(0, Number(data?.quantity) || 0);
+    const oldCost = Number(data?.cost_price) || 0;
+    const next = nextAvgCost(onHand, oldCost, recvQty, unitCost);
+    if (next !== oldCost)
+      await sb().from("products").update({ cost_price: next }).eq("id", productId);
+  } catch (e) {
+    console.warn("Moving-average cost update failed", e);
+  }
+}
+
+async function adjustProductStock(
+  productId: number,
+  delta: number,
+  ctx?: StockCtx
+): Promise<void> {
   if (!productId || delta === 0) return;
-  const { error } = await sb().rpc("adjust_product_stock", {
-    p_id: productId,
-    p_delta: delta,
-  });
-  if (!error) return;
-  // Fallback: read current qty and write the delta ourselves (best-effort, not atomic).
-  const { data: row, error: fe } = await sb()
-    .from("products")
-    .select("quantity")
-    .eq("id", productId)
-    .single();
-  if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
-  const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
-  const { error: ue } = await sb()
-    .from("products")
-    .update({ quantity: next })
-    .eq("id", productId);
-  if (ue) throw new Error(`Stock RPC failed and fallback update failed: ${ue.message}`);
+  const apply = async () => {
+    const { error } = await sb().rpc("adjust_product_stock", {
+      p_id: productId,
+      p_delta: delta,
+    });
+    if (!error) return;
+    // Fallback: read current qty and write the delta ourselves (best-effort, not atomic).
+    const { data: row, error: fe } = await sb()
+      .from("products")
+      .select("quantity")
+      .eq("id", productId)
+      .single();
+    if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
+    const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
+    const { error: ue } = await sb()
+      .from("products")
+      .update({ quantity: next })
+      .eq("id", productId);
+    if (ue) throw new Error(`Stock RPC failed and fallback update failed: ${ue.message}`);
+  };
+  await apply();
+  // Movement log — best-effort: a failed log must never undo/block the stock write.
+  try {
+    await sInsert("stock_movements", {
+      product_id: productId,
+      qty: delta,
+      type: ctx?.type ?? "adjust",
+      ref: ctx?.ref?.trim() || null,
+      note: ctx?.note?.trim() || null,
+      moved_at: ctx?.date
+        ? new Date(`${ctx.date}T12:00:00`).toISOString()
+        : new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn("stock movement log failed", e);
+  }
+}
+
+/** Invoices created since the 1st of the current month (free-tier cap). */
+async function invoicesThisMonth(): Promise<number> {
+  const rows = await sList<{ created_at?: string }>("invoice_docs");
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  return rows.filter((r) => r.created_at && new Date(r.created_at) >= start).length;
 }
 
 async function adjustAccountBalance(accountId: number, delta: number): Promise<void> {
@@ -635,12 +732,54 @@ async function adjustAccountBalance(accountId: number, delta: number): Promise<v
 
 // ===== ERP Core =====
 
-/** A stock-out record: qty of a product issued against an invoice/reference. */
-export interface StockIssue {
+/** Legacy shape of the pre-table `stock_issues` JSON app-setting. Only used
+ *  by migrateLegacyStockIssues; new code reads/writes stock_movements rows. */
+interface LegacyStockIssue {
   qty: number;
   invoice: string;
   note?: string;
   date: string; // ISO
+  type?: "in" | "out" | "adjust";
+}
+
+/** One-time move of the legacy stock_issues JSON blob into stock_movements
+ *  rows. Runs lazily on first movement read; deletes the setting after so it
+ *  never runs twice. (Two devices racing this could duplicate history rows —
+ *  accepted: single-user desktop, and movements are informational.) */
+async function migrateLegacyStockIssues(): Promise<void> {
+  const { data } = await sb()
+    .from("app_settings")
+    .select("id,value")
+    .eq("key", "stock_issues")
+    .maybeSingle();
+  const row = data as { id?: number; value?: string } | null;
+  if (!row?.id || !row.value) return;
+  try {
+    const map = JSON.parse(row.value) as Record<string, LegacyStockIssue[]>;
+    for (const [pid, list] of Object.entries(map)) {
+      for (const h of list ?? []) {
+        const t = h.type ?? "out";
+        const qty =
+          t === "out"
+            ? -Math.abs(Number(h.qty) || 0)
+            : t === "in"
+              ? Math.abs(Number(h.qty) || 0)
+              : Number(h.qty) || 0;
+        if (!qty) continue;
+        await sInsert("stock_movements", {
+          product_id: Number(pid),
+          qty,
+          type: t,
+          ref: h.invoice || null,
+          note: h.note || null,
+          moved_at: h.date || new Date().toISOString(),
+        });
+      }
+    }
+    await sDelete("app_settings", row.id);
+  } catch (e) {
+    console.warn("Legacy stock_issues migration failed", e);
+  }
 }
 
 export const erp = {
@@ -656,59 +795,47 @@ export const erp = {
       sInsert("products", row), -1
     );
   },
-  updateStock: (productId: number, delta: number) =>
+  updateStock: (productId: number, delta: number, note?: string) =>
     online(async () => {
       // Atomic — avoids lost updates when two clients adjust stock at once.
-      await adjustProductStock(productId, delta,
-      );
+      await adjustProductStock(productId, delta, {
+        type: "adjust",
+        note: note ?? "Manual stock update",
+      });
     }),
-  /** Issue stock against an invoice: logs the movement (in app_settings, so it
-   *  syncs cross-device) and subtracts the qty from the product's stock. */
-  issueStock: (
+  /** Record a manual stock entry: applies the delta to the product's stock
+   *  atomically and logs a movement row. "out" subtracts qty, "in" adds qty,
+   *  "adjust" applies qty as a signed delta. */
+  recordStockEntry: (
     productId: number,
+    type: "in" | "out" | "adjust",
     qty: number,
-    invoice: string,
+    reference: string,
     note?: string,
     date?: string // yyyy-mm-dd; defaults to now
   ) =>
     online(async () => {
-      const q = Math.abs(Number(qty) || 0);
-      if (!productId || q <= 0) return;
-      const { data } = await sb()
-        .from("app_settings")
-        .select("id,value")
-        .eq("key", "stock_issues")
-        .maybeSingle();
-      const row = data as { id?: number; value?: string } | null;
-      const map: Record<string, StockIssue[]> = row?.value
-        ? JSON.parse(row.value)
-        : {};
-      const list = map[String(productId)] ?? [];
-      list.push({
-        qty: q,
-        invoice: invoice.trim(),
-        note: note?.trim() || undefined,
-        date: date ? new Date(`${date}T12:00:00`).toISOString() : new Date().toISOString(),
+      const q =
+        type === "adjust" ? Math.trunc(Number(qty) || 0) : Math.abs(Number(qty) || 0);
+      if (!productId || q === 0) return;
+      const delta = type === "out" ? -q : q;
+      await adjustProductStock(productId, delta, {
+        type,
+        ref: reference,
+        note,
+        date,
       });
-      map[String(productId)] = list;
-      const value = JSON.stringify(map);
-      if (row?.id) await sUpdate("app_settings", row.id, { value });
-      else await sInsert("app_settings", { key: "stock_issues", value });
-      // Subtract from stock (atomic RPC with fallback).
-      await adjustProductStock(productId, -q);
     }),
-  /** All stock-issue movements, keyed by product id (one read). */
-  allStockIssues: () =>
+  /** All stock movements, keyed by product id, oldest first (one read). */
+  stockMovements: () =>
     online(async () => {
-      const { data } = await sb()
-        .from("app_settings")
-        .select("value")
-        .eq("key", "stock_issues")
-        .maybeSingle();
-      const row = data as { value?: string } | null;
-      return (row?.value
-        ? JSON.parse(row.value)
-        : {}) as Record<string, StockIssue[]>;
+      await migrateLegacyStockIssues();
+      const rows = await sList<StockMovement>("stock_movements", [
+        { col: "moved_at", asc: true },
+      ]);
+      const map: Record<string, StockMovement[]> = {};
+      for (const m of rows) (map[String(m.product_id)] ??= []).push(m);
+      return map;
     }),
   updateProduct: (
     productId: number,
@@ -769,8 +896,10 @@ export const erp = {
         if (itemsErr) throw itemsErr;
         for (const l of lines) {
           // Atomic decrement (clamped at 0 server-side).
-          await adjustProductStock(l.product_id, -l.quantity,
-          );
+          await adjustProductStock(l.product_id, -l.quantity, {
+            type: "order",
+            ref: `Order #${orderId}`,
+          });
         }
       }
       return orderId;
@@ -863,8 +992,11 @@ export const erp = {
       for (const pid of ids) {
         const delta = (oldMap.get(pid) ?? 0) - (newMap.get(pid) ?? 0);
         if (delta !== 0) {
-          await adjustProductStock(pid, delta,
-          );
+          await adjustProductStock(pid, delta, {
+            type: "order",
+            ref: `Order #${orderId}`,
+            note: "Order edited",
+          });
         }
       }
     }),
@@ -881,8 +1013,11 @@ export const erp = {
         quantity: number;
       }[]) {
         if (it.product_id != null && it.quantity) {
-          await adjustProductStock(it.product_id, it.quantity,
-          );
+          await adjustProductStock(it.product_id, it.quantity, {
+            type: "order",
+            ref: `Order #${orderId}`,
+            note: "Order deleted — stock restored",
+          });
         }
       }
       const { error: de } = await sb()
@@ -2111,7 +2246,11 @@ async function reverseInvoiceOrderAndStock(
   const dir = isPurchase ? -1 : 1;
   for (const it of items) {
     if (!it.product_id || !it.qty) continue;
-    await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)));
+    await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)), {
+      type: isPurchase ? "purchase" : "sale",
+      ref: `${isPurchase ? "Bill" : "Invoice"} ${number}`,
+      note: "Posting reversed",
+    });
   }
 }
 
@@ -2153,7 +2292,10 @@ async function propagateInvoice(
       // Purchase invoice (supplier bill): stock IN, debit Purchases, credit AP.
       for (const it of items) {
         if (!it.product_id || !it.qty) continue;
-        await adjustProductStock(it.product_id, Math.abs(Number(it.qty)));
+        const qty = Math.abs(Number(it.qty));
+        // Moving average first — needs the pre-receipt on-hand quantity.
+        await applyMovingAverageCost(it.product_id, qty, Number(it.unit_price) || 0);
+        await adjustProductStock(it.product_id, qty, { type: "purchase", ref });
       }
       if (total > 0) {
         const inventoryId = await findOrCreateInventoryAccount();
@@ -2217,7 +2359,10 @@ async function propagateInvoice(
     });
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
-      await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)));
+      await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)), {
+        type: "sale",
+        ref,
+      });
     }
     // COGS: relieve Inventory at cost and book the cost of the sale. Only
     // product-linked lines have a cost; free-text lines are skipped. Tagged with
@@ -2547,6 +2692,7 @@ export const billing = {
         if (error) throw error;
         docId = id;
       } else {
+        await checkFreeInvoiceCap(invoicesThisMonth);
         docId = await sInsert("invoice_docs", row);
       }
       if (items.length) {
@@ -3234,6 +3380,7 @@ export const quotes = {
       const due = new Date(Date.now() + 30 * 86400000)
         .toISOString()
         .slice(0, 10);
+      await checkFreeInvoiceCap(invoicesThisMonth);
       const docId = await sInsert("invoice_docs", {
         number,
         status: "draft",
@@ -3423,6 +3570,70 @@ export type PoInput = Omit<
 > & { id?: number; };
 
 export const pos = {
+  /** Create draft POs for every product at/below its reorder level, grouped
+   *  by supplier (products without one share a single supplier-less draft).
+   *  Returns the created PO numbers. */
+  createDraftsFromLowStock: () =>
+    online(async () => {
+      const [products, sups, existing] = await Promise.all([
+        sList<Product>("products"),
+        sList<Supplier>("suppliers"),
+        sList<{ po_number?: string }>("purchase_orders"),
+      ]);
+      const low = products.filter(
+        (p) => p.reorder_level > 0 && p.quantity <= p.reorder_level
+      );
+      if (!low.length) return [] as string[];
+      const company = await billing.getCompany().catch(() => null);
+      const bySupplier = new Map<number, Product[]>();
+      for (const p of low) {
+        const sid = p.supplier_id ?? 0;
+        const group = bySupplier.get(sid) ?? [];
+        group.push(p);
+        bySupplier.set(sid, group);
+      }
+      const supById = new Map(sups.map((s) => [s.id, s]));
+      const existingNums = existing.map((r) => r.po_number ?? "").filter(Boolean);
+      const created: string[] = [];
+      for (const [sid, prods] of bySupplier) {
+        const sup = supById.get(sid);
+        // ponytail: refill to 2× reorder level — a draft the user edits anyway.
+        const items = prods.map((p) => ({
+          product_id: p.id,
+          description: p.name,
+          quantity: Math.max(1, p.reorder_level * 2 - p.quantity),
+          unit_cost: Number(p.cost_price) || 0,
+          unit: p.unit,
+        }));
+        const num = nextDocNumber({ prefix: "PO", existing: existingNums });
+        existingNums.push(num);
+        await pos.save({
+          po_number: num,
+          status: "draft",
+          doc_title: "Purchase Order",
+          template: company?.default_template || "minimal",
+          accent: company?.default_accent || "#222222",
+          currency: company?.currency || "AED",
+          seller_name: company?.name || "",
+          seller_address: company?.address,
+          seller_trn: company?.trn,
+          seller_email: company?.email,
+          seller_phone: company?.phone,
+          supplier_id: sid || undefined,
+          supplier_name: sup?.name ?? "",
+          supplier_address: sup?.address ?? "",
+          supplier_email: sup?.email ?? "",
+          supplier_phone: sup?.phone ?? "",
+          supplier_trn: sup?.tax_id ?? "",
+          order_date: new Date().toISOString().slice(0, 10),
+          notes: "Auto-created from low stock",
+          total: items.reduce((s, it) => s + it.quantity * it.unit_cost, 0),
+          items,
+        } as PoInput);
+        created.push(num);
+      }
+      return created;
+    }),
   list: () =>
     readCached<PoSummary[]>(
       "purchase_orders",
@@ -3587,7 +3798,13 @@ export const pos = {
       const po = await pos.get(poId);
       for (const it of po.items) {
         if (!it.product_id) continue;
-        await adjustProductStock(it.product_id, Math.abs(Number(it.quantity)));
+        const qty = Math.abs(Number(it.quantity));
+        // Moving average first — needs the pre-receipt on-hand quantity.
+        await applyMovingAverageCost(it.product_id, qty, Number(it.unit_cost) || 0);
+        await adjustProductStock(it.product_id, qty, {
+          type: "purchase",
+          ref: po.po_number ? `PO ${po.po_number}` : `PO #${poId}`,
+        });
       }
       await sUpdate("purchase_orders", poId, { status: "received" });
       // Receiving = done → post Purchases / Accounts Payable to Accounting.

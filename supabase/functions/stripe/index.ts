@@ -28,6 +28,11 @@ const PRICES: Record<string, string | undefined> = {
   pro: Deno.env.get("STRIPE_PRICE_PRO"),
   business: Deno.env.get("STRIPE_PRICE_BUSINESS"),
 };
+// One-time desktop license (Lite tier).
+const PRICE_LITE = Deno.env.get("STRIPE_PRICE_LITE");
+// ECDSA P-256 private key (PKCS8, base64) — signs desktop license tokens.
+const LICENSE_SIGNING_KEY = Deno.env.get("LICENSE_SIGNING_KEY") ?? "";
+const LICENSE_DEVICE_SLOTS = 2;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +97,17 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
 
+    // Desktop license actions don't need an org — they attach to the user.
+    if (action === "license_activate")
+      return await licenseActivate(
+        supa,
+        user,
+        String(payload.fingerprint ?? ""),
+        String(payload.device_name ?? "")
+      );
+    if (action === "license_deactivate")
+      return await licenseDeactivate(supa, user.id, String(payload.fingerprint ?? ""));
+
     const org = await userOrg(supa, user.id);
     if (!org) return json({ error: "No organization found" }, 400);
 
@@ -117,6 +133,22 @@ Deno.serve(async (req) => {
       return json({ url: session.url });
     }
 
+    // One-time desktop license (Lite). invoice_creation makes Stripe email a
+    // proper invoice for the one-off payment (subscriptions do this natively).
+    if (action === "checkout_lite") {
+      if (!PRICE_LITE) return json({ error: "Lite price not configured" }, 400);
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer: customerId,
+        line_items: [{ price: PRICE_LITE, quantity: 1 }],
+        invoice_creation: { enabled: true },
+        success_url: `${origin}/#/settings?section=license&checkout=success`,
+        cancel_url: `${origin}/#/settings?section=license&checkout=cancel`,
+        metadata: { type: "lite_license", user_id: user.id },
+      });
+      return json({ url: session.url });
+    }
+
     if (action === "checkout") {
       const price = PRICES[plan as string];
       if (!price) return json({ error: `Unknown or unconfigured plan: ${plan}` }, 400);
@@ -137,6 +169,105 @@ Deno.serve(async (req) => {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
+
+/* ---------------- desktop license: activation + signing ---------------- */
+
+const b64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+/** Sign a license payload with the server-only ECDSA P-256 key. The desktop
+ *  app verifies with the embedded public key — fully offline afterwards. */
+async function signLicense(payload: Record<string, unknown>): Promise<string> {
+  if (!LICENSE_SIGNING_KEY) throw new Error("LICENSE_SIGNING_KEY not configured");
+  const pkcs8 = Uint8Array.from(atob(LICENSE_SIGNING_KEY), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+  const body = new TextEncoder().encode(JSON.stringify(payload));
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, body);
+  return `${b64url(body)}.${b64url(new Uint8Array(sig))}`;
+}
+
+async function licenseActivate(
+  supa: ReturnType<typeof admin>,
+  user: { id: string; email?: string | null },
+  fingerprint: string,
+  deviceName: string
+): Promise<Response> {
+  if (!fingerprint) return json({ error: "Missing device fingerprint" }, 400);
+  const { data: lic } = await supa
+    .from("licenses")
+    .select("id, product, status")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (!lic) return json({ error: "No active license on this account" }, 404);
+
+  const { data: devices } = await supa
+    .from("license_devices")
+    .select("id, fingerprint, deactivated_at")
+    .eq("license_id", lic.id);
+  const active = (devices ?? []).filter((d) => !d.deactivated_at);
+  const mine = (devices ?? []).find((d) => d.fingerprint === fingerprint);
+
+  if (mine?.deactivated_at) {
+    // Re-activating a freed slot — only if a slot is open.
+    if (active.length >= LICENSE_DEVICE_SLOTS)
+      return json({ error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` }, 409);
+    await supa
+      .from("license_devices")
+      .update({ deactivated_at: null, activated_at: new Date().toISOString(), device_name: deviceName || null })
+      .eq("id", mine.id);
+  } else if (!mine) {
+    if (active.length >= LICENSE_DEVICE_SLOTS)
+      return json({ error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` }, 409);
+    const { error } = await supa.from("license_devices").insert({
+      license_id: lic.id,
+      fingerprint,
+      device_name: deviceName || null,
+    });
+    if (error) return json({ error: error.message }, 500);
+  }
+
+  const token = await signLicense({
+    email: user.email ?? "",
+    product: lic.product,
+    issued: new Date().toISOString().slice(0, 10),
+    device_id: fingerprint,
+    license_id: lic.id,
+  });
+  return json({ token });
+}
+
+async function licenseDeactivate(
+  supa: ReturnType<typeof admin>,
+  userId: string,
+  fingerprint: string
+): Promise<Response> {
+  if (!fingerprint) return json({ error: "Missing device fingerprint" }, 400);
+  const { data: lic } = await supa
+    .from("licenses")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (!lic) return json({ error: "No active license on this account" }, 404);
+  await supa
+    .from("license_devices")
+    .update({ deactivated_at: new Date().toISOString() })
+    .eq("license_id", lic.id)
+    .eq("fingerprint", fingerprint);
+  return json({ ok: true });
+}
 
 async function invoiceBalance(supa: ReturnType<typeof admin>, docId: number) {
   const [{ data: doc }, { data: items }, { data: pays }] = await Promise.all([
@@ -227,6 +358,16 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
           const bal = await invoiceBalance(supa, invId);
           if (bal && bal.balance <= 0)
             await supa.from("invoice_docs").update({ status: "paid" }).eq("id", invId);
+          break;
+        }
+        // A one-time desktop license purchase → issue the license.
+        if (s.metadata?.type === "lite_license") {
+          await supa.from("licenses").insert({
+            user_id: s.metadata.user_id,
+            product: "filey-desktop",
+            status: "active",
+            stripe_payment_intent: String(s.payment_intent ?? ""),
+          });
           break;
         }
         // Otherwise it's a subscription checkout → set the org's plan.

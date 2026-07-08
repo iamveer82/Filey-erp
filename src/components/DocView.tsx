@@ -1,5 +1,6 @@
 import { fmtDate, money } from "../lib/format";
 import { docTotals, docLineAmount } from "../lib/docItems";
+import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import type { CalcMode } from "../lib/money";
 import { loadCustomTemplates } from "./TemplateDesigner";
 import { resolveTemplateId } from "./DocTemplates";
@@ -207,11 +208,17 @@ export default function DocView({
       </div>
     ) : null;
 
+  // Free-tier branding line — volume+branding are the only free limits.
+  const freeWatermark = ENFORCE_LICENSING && currentTier() === "free";
+
   const Footer = () =>
-    showFooter && (form.notes || form.terms) ? (
+    showFooter && (form.notes || form.terms || freeWatermark) ? (
       <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
         {form.notes && <p>{form.notes}</p>}
         {form.terms && <p className="text-neutral-400">{form.terms}</p>}
+        {freeWatermark && (
+          <p className="text-[9px] text-neutral-400">Made with Filey — the free plan</p>
+        )}
       </div>
     ) : null;
 
@@ -332,6 +339,9 @@ export default function DocView({
         <Section k="footer">
           {form.notes && <p className="text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
+          {freeWatermark && (
+            <p className="text-[8px] text-neutral-400 mt-0.5">Made with Filey — the free plan</p>
+          )}
         </Section>
         <div className="absolute bottom-2 right-2 z-20">
           <span className="text-[8px] text-neutral-400 bg-white/60 px-1.5 py-0.5 rounded-full">{customTemplate.name}</span>

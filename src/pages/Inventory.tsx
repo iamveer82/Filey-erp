@@ -17,6 +17,9 @@ import {
   Hash,
   Pencil,
   PackageMinus,
+  PackagePlus,
+  ShoppingCart,
+  ClipboardList,
   Loader2,
 } from "lucide-react";
 import {
@@ -25,7 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/DropdownMenu";
-import { erp, shareRecord, billing, Product, type StockIssue } from "../lib/api";
+import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
@@ -48,6 +51,14 @@ import {
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 
+/** Expiring = still in stock and expiry date within 30 days (or already past). */
+function isExpiring(p: Product): boolean {
+  if (!p.expiry_date || p.quantity <= 0) return false;
+  const d = new Date(p.expiry_date).getTime();
+  if (Number.isNaN(d)) return false;
+  return d - Date.now() <= 30 * 24 * 60 * 60 * 1000;
+}
+
 export default function Inventory() {
   const { toast, confirm } = useUI();
   const [products, setProducts] = useState<Product[]>([]);
@@ -56,10 +67,12 @@ export default function Inventory() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [issueFor, setIssueFor] = useState<Product | null>(null);
-  const [issues, setIssues] = useState<Record<string, StockIssue[]>>({});
+  const [issues, setIssues] = useState<Record<string, StockMovement[]>>({});
   const [importOpen, setImportOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [batchFilter, setBatchFilter] = useState("");
+  const [draftingPo, setDraftingPo] = useState(false);
+  const [stocktakeOpen, setStocktakeOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [params, setParams] = useSearchParams();
@@ -69,6 +82,29 @@ export default function Inventory() {
       setParams({}, { replace: true });
     }
   }, [params, setParams]);
+
+  const draftPoFromLowStock = async () => {
+    const ok = await confirm({
+      title: "Draft purchase orders",
+      message:
+        "Create draft PO(s) for all low-stock products, grouped by supplier? You can edit quantities before sending.",
+      confirmLabel: "Create drafts",
+    });
+    if (!ok) return;
+    setDraftingPo(true);
+    try {
+      const nums = await pos.createDraftsFromLowStock();
+      toast.success(
+        nums.length
+          ? `Created ${nums.join(", ")} — see Purchase Orders.`
+          : "Nothing to reorder (set reorder levels first)."
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDraftingPo(false);
+    }
+  };
 
   const toggleShare = async (p: Product, next: boolean) => {
     try {
@@ -82,7 +118,7 @@ export default function Inventory() {
 
   const load = () => {
     setError("");
-    erp.allStockIssues().then(setIssues).catch(() => {});
+    erp.stockMovements().then(setIssues).catch(() => {});
     return erp
       .products()
       .then(setProducts)
@@ -93,8 +129,9 @@ export default function Inventory() {
       )
       .finally(() => setLoading(false));
   };
+  // Total units that left stock (sales, orders, manual issues) — any negative movement.
   const issuedTotal = (p: Product) =>
-    (issues[String(p.id)] ?? []).reduce((s, i) => s + i.qty, 0);
+    (issues[String(p.id)] ?? []).reduce((s, m) => s + (m.qty < 0 ? -m.qty : 0), 0);
   useEffect(() => {
     load();
   }, []);
@@ -118,6 +155,8 @@ export default function Inventory() {
             matchCat = p.quantity > 0 && p.quantity <= p.reorder_level;
           } else if (cat === "__out__") {
             matchCat = p.quantity === 0;
+          } else if (cat === "__exp__") {
+            matchCat = isExpiring(p);
           } else if (cat !== "all") {
             matchCat = (p.category || "Unsorted") === cat;
           }
@@ -139,6 +178,7 @@ export default function Inventory() {
 
   const lowStock = products.filter((p) => p.quantity <= p.reorder_level);
   const outOfStock = products.filter((p) => p.quantity === 0);
+  const expiring = products.filter(isExpiring);
   // Guard unset/NaN prices so a product with no cost price adds 0 (not NaN).
   const invValue = products.reduce(
     (s, p) => s + (Number(p.quantity) || 0) * (Number(p.cost_price) || 0),
@@ -200,6 +240,13 @@ export default function Inventory() {
             <button className="btn-ghost" aria-label="Import products" onClick={() => setImportOpen(true)}>
               <Upload size={15} /> Import
             </button>
+            <button
+              className="btn-ghost"
+              aria-label="Stocktake"
+              onClick={() => setStocktakeOpen(true)}
+            >
+              <ClipboardList size={15} /> Stocktake
+            </button>
             <button className="btn-primary" aria-label="New product" onClick={() => setOpen(true)}>
               <Plus size={16} /> New product
             </button>
@@ -246,14 +293,28 @@ export default function Inventory() {
             All
           </FilterChip>
           {lowStock.length > 0 && (
-            <FilterChip
-              active={cat === "__low__"}
-              onClick={() => setCat("__low__")}
-              count={lowStock.length}
-              tone="warn"
-            >
-              Low stock
-            </FilterChip>
+            <>
+              <FilterChip
+                active={cat === "__low__"}
+                onClick={() => setCat("__low__")}
+                count={lowStock.length}
+                tone="warn"
+              >
+                Low stock
+              </FilterChip>
+              <button
+                className="btn-ghost !h-8 text-xs"
+                disabled={draftingPo}
+                onClick={draftPoFromLowStock}
+              >
+                {draftingPo ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <ShoppingCart size={13} />
+                )}
+                Draft PO from low stock
+              </button>
+            </>
           )}
           {outOfStock.length > 0 && (
             <FilterChip
@@ -263,6 +324,16 @@ export default function Inventory() {
               tone="danger"
             >
               Out of stock
+            </FilterChip>
+          )}
+          {expiring.length > 0 && (
+            <FilterChip
+              active={cat === "__exp__"}
+              onClick={() => setCat("__exp__")}
+              count={expiring.length}
+              tone="warn"
+            >
+              <Calendar size={12} /> Expiring soon
             </FilterChip>
           )}
           {categories.map((c) => (
@@ -519,7 +590,7 @@ export default function Inventory() {
                       setIssueFor(p);
                     }}
                   >
-                    <PackageMinus size={14} /> Issue stock
+                    <PackageMinus size={14} /> Stock entry
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={(e) => {
@@ -567,6 +638,13 @@ export default function Inventory() {
         product={issueFor}
         history={issueFor ? issues[String(issueFor.id)] ?? [] : []}
         onClose={() => setIssueFor(null)}
+        onSaved={load}
+      />
+
+      <StocktakeModal
+        open={stocktakeOpen}
+        products={products}
+        onClose={() => setStocktakeOpen(false)}
         onSaved={load}
       />
 
@@ -746,10 +824,23 @@ function ProductModal({
           : undefined,
       };
       if (product) {
+        // Quantity changes go through the stock ledger (atomic + logged as an
+        // adjustment) instead of being silently overwritten with the rest of
+        // the form.
+        const qtyDiff = (Number(f.quantity) || 0) - (Number(product.quantity) || 0);
+        const { quantity: _q, ...rest } = payload;
         await erp.updateProduct(
           product.id,
-          payload as Partial<Omit<Product, "id" | "created_at">>
+          rest as Partial<Omit<Product, "id" | "created_at">>
         );
+        if (qtyDiff !== 0)
+          await erp.recordStockEntry(
+            product.id,
+            "adjust",
+            qtyDiff,
+            "",
+            "Edited in product form"
+          );
         toast.success("Product updated.");
       } else {
         await erp.createProduct({
@@ -937,6 +1028,180 @@ function ProductModal({
   );
 }
 
+/** Count-sheet stocktake: type the physically counted quantity per product;
+ *  every non-empty count that differs from book stock posts one adjustment
+ *  movement. Rows left blank are untouched. */
+function StocktakeModal({
+  open,
+  products,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  products: Product[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useUI();
+  const [counts, setCounts] = useState<Record<number, string>>({});
+  const [filter, setFilter] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setCounts({});
+      setFilter("");
+    }
+  }, [open]);
+
+  const rows = products.filter(
+    (p) =>
+      !filter ||
+      p.name.toLowerCase().includes(filter.toLowerCase()) ||
+      p.sku.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  const diffs = products
+    .map((p) => {
+      const raw = counts[p.id];
+      if (raw === undefined || raw.trim() === "") return null;
+      const counted = Number(raw);
+      if (!Number.isFinite(counted) || counted < 0) return null;
+      const diff = Math.trunc(counted) - p.quantity;
+      return diff === 0 ? null : { p, counted: Math.trunc(counted), diff };
+    })
+    .filter(Boolean) as { p: Product; counted: number; diff: number }[];
+
+  const post = async () => {
+    if (!diffs.length) return;
+    setPosting(true);
+    try {
+      for (const d of diffs) {
+        await erp.recordStockEntry(
+          d.p.id,
+          "adjust",
+          d.diff,
+          "Stocktake",
+          `Counted ${d.counted}, book ${d.p.quantity}`
+        );
+      }
+      toast.success(`Stocktake posted — ${diffs.length} adjustment(s).`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Stocktake — physical count" size="2xl">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <input
+          className="input max-w-xs"
+          placeholder="Filter by name or SKU…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <p className="text-xs text-brand-400 shrink-0">
+          Leave a row blank to skip it.
+        </p>
+      </div>
+
+      <div className="max-h-[50vh] overflow-auto rounded-xl border border-brand-100 dark:border-white/10">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-brand-50 dark:bg-[#1C1C1E] text-left">
+            <tr className="text-[11px] uppercase tracking-wider text-brand-400">
+              <th className="px-3 py-2 font-medium">Product</th>
+              <th className="px-3 py-2 font-medium text-right">Book</th>
+              <th className="px-3 py-2 font-medium w-32">Counted</th>
+              <th className="px-3 py-2 font-medium text-right">Diff</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => {
+              const raw = counts[p.id] ?? "";
+              const counted = raw.trim() === "" ? null : Number(raw);
+              const diff =
+                counted === null || !Number.isFinite(counted)
+                  ? null
+                  : Math.trunc(counted) - p.quantity;
+              return (
+                <tr key={p.id} className="border-t border-brand-100 dark:border-white/10">
+                  <td className="px-3 py-1.5">
+                    <span className="font-medium text-ink">{p.name}</span>
+                    {p.sku && (
+                      <span className="ml-2 text-xs text-brand-400">{p.sku}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{p.quantity}</td>
+                  <td className="px-3 py-1.5">
+                    <input
+                      type="number"
+                      min={0}
+                      className="input !h-8 tabular-nums"
+                      placeholder="—"
+                      value={raw}
+                      onChange={(e) =>
+                        setCounts((c) => ({ ...c, [p.id]: e.target.value }))
+                      }
+                    />
+                  </td>
+                  <td
+                    className={cn(
+                      "px-3 py-1.5 text-right tabular-nums",
+                      diff === null || diff === 0
+                        ? "text-brand-400"
+                        : diff < 0
+                          ? "text-danger"
+                          : "text-success"
+                    )}
+                  >
+                    {diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : diff}
+                  </td>
+                </tr>
+              );
+            })}
+            {!rows.length && (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-brand-400 text-sm">
+                  No products match.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-xs text-brand-400">
+          {diffs.length
+            ? `${diffs.length} product(s) will be adjusted.`
+            : "No differences entered yet."}
+        </p>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn-primary"
+            disabled={posting || !diffs.length}
+            onClick={post}
+          >
+            {posting ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <ClipboardList size={15} />
+            )}
+            Post adjustments
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function IssueStockModal({
   product,
   history,
@@ -944,13 +1209,15 @@ function IssueStockModal({
   onSaved,
 }: {
   product: Product | null;
-  history: StockIssue[];
+  history: StockMovement[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { toast } = useUI();
+  const [mode, setMode] = useState<"out" | "in" | "adjust">("out");
   const [invoice, setInvoice] = useState("");
   const [qty, setQty] = useState(0);
+  const [counted, setCounted] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [date, setDate] = useState("");
   const [saving, setSaving] = useState(false);
@@ -958,8 +1225,10 @@ function IssueStockModal({
 
   useEffect(() => {
     if (!product) return;
+    setMode("out");
     setInvoice("");
     setQty(0);
+    setCounted(null);
     setNote("");
     setDate(new Date().toISOString().slice(0, 10));
     billing
@@ -977,16 +1246,29 @@ function IssueStockModal({
   if (!product) return null;
 
   const stock = product.quantity;
-  const issuedSoFar = history.reduce((s, i) => s + i.qty, 0);
-  const qtyErr = qty <= 0 || qty > stock;
-  const invErr = !invoice.trim();
+  const issuedSoFar = history.reduce((s, m) => s + (m.qty < 0 ? -m.qty : 0), 0);
+  const delta = counted === null ? 0 : counted - stock;
+  const qtyErr =
+    mode === "adjust"
+      ? counted === null || counted < 0 || delta === 0
+      : qty <= 0 || (mode === "out" && qty > stock);
+  const invErr = mode === "out" && !invoice.trim();
+  const after =
+    mode === "out" ? stock - qty : mode === "in" ? stock + qty : counted ?? stock;
 
   const submit = async () => {
     if (qtyErr || invErr) return;
     setSaving(true);
     try {
-      await erp.issueStock(product.id, qty, invoice, note, date);
-      toast.success(`Issued ${qty} × ${product.name} to ${invoice.trim()}`);
+      const q = mode === "adjust" ? delta : qty;
+      await erp.recordStockEntry(product.id, mode, q, invoice, note, date);
+      toast.success(
+        mode === "out"
+          ? `Issued ${qty} × ${product.name} to ${invoice.trim()}`
+          : mode === "in"
+            ? `Received ${qty} × ${product.name}`
+            : `Adjusted ${product.name} to ${counted} (${delta > 0 ? "+" : ""}${delta})`
+      );
       onSaved();
       onClose();
     } catch (e) {
@@ -996,8 +1278,41 @@ function IssueStockModal({
     }
   };
 
+  const entryLabel = { out: "Stock out", in: "Stock in", adjust: "Adjust count" }[mode];
+  const typeLabel: Record<string, string> = {
+    sale: "Invoice",
+    purchase: "Purchase",
+    order: "Order",
+    in: "Stock in",
+    out: "Stock out",
+    adjust: "Adjustment",
+  };
+
   return (
-    <Modal open={!!product} onClose={onClose} title={`Issue stock — ${product.name}`}>
+    <Modal open={!!product} onClose={onClose} title={`Stock entry — ${product.name}`}>
+      {/* entry type */}
+      <div className="mb-4 flex items-center gap-1 rounded-xl bg-brand-50 p-1 dark:bg-white/5 w-fit">
+        {(
+          [
+            ["out", "Stock out"],
+            ["in", "Stock in"],
+            ["adjust", "Adjust"],
+          ] as const
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            className={cn(
+              "rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors",
+              mode === m ? "bg-primary-100 text-primary-700" : "text-brand-400"
+            )}
+            onClick={() => setMode(m)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-4 flex items-center gap-6 rounded-xl bg-brand-50 px-4 py-3 dark:bg-white/5">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">In stock</p>
@@ -1007,42 +1322,73 @@ function IssueStockModal({
           <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">Issued out</p>
           <p className="text-lg font-semibold text-brand-600">{issuedSoFar}</p>
         </div>
-        {qty > 0 && !qtyErr && (
+        {!qtyErr && (qty > 0 || counted !== null) && (
           <div className="ml-auto text-right">
             <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">After this</p>
-            <p className="text-lg font-semibold text-ink">{stock - qty} left</p>
+            <p className="text-lg font-semibold text-ink">{after} left</p>
           </div>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Invoice / reference *">
-          <input
-            className={cn("input", invErr && "border-danger")}
-            list="issue-inv-numbers"
-            placeholder="INV-2026-0001"
-            value={invoice}
-            onChange={(e) => setInvoice(e.target.value)}
-          />
-          <datalist id="issue-inv-numbers">
-            {invNumbers.map((n) => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
-        </Field>
-        <Field label="Quantity *">
-          <input
-            type="number"
-            className={cn("input", qty > stock && "border-danger")}
-            placeholder="0"
-            value={qty || ""}
-            onChange={(e) => setQty(numInput(e.target.value))}
-          />
-          {qty > stock && (
-            <p className="mt-1 text-[11px] text-danger">Only {stock} in stock.</p>
-          )}
-        </Field>
-        <Field label="Issue date">
+        {mode === "out" ? (
+          <Field label="Invoice / reference *">
+            <input
+              className={cn("input", invErr && "border-danger")}
+              list="issue-inv-numbers"
+              placeholder="INV-2026-0001"
+              value={invoice}
+              onChange={(e) => setInvoice(e.target.value)}
+            />
+            <datalist id="issue-inv-numbers">
+              {invNumbers.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+          </Field>
+        ) : (
+          <Field label="Reference (optional)">
+            <input
+              className="input"
+              placeholder={mode === "in" ? "GRN / PO / supplier ref" : "e.g. stock count"}
+              value={invoice}
+              onChange={(e) => setInvoice(e.target.value)}
+            />
+          </Field>
+        )}
+        {mode === "adjust" ? (
+          <Field label="Counted quantity *">
+            <input
+              type="number"
+              className={cn("input", counted !== null && counted < 0 && "border-danger")}
+              placeholder={String(stock)}
+              value={counted ?? ""}
+              onChange={(e) =>
+                setCounted(e.target.value === "" ? null : numInput(e.target.value))
+              }
+            />
+            {counted !== null && delta !== 0 && (
+              <p className={cn("mt-1 text-[11px]", delta < 0 ? "text-danger" : "text-brand-500")}>
+                {delta > 0 ? "+" : ""}
+                {delta} vs current stock
+              </p>
+            )}
+          </Field>
+        ) : (
+          <Field label="Quantity *">
+            <input
+              type="number"
+              className={cn("input", mode === "out" && qty > stock && "border-danger")}
+              placeholder="0"
+              value={qty || ""}
+              onChange={(e) => setQty(numInput(e.target.value))}
+            />
+            {mode === "out" && qty > stock && (
+              <p className="mt-1 text-[11px] text-danger">Only {stock} in stock.</p>
+            )}
+          </Field>
+        )}
+        <Field label="Date">
           <DateField value={date} onChange={setDate} clearable={false} />
         </Field>
       </div>
@@ -1050,7 +1396,13 @@ function IssueStockModal({
         <Field label="Note (optional)">
           <input
             className="input"
-            placeholder="e.g. delivered to customer site"
+            placeholder={
+              mode === "out"
+                ? "e.g. delivered to customer site"
+                : mode === "in"
+                  ? "e.g. received from supplier"
+                  : "e.g. physical count correction"
+            }
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
@@ -1059,16 +1411,20 @@ function IssueStockModal({
 
       {history.length > 0 && (
         <div className="mt-4 border-t border-brand-100 pt-3 dark:border-white/10">
-          <p className="mb-2 text-[13px] font-medium text-brand-500">Issue history</p>
+          <p className="mb-2 text-[13px] font-medium text-brand-500">Movement history</p>
           <div className="max-h-40 space-y-1.5 overflow-auto">
             {[...history].reverse().map((h, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
+              <div key={h.id ?? i} className="flex items-center justify-between text-xs">
                 <span className="min-w-0 truncate font-medium text-ink">
-                  {h.invoice || "—"}
+                  {h.ref || typeLabel[h.type] || "—"}
                   {h.note ? <span className="text-brand-400"> · {h.note}</span> : null}
                 </span>
-                <span className="shrink-0 text-brand-500">
-                  {h.qty} · {fmtDate(h.date)}
+                <span className="shrink-0 tabular-nums">
+                  <span className={h.qty < 0 ? "text-danger" : "text-success"}>
+                    {h.qty > 0 ? "+" : ""}
+                    {h.qty}
+                  </span>
+                  <span className="text-brand-500"> · {fmtDate(h.moved_at)}</span>
                 </span>
               </div>
             ))}
@@ -1087,10 +1443,14 @@ function IssueStockModal({
         >
           {saving ? (
             <Loader2 size={15} className="animate-spin" />
+          ) : mode === "in" ? (
+            <PackagePlus size={15} />
+          ) : mode === "adjust" ? (
+            <Pencil size={15} />
           ) : (
             <PackageMinus size={15} />
           )}
-          Issue stock
+          {entryLabel}
         </button>
       </div>
     </Modal>

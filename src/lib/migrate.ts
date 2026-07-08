@@ -20,6 +20,8 @@ const TABLES = [
   "app_users",
   "profiles",
   "organizations",
+  "suppliers",
+  "crm_customers",
   "products",
   "orders",
   "order_items",
@@ -29,18 +31,67 @@ const TABLES = [
   "invoice_recurrence",
   "quotations",
   "quotation_items",
+  "quotation_templates",
   "purchase_orders",
   "purchase_order_items",
   "po_payments",
   "payment_receipts",
   "accounts",
+  "expenses",
   "transactions",
+  "advances",
+  "stock_movements",
+  "employees",
+  "attendance",
+  "payroll",
   "crm_leads",
+  "crm_opportunities",
   "crm_activities",
   "follow_ups",
   "notifications",
   "tool_runs",
   "tool_jobs",
+  "user_folders",
+  "user_files",
+  "user_assets",
+];
+
+// Local → cloud push list: app data only, in FK-safe order (parents before
+// children). Cloud/system tables (profiles, organizations, notifications,
+// tool_jobs…) are excluded — the cloud owns those.
+const PUSH_TABLES = [
+  "company_profile",
+  "app_settings",
+  "suppliers",
+  "crm_customers",
+  "products",
+  "orders",
+  "order_items",
+  "invoice_docs",
+  "invoice_doc_items",
+  "invoice_payments",
+  "invoice_recurrence",
+  "quotations",
+  "quotation_items",
+  "quotation_templates",
+  "purchase_orders",
+  "purchase_order_items",
+  "po_payments",
+  "payment_receipts",
+  "accounts",
+  "expenses",
+  "transactions",
+  "advances",
+  "stock_movements",
+  "employees",
+  "attendance",
+  "payroll",
+  "crm_leads",
+  "crm_opportunities",
+  "crm_activities",
+  "follow_ups",
+  "tool_runs",
+  "user_folders",
   "user_files",
   "user_assets",
 ];
@@ -104,10 +155,131 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 export interface MigrateResult {
   table: string;
   rows: number;
   error?: string;
+}
+
+/** Push all local on-device data into the signed-in cloud account, so the web
+ *  version shows the same data. Rows keep their local ids (FK relationships
+ *  survive); user/org ownership is re-stamped by the cloud's defaults and
+ *  triggers. To avoid id collisions, each table is only pushed when its cloud
+ *  side is EMPTY — tables that already have cloud rows are skipped and
+ *  reported. File bytes stored locally are uploaded to the files bucket. */
+export async function migrateLocalToCloud(
+  onProgress?: (msg: string) => void
+): Promise<MigrateResult[]> {
+  if (!supabase)
+    throw new Error("Cloud isn't configured in this build — nowhere to push.");
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user?.id;
+  if (!uid)
+    throw new Error(
+      "Sign in to your cloud account first: switch to Cloud mode, log in, then push."
+    );
+
+  const out: MigrateResult[] = [];
+  const CHUNK = 200;
+
+  for (const t of PUSH_TABLES) {
+    const raw = await localGet("localdb:" + t);
+    let rows: any[] = [];
+    try {
+      rows = raw ? JSON.parse(raw) : [];
+    } catch {
+      rows = [];
+    }
+    if (!Array.isArray(rows) || rows.length === 0) continue;
+
+    onProgress?.(`Pushing ${t}…`);
+    // Never merge into a table that already has cloud rows — pushed rows keep
+    // their local ids, and colliding ids would corrupt FK relationships.
+    const { count, error: ce } = await supabase
+      .from(t)
+      .select("id", { count: "exact", head: true });
+    if (ce) {
+      out.push({ table: t, rows: 0, error: ce.message });
+      continue;
+    }
+    if ((count ?? 0) > 0) {
+      out.push({ table: t, rows: 0, error: "skipped — cloud already has data" });
+      continue;
+    }
+
+    const cleaned = rows.map((r) => {
+      // Ownership is re-stamped by cloud defaults (user_id) and the
+      // force_org_id trigger (org_id); "owner" columns need the real uid.
+      const { user_id: _u, org_id: _o, ...rest } = r as Record<string, any>;
+      if ("owner" in rest) rest.owner = uid;
+      if (typeof rest.storage_path === "string")
+        rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);
+      return rest;
+    });
+
+    let pushed = 0;
+    let err: string | undefined;
+    for (let i = 0; i < cleaned.length; i += CHUNK) {
+      const { error } = await supabase.from(t).insert(cleaned.slice(i, i + CHUNK));
+      if (error) {
+        err = error.message;
+        break;
+      }
+      pushed += Math.min(CHUNK, cleaned.length - i);
+    }
+    out.push({ table: t, rows: pushed, error: err });
+  }
+
+  // Pushed rows kept their local ids — bump identity sequences past them so
+  // the next normal insert doesn't collide.
+  onProgress?.("Fixing id sequences…");
+  try {
+    await supabase.rpc("sync_bump_sequences");
+  } catch {
+    /* older cloud DBs without the fn: next insert may need a retry */
+  }
+
+  // Upload locally-stored file bytes so My Files works on the web too.
+  const rawFiles = await localGet("localdb:user_files");
+  let fileRows: { storage_path?: string }[] = [];
+  try {
+    fileRows = rawFiles ? JSON.parse(rawFiles) : [];
+  } catch {
+    fileRows = [];
+  }
+  if (fileRows.length) {
+    onProgress?.(`Uploading ${fileRows.length} files…`);
+    let ok = 0;
+    for (const f of fileRows) {
+      const localPath = f.storage_path;
+      if (!localPath) continue;
+      try {
+        const blobRaw = await localGet("fileblob:" + localPath);
+        if (!blobRaw) continue;
+        const { mime, b64 } = JSON.parse(blobRaw) as { mime: string; b64: string };
+        const cloudPath = localPath.replace(/^local-user\//, `${uid}/`);
+        const { error } = await supabase.storage
+          .from(FILES_BUCKET)
+          .upload(cloudPath, new Blob([b64ToBytes(b64).slice()], { type: mime }), {
+            contentType: mime,
+            upsert: true,
+          });
+        if (!error) ok++;
+      } catch {
+        /* skip individual file failures */
+      }
+    }
+    out.push({ table: "files (blobs)", rows: ok });
+  }
+
+  return out;
 }
 
 /** Copy all cloud data into the local on-device store. Replaces any existing

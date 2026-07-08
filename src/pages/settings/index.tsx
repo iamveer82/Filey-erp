@@ -30,6 +30,8 @@ import IntegrationsPanel from "./IntegrationsPanel";
 import BackupPanel from "./BackupPanel";
 import DataModePanel from "./DataModePanel";
 import EmailPanel from "./EmailPanel";
+import LicensePanel from "./LicensePanel";
+import { KeyRound } from "lucide-react";
 // import { MessageSquare } from "lucide-react";
 
 type Section =
@@ -48,7 +50,8 @@ type Section =
   | "backup"
   | "datamode"
   | "activity"
-  | "ai";
+  | "ai"
+  | "license";
 
 const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
@@ -59,6 +62,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "apps", label: "Apps & Modules", icon: SlidersHorizontal },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "billing", label: "Billing & Subscription", icon: CreditCard },
+  { id: "license", label: "Desktop License", icon: KeyRound },
   { id: "security", label: "Security", icon: ShieldCheck },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "email", label: "Email", icon: Bell },
@@ -118,6 +122,7 @@ export default function Settings() {
           )}
           {section === "preferences" && <PreferencesPanel />}
           {section === "billing" && <BillingPanel />}
+          {section === "license" && <LicensePanel />}
           {section === "notifications" && <NotificationsPanel />}
           {section === "email" && <EmailPanel />}
           {/* {section === "sms" && <SmsPanel />} */}

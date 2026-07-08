@@ -11,6 +11,7 @@ import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
+import { registerCloudDevice, entitlement } from "./license";
 
 // ---- Local mode: a single on-device user, no real authentication ----------
 const LOCAL_PROFILE_KEY = "filey_local_profile";
@@ -76,6 +77,13 @@ interface AuthValue {
   /** True while we're still fetching the signed-in user's profile. */
   profileLoading: boolean;
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
+  /** Google OAuth (web only — embedded webviews are blocked by Google). */
+  signInWithGoogle: () => Promise<void>;
+  /** True when the org is at its cloud device limit and THIS device was
+   *  refused a slot. UI gates on this only when licensing is enforced. */
+  deviceLimitBlocked: boolean;
+  /** Re-attempt device registration (after the user released a slot). */
+  retryDeviceRegistration: () => Promise<void>;
   /** Returns needsOtp=false when Supabase confirmation is disabled (instant session). */
   signUpWithPassword: (c: Credential, password: string) => Promise<{ needsOtp: boolean }>;
   /** Passwordless: sends a login code to an existing account. */
@@ -196,12 +204,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else stopRealtime();
   }, [session]);
 
+  // Cloud device registry (5 per org): claim/refresh this device's slot on
+  // session start. Best-effort — a network blip must not lock the app.
+  const [deviceLimitBlocked, setDeviceLimitBlocked] = useState(false);
+  const retryDeviceRegistration = async () => {
+    try {
+      const r = await registerCloudDevice();
+      setDeviceLimitBlocked(!r.ok && r.reason === "limit");
+    } catch {
+      /* keep previous state */
+    }
+  };
+  useEffect(() => {
+    if (!session?.user || local) return;
+    void retryDeviceRegistration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
+  // Warm the tier cache (free/lite/pro) so render paths can read it
+  // synchronously via currentTier(). Local mode resolves immediately.
+  useEffect(() => {
+    void entitlement(true).catch(() => {});
+  }, [session?.user?.id, local]);
+
   const signInWithPassword = async (c: Credential, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");
     const { error } = await supabase.auth.signInWithPassword({
       ...norm(c),
       password,
     } as any);
+    if (error) throw error;
+  };
+
+  const signInWithGoogle = async () => {
+    if (!supabase) throw new Error("Supabase not configured");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
     if (error) throw error;
   };
 
@@ -314,6 +354,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     needsProfile: !!user && profileLoaded && !profile,
     profileLoading: !!user && !profileLoaded,
     signInWithPassword,
+    signInWithGoogle,
+    deviceLimitBlocked,
+    retryDeviceRegistration,
     signUpWithPassword,
     sendLoginOtp,
     verifyOtp,
