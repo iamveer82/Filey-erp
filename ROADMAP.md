@@ -41,10 +41,10 @@ Ordered by leverage — Tier A first (reliability is what "professional" means).
   (`invoice_docs.fx_rate`, AED per unit) and show an AED-equivalent under the
   total (`aedEquivalent`, tested). TODO: quotations/POs, and balance-sheet
   revaluation of open foreign balances.
-- [~] **[partial] Bank reconciliation** — statement CSV import + amount/date
-  matcher shipped (`lib/bankRecon.ts`, Reconcile modal in Bank Accounts), buckets
-  matched / statement-only / books-only. TODO: MT940, persist reconciled state,
-  one-click "record missing entry".
+- [~] **[partial] Bank reconciliation** — CSV import + matcher, persisted
+  reconciled state (`transactions.reconciled_at`, confirmed matches leave the
+  pool) and one-click "record expense" for statement-only money-out shipped
+  2026-07-11. TODO: MT940, record money-in (needs an income quick-entry).
 - [ ] **[gap] Multi-warehouse/location** + stock transfers.
 - [ ] **[gap] Batch/serial/lot + expiry** tracking.
 - [ ] **[gap] Purchase/expense approval workflows** (threshold → approver).
@@ -81,9 +81,13 @@ Ordered by leverage — Tier A first (reliability is what "professional" means).
   Anthropic tool-use (`tools.ts`); org-scoping enforced + tested. Gated WRITE
   tools (create invoice, mark paid) still TODO behind a confirm step.
 - [ ] **[gap] NL reporting** — "ask your data" → SQL/chart.
-- [ ] **[gap] AI insights** — cashflow forecast, overdue-risk, reorder, anomalies.
-- [ ] **[partial] Doc scanning/OCR** (tesseract + expense/invoice extract) — extend
-  to bank statements + POs.
+- [~] **[partial] AI insights** — dashboard Insights card shipped 2026-07-11
+  (`lib/insights.ts`: 30/60/90-day cashflow forecast, overdue-risk customers,
+  expense anomalies, stockout ETA — deterministic, offline, tested). TODO:
+  AI-narrated digest of the same numbers, trend charts.
+- [~] **[partial] Doc scanning/OCR** — invoice + expense extract shipped;
+  purchase-mode scan (supplier bill → draft purchase invoice, seller as party,
+  seller TRN) added 2026-07-11. TODO: bank statements + POs.
 
 ## Tier E — Platform / integration
 
