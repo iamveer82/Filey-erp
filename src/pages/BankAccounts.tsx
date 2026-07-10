@@ -208,14 +208,19 @@ export default function BankAccounts() {
 }
 
 function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useUI();
   const [result, setResult] = useState<ReconResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [recorded, setRecorded] = useState<Set<number>>(new Set());
 
   const onFile = async (file: File) => {
     setErr("");
     setBusy(true);
     setResult(null);
+    setConfirmed(false);
+    setRecorded(new Set());
     try {
       const lines = parseStatementCsv(await file.text());
       if (!lines.length) {
@@ -226,7 +231,9 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
       }
       const txns = await fin.transactions();
       const book: BookTxn[] = txns
-        .filter((t) => /cash|bank/i.test(t.account_name))
+        // Entries confirmed in an earlier reconciliation stay out of the pool
+        // so they can't soak up this statement's lines.
+        .filter((t) => /cash|bank/i.test(t.account_name) && !t.reconciled_at)
         .map((t) => ({
           id: t.id,
           description: t.description || t.account_name,
@@ -236,6 +243,43 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
       setResult(matchStatement(lines, book));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmMatches = async () => {
+    if (!result?.matched.length) return;
+    setBusy(true);
+    try {
+      await fin.markReconciled(result.matched.map((m) => m.txnId));
+      setConfirmed(true);
+      toast.success(
+        `${result.matched.length} entr${result.matched.length === 1 ? "y" : "ies"} marked reconciled.`
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const recordExpense = async (i: number) => {
+    const line = result?.unmatchedLines[i];
+    if (!line || line.amount >= 0) return;
+    setBusy(true);
+    try {
+      await fin.createExpense(
+        "Bank import",
+        line.description || "Bank statement entry",
+        Math.abs(line.amount),
+        line.date,
+        null
+      );
+      setRecorded((s) => new Set(s).add(i));
+      toast.success("Expense recorded and posted to the ledger.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -281,14 +325,32 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
             <Stat n={result.unmatchedLines.length} label="On statement only" tone="text-ink" />
             <Stat n={result.unmatchedTxns.length} label="In books only" tone="text-ink" />
           </div>
+          {result.matched.length > 0 && (
+            <button
+              className="btn-primary w-full"
+              disabled={busy || confirmed}
+              onClick={confirmMatches}
+            >
+              <FileCheck2 size={15} />
+              {confirmed
+                ? "Matches reconciled ✓"
+                : `Mark ${result.matched.length} matched entr${result.matched.length === 1 ? "y" : "ies"} as reconciled`}
+            </button>
+          )}
           {result.unmatchedLines.length > 0 && (
             <ReconList
               title="On the statement, not in your books"
-              hint="Likely missing entries — record these."
-              rows={result.unmatchedLines.map((l) => ({
+              hint="Money out can be recorded as an expense here; money in usually belongs to an invoice payment — record it there."
+              rows={result.unmatchedLines.map((l, i) => ({
                 date: l.date,
                 desc: l.description,
                 amount: l.amount,
+                action:
+                  l.amount < 0 && !recorded.has(i)
+                    ? { label: "Record expense", onClick: () => recordExpense(i) }
+                    : recorded.has(i)
+                      ? { label: "Recorded ✓" }
+                      : undefined,
               }))}
             />
           )}
@@ -303,9 +365,6 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
               }))}
             />
           )}
-          <p className="text-[11px] text-brand-400">
-            Review aid — marking entries reconciled (and persisting it) is a later step.
-          </p>
         </div>
       )}
     </Modal>
@@ -319,7 +378,12 @@ function ReconList({
 }: {
   title: string;
   hint: string;
-  rows: { date: string; desc: string; amount: number }[];
+  rows: {
+    date: string;
+    desc: string;
+    amount: number;
+    action?: { label: string; onClick?: () => void };
+  }[];
 }) {
   return (
     <div>
@@ -336,6 +400,17 @@ function ReconList({
             </span>
             <span className="flex-1 truncate text-ink/80">{r.desc || "—"}</span>
             <span className="tabular-nums font-medium">{aed(r.amount)}</span>
+            {r.action &&
+              (r.action.onClick ? (
+                <button
+                  className="btn-ghost h-7 shrink-0 text-xs"
+                  onClick={r.action.onClick}
+                >
+                  {r.action.label}
+                </button>
+              ) : (
+                <span className="shrink-0 text-xs text-success">{r.action.label}</span>
+              ))}
           </div>
         ))}
       </div>

@@ -9,17 +9,23 @@ import { fileToImages } from "../lib/docScan";
 import { billing, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
 import { getDisplayCurrency, numInput } from "../lib/format";
 
-/* Scan an invoice/receipt with the user's AI model and create a draft. */
+/* Scan an invoice/receipt with the user's AI model and create a draft.
+ * mode "purchase": the scan is a supplier bill — the DOCUMENT'S SELLER becomes
+ * the party (supplier) and the draft is a purchase invoice. */
 
 export default function ScanDocModal({
   open,
   onClose,
+  mode = "sales",
 }: {
   open: boolean;
   onClose: () => void;
+  mode?: "sales" | "purchase";
 }) {
   const { toast } = useUI();
   const navigate = useNavigate();
+  const isPurchase = mode === "purchase";
+  const partyLabel = isPurchase ? "Supplier" : "Customer";
   const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -46,7 +52,21 @@ export default function ScanDocModal({
     try {
       const imgs = await fileToImages(file);
       const extracted = await extractInvoiceFromImage(imgs);
-      setData(extracted);
+      // Supplier bill: the document's SELLER is our party; the buyer fields
+      // describe our own company, so they don't belong on the draft.
+      setData(
+        isPurchase
+          ? {
+              ...extracted,
+              customer_name: extracted.seller_name ?? "",
+              customer_trn: extracted.seller_trn ?? "",
+              customer_address: "",
+              buyer_city: undefined,
+              buyer_country_subdivision: undefined,
+              buyer_country_code: undefined,
+            }
+          : extracted
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -111,11 +131,19 @@ export default function ScanDocModal({
           tax_category: it.tax_category || "S",
         })),
       };
+      if (isPurchase) {
+        input.doc_type = "purchase";
+        input.doc_title = "Purchase Invoice";
+      }
       await billing.saveDoc(input);
-      toast.success("Draft invoice created from the document");
+      toast.success(
+        isPurchase
+          ? "Draft purchase invoice created from the document"
+          : "Draft invoice created from the document"
+      );
       onClose();
       reset();
-      navigate("/invoicing");
+      navigate(isPurchase ? "/purchase-invoices" : "/invoicing");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -164,14 +192,14 @@ export default function ScanDocModal({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Labeled label="Customer">
+            <Labeled label={partyLabel}>
               <input
                 className="input"
                 value={data.customer_name ?? ""}
                 onChange={(e) => setData({ ...data, customer_name: e.target.value })}
               />
             </Labeled>
-            <Labeled label="Customer TRN">
+            <Labeled label={`${partyLabel} TRN`}>
               <input
                 className="input"
                 value={data.customer_trn ?? ""}
@@ -249,7 +277,7 @@ export default function ScanDocModal({
               ) : (
                 <Sparkles size={15} />
               )}
-              Create draft invoice
+              {isPurchase ? "Create draft purchase invoice" : "Create draft invoice"}
             </button>
           </div>
         </div>

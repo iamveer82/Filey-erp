@@ -192,9 +192,12 @@ create table if not exists transactions (
   ref text,
   source text,
   invoice_id bigint references invoice_docs(id) on delete set null,
+  -- Set when a bank reconciliation confirmed this entry against a statement.
+  reconciled_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table transactions add column if not exists reconciled_at timestamptz;
 
 create index if not exists idx_transactions_invoice_id on transactions(invoice_id);
 create index if not exists idx_transactions_ref on transactions(ref);

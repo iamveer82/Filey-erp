@@ -114,6 +114,8 @@ export interface Txn {
   amount: number;
   description?: string;
   txn_date: string;
+  /** Set when a bank reconciliation confirmed this entry against a statement. */
+  reconciled_at?: string | null;
 }
 export interface FinanceReport {
   total_assets: number;
@@ -1550,18 +1552,34 @@ export const fin = {
           [{ col: "txn_date", asc: false }],
           "*, accounts(name)"
         );
+        // The local shim is schemaless — no embedded join — so resolve
+        // account names from the accounts table when the join came back empty.
+        const names = new Map<number, string>();
+        if (rows.some((r) => r.account_id != null && !r.accounts?.name)) {
+          const accts = await sList<any>("accounts");
+          for (const a of accts) names.set(a.id, a.name);
+        }
         return rows.map((r) => ({
           id: r.id,
           account_id: r.account_id,
-          account_name: r.accounts?.name ?? "—",
+          account_name: r.accounts?.name ?? names.get(r.account_id) ?? "—",
           txn_type: r.txn_type,
           amount: r.amount,
           description: r.description ?? undefined,
           txn_date: r.txn_date,
+          reconciled_at: r.reconciled_at ?? null,
         })) as Txn[];
       },
       []
     ),
+  /** Stamp book entries as reconciled against a bank statement. Per-id loop —
+   *  the local shim has no .in() filter, and lists are tens of rows. */
+  markReconciled: (ids: number[]) =>
+    online(async () => {
+      const at = new Date().toISOString();
+      for (const id of ids)
+        await sUpdate("transactions", id, { reconciled_at: at });
+    }),
   postTransaction: (
     accountId: number,
     txnType: string,

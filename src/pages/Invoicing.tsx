@@ -1163,7 +1163,7 @@ const editInvoice = async (id: number) => {
         ]}
       />
 
-      <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} />
+      <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
 
       <PaymentsModal doc={payFor} onClose={() => setPayFor(null)} onSaved={loadDocs} />
     </div>

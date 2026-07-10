@@ -563,6 +563,9 @@ export async function aiAutonomous(
 
 export interface ExtractedInvoice {
   seller_name?: string;
+  /** Seller/vendor tax registration number — the party TRN when the scan is a
+   *  supplier bill (purchase mode). */
+  seller_trn?: string;
   customer_name?: string;
   customer_address?: string;
   customer_trn?: string;
@@ -602,7 +605,8 @@ export async function extractInvoiceFromImage(
       ? ` The document spans ${images.length} pages (images, in order) — combine them into ONE result and include every line item across all pages.`
       : "";
   const prompt = `You parse business documents. Read this invoice / receipt / quote and return STRICT JSON of this exact shape:
-{"seller_name":"","customer_name":"","customer_address":"","customer_trn":"","buyer_city":"","buyer_country_subdivision":"","buyer_country_code":"","invoice_type_code":"380","payment_means_code":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0,"tax_category":"S"}]}
+{"seller_name":"","seller_trn":"","customer_name":"","customer_address":"","customer_trn":"","buyer_city":"","buyer_country_subdivision":"","buyer_country_code":"","invoice_type_code":"380","payment_means_code":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0,"tax_category":"S"}]}
+seller_name / seller_trn are the issuing party (the vendor whose letterhead this is) and their tax registration number; customer_* is the party being billed.
 Rules: use an empty string, 0, or empty array when a field is unknown; numbers must be plain numbers; dates must be YYYY-MM-DD; tax_rate is the VAT/sales-tax percentage as a plain number (e.g. 5), 0 if the document has none; unit_price is the per-unit price excluding tax.
 For the buyer/customer: buyer_city is their city; buyer_country_subdivision is the emirate as an ISO 3166-2:AE code when the address is in the UAE — AE-AZ Abu Dhabi, AE-DU Dubai, AE-SH Sharjah, AE-AJ Ajman, AE-UQ Umm Al Quwain, AE-RK Ras Al Khaimah, AE-FU Fujairah — else "" ; buyer_country_code is the ISO alpha-2 country code (AE for the UAE).
 invoice_type_code is "380" for a normal invoice or "381" for a credit note.
