@@ -8,6 +8,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
+import { PUSH_TABLES } from "./syncTables";
+import { cleanRowForPush } from "./sync";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -51,46 +53,6 @@ const TABLES = [
   "notifications",
   "tool_runs",
   "tool_jobs",
-  "user_folders",
-  "user_files",
-  "user_assets",
-];
-
-// Local → cloud push list: app data only, in FK-safe order (parents before
-// children). Cloud/system tables (profiles, organizations, notifications,
-// tool_jobs…) are excluded — the cloud owns those.
-const PUSH_TABLES = [
-  "company_profile",
-  "app_settings",
-  "suppliers",
-  "crm_customers",
-  "products",
-  "orders",
-  "order_items",
-  "invoice_docs",
-  "invoice_doc_items",
-  "invoice_payments",
-  "invoice_recurrence",
-  "quotations",
-  "quotation_items",
-  "quotation_templates",
-  "purchase_orders",
-  "purchase_order_items",
-  "po_payments",
-  "payment_receipts",
-  "accounts",
-  "expenses",
-  "transactions",
-  "advances",
-  "stock_movements",
-  "employees",
-  "attendance",
-  "payroll",
-  "crm_leads",
-  "crm_opportunities",
-  "crm_activities",
-  "follow_ups",
-  "tool_runs",
   "user_folders",
   "user_files",
   "user_assets",
@@ -214,15 +176,7 @@ export async function migrateLocalToCloud(
       continue;
     }
 
-    const cleaned = rows.map((r) => {
-      // Ownership is re-stamped by cloud defaults (user_id) and the
-      // force_org_id trigger (org_id); "owner" columns need the real uid.
-      const { user_id: _u, org_id: _o, ...rest } = r as Record<string, any>;
-      if ("owner" in rest) rest.owner = uid;
-      if (typeof rest.storage_path === "string")
-        rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);
-      return rest;
-    });
+    const cleaned = rows.map((r) => cleanRowForPush(r as Record<string, any>, uid));
 
     let pushed = 0;
     let err: string | undefined;

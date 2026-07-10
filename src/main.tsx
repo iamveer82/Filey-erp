@@ -22,10 +22,12 @@ import "@fontsource/lora/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
+import { startAutoSync } from "./lib/sync";
 
 applyTheme();
 initMonitoring();
 installExtensionBannerGuard();
+startAutoSync();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

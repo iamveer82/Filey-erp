@@ -9,6 +9,7 @@
 // enough to lag.
 
 import { invoke } from "@tauri-apps/api/core";
+import { PUSH_SET } from "./syncTables";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -18,7 +19,7 @@ type Result = { data: any; error: any };
 
 // ---- storage backend: collection name -> Row[] ----------------------------
 
-async function loadColl(coll: string): Promise<Row[]> {
+export async function loadColl(coll: string): Promise<Row[]> {
   const key = "localdb:" + coll;
   try {
     if (hasTauri) {
@@ -41,6 +42,65 @@ async function saveColl(coll: string, rows: Row[]): Promise<void> {
 
 const nextId = (rows: Row[]): number =>
   rows.reduce((m, r) => (typeof r.id === "number" && r.id > m ? r.id : m), 0) + 1;
+
+// ---- sync journal ----------------------------------------------------------
+// Records which collections changed (and which row ids were deleted) since the
+// last cloud push, so sync.ts can upload only what moved. Presence of a table
+// key = dirty; `v` bumps on every write so the pusher can detect writes that
+// landed mid-sync and keep the journal instead of clearing it.
+
+export type SyncJournal = {
+  v: number;
+  tables: Record<string, { deleted: any[] }>;
+};
+
+const JOURNAL_KEY = "syncjournal";
+
+async function journalLoad(): Promise<SyncJournal> {
+  try {
+    const raw = hasTauri
+      ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
+      : localStorage.getItem(JOURNAL_KEY);
+    const j = raw ? JSON.parse(raw) : null;
+    if (j && typeof j.v === "number" && j.tables) return j as SyncJournal;
+  } catch {
+    /* corrupt journal → start fresh; worst case a full re-push (idempotent) */
+  }
+  return { v: 0, tables: {} };
+}
+
+async function journalSave(j: SyncJournal): Promise<void> {
+  const json = JSON.stringify(j);
+  if (hasTauri) await invoke("cache_set", { key: JOURNAL_KEY, value: json });
+  else localStorage.setItem(JOURNAL_KEY, json);
+}
+
+/** Mark a collection dirty (optionally recording deleted row ids) and notify
+ *  the auto-sync scheduler. No-op for collections the cloud doesn't take. */
+export async function journalMark(coll: string, deletedIds?: any[]): Promise<void> {
+  if (!PUSH_SET.has(coll)) return;
+  const j = await journalLoad();
+  j.v++;
+  const entry = (j.tables[coll] ??= { deleted: [] });
+  for (const id of deletedIds ?? []) if (id != null) entry.deleted.push(id);
+  await journalSave(j);
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event("filey:local-write"));
+}
+
+export async function journalSnapshot(): Promise<SyncJournal> {
+  return journalLoad();
+}
+
+/** Clear pushed tables from the journal — but only if nothing wrote since the
+ *  snapshot (`v` unchanged). Otherwise leave it; the next debounced sync
+ *  re-pushes, and upserts make that harmless. */
+export async function journalCommit(v: number, tables: string[]): Promise<void> {
+  const j = await journalLoad();
+  if (j.v !== v) return;
+  for (const t of tables) delete j.tables[t];
+  await journalSave(j);
+}
 
 // ---- query builder --------------------------------------------------------
 
@@ -201,6 +261,7 @@ class LocalBuilder implements PromiseLike<Result> {
           written.push(row);
         }
         await saveColl(this.coll, rows);
+        await journalMark(this.coll);
         result = this.returnRows ? written : null;
       } else if (this.op === "update") {
         const patch = this.payload[0] || {};
@@ -214,10 +275,13 @@ class LocalBuilder implements PromiseLike<Result> {
           return r;
         });
         await saveColl(this.coll, rows);
+        await journalMark(this.coll);
         result = this.returnRows ? written : null;
       } else if (this.op === "delete") {
+        const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
         await saveColl(this.coll, rows);
+        await journalMark(this.coll, removed.map((r) => r.id));
         result = null;
       }
 
@@ -383,7 +447,7 @@ async function diskDelete(path: string): Promise<void> {
 
 /** Read bytes for a storage key. Desktop: disk, migrating an old kv base64 blob
  *  on first read. Browser: kv base64. */
-async function readBlobBytes(path: string): Promise<Uint8Array | null> {
+export async function readBlobBytes(path: string): Promise<Uint8Array | null> {
   if (hasTauri) {
     const disk = await diskRead(path);
     if (disk) return disk;

@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
-import { Cloud, HardDrive, Check, Download, Upload, FolderOpen } from "lucide-react";
+import { Cloud, HardDrive, Check, Download, Upload, FolderOpen, RefreshCw } from "lucide-react";
 import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured } from "../../lib/supabase";
+import {
+  autoSyncEnabled,
+  setAutoSyncEnabled,
+  getSyncStatus,
+  syncNow,
+  markAllForSync,
+  cloudSessionEmail,
+  cloudSignIn,
+  cloudSignOut,
+  type SyncStatus,
+} from "../../lib/sync";
 import {
   migrateCloudToLocal,
   migrateLocalToCloud,
@@ -21,6 +32,163 @@ import {
   backupAll,
   restoreAll,
 } from "../../lib/localPaths";
+
+// Cloud sync card (local mode only): connect a cloud account, and every local
+// change uploads automatically so the web version stays current. One-way,
+// this device wins — web edits to the same records are overwritten.
+function CloudSyncCard() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [connected, setConnected] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(autoSyncEnabled());
+  const [sync, setSync] = useState<SyncStatus>(getSyncStatus());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    cloudSessionEmail().then(setConnected).catch(() => {});
+    const onStatus = () => {
+      setSync(getSyncStatus());
+      setEnabled(autoSyncEnabled());
+    };
+    window.addEventListener("filey:sync-status", onStatus);
+    return () => window.removeEventListener("filey:sync-status", onStatus);
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await cloudSignIn(email.trim(), password);
+      setConnected(email.trim());
+      setPassword("");
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    await cloudSignOut();
+    setConnected(null);
+  };
+
+  const uploadAll = async () => {
+    if (
+      !window.confirm(
+        "Upload ALL local data to the cloud now? Cloud copies of the same records are overwritten — this device wins."
+      )
+    )
+      return;
+    setBusy(true);
+    setErr("");
+    try {
+      await markAllForSync();
+      await syncNow();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const statusLine =
+    sync.state === "syncing"
+      ? "Syncing…"
+      : sync.state === "error"
+        ? `Sync failed: ${sync.error}`
+        : sync.at
+          ? `Last synced ${new Date(sync.at).toLocaleString()}`
+          : "Waiting for changes to sync.";
+
+  return (
+    <div className="border-t border-brand-100 pt-4 space-y-3">
+      <div>
+        <p className="font-medium text-ink flex items-center gap-2">
+          <RefreshCw size={16} /> Cloud sync (automatic)
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5">
+          Keep working offline on this device; changes also upload to your
+          cloud account so the web version stays current. One-way — this
+          device is the source of truth.
+        </p>
+      </div>
+
+      {connected ? (
+        <>
+          <div className="flex items-center gap-2 flex-wrap text-sm">
+            <span className="inline-flex items-center gap-1 text-success">
+              <Check size={14} /> Connected as {connected}
+            </span>
+            <button className="btn-ghost shrink-0" onClick={disconnect}>
+              Disconnect
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-ink cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => {
+                setAutoSyncEnabled(e.target.checked);
+                setEnabled(e.target.checked);
+              }}
+            />
+            Sync changes automatically
+          </label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              className="btn-ghost"
+              disabled={busy || sync.state === "syncing"}
+              onClick={() => void syncNow()}
+            >
+              Sync now
+            </button>
+            <button className="btn-ghost" disabled={busy} onClick={uploadAll}>
+              Upload all local data
+            </button>
+          </div>
+          <p
+            className={`text-xs ${sync.state === "error" ? "text-danger" : "text-brand-500"}`}
+          >
+            {statusLine}
+          </p>
+        </>
+      ) : (
+        <div className="flex items-end gap-2 flex-wrap">
+          <label className="text-sm text-ink">
+            <span className="block text-xs text-brand-500 mb-1">Email</span>
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </label>
+          <label className="text-sm text-ink">
+            <span className="block text-xs text-brand-500 mb-1">Password</span>
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          <button
+            className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+            disabled={busy || !email || !password}
+            onClick={connect}
+          >
+            {busy ? "Connecting…" : "Connect"}
+          </button>
+        </div>
+      )}
+      {err && (
+        <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
+      )}
+    </div>
+  );
+}
 
 // Switch where data lives. Changing mode reloads the app; it does NOT migrate
 // data — local data stays on this device, cloud data stays in your account.
@@ -229,6 +397,8 @@ export default function DataModePanel() {
           disabled={!cloudConfigured}
         />
       </div>
+
+      {mode === "local" && cloudConfigured && <CloudSyncCard />}
 
       {hasTauri && (
         <div className="border-t border-brand-100 pt-4 space-y-4">
