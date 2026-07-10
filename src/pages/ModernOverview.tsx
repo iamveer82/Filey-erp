@@ -40,6 +40,7 @@ import {
   TimelineItem,
 } from "../components/ui";
 import AiSummaryCard from "../components/AiSummaryCard";
+import InsightsCard from "../components/InsightsCard";
 import AppIcon from "../components/AppIcon";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
@@ -723,8 +724,9 @@ export default function ModernOverview() {
           )}
         </InfoCard>
 
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-4">
           <AiSummaryCard />
+          <InsightsCard />
         </div>
       </section>
 

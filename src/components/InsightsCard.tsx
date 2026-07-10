@@ -1,0 +1,90 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Lightbulb, ChevronRight, CheckCircle2 } from "lucide-react";
+
+import { billing, fin, erp } from "../lib/api";
+import { buildInsights, type Insight } from "../lib/insights";
+import { getDisplayCurrency } from "../lib/format";
+import { InfoCard, Skeleton } from "./ui";
+
+/* Dashboard insights: cash gap, overdue risk, expense spikes, stockout ETAs.
+ * Computed locally from the books (lib/insights.ts) — no AI key, no network
+ * beyond the normal list APIs, so it works offline too. */
+
+const DOT: Record<Insight["severity"], string> = {
+  critical: "bg-danger",
+  warn: "bg-warning",
+  info: "bg-primary-400",
+};
+
+export default function InsightsCard() {
+  const nav = useNavigate();
+  const [insights, setInsights] = useState<Insight[] | null>(null);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const [sales, purchases, expenses, products, movements] = await Promise.all([
+        billing.listDocs("sales").catch(() => []),
+        billing.listDocs("purchase").catch(() => []),
+        fin.expenses().catch(() => []),
+        erp.products().catch(() => []),
+        erp.stockMovements().catch(() => ({})),
+      ]);
+      const list = buildInsights({
+        sales,
+        purchases,
+        expenses,
+        products,
+        movements,
+        today: new Date().toISOString().slice(0, 10),
+        currency: getDisplayCurrency(),
+      });
+      if (!dead) setInsights(list);
+    })();
+    return () => {
+      dead = true;
+    };
+  }, []);
+
+  return (
+    <InfoCard
+      title="Insights"
+      action={<Lightbulb size={15} className="text-brand-400" />}
+    >
+      {insights === null ? (
+        <div className="space-y-2">
+          <Skeleton className="h-10" />
+          <Skeleton className="h-10" />
+        </div>
+      ) : insights.length === 0 ? (
+        <p className="flex items-center gap-2 text-sm text-brand-500">
+          <CheckCircle2 size={15} className="text-success" />
+          All clear — cash, receivables, spend and stock look healthy.
+        </p>
+      ) : (
+        <ul className="divide-y divide-brand-100 dark:divide-white/8">
+          {insights.slice(0, 5).map((i, idx) => (
+            <li key={idx}>
+              <button
+                onClick={() => i.to && nav(i.to)}
+                className="flex w-full items-start gap-2.5 py-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 rounded-lg px-1.5 -mx-1.5 cursor-pointer"
+              >
+                <span
+                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[i.severity]}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-ink">{i.title}</span>
+                  <span className="block text-xs text-brand-500 mt-0.5">{i.detail}</span>
+                </span>
+                {i.to && (
+                  <ChevronRight size={14} className="mt-1 shrink-0 text-brand-300" />
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </InfoCard>
+  );
+}
