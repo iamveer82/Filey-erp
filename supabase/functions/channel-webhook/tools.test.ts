@@ -1,6 +1,6 @@
 // Runnable check for the agent data tools:  deno test supabase/functions/channel-webhook/
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { runTool, TOOLS } from "./tools.ts";
+import { runTool, TOOLS, WRITE_TOOLS } from "./tools.ts";
 
 // Minimal thenable query-builder stub. Records every .eq() so we can assert
 // org scoping; resolves to { data } when awaited.
@@ -16,16 +16,25 @@ function fakeClient(rows: unknown[]) {
     order: () => builder,
     limit: () => builder,
     lt: () => builder,
+    gte: () => builder,
+    neq: () => builder,
+    in: () => builder,
     or: () => builder,
     then: (resolve: (x: unknown) => void) => resolve({ data: rows, error: null }),
   };
   return { client: { from: () => builder }, eqs };
 }
 
+// Inputs that make each read tool actually run its query.
+const READ_INPUTS: Record<string, unknown> = {
+  find_customer: { query: "acme" },
+  run_report: { report: "receivables_aging" },
+};
+
 Deno.test("every read tool scopes its query to the caller's org", async () => {
   for (const tool of TOOLS) {
     const { client, eqs } = fakeClient([]);
-    await runTool(client, "ORG-123", tool.name, { query: "acme" });
+    await runTool(client, "ORG-123", tool.name, READ_INPUTS[tool.name] ?? {});
     const scoped = eqs.some(([c, v]) => c === "org_id" && v === "ORG-123");
     assertEquals(scoped, true, `${tool.name} must filter by org_id (cross-tenant leak otherwise)`);
   }
@@ -50,5 +59,80 @@ Deno.test("find_customer ignores empty queries and sanitizes filter chars", asyn
 Deno.test("unknown tool returns an error object, never throws", async () => {
   const { client } = fakeClient([]);
   const out = (await runTool(client, "ORG", "nope", {})) as { error: string };
+  assertEquals(typeof out.error, "string");
+});
+
+// ---- draft-only write tools ----
+
+// Records every insert payload; select/single resolve with a fake id.
+function fakeWriteClient() {
+  const inserts: [string, unknown][] = [];
+  const from = (table: string) => {
+    // deno-lint-ignore no-explicit-any
+    const builder: any = {
+      insert: (rows: unknown) => {
+        inserts.push([table, rows]);
+        return builder;
+      },
+      select: () => builder,
+      single: () => Promise.resolve({ data: { id: 42 }, error: null }),
+      eq: () => builder,
+      ilike: () => builder,
+      limit: () => builder,
+      maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      then: (resolve: (x: unknown) => void) => resolve({ data: null, error: null }),
+    };
+    return builder;
+  };
+  return { client: { from }, inserts };
+}
+
+const WRITE_INPUTS: Record<string, unknown> = {
+  create_draft_invoice: {
+    customer_name: "Acme",
+    items: [{ description: "Widget", qty: 2, unit_price: 100 }],
+  },
+  create_draft_quote: {
+    customer_name: "Acme",
+    items: [{ description: "Widget", unit_price: 50 }],
+  },
+  create_draft_po: {
+    supplier_name: "Dune Oil",
+    items: [{ description: "Drum", qty: 3, unit_cost: 40 }],
+  },
+  add_customer: { name: "New Co" },
+  add_product: { name: "New Product" },
+};
+
+Deno.test("write tools pin user_id + org_id on every insert", async () => {
+  for (const tool of WRITE_TOOLS) {
+    const { client, inserts } = fakeWriteClient();
+    const out = await runTool(client, "ORG-1", tool.name, WRITE_INPUTS[tool.name], "OWNER-1");
+    assertEquals((out as { error?: string }).error, undefined, `${tool.name} errored`);
+    // Every non-audit insert must carry explicit ownership.
+    const rows = inserts
+      .filter(([t]) => t !== "audit_log")
+      .flatMap(([, r]) => (Array.isArray(r) ? r : [r])) as Record<string, unknown>[];
+    for (const row of rows) {
+      assertEquals(row.user_id, "OWNER-1", `${tool.name}: insert missing user_id`);
+      assertEquals(row.org_id, "ORG-1", `${tool.name}: insert missing org_id`);
+    }
+  }
+});
+
+Deno.test("document write tools only ever create drafts", async () => {
+  for (const name of ["create_draft_invoice", "create_draft_quote", "create_draft_po"]) {
+    const { client, inserts } = fakeWriteClient();
+    await runTool(client, "ORG", name, WRITE_INPUTS[name], "OWNER");
+    const heads = inserts
+      .filter(([t]) => ["invoice_docs", "quotations", "purchase_orders"].includes(t))
+      .flatMap(([, r]) => (Array.isArray(r) ? r : [r])) as { status?: string }[];
+    for (const h of heads) assertEquals(h.status, "draft", `${name} must create drafts only`);
+  }
+});
+
+Deno.test("write tools refuse to run without an owner", async () => {
+  const { client } = fakeWriteClient();
+  const out = (await runTool(client, "ORG", "add_customer", { name: "X" })) as { error: string };
   assertEquals(typeof out.error, "string");
 });
