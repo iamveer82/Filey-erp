@@ -12,11 +12,20 @@ export interface Subscription {
   current_period_end?: string | null;
 }
 
-export const PLANS: { id: Plan; name: string; price: string; features: string[] }[] = [
+export const PLANS: {
+  id: Plan;
+  name: string;
+  price: string;
+  period?: string;
+  blurb: string;
+  recommended?: boolean;
+  features: string[];
+}[] = [
   {
     id: "free",
     name: "Free",
     price: "$0",
+    blurb: "Run your books on one device.",
     features: [
       "Core ERP & CRM — all modules",
       "25 invoices/month",
@@ -28,10 +37,14 @@ export const PLANS: { id: Plan; name: string; price: string; features: string[] 
   {
     id: "pro",
     name: "Pro",
-    price: "$19/mo",
+    price: "$19",
+    period: "/month",
+    blurb: "Cloud sync for growing businesses.",
+    recommended: true,
     features: [
-      "Everything in Free",
-      "More storage",
+      "Everything in Free — no caps",
+      "Cloud sync, backup & web access",
+      "Up to 5 devices, team included",
       "Recurring invoices",
       "Priority support",
     ],
@@ -39,8 +52,15 @@ export const PLANS: { id: Plan; name: string; price: string; features: string[] 
   {
     id: "business",
     name: "Business",
-    price: "$49/mo",
-    features: ["Everything in Pro", "Team seats", "Customer portal", "Highest limits"],
+    price: "$49",
+    period: "/month",
+    blurb: "For teams that run on Filey.",
+    features: [
+      "Everything in Pro",
+      "Team seats & roles",
+      "Customer portal",
+      "Highest limits",
+    ],
   },
 ];
 

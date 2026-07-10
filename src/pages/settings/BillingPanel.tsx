@@ -113,8 +113,8 @@ export default function BillingPanel() {
               className="h-full rounded-full transition-[width]"
               style={{
                 width: `${pctUsed}%`,
-                background:
-                  pctUsed >= 90 ? "#E5484D" : "linear-gradient(90deg,#F5B700,#FFD600)",
+                // design.md: no gradients — flat brand yellow, danger at ≥90%.
+                background: pctUsed >= 90 ? "#E5484D" : "#FFD600",
               }}
             />
           </div>
@@ -128,18 +128,39 @@ export default function BillingPanel() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3 items-stretch">
         {PLANS.map((p) => (
           <div
             key={p.id}
             className={cn(
-              "card flex flex-col",
-              p.id === sub.plan && "ring-2 ring-primary-400"
+              "card flex flex-col !p-5",
+              p.id === sub.plan
+                ? "ring-2 ring-primary-400"
+                : p.recommended && "border-ink/25 dark:border-white/25"
             )}
           >
-            <p className="font-medium text-ink">{p.name}</p>
-            <p className="mt-1 text-xl font-medium text-ink">{p.price}</p>
-            <ul className="mt-3 flex-1 space-y-1.5 text-sm text-brand-500">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-400">
+                {p.name}
+              </p>
+              {p.id === sub.plan ? (
+                <span className="pill bg-primary-100 text-ink text-[11px]">Current</span>
+              ) : (
+                p.recommended && (
+                  <span className="pill bg-primary-100 text-ink text-[11px]">
+                    Recommended
+                  </span>
+                )
+              )}
+            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
+              {p.price}
+              {p.period && (
+                <span className="text-sm font-medium text-brand-400">{p.period}</span>
+              )}
+            </p>
+            <p className="mt-1 text-sm text-brand-500">{p.blurb}</p>
+            <ul className="mt-4 flex-1 space-y-2 border-t border-brand-100 pt-4 text-sm text-brand-500 dark:border-white/10">
               {p.features.map((f) => (
                 <li key={f} className="flex gap-2">
                   <Check size={14} className="mt-0.5 shrink-0 text-success" />
@@ -147,16 +168,18 @@ export default function BillingPanel() {
                 </li>
               ))}
             </ul>
-            <div className="mt-4">
+            <div className="mt-5">
               {p.id === sub.plan ? (
-                <span className="pill bg-primary-100 text-ink">Current plan</span>
+                <button className="btn-ghost w-full" disabled>
+                  Your plan
+                </button>
               ) : p.id === "free" ? (
-                <span className="text-xs text-brand-400">
-                  Downgrade in the billing portal
-                </span>
+                <p className="py-2 text-center text-xs text-brand-400">
+                  Downgrade anytime in the billing portal
+                </p>
               ) : (
                 <button
-                  className="btn-primary w-full"
+                  className={cn("w-full", p.recommended ? "btn-primary" : "btn-ghost")}
                   onClick={() => upgrade(p.id)}
                   disabled={busy === p.id}
                 >
@@ -167,6 +190,15 @@ export default function BillingPanel() {
           </div>
         ))}
       </div>
+
+      <p className="text-xs text-brand-400">
+        Prefer to own it outright? The one-time desktop license (2 devices,
+        offline forever) lives under{" "}
+        <a href="#/settings?section=license" className="font-medium text-ink hover:underline">
+          Settings → Desktop License
+        </a>
+        .
+      </p>
 
       <div className="card">
         <p className="mb-3 font-medium text-ink">Usage</p>
