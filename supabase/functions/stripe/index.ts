@@ -82,7 +82,10 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("stripe-signature");
   if (sig) return handleWebhook(req, sig);
 
-  const origin = req.headers.get("origin") || SITE_URL || "";
+  // SECURITY: SITE_URL wins — the Origin header is caller-controlled, and it
+  // ends up in Stripe success/cancel redirect URLs (open-redirect phishing on
+  // the public pay_invoice path otherwise).
+  const origin = SITE_URL || req.headers.get("origin") || "";
   const payload = await req.json().catch(() => ({} as Record<string, unknown>));
   const action = String(payload.action ?? "");
 
@@ -218,23 +221,47 @@ async function licenseActivate(
   const active = (devices ?? []).filter((d) => !d.deactivated_at);
   const mine = (devices ?? []).find((d) => d.fingerprint === fingerprint);
 
+  // SECURITY: the count check below races concurrent activations (TOCTOU).
+  // After claiming a slot, recount; if we overflowed, release our claim.
+  const claimedOverLimit = async (rowId: unknown): Promise<boolean> => {
+    const { data: act } = await supa
+      .from("license_devices")
+      .select("id")
+      .eq("license_id", lic.id)
+      .is("deactivated_at", null);
+    if ((act ?? []).length <= LICENSE_DEVICE_SLOTS) return false;
+    await supa
+      .from("license_devices")
+      .update({ deactivated_at: new Date().toISOString() })
+      .eq("id", rowId);
+    return true;
+  };
+  const slotsFull = json(
+    { error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` },
+    409
+  );
+
   if (mine?.deactivated_at) {
     // Re-activating a freed slot — only if a slot is open.
-    if (active.length >= LICENSE_DEVICE_SLOTS)
-      return json({ error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` }, 409);
+    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
     await supa
       .from("license_devices")
       .update({ deactivated_at: null, activated_at: new Date().toISOString(), device_name: deviceName || null })
       .eq("id", mine.id);
+    if (await claimedOverLimit(mine.id)) return slotsFull;
   } else if (!mine) {
-    if (active.length >= LICENSE_DEVICE_SLOTS)
-      return json({ error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` }, 409);
-    const { error } = await supa.from("license_devices").insert({
-      license_id: lic.id,
-      fingerprint,
-      device_name: deviceName || null,
-    });
+    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
+    const { data: ins, error } = await supa
+      .from("license_devices")
+      .insert({
+        license_id: lic.id,
+        fingerprint,
+        device_name: deviceName || null,
+      })
+      .select("id")
+      .single();
     if (error) return json({ error: error.message }, 500);
+    if (await claimedOverLimit(ins.id)) return slotsFull;
   }
 
   const token = await signLicense({

@@ -25,6 +25,12 @@ serve(async (req) => {
     if (!to || !subject || !html) {
       return json({ error: "to, subject and html are required" }, 400);
     }
+    // SECURITY: transactional sender, not a relay — one recipient per call
+    // (an array here would let any signed-in user mass-mail from our domain).
+    if (typeof to !== "string" || to.length > 320 ||
+        String(subject).length > 500 || String(html).length > 500_000) {
+      return json({ error: "invalid payload" }, 400);
+    }
 
     const RESEND = Deno.env.get("RESEND_API_KEY");
     const FROM = Deno.env.get("EMAIL_FROM") ?? "Filey <onboarding@resend.dev>";
