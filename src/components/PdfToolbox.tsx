@@ -1487,20 +1487,6 @@ export const PDF_TOOLS: Tool[] = [
       throw new Error("Open “Stamp & Sign” to place your stamp on the live preview.");
     },
   },
-  // ===== Edit: E‑sign tool =====
-  {
-    id: "esign",
-    name: "E‑Sign",
-    desc: "Create a signature, upload a document, combine them — draw or upload",
-    icon: PenTool,
-    cat: "Edit",
-    accept: "application/pdf,image/png,image/jpeg,image/webp",
-    interactive: "esign",
-    fields: [],
-    run: async () => {
-      throw new Error("Open “E‑Sign” to create and place your signature.");
-    },
-  },
   // ===== To PDF: image engines =====
   {
     id: "heic-to-pdf",

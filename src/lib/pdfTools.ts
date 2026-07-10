@@ -1545,30 +1545,28 @@ export async function bookletOrder(file: File): Promise<OutFile> {
     right -= 2;
   }
   const out = await PDFDocument.create();
-  // Build the padded source (real pages then blanks at the end).
-  const padDoc = await PDFDocument.create();
   const firstSize = src.getPage(0);
   const pw = firstSize.getWidth();
   const ph = firstSize.getHeight();
-  const realCopied = await padDoc.copyPages(src, src.getPageIndices());
-  realCopied.forEach((p) => padDoc.addPage(p));
-  for (let i = total; i < padded; i++) padDoc.addPage([pw, ph]);
-  // 2-up onto landscape sheets following the imposition order.
+  // 2-up onto landscape sheets following the imposition order. Padding
+  // indices (>= total) have no source page — that half-sheet stays empty
+  // (embedding a content-less blank page makes pdf-lib throw).
   const sw = ph; // landscape
   const sh = pw;
   for (let i = 0; i < order.length; i += 2) {
-    const pages = order.slice(i, i + 2).map((idx) => padDoc.getPage(idx));
-    const embedded = await out.embedPages(pages);
-    const sheet = out.addPage([sw * 1, sh * 1]);
-    // pdf-lib swap not needed: use real values
-    embedded.forEach((emb, k) => {
+    const sheet = out.addPage([sw, sh]);
+    const idxs = order.slice(i, i + 2);
+    for (let k = 0; k < idxs.length; k++) {
+      const idx = idxs[k];
+      if (idx >= total) continue;
+      const [emb] = await out.embedPages([src.getPage(idx)]);
       const scale = Math.min((sw / 2) / emb.width, sh / emb.height) * 0.96;
       const drawW = emb.width * scale;
       const drawH = emb.height * scale;
       const x = k * (sw / 2) + (sw / 2 - drawW) / 2;
       const y = (sh - drawH) / 2;
       sheet.drawPage(emb, { x, y, xScale: scale, yScale: scale });
-    });
+    }
   }
   return {
     name: `${base(file.name)}-booklet.pdf`,
