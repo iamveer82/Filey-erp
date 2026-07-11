@@ -15,7 +15,7 @@
 
 1. **Never** introduce colors, fonts, radii, shadows, or spacing values that are not defined here.
 2. **Always** use design tokens / component classes instead of hard-coded values.
-3. **One typeface:** Plus Jakarta Sans everywhere (`font-sans` = `font-display`). IBM Plex Mono for code/numeric identifiers only. Geist Pixel (`font-pixel`) is a narrow display accent — wordmark + stat numbers only, see §3.
+3. **One typeface:** Plus Jakarta Sans everywhere (`font-sans` = `font-display`). IBM Plex Mono for code/numeric identifiers only. Geist Pixel (`font-pixel`) is the display accent — wordmark, dashboard numbers, chart text; see §3.
 4. **4px spacing scale** only: 4, 8, 12, 16, 24, 32, 48, 64, 96.
 5. **Radii:** 12px (`rounded-xl`) for buttons/inputs, 16px (`rounded-2xl`) for cards/modals. Nothing rounder.
 6. **Icons:** Lucide React only, 1.75px stroke (set globally), sizes 16/18/20/24.
@@ -63,8 +63,9 @@ Rules:
 **Plus Jakarta Sans** for everything (weights 400–800). `font-mono` (IBM Plex
 Mono) for document numbers / code only. **Geist Pixel Square** (`font-pixel`,
 single weight, vendored OFL woff2 in `public/fonts/geist-pixel`) is the
-display accent: the sidebar wordmark and stat numbers ONLY. Never body text,
-headings, labels, or anything the user must read fast; never bold it
+display accent: the sidebar wordmark, dashboard stat/metric numbers, and
+chart text (axis ticks, legend, tooltip — global rule in index.css) ONLY.
+Never body text, headings, form labels, or table data; never bold it
 (synthetic bold ruins the pixel grid).
 
 | Style             | Size / Line | Weight                        |

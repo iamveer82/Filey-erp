@@ -202,7 +202,7 @@ export function MetricCard({
           <p className="text-xs font-medium text-brand-500 leading-4 truncate">{label}</p>
           <p
             ref={numRef}
-            className="leading-tight font-semibold text-ink mt-0.5 tabular-nums whitespace-nowrap overflow-hidden"
+            className="leading-tight font-pixel text-ink mt-0.5 tabular-nums whitespace-nowrap overflow-hidden"
           >
             {display}
           </p>
@@ -755,7 +755,7 @@ export function OrdersStatCard({
       <div className="grid grid-cols-2 gap-x-6 gap-y-4">
         {items.map(([k, v]) => (
           <div key={k}>
-            <p className="text-2xl font-bold leading-none text-ink tabular-nums">{v}</p>
+            <p className="text-2xl font-pixel leading-none text-ink tabular-nums">{v}</p>
             <p className="text-xs font-semibold text-brand-400 mt-1">{k}</p>
           </div>
         ))}
@@ -793,7 +793,7 @@ export function StockBreakdownCard({
           ))}
         </ul>
         <div className="grid place-items-center rounded-2xl bg-brand-50 text-ink w-16 h-16 shrink-0 dark:bg-white/5">
-          <span className="text-2xl font-bold tabular-nums">{total}</span>
+          <span className="text-2xl font-pixel tabular-nums">{total}</span>
         </div>
       </div>
     </div>

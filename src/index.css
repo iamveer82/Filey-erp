@@ -34,6 +34,15 @@
     border-color: #3a3d45;
   }
 
+  /* Geist Pixel on all chart text — axis ticks, legend, tooltip
+     (design.md §3: pixel is the display accent for charts + numbers). */
+  .recharts-wrapper text,
+  .recharts-tooltip-wrapper,
+  .recharts-legend-wrapper,
+  .recharts-default-tooltip {
+    font-family: "Geist Pixel", "IBM Plex Mono", ui-monospace, monospace;
+  }
+
   /* Chart colors for recharts components (ModernOverview trend chart) */
   :root {
     --chart-stroke: theme(colors.primary.500);
