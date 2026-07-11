@@ -81,8 +81,8 @@ create table if not exists products (
   category text,
   unit_price numeric(14,2) not null default 0,
   cost_price numeric(14,2) not null default 0,
-  quantity bigint not null default 0,
-  reorder_level bigint not null default 0,
+  quantity numeric(14,3) not null default 0,
+  reorder_level numeric(14,3) not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -103,7 +103,7 @@ create table if not exists order_items (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   order_id bigint references orders(id) on delete cascade,
   product_id bigint,
-  quantity bigint not null default 1,
+  quantity numeric(14,3) not null default 1,
   unit_price numeric(14,2) not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
