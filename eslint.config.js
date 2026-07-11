@@ -18,6 +18,7 @@ export default tseslint.config(
       "server", // separate Node runtime, not in the desktop/web build
       "src-tauri/target",
       "public/sw.js", // service-worker globals, hand-written
+      "public/tesseract", // vendored tesseract.js worker + wasm (minified)
       "worker", // separate Cloudflare worker deploy, Node runtime
       "**/*.config.{js,ts,mjs}",
       "scripts",
