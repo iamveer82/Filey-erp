@@ -169,7 +169,7 @@ export default function AgentChat() {
     }
     setErr(null);
     setInput("");
-    setFile(null);
+    attach(null); // clears the file AND revokes the preview object URL
 
     const shownText = attached ? `${q}${q ? "\n\n" : ""}📎 ${attached.name}` : q;
     // Explicit hint so the agent knows it can edit the attached file via tools.

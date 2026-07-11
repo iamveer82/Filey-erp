@@ -67,6 +67,15 @@ export function vatBreakdown(net: number) {
   return { net, vat, gross: +(net + vat).toFixed(2) };
 }
 
+/** yyyy-mm-dd of a Date in the USER'S timezone. toISOString() shifts to UTC
+ *  first — a local-midnight date picked in Dubai (UTC+4) would land on the
+ *  previous day. Use this for anything a date picker hands back. */
+export function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
 export function fmtDate(d?: string | null): string {
   if (!d) return "—";
   const date = new Date(d);

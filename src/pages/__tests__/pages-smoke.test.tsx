@@ -96,6 +96,9 @@ import PdfTools from "../PdfTools";
 import AgentChat from "../AgentChat";
 import CustomerDetail from "../CustomerDetail";
 import SupplierDetail from "../SupplierDetail";
+import PortalView from "../PortalView";
+import Login from "../Login";
+import NotFound from "../NotFound";
 
 const pages: [string, () => ReactElement][] = [
   ["Customers", () => <Customers />],
@@ -122,6 +125,12 @@ const pages: [string, () => ReactElement][] = [
   ["Tools", () => <Tools />],
   ["PdfTools", () => <PdfTools />],
   ["AgentChat", () => <AgentChat />],
+  // Purchase Invoices = the same page in purchase mode; its branches
+  // (supplier labels, doc_type) must mount too.
+  ["Invoicing (purchase)", () => <Invoicing mode="purchase" />],
+  ["PortalView", () => <PortalView />],
+  ["Login", () => <Login />],
+  ["NotFound", () => <NotFound />],
 ];
 
 describe("page render smoke", () => {

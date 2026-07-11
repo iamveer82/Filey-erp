@@ -51,7 +51,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
-import { aed, num, getDisplayCurrency, fmtDate } from "../lib/format";
+import { aed, num, getDisplayCurrency, fmtDate, localYmd } from "../lib/format";
 import { PageHeader, MetricCard, InfoCard, Spinner, ErrorBanner } from "../components/ui";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { DateRangePicker } from "../components/DatePicker";
@@ -223,8 +223,8 @@ export default function Reports() {
       computeVatReturn(
         txns,
         5, // ponytail: UAE flat 5%; pass company default_tax_rate when multi-rate lands
-        dateFrom?.toISOString().slice(0, 10),
-        dateTo?.toISOString().slice(0, 10)
+        dateFrom ? localYmd(dateFrom) : undefined,
+        dateTo ? localYmd(dateTo) : undefined
       ),
     [txns, dateFrom, dateTo]
   );
@@ -236,8 +236,8 @@ export default function Reports() {
     () =>
       computeCashSummary(
         txns,
-        dateFrom?.toISOString().slice(0, 10),
-        dateTo?.toISOString().slice(0, 10)
+        dateFrom ? localYmd(dateFrom) : undefined,
+        dateTo ? localYmd(dateTo) : undefined
       ),
     [txns, dateFrom, dateTo]
   );

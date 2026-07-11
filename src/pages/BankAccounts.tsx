@@ -12,7 +12,7 @@ import {
   Spinner,
   ErrorBanner,
 } from "../components/ui";
-import { fin } from "../lib/api";
+import { fin, tools } from "../lib/api";
 import {
   parseStatementCsv,
   matchStatement,
@@ -20,7 +20,8 @@ import {
   type ReconResult,
 } from "../lib/bankRecon";
 
-const BANK_KEY = "filey_bank_accounts";
+const BANK_KEY = "filey_bank_accounts"; // device-local cache
+const BANK_SETTING_KEY = "bank_accounts"; // app_settings — synced + backed up
 
 interface BankAccount {
   id: number;
@@ -48,6 +49,25 @@ function save(a: BankAccount[]) {
   } catch (e) {
     console.warn("Failed to save bank accounts", e);
   }
+  // Write-through to app_settings: bare localStorage never syncs across
+  // devices and the desktop backup doesn't include it (same as challans).
+  void tools.setSetting(BANK_SETTING_KEY, JSON.stringify(a)).catch(() => {});
+}
+
+/** Pull accounts saved on the user's other devices; remote wins when present. */
+async function syncBankAccounts(): Promise<BankAccount[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === BANK_SETTING_KEY);
+    if (row?.value) {
+      const remote: BankAccount[] = JSON.parse(row.value);
+      localStorage.setItem(BANK_KEY, JSON.stringify(remote));
+      return remote;
+    }
+  } catch (e) {
+    console.warn("Failed to sync bank accounts from server", e);
+  }
+  return load();
 }
 
 export default function BankAccounts() {
@@ -57,7 +77,8 @@ export default function BankAccounts() {
   const [edit, setEdit] = useState<BankAccount | null>(null);
   const [reconOpen, setReconOpen] = useState(false);
   useEffect(() => {
-    setAccounts(load());
+    setAccounts(load()); // instant paint from the local cache…
+    syncBankAccounts().then(setAccounts); // …then reconcile with other devices
   }, []);
 
   const del = async (a: BankAccount) => {

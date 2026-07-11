@@ -9,6 +9,9 @@ const FLAG = "filey.overdue.notified";
 
 export default function OverdueReminder() {
   const { toast } = useUI();
+  // Run once on mount. toast must stay OUT of the deps: notifying re-renders
+  // the UIProvider, toast gets a new identity, and the effect would re-fire
+  // before the async FLAG write lands — duplicate fetch + duplicate toast.
   useEffect(() => {
     if (sessionStorage.getItem(FLAG)) return;
     let active = true;
@@ -36,6 +39,7 @@ export default function OverdueReminder() {
     return () => {
       active = false;
     };
-  }, [toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return null;
 }

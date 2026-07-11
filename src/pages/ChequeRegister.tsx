@@ -12,12 +12,14 @@ import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput } from "../lib/format";
 import { PageHeader, MetricCard, DataTable, Badge, Modal, Field } from "../components/ui";
 import { DateField } from "../components/DatePicker";
+import { tools } from "../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Cheque Register — issued & received cheques                        */
 /* ------------------------------------------------------------------ */
 
-const CHEQUE_KEY = "filey_cheques";
+const CHEQUE_KEY = "filey_cheques"; // device-local cache
+const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings — synced + backed up
 
 interface Cheque {
   id: number;
@@ -47,6 +49,25 @@ function saveCheques(c: Cheque[]) {
   } catch (e) {
     console.warn("Failed to save cheques", e);
   }
+  // Write-through to app_settings: bare localStorage never syncs across
+  // devices and the desktop backup doesn't include it (same as challans).
+  void tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(c)).catch(() => {});
+}
+
+/** Pull cheques saved on the user's other devices; remote wins when present. */
+async function syncCheques(): Promise<Cheque[]> {
+  try {
+    const settings = await tools.settings();
+    const row = settings.find((s) => s.key === CHEQUE_SETTING_KEY);
+    if (row?.value) {
+      const remote: Cheque[] = JSON.parse(row.value);
+      localStorage.setItem(CHEQUE_KEY, JSON.stringify(remote));
+      return remote;
+    }
+  } catch (e) {
+    console.warn("Failed to sync cheques from server", e);
+  }
+  return loadCheques();
 }
 
 const statusTone = (s: string) => {
@@ -64,7 +85,8 @@ export default function ChequeRegister() {
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    setCheques(loadCheques());
+    setCheques(loadCheques()); // instant paint from the local cache…
+    syncCheques().then(setCheques); // …then reconcile with other devices
   }, []);
 
   const filtered = useMemo(
@@ -214,6 +236,7 @@ export default function ChequeRegister() {
             render: (c) => {
               const overdue =
                 c.status === "pending" &&
+                !!c.due_date &&
                 c.due_date < new Date().toISOString().slice(0, 10);
               return (
                 <span className={overdue ? "text-danger font-semibold" : ""}>

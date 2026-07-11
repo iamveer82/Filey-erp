@@ -45,11 +45,15 @@ export default function BillingPanel() {
       );
   }, []);
 
+  // Once on mount only. With [params, toast] deps the success toast re-renders
+  // the provider, both deps get fresh identities, and the effect loops —
+  // endless "Subscription updated" toasts after returning from Stripe.
   useEffect(() => {
     const c = params.get("checkout");
     if (c === "success") toast.success("Subscription updated — welcome aboard!");
     else if (c === "cancel") toast.info("Checkout canceled.");
-  }, [params, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const upgrade = async (plan: Plan) => {
     setBusy(plan);
