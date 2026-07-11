@@ -71,7 +71,9 @@ export default function Orders() {
   useLiveSync(load);
 
   const stats = useMemo(() => {
-    const by = (s: string[]) => orders.filter((o) => s.includes(o.status.toLowerCase()));
+    // localdb is schemaless — propagated/imported rows may lack fields.
+    const by = (s: string[]) =>
+      orders.filter((o) => s.includes((o.status || "").toLowerCase()));
     return {
       completed: by(["delivered", "paid", "completed"]).length,
       progress: by(["confirmed", "draft", "processing"]).length,
@@ -88,13 +90,13 @@ export default function Orders() {
     return orders.filter((o) => {
       if (
         ql &&
-        !o.order_number.toLowerCase().includes(ql) &&
-        !o.customer_name.toLowerCase().includes(ql)
+        !(o.order_number || "").toLowerCase().includes(ql) &&
+        !(o.customer_name || "").toLowerCase().includes(ql)
       ) {
         return false;
       }
       if (statusFilter === "all") return true;
-      const st = o.status.toLowerCase();
+      const st = (o.status || "").toLowerCase();
       if (statusFilter === "progress")
         return ["confirmed", "draft", "processing"].includes(st);
       if (statusFilter === "completed")
@@ -264,7 +266,7 @@ export default function Orders() {
             key: "act",
             label: "",
             render: (o) => {
-              const idx = FLOW.indexOf(o.status.toLowerCase());
+              const idx = FLOW.indexOf((o.status || "").toLowerCase());
               // No forward transition from "cancelled" or unknown statuses —
               // wrapping back to "draft" silently regressed orders.
               const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;

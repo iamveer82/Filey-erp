@@ -97,15 +97,15 @@ export default function SupplierDetail() {
     [orders, supplier]
   );
 
+  // localdb is schemaless — older/agent-created rows may lack status.
+  const st = (o: { status?: string }) => (o.status || "").toLowerCase();
   const totalValue = myOrders.reduce((s, o) => s + o.total, 0);
   const openCount = myOrders.filter(
-    (o) => !["received", "cancelled"].includes(o.status.toLowerCase())
+    (o) => !["received", "cancelled"].includes(st(o))
   ).length;
-  const receivedCount = myOrders.filter(
-    (o) => o.status.toLowerCase() === "received"
-  ).length;
+  const receivedCount = myOrders.filter((o) => st(o) === "received").length;
   const receivedValue = myOrders
-    .filter((o) => o.status.toLowerCase() === "received")
+    .filter((o) => st(o) === "received")
     .reduce((s, o) => s + o.total, 0);
 
   if (!loading && !supplier) {

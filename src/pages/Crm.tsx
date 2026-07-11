@@ -142,7 +142,8 @@ export default function Crm() {
     return customers
       .map((c) => {
         const key = (c.company || c.name || "").toLowerCase();
-        const theirs = opps.filter((o) => o.customer_name.toLowerCase() === key);
+        // localdb is schemaless — agent-created rows may lack customer_name.
+        const theirs = opps.filter((o) => (o.customer_name || "").toLowerCase() === key);
         return {
           c,
           orders: theirs.length,

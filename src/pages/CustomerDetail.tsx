@@ -115,7 +115,8 @@ export default function CustomerDetail() {
     0
   );
   const openOppValue = myOpps
-    .filter((o) => !["won", "lost"].includes(o.stage.toLowerCase()))
+    // localdb is schemaless — agent-created rows may lack stage.
+    .filter((o) => !["won", "lost"].includes((o.stage || "").toLowerCase()))
     .reduce((s, o) => s + o.value, 0);
 
   if (!loading && !customer) {
