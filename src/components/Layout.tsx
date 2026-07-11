@@ -5,6 +5,7 @@ import {
   useState,
   type PointerEvent as RPointerEvent,
   type KeyboardEvent as RKeyboardEvent,
+  type CSSProperties,
 } from "react";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -554,7 +555,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
 
               {searchOpen && (
-                <div className="absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover animate-fade-in">
+                <div
+                  style={{ "--materialize-origin": "top" } as CSSProperties}
+                  className="materialize-surface absolute left-0 right-0 top-12 z-30 overflow-hidden rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover"
+                >
                   <div className="max-h-[52vh] overflow-y-auto p-2">
                     {/* Quick actions (command palette) */}
                     {cmdHits.length > 0 && (
@@ -682,7 +686,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </button>
 
                 {notifOpen && (
-                  <div className="absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover">
+                  <div
+                    style={{ "--materialize-origin": "top right" } as CSSProperties}
+                    className="materialize-surface absolute right-0 top-12 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#24262C] border border-brand-200 dark:border-[#3A3D45] shadow-bento-hover"
+                  >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-brand-100 dark:border-[#2A2C33]">
                       <p className="text-sm font-bold text-ink">{t("Notifications")}</p>
                       {unread > 0 && (

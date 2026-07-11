@@ -21,7 +21,7 @@
 6. **Icons:** Lucide React only, 1.75px stroke (set globally), sizes 16/18/20/24.
 7. **Yellow `#FFD600` is reserved** for primary actions, the active nav state, and small key highlights. Never body text, large backgrounds, gradients, or decoration.
 8. **No decorative effects.** Banned: gradients (background or text), glows, shimmer, spotlight/tilt cards, scale/lift **hovers**, staggered entrances, spring animations, parallax, glassmorphism blur.
-9. **Motion budget:** opacity fades ≤150ms and color transitions ≤200ms. The ONE sanctioned exception is the **materialize** enter primitive for overlays (modals, command palette, popovers): opacity + a ≤3% scale + ≤6px translate from the anchor, `--ease-out` cubic-bezier(0.16,1,0.3,1), ≤200ms, one-shot, `transform-origin` set to where it appears (`.materialize-scrim` / `.materialize-surface` in index.css). Everything else: nothing moves position, scales, or bounces — no hover motion, no springs, no loops. `prefers-reduced-motion` collapses materialize to a fade.
+9. **Motion budget:** opacity fades ≤150ms and color transitions ≤200ms. The ONE sanctioned exception is the **materialize** enter primitive for overlays (modals, command palette, popovers): opacity + a ≤3% scale + ≤6px translate from the anchor, cubic-bezier(0.16,1,0.3,1) (fast-out/gentle-settle), ≤200ms, one-shot, `transform-origin` set to where it appears (`.materialize-scrim` / `.materialize-surface` in index.css). Everything else: nothing moves position, scales, or bounces — no hover motion, no springs, no loops. `prefers-reduced-motion` collapses materialize to a fade.
 10. Dark mode is supported (`dark:` class strategy); every new surface needs a dark variant.
 
 ---
