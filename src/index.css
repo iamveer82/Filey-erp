@@ -4,6 +4,18 @@
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
 @config "../tailwind.config.js";
 
+/* Geist Pixel (Square) — display accent for the wordmark and stat numbers
+   only (see design.md §3). Single weight; never body text. Vendored in
+   public/fonts/geist-pixel (OFL) — no CDN, works offline and under the
+   Tauri CSP. */
+@font-face {
+  font-family: "Geist Pixel";
+  src: url("/fonts/geist-pixel/GeistPixel-Square.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* v3 → v4 compatibility shims
    1. v4 dropped the Preflight default border color (now `currentColor`).
       Restore the warm hairline so any bare `border` reads as before.

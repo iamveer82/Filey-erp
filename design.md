@@ -15,7 +15,7 @@
 
 1. **Never** introduce colors, fonts, radii, shadows, or spacing values that are not defined here.
 2. **Always** use design tokens / component classes instead of hard-coded values.
-3. **One typeface:** Plus Jakarta Sans everywhere (`font-sans` = `font-display`). IBM Plex Mono for code/numeric identifiers only.
+3. **One typeface:** Plus Jakarta Sans everywhere (`font-sans` = `font-display`). IBM Plex Mono for code/numeric identifiers only. Geist Pixel (`font-pixel`) is a narrow display accent — wordmark + stat numbers only, see §3.
 4. **4px spacing scale** only: 4, 8, 12, 16, 24, 32, 48, 64, 96.
 5. **Radii:** 12px (`rounded-xl`) for buttons/inputs, 16px (`rounded-2xl`) for cards/modals. Nothing rounder.
 6. **Icons:** Lucide React only, 1.75px stroke (set globally), sizes 16/18/20/24.
@@ -61,16 +61,20 @@ Rules:
 ## 3. Typography
 
 **Plus Jakarta Sans** for everything (weights 400–800). `font-mono` (IBM Plex
-Mono) for document numbers / code only.
+Mono) for document numbers / code only. **Geist Pixel Square** (`font-pixel`,
+single weight, vendored OFL woff2 in `public/fonts/geist-pixel`) is the
+display accent: the sidebar wordmark and stat numbers ONLY. Never body text,
+headings, labels, or anything the user must read fast; never bold it
+(synthetic bold ruins the pixel grid).
 
-| Style             | Size / Line | Weight              |
-| ----------------- | ----------- | ------------------- |
-| Page title        | 28 / 36     | 700                 |
-| Section header    | 16–18       | 700                 |
-| Card title        | 15–16       | 700                 |
-| Body / table data | 14 / 22     | 400–500             |
-| Caption / meta    | 11–12       | 400–600             |
-| Stat number       | 24          | 700, `tabular-nums` |
+| Style             | Size / Line | Weight                        |
+| ----------------- | ----------- | ----------------------------- |
+| Page title        | 28 / 36     | 700                           |
+| Section header    | 16–18       | 700                           |
+| Card title        | 15–16       | 700                           |
+| Body / table data | 14 / 22     | 400–500                       |
+| Caption / meta    | 11–12       | 400–600                       |
+| Stat number       | 24          | `font-pixel`, `tabular-nums`  |
 
 Eyebrow labels: 10–11px, semibold, uppercase, tracked, `brand-400`.
 

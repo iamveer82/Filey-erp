@@ -401,7 +401,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Logo size={railMode ? 40 : 72} />
               {!railMode && (
                 <span className="leading-tight">
-                  <span className="block font-bold text-ink text-lg">Filey</span>
+                  <span className="block font-pixel text-ink text-lg">Filey</span>
                   <span className="block text-[11px] font-semibold text-brand-400">
                     {t("Business Suite")}
                   </span>

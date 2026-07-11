@@ -78,6 +78,9 @@ export default {
         display: ['"Plus Jakarta Sans"', '"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
+        // Geist Pixel Square (@font-face in index.css, vendored woff2).
+        // Display accent only — wordmark + stat numbers per design.md §3.
+        pixel: ['"Geist Pixel"', '"IBM Plex Mono"', "ui-monospace", "monospace"],
       },
       letterSpacing: {
         tighter: "-0.04em",
