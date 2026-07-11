@@ -308,7 +308,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   const Stat = ({ n, label, tone }: { n: number; label: string; tone: string }) => (
     <div className="rounded-xl border border-brand-100 p-3">
-      <p className={`text-2xl font-semibold tabular-nums ${tone}`}>{n}</p>
+      <p className={`text-2xl font-pixel tabular-nums ${tone}`}>{n}</p>
       <p className="text-xs text-brand-500 mt-0.5">{label}</p>
     </div>
   );
