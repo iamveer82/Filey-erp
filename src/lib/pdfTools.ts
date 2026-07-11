@@ -2354,6 +2354,16 @@ export async function decryptPdf(
 
 /* ───────────────────────────── OCR (tesseract.js) ─────────────────────── */
 
+// Vendored in public/tesseract/ — tesseract.js defaults fetch worker, core
+// wasm and traineddata from CDNs at runtime, which the Tauri CSP blocks and
+// offline mode can't reach. Local paths keep OCR working in both.
+const TESS_BASE = `${import.meta.env.BASE_URL}tesseract`;
+const TESS_OPTS = {
+  workerPath: `${TESS_BASE}/worker.min.js`,
+  corePath: `${TESS_BASE}/`,
+  langPath: TESS_BASE,
+};
+
 interface OcrWord {
   text: string;
   bbox: { x0: number; y0: number; x1: number; y1: number };
@@ -2382,7 +2392,7 @@ async function ocrPages(
   const { createWorker } = await import("tesseract.js");
   const data = new Uint8Array(await readBuf(file));
   const pdf = await pdfjs.getDocument({ data }).promise;
-  const worker = await createWorker("eng");
+  const worker = await createWorker("eng", 1, TESS_OPTS);
   const pages: { width: number; height: number; words: OcrWord[]; text: string }[] = [];
   try {
     for (let n = 1; n <= pdf.numPages; n++) {
@@ -2431,7 +2441,7 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
   const pdf = await pdfjs.getDocument({ data }).promise;
   const out = await PDFDocument.create();
   const font = await out.embedFont(StandardFonts.Helvetica);
-  const worker = await createWorker("eng");
+  const worker = await createWorker("eng", 1, TESS_OPTS);
   try {
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n);
