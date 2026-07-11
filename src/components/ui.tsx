@@ -191,7 +191,9 @@ export function MetricCard({
   formatValue?: (n: number) => string;
 }) {
   const display = rawValue !== undefined && formatValue ? formatValue(rawValue) : value;
-  const numRef = useFitText<HTMLParagraphElement>(display);
+  // Larger ceiling so the Geist Pixel numerals read as a display element;
+  // fit-text still shrinks long money amounts to fit the card.
+  const numRef = useFitText<HTMLParagraphElement>(display, 26, 13);
   return (
     <CardPrimitive className="p-4 h-full">
       <div className="flex items-start gap-3 h-full min-h-0">
