@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -220,14 +220,15 @@ export default function CommandPalette() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-ink/40 p-4 pt-[12vh]"
+      className="materialize-scrim fixed inset-0 z-[60] flex items-start justify-center bg-ink/40 p-4 pt-[12vh]"
       onClick={() => setOpen(false)}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+        style={{ "--materialize-origin": "top" } as CSSProperties}
+        className="materialize-surface w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-brand-200 px-4 dark:border-[#2C2C2E]">

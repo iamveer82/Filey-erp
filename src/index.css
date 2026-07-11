@@ -90,6 +90,11 @@
            dark:bg-[#0F1011] dark:text-[#F4F5F6];
     margin: 0;
     letter-spacing: -0.025em;
+    /* Optical sizing: Inter/Jakarta are variable fonts with an opsz axis —
+       let glyph shapes adapt to size the way Apple's system fonts do
+       (heavier optical weight small, refined large). Pure craft, no layout
+       cost. */
+    font-optical-sizing: auto;
     /* Inter-specific numeric alternates / tabular numbers */
     font-feature-settings: "cv01" 1, "cv03" 1, "cv11" 1, "ss03" 1;
   }
@@ -194,6 +199,36 @@
 }
 .animate-shimmer {
   animation: shimmer 2s infinite;
+}
+
+/* ── Materialize: the one sanctioned enter primitive (design.md §9). ──
+   Apple's rule is "materialize, don't just appear" — an overlay that pops
+   in with zero motion reads as a computer, not a surface arriving. Kept
+   deliberately quiet for a professional ERP: opacity + a 3% scale from the
+   anchor, ease-out, ≤200ms. No spring, no bounce, no hover motion — this is
+   a one-shot enter only. Reduced-motion drops the transform (fade only). */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* fast-out, gentle-settle */
+}
+@keyframes materialize-scrim {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes materialize-surface {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.materialize-scrim {
+  animation: materialize-scrim 160ms linear;
+}
+.materialize-surface {
+  animation: materialize-surface 200ms var(--ease-out);
+  transform-origin: var(--materialize-origin, center);
+}
+@media (prefers-reduced-motion: reduce) {
+  .materialize-surface {
+    animation: materialize-scrim 160ms linear; /* fade only, no transform */
+  }
 }
 
 /* Dot pattern background — neutralized (minimal theme). */

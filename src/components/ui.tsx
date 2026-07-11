@@ -662,7 +662,7 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+      className="materialize-scrim fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
       onClick={onClose}
     >
       <div
@@ -672,7 +672,7 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none",
+          "materialize-surface flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}
