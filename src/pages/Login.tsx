@@ -257,7 +257,7 @@ export default function Login() {
 
         <div className="relative flex items-center gap-3">
           <Logo size={56} />
-          <p className="text-2xl font-medium">Filey</p>
+          <p className="font-pixel text-2xl leading-none">Filey</p>
         </div>
 
         <div className="relative">
@@ -284,7 +284,7 @@ export default function Login() {
         <div className="w-full max-w-sm">
           <div className="flex lg:hidden flex-col items-center mb-8">
             <Logo size={104} />
-            <h1 className="text-2xl font-medium text-ink mt-3">Filey</h1>
+            <h1 className="font-pixel text-2xl leading-none text-ink mt-3">Filey</h1>
           </div>
 
           {screen === "form" ? (
