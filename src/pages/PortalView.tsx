@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase, invokeFn } from "../lib/supabase";
 import { money } from "../lib/format";
 import DocView, { type DocViewForm, type DocViewLabels } from "../components/DocView";
 import { splitItemMeta } from "../lib/docItems";
@@ -55,10 +55,10 @@ export default function PortalView() {
     setPaying(true);
     setPayErr(null);
     try {
-      const { data, error } = await supabase.functions.invoke("stripe", {
+      const { data, error } = (await invokeFn(supabase, "stripe", {
         body: { action: "pay_invoice", token: tokenFromHash() },
-      });
-      const res = data as { url?: string; error?: string } | null;
+      })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
+      const res = data;
       if (error || !res?.url)
         throw new Error(res?.error || error?.message || "Payment is not available yet.");
       window.location.href = res.url;

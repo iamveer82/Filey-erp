@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { supabase } from "./supabase";
+import { supabase, invokeFn } from "./supabase";
 
 export interface EmailConfig {
   host: string;
@@ -65,9 +65,9 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
 
   if (!supabase)
     throw new Error("Email is not available — cloud storage isn't configured.");
-  const { error } = await supabase.functions.invoke("send-email", {
+  const { error } = (await invokeFn(supabase, "send-email", {
     body: { to: msg.to, subject: msg.subject, html: msg.html },
-  });
+  })) as { error: { message: string } | null };
   if (error)
     throw new Error(
       "Could not send email. Make sure the send-email function is deployed " +

@@ -3,7 +3,7 @@
 // via the run-tool edge function (light tools) or lets a self-hosted worker
 // pick it up (heavy tools). Outputs land in the tool-outputs bucket — reuse
 // downloadBytes / signedUrl from toolStorage to fetch them.
-import { sb, isConfigured } from "./supabase";
+import { sb, isConfigured, invokeFn } from "./supabase";
 
 export type ToolEngine = "edge" | "worker";
 
@@ -56,9 +56,9 @@ export async function runServerTool(opts: {
 
   // 3a. light tools: invoke the edge function (it processes synchronously)
   if (engine === "edge") {
-    const { error: fErr } = await client.functions.invoke("run-tool", {
+    const { error: fErr } = (await invokeFn(client, "run-tool", {
       body: { jobId },
-    });
+    })) as { error: { message: string } | null };
     if (fErr) {
       await markError(jobId, fErr.message);
       throw fErr;

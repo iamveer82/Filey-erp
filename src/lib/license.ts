@@ -9,7 +9,7 @@
 // first, the paywall flips on at launch.
 
 import { invoke } from "@tauri-apps/api/core";
-import { supabase } from "./supabase";
+import { supabase, invokeFn } from "./supabase";
 import { isLocalMode } from "./dataMode";
 
 /** Flip to true at launch to actually gate desktop features. */
@@ -124,9 +124,9 @@ export async function activateThisDevice(): Promise<LicenseState> {
   const device_name =
     (hasTauri ? "Desktop" : "Browser") +
     (typeof navigator !== "undefined" ? ` · ${navigator.platform}` : "");
-  const { data, error } = await supabase.functions.invoke("stripe", {
+  const { data, error } = (await invokeFn(supabase, "stripe", {
     body: { action: "license_activate", fingerprint, device_name },
-  });
+  })) as { data: { token?: string; error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (!data?.token) throw new Error("Activation failed — no token returned.");
@@ -139,9 +139,9 @@ export async function activateThisDevice(): Promise<LicenseState> {
  *  The freed machine keeps working offline until it next re-activates. */
 export async function deactivateDevice(fingerprint: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = await supabase.functions.invoke("stripe", {
+  const { data, error } = (await invokeFn(supabase, "stripe", {
     body: { action: "license_deactivate", fingerprint },
-  });
+  })) as { data: { error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (fingerprint === (await deviceId())) await kvSet(TOKEN_KEY, "");
@@ -204,12 +204,13 @@ export async function releaseOrgDevice(id: string): Promise<void> {
 /** Buy the one-time Lite license (Stripe Checkout; invoice emailed). */
 export async function startLiteCheckout(): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = await supabase.functions.invoke("stripe", {
+  const { data, error } = (await invokeFn(supabase, "stripe", {
     body: { action: "checkout_lite" },
-  });
+  })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
-  window.location.href = data.url as string;
+  if (!data?.url) throw new Error("Checkout failed — no URL returned.");
+  window.location.href = data.url;
 }
 
 /* ---------------- tiers: free < lite (one-time) < pro (cloud) ---------------- */

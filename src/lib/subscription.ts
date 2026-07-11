@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { supabase, invokeFn } from "./supabase";
 
 /* Client side of Stripe billing. Reads the org's plan (RLS scopes it to the
  * member's own org) and invokes the `stripe` edge function for checkout /
@@ -80,7 +80,10 @@ export async function getSubscription(): Promise<Subscription> {
 
 async function invokeStripe(body: Record<string, unknown>): Promise<string> {
   if (!supabase) throw new Error("Not configured");
-  const { data, error } = await supabase.functions.invoke("stripe", { body });
+  const { data, error } = (await invokeFn(supabase, "stripe", { body })) as {
+    data: { url?: string; error?: string } | null;
+    error: { message: string } | null;
+  };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (!data?.url)
