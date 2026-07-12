@@ -1149,6 +1149,11 @@ alter table invoice_docs    add column if not exists quotation_id bigint referen
 -- Invoice UI columns (safe additive — live DB already has these; schema.sql drifted).
 alter table invoice_docs add column if not exists doc_title text;
 alter table invoice_docs add column if not exists po_number text;
+alter table invoice_docs add column if not exists payment_terms text;
+alter table invoice_docs add column if not exists po_date date;
+alter table invoice_docs add column if not exists date_of_supply date;
+alter table crm_customers add column if not exists credit_limit numeric(14,2);
+alter table crm_customers add column if not exists opening_balance numeric(14,2);
 alter table invoice_docs add column if not exists custom_columns jsonb;
 alter table invoice_docs add column if not exists unit_price_formula jsonb;
 alter table invoice_docs add column if not exists show_stamp boolean not null default false;

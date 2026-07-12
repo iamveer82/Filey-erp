@@ -1,4 +1,5 @@
 import { fmtDate, money } from "../lib/format";
+import { amountInWords } from "../lib/words";
 import { docTotals, docLineAmount } from "../lib/docItems";
 import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import type { CalcMode } from "../lib/money";
@@ -75,6 +76,8 @@ export interface DocViewForm {
   issue_date?: string | null;
   due_date?: string | null;
   po_number?: string | null;
+  po_date?: string | null;
+  date_of_supply?: string | null;
   tax_rate?: number | null;
   discount?: number | null;
   notes?: string | null;
@@ -205,6 +208,9 @@ export default function DocView({
             </div>
           </>
         )}
+        <p className="mt-2 text-[10px] leading-snug text-neutral-500 text-right">
+          {amountInWords(t.total, form.currency || "AED")}
+        </p>
       </div>
     ) : null;
 
@@ -261,6 +267,8 @@ export default function DocView({
       <p className="font-medium">{form.number}</p>
       <p>
         {issuedLabel} {fmtDate(form.issue_date)} · {dueLabel} {fmtDate(form.due_date)}
+        {form.date_of_supply && <> · Supply {fmtDate(form.date_of_supply)}</>}
+        {form.po_date && <> · PO Date {fmtDate(form.po_date)}</>}
       </p>
     </div>
   );
@@ -1035,6 +1043,9 @@ export default function DocView({
                 <span>Total ({form.currency || "AED"})</span>
                 <span>{m(grandTotal)}</span>
               </div>
+              <p className="mt-1 text-[10px] leading-snug text-neutral-500 text-right">
+                {amountInWords(grandTotal, form.currency || "AED")}
+              </p>
               {ccy !== "AED" && !!form.fx_rate && form.fx_rate > 0 && (
                 <div className="flex justify-between py-1 text-xs text-neutral-500">
                   <span>Equivalent</span>

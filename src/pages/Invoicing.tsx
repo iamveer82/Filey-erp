@@ -204,6 +204,19 @@ const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (n: number) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
+// Payment-terms presets — picking one autofills Due Date from Invoice Date.
+const PAYMENT_TERMS: { id: string; label: string; days: number }[] = [
+  { id: "receipt", label: "Due on Receipt", days: 0 },
+  { id: "net7", label: "Net 7", days: 7 },
+  { id: "net15", label: "Net 15", days: 15 },
+  { id: "net30", label: "Net 30", days: 30 },
+  { id: "net60", label: "Net 60", days: 60 },
+];
+const addDaysTo = (iso: string, n: number) =>
+  new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000)
+    .toISOString()
+    .slice(0, 10);
+
 const RESERVED_ITEM_COLUMNS = new Set([
   "description",
   "qty",
@@ -417,6 +430,9 @@ const editInvoice = async (id: number) => {
         issue_date: d.issue_date,
         due_date: d.due_date,
         po_number: d.po_number,
+        po_date: d.po_date,
+        date_of_supply: d.date_of_supply,
+        payment_terms: d.payment_terms,
         notes: d.notes,
         terms: d.terms,
         tax_rate: d.tax_rate,
@@ -519,6 +535,7 @@ const editInvoice = async (id: number) => {
         issue_date: today(),
         due_date: addDays(30),
         po_number: d.po_number,
+        payment_terms: d.payment_terms,
         notes: d.notes,
         terms: d.terms,
         tax_rate: d.tax_rate,
@@ -2165,10 +2182,41 @@ function Editor({
                     clearable={false}
                   />
                 </Field>
+                <Field label="Payment Terms">
+                  <select
+                    className="select"
+                    value={form.payment_terms || ""}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      const days = PAYMENT_TERMS.find((t) => t.id === id)?.days;
+                      setForm({
+                        ...form,
+                        payment_terms: id || undefined,
+                        due_date:
+                          days == null || !form.issue_date
+                            ? form.due_date
+                            : addDaysTo(form.issue_date, days),
+                      });
+                    }}
+                  >
+                    <option value="">Custom / none</option>
+                    {PAYMENT_TERMS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Due Date (optional)">
                   <DateField
                     value={form.due_date ?? ""}
                     onChange={(v) => set("due_date", v)}
+                  />
+                </Field>
+                <Field label="Date of Supply (optional)">
+                  <DateField
+                    value={form.date_of_supply ?? ""}
+                    onChange={(v) => set("date_of_supply", v)}
                   />
                 </Field>
                 <Field label="PO Number (optional)">
@@ -2177,6 +2225,12 @@ function Editor({
                     placeholder="e.g. PO-2024-001"
                     value={form.po_number || ""}
                     onChange={(e) => set("po_number", e.target.value)}
+                  />
+                </Field>
+                <Field label="PO Date (optional)">
+                  <DateField
+                    value={form.po_date ?? ""}
+                    onChange={(v) => set("po_date", v)}
                   />
                 </Field>
                 <Field label="Currency">

@@ -513,6 +513,8 @@ function CustomerModal({
     country_code: string;
     email: string;
     phone: string;
+    credit_limit: string;
+    opening_balance: string;
     custom_fields: Record<string, string>;
   };
   const blank: FormState = {
@@ -525,6 +527,8 @@ function CustomerModal({
     country_code: "AE",
     email: "",
     phone: "",
+    credit_limit: "",
+    opening_balance: "",
     custom_fields: {},
   };
   const [f, setF] = useState<FormState>(blank);
@@ -550,6 +554,8 @@ function CustomerModal({
         country_code: edit.country_code ?? "AE",
         email: edit.email ?? "",
         phone: edit.phone ?? "",
+        credit_limit: edit.credit_limit != null ? String(edit.credit_limit) : "",
+        opening_balance: edit.opening_balance != null ? String(edit.opening_balance) : "",
         custom_fields: edit.custom_fields ?? {},
       };
       setF(next);
@@ -594,6 +600,9 @@ function CustomerModal({
         city: f.city.trim() || undefined,
         country_subdivision: f.country_subdivision || undefined,
         country_code: f.country_code.trim() || undefined,
+        credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
+        opening_balance:
+          f.opening_balance.trim() === "" ? undefined : Number(f.opening_balance),
         phone_e164: e164 ?? undefined,
         custom_fields:
           Object.keys(f.custom_fields || {}).length > 0
@@ -700,6 +709,30 @@ function CustomerModal({
                 setF({ ...f, country_code: e.target.value.toUpperCase() })
               }
               placeholder="AE"
+            />
+          </Field>
+        </div>
+        {/* Credit & balance (Vyapar parity). Opening balance: + = they owe you. */}
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="Credit limit (AED)">
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={f.credit_limit}
+              onChange={(e) => setF({ ...f, credit_limit: e.target.value })}
+              placeholder="e.g. 100000"
+            />
+          </Field>
+          <Field label="Opening balance (AED)">
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={f.opening_balance}
+              onChange={(e) => setF({ ...f, opening_balance: e.target.value })}
+              placeholder="+ receivable / − payable"
             />
           </Field>
         </div>

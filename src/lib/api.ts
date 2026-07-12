@@ -186,6 +186,10 @@ export interface CrmCustomer {
   country_subdivision?: string; // emirate (ISO 3166-2:AE)
   country_code?: string;        // default AE
   segment?: string;
+  /** Credit ceiling in AED — UI warns when outstanding exceeds it. */
+  credit_limit?: number;
+  /** Balance carried in from before Filey: + = they owe you, − = you owe them. */
+  opening_balance?: number;
   custom_fields?: Record<string, string>;
   /** Per-customer bank details (BankInfo shape: bank_name, account_number, …). */
   bank_details?: Record<string, string>;
@@ -280,6 +284,12 @@ export interface InvoiceDoc {
   notes?: string;
   terms?: string;
   po_number?: string;
+  /** Buyer PO date (Vyapar parity; optional). */
+  po_date?: string;
+  /** UAE VAT: date goods/services were supplied, when ≠ invoice date. */
+  date_of_supply?: string;
+  /** Payment-terms preset id (e.g. "net30") — drives due_date autofill. */
+  payment_terms?: string;
   tax_rate: number;
   discount: number;
   quotation_id?: number;
