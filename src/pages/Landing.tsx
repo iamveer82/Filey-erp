@@ -62,7 +62,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <Logo size={34} />
-            <span className="font-medium text-lg font-medium">Filey</span>
+            <span className="font-pixel text-lg leading-none">Filey</span>
           </div>
           <div className="flex items-center gap-2">
             <button
