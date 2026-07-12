@@ -179,8 +179,18 @@ export default function CustomerDetail() {
           />
           <StatCard
             label="Outstanding"
-            value={aed(outstanding)}
-            hint={outstanding > 0 ? "Balance due" : "All settled"}
+            value={aed(outstanding + (customer?.opening_balance || 0))}
+            hint={
+              customer?.credit_limit
+                ? outstanding + (customer?.opening_balance || 0) > customer.credit_limit
+                  ? `OVER credit limit ${aed(customer.credit_limit)}`
+                  : `Credit limit ${aed(customer.credit_limit)}`
+                : (customer?.opening_balance || 0) !== 0
+                  ? `Incl. opening balance ${aed(customer!.opening_balance!)}`
+                  : outstanding > 0
+                    ? "Balance due"
+                    : "All settled"
+            }
             icon={<Wallet size={18} />}
           />
           <StatCard
