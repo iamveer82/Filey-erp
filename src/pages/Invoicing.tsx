@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -809,6 +809,7 @@ const editInvoice = async (id: number) => {
           saving={saving}
           onEditCompany={() => setCompanyOpen(true)}
           partyLabel={partyLabel}
+          docs={docs}
         />
       </>
     );
@@ -1417,6 +1418,7 @@ function Editor({
   saving,
   onEditCompany,
   partyLabel,
+  docs,
 }: {
   form: Form;
   setForm: (f: Form) => void;
@@ -1427,6 +1429,7 @@ function Editor({
   saving: boolean;
   onEditCompany: () => void;
   partyLabel: string;
+  docs: InvoiceDocSummary[];
 }) {
   const { toast, confirm } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
@@ -1491,6 +1494,21 @@ function Editor({
     }
   };
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v });
+
+  // Per-customer outstanding (Vyapar "BAL:") — summed from issued, unpaid
+  // invoices already loaded for the list. Keyed by name; docs store the same
+  // customer_name applyCustomer writes, so lookup by that string.
+  const custBalance = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of docs) {
+      if (d.status === "draft" || d.status === "paid") continue;
+      const key = (d.customer_name || "").trim().toLowerCase();
+      if (key) m.set(key, (m.get(key) || 0) + (d.balance ?? 0));
+    }
+    return m;
+  }, [docs]);
+  const balFor = (name?: string | null) =>
+    custBalance.get((name || "").trim().toLowerCase()) || 0;
 
   const [designing, setDesigning] = useState(false);
   const [customTemplates, setCustomTemplates] =
@@ -2013,11 +2031,15 @@ function Editor({
                           ? "Select saved customer…"
                           : "No saved customers yet"}
                       </option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.company || c.name}
-                        </option>
-                      ))}
+                      {customers.map((c) => {
+                        const bal = balFor(c.company || c.name);
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.company || c.name}
+                            {bal > 0 ? ` — BAL ${Math.round(bal).toLocaleString()}` : ""}
+                          </option>
+                        );
+                      })}
                     </select>
                     <button
                       type="button"
@@ -2036,6 +2058,19 @@ function Editor({
                     value={form.customer_name}
                     onChange={(e) => set("customer_name", e.target.value)}
                   />
+                  {balFor(form.customer_name) > 0 &&
+                    (() => {
+                      const bal = balFor(form.customer_name);
+                      const limit = customers.find((c) => c.id === form.customer_id)
+                        ?.credit_limit;
+                      const over = limit != null && limit > 0 && bal > limit;
+                      return (
+                        <p className={`text-xs mt-1 ${over ? "text-danger" : "text-brand-500"}`}>
+                          Outstanding: {money(bal, "AED")}
+                          {over && ` — over credit limit (${money(limit!, "AED")})`}
+                        </p>
+                      );
+                    })()}
                 </Field>
                 <Field label="Billing Address">
                   <textarea
