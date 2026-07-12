@@ -70,8 +70,11 @@ async function check(toast: Toast, firstPass: boolean) {
 
   if (!firstPass) return;
 
-  // Low-stock — once per session, summarising how many are at/below reorder.
-  if (on("notif.lowstock") && !sessionStorage.getItem("notif.lowstock.done")) {
+  // Low-stock — at most once per day. sessionStorage resets on every app
+  // launch (fresh webview), which made this re-toast on each open; a
+  // localStorage date key survives restarts.
+  const today = new Date().toISOString().slice(0, 10);
+  if (on("notif.lowstock") && localStorage.getItem("notif.lowstock.day") !== today) {
     const low = (await erp.products().catch(() => [])).filter(
       (p) => p.quantity <= p.reorder_level
     );
@@ -81,7 +84,7 @@ async function check(toast: Toast, firstPass: boolean) {
         message: `${low.length} product${low.length > 1 ? "s are" : " is"} at or below reorder level.`,
         to: "/inventory",
       });
-    sessionStorage.setItem("notif.lowstock.done", "1");
+    localStorage.setItem("notif.lowstock.day", today);
   }
 
   // Weekly summary — at most once per week, on/after Monday.
