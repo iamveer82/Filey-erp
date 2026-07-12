@@ -3875,6 +3875,18 @@ export const pos = {
       await sDelete("purchase_orders", poId);
     }, undefined),
   /* ---- payments ---- */
+  /** All PO payments in one query — dashboard aggregates payable per PO. */
+  allPayments: () =>
+    readCached<{ po_id: number; amount: number }[]>(
+      "po_payments:all",
+      async () => {
+        const { data } = await sb().from("po_payments").select("po_id,amount");
+        return ((data ?? []) as { po_id: number | string; amount: number | string }[]).map(
+          (p) => ({ po_id: Number(p.po_id), amount: Number(p.amount) || 0 })
+        );
+      },
+      []
+    ),
   payments: (poId: number) =>
     readCached<PoPayment[]>(
       `po_payments:${poId}`,

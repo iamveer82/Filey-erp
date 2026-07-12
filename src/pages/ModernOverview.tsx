@@ -83,6 +83,7 @@ export default function ModernOverview() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [quotations, setQuotations] = useState<QuotationSummary[]>([]);
   const [posList, setPosList] = useState<PoSummary[]>([]);
+  const [poPayments, setPoPayments] = useState<{ po_id: number; amount: number }[]>([]);
   const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -105,7 +106,7 @@ export default function ModernOverview() {
   const load = async () => {
     setError("");
     try {
-      const [p, o, i, e, c, q, po, comp] = await Promise.all([
+      const [p, o, i, e, c, q, po, comp, poPays] = await Promise.all([
         erp.products().catch(() => [] as Product[]),
         erp.orders().catch(() => [] as Order[]),
         billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
@@ -114,6 +115,7 @@ export default function ModernOverview() {
         quotes.listDocs().catch(() => [] as QuotationSummary[]),
         pos.list().catch(() => [] as PoSummary[]),
         billing.getCompany().catch(() => null),
+        pos.allPayments().catch(() => [] as { po_id: number; amount: number }[]),
       ]);
       setProducts(p);
       setOrders(o);
@@ -122,6 +124,7 @@ export default function ModernOverview() {
       setCustomers(c);
       setQuotations(q);
       setPosList(po);
+      setPoPayments(poPays);
       setCompanyName((comp as { name?: string } | null)?.name || "");
     } catch (err: unknown) {
       setError((err as Error)?.message || "Failed to load overview data");
@@ -178,6 +181,38 @@ export default function ModernOverview() {
     const total = issued.reduce((s, i) => s + (i.total || 0), 0);
     return { collected, outstanding, total, count: issued.length };
   }, [invoices]);
+
+  // Vyapar-style receivable/payable: who owes you (unpaid invoice balances,
+  // per party) and what you owe suppliers (PO totals minus payments made).
+  const receivable = useMemo(() => {
+    const parties = new Set<string>();
+    let total = 0;
+    for (const i of invoices) {
+      if (i.status === "draft" || i.status === "paid") continue;
+      const bal = i.balance ?? 0;
+      if (bal <= 0) continue;
+      total += bal;
+      parties.add((i.customer_name || "").trim().toLowerCase());
+    }
+    return { total, parties: parties.size };
+  }, [invoices]);
+
+  const payable = useMemo(() => {
+    const paidByPo = new Map<number, number>();
+    for (const p of poPayments)
+      paidByPo.set(p.po_id, (paidByPo.get(p.po_id) || 0) + p.amount);
+    const parties = new Set<string>();
+    let total = 0;
+    for (const po of posList) {
+      const s = (po.status || "").toLowerCase();
+      if (["draft", "cancelled", "canceled"].includes(s)) continue;
+      const due = Math.max(0, (po.total || 0) - (paidByPo.get(po.id) || 0));
+      if (due <= 0) continue;
+      total += due;
+      parties.add((po.supplier_name || "").trim().toLowerCase());
+    }
+    return { total, parties: parties.size };
+  }, [posList, poPayments]);
 
   const profit = useMemo(() => {
     // PO totals shown as an informational "commitment" line, not deducted
@@ -343,7 +378,7 @@ export default function ModernOverview() {
       {show("kpis") && (
         <section
           aria-labelledby="kpi-heading"
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4"
+          className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4"
         >
           <h2 id="kpi-heading" className="sr-only">
             Key performance indicators
@@ -367,11 +402,27 @@ export default function ModernOverview() {
           />
           <KpiMetric
             loading={loading}
-            label="Outstanding"
-            value={revenue.outstanding}
+            label={
+              receivable.parties > 0
+                ? `Receivable · ${receivable.parties} ${receivable.parties === 1 ? "party" : "parties"}`
+                : "Receivable"
+            }
+            value={receivable.total}
             format={aed}
             icon={<AppIcon name="outstanding" className="w-5 h-5" />}
             iconClass="bg-danger/15 text-danger"
+          />
+          <KpiMetric
+            loading={loading}
+            label={
+              payable.parties > 0
+                ? `Payable · ${payable.parties} ${payable.parties === 1 ? "party" : "parties"}`
+                : "Payable"
+            }
+            value={payable.total}
+            format={aed}
+            icon={<AppIcon name="purchase" className="w-5 h-5" />}
+            iconClass="bg-warning/15 text-warning"
           />
           <KpiMetric
             loading={loading}
