@@ -331,7 +331,7 @@ export default function Reports() {
       <div ref={pdfRef} className="invoice-print">
         {/* ── Summary cards ── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 no-print">
-          <div className="relative overflow-hidden rounded-full bg-primary-400 p-6 text-ink">
+          <div className="relative overflow-hidden rounded-2xl bg-primary-400 p-6 text-ink">
             <div className="flex items-center justify-between mb-3">
               <DollarSign size={22} className="text-ink/70" />
               <span className="pill bg-ink/15 text-ink text-[11px]">Billed (all)</span>
@@ -352,7 +352,7 @@ export default function Reports() {
             </p>
           </div>
           <div
-            className={`rounded-md p-6 text-white ${grossProfit >= 0 ? "bg-success" : "bg-danger"}`}
+            className={`rounded-2xl p-6 text-white ${grossProfit >= 0 ? "bg-success" : "bg-danger"}`}
           >
             <div className="flex items-center justify-between mb-3">
               <PiggyBank size={22} className="text-white/70" />
