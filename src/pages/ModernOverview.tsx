@@ -425,7 +425,7 @@ export default function ModernOverview() {
           ) : (
             <>
               <div className="flex items-baseline gap-3 mb-2">
-                <span className="text-2xl font-pixel text-ink tabular-nums">
+                <span className="text-2xl font-semibold text-ink tabular-nums">
                   {orderStats.total}
                 </span>
                 <span className="text-sm text-brand-500">orders in window</span>

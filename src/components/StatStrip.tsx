@@ -56,7 +56,7 @@ export default function StatStrip({
               {s.change}
             </div>
           )}
-          <div className="w-full flex-none font-pixel text-2xl text-ink tabular-nums">
+          <div className="w-full flex-none text-2xl font-medium text-ink tabular-nums">
             {s.value}
           </div>
         </div>

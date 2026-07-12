@@ -336,7 +336,7 @@ export default function Reports() {
               <DollarSign size={22} className="text-ink/70" />
               <span className="pill bg-ink/15 text-ink text-[11px]">Billed (all)</span>
             </div>
-            <p className="text-3xl font-pixel">{aed(totalRevenue)}</p>
+            <p className="text-3xl font-medium">{aed(totalRevenue)}</p>
             <p className="text-sm font-medium text-ink/60 mt-1">Total Revenue</p>
           </div>
           <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#F4F5F6]">
@@ -346,7 +346,7 @@ export default function Reports() {
                 Expenses + Payroll
               </span>
             </div>
-            <p className="text-3xl font-pixel">{aed(totalExpenses + payrollCost)}</p>
+            <p className="text-3xl font-medium">{aed(totalExpenses + payrollCost)}</p>
             <p className="text-sm font-medium text-brand-500 dark:text-[#B6BAC1] mt-1">
               Total Expenses
             </p>
@@ -360,7 +360,7 @@ export default function Reports() {
                 Revenue − Costs
               </span>
             </div>
-            <p className="text-3xl font-pixel">{aed(grossProfit)}</p>
+            <p className="text-3xl font-medium">{aed(grossProfit)}</p>
             <p className="text-sm font-medium text-white/60 mt-1">Net Profit</p>
           </div>
         </div>

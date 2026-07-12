@@ -100,7 +100,7 @@ export default function AdvanceCard({
       </div>
 
       <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-pixel text-ink">{aed(total)}</span>
+        <span className="text-2xl font-semibold text-ink">{aed(total)}</span>
         <span className="text-xs text-brand-400">
           credit balance
           {rows.length
