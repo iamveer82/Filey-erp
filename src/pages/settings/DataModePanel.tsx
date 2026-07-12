@@ -594,14 +594,21 @@ export default function DataModePanel() {
               <ul className="text-brand-500 grid grid-cols-2 gap-x-6 gap-y-0.5">
                 {result
                   .filter((r) => r.rows > 0 || r.error)
-                  .map((r) => (
-                    <li key={r.table} className="flex justify-between">
-                      <span>{r.table}</span>
-                      <span className={r.error ? "text-danger" : "tabular-nums"}>
-                        {r.error ? "failed" : r.rows}
-                      </span>
-                    </li>
-                  ))}
+                  .map((r) => {
+                    const skipped = r.error?.startsWith("skipped");
+                    return (
+                      <li key={r.table} className="flex justify-between" title={r.error}>
+                        <span>{r.table}</span>
+                        <span
+                          className={
+                            r.error ? (skipped ? "text-brand-400" : "text-danger") : "tabular-nums"
+                          }
+                        >
+                          {r.error ? (skipped ? "already in cloud" : "failed") : r.rows}
+                        </span>
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           )}
