@@ -116,6 +116,14 @@ export async function verifyStoredLicense(): Promise<LicenseState> {
   }
 }
 
+/** Offline/local mode is the paid Lite feature: cloud is the free default,
+ *  keeping data on-device needs a desktop license. Always true while
+ *  ENFORCE_LICENSING is off (pre-launch), so nothing is gated yet. */
+export async function canUseLocalMode(): Promise<boolean> {
+  if (!ENFORCE_LICENSING) return true;
+  return (await verifyStoredLicense()).valid;
+}
+
 /** Activate this device against the signed-in account's license (one server
  *  call; offline forever after). Stores the signed token on success. */
 export async function activateThisDevice(): Promise<LicenseState> {

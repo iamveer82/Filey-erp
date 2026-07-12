@@ -2,8 +2,10 @@ import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { MODULES } from "../../modules/registry";
 import { Badge, Modal, Field } from "../../components/ui";
-import { Plus, Trash2, Building } from "lucide-react";
+import { Plus, Trash2, Building, Cloud } from "lucide-react";
 import { org, type OrgMember, type Organization, type Invitation } from "../../lib/api";
+import { isLocalMode } from "../../lib/dataMode";
+import { supabase } from "../../lib/supabase";
 import { useEffect, useState } from "react";
 
 /* ---------------- Users & Roles (Organization) ---------------- */
@@ -23,6 +25,32 @@ export default function UsersRoles() {
   const [accessFor, setAccessFor] = useState<OrgMember | null>(null);
   const [busy, setBusy] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+
+  // Desktop/local mode: team data lives in the cloud, so identity comes from
+  // the separately signed-in cloud session (sync card), not the local shim.
+  const local = isLocalMode();
+  const [cloudUser, setCloudUser] = useState<{ id: string; email?: string } | null>(null);
+  const [cloudOrgId, setCloudOrgId] = useState<string>("default");
+  const [checked, setChecked] = useState(!local);
+  useEffect(() => {
+    if (!local || !supabase) {
+      setChecked(true);
+      return;
+    }
+    supabase.auth.getSession().then(async ({ data }) => {
+      const u = data.session?.user;
+      setCloudUser(u ? { id: u.id, email: u.email ?? undefined } : null);
+      if (u) {
+        const { data: p } = await supabase!
+          .from("profiles")
+          .select("org_id")
+          .eq("id", u.id)
+          .maybeSingle();
+        setCloudOrgId(p?.org_id ?? "default");
+      }
+      setChecked(true);
+    });
+  }, [local]);
 
   const load = () => {
     org
@@ -48,16 +76,31 @@ export default function UsersRoles() {
       .then(setMyInvites)
       .catch(() => setMyInvites([]));
   };
-  useEffect(load, []);
+  useEffect(() => {
+    if (!local || cloudUser) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [local, cloudUser]);
 
-  const currentOrg = profile?.org_id || "default";
+  const uid = local ? cloudUser?.id : user?.id;
+  const currentOrg = (local ? cloudOrgId : profile?.org_id) || "default";
   const personal = currentOrg === "default" || !o;
   const myRole =
-    members.find((m) => m.user_id === user?.id)?.role ?? (personal ? "owner" : "staff");
+    members.find((m) => m.user_id === uid)?.role ?? (personal ? "owner" : "staff");
   const isAdmin = personal || ["owner", "admin"].includes(myRole);
 
   const switchOrg = async (id: string) => {
-    await updateProfile({ org_id: id });
+    if (local) {
+      // The cloud profile's org_id is what current_org()/RLS key off — the
+      // local shim profile has no cloud meaning.
+      const { error } = await supabase!
+        .from("profiles")
+        .update({ org_id: id })
+        .eq("id", cloudUser!.id);
+      if (error) throw new Error(error.message);
+      setCloudOrgId(id);
+    } else {
+      await updateProfile({ org_id: id });
+    }
     setName("");
     setTimeout(load, 150);
   };
@@ -104,6 +147,28 @@ export default function UsersRoles() {
     }
   };
 
+  // Local mode without a connected cloud account: nothing to manage yet.
+  if (local && checked && !cloudUser) {
+    return (
+      <div className="card">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-primary-100 text-ink p-2.5">
+            <Cloud size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-ink">Connect a cloud account first</p>
+            <p className="text-sm text-brand-500 mt-0.5">
+              Teams live in the cloud. Connect (or create) your Filey cloud
+              account under <b>Settings → Data &amp; Storage → Cloud sync</b>,
+              then come back here to create your organization and invite your
+              team. Your data keeps working offline; it also syncs to the team.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="card">
@@ -118,7 +183,9 @@ export default function UsersRoles() {
             <p className="text-sm text-brand-500 mt-0.5">
               {personal
                 ? "You're working solo. Create an organization to invite a team and share data."
-                : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
+                : local
+                  ? "Invite teammates by email. Business records sync to the whole team automatically; your files stay private."
+                  : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
             </p>
           </div>
         </div>

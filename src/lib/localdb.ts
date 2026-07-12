@@ -40,18 +40,33 @@ async function saveColl(coll: string, rows: Row[]): Promise<void> {
   else localStorage.setItem(key, json);
 }
 
+/** Overwrite a collection from the cloud (pull-sync) WITHOUT journalling —
+ *  journalling it would echo the pulled rows straight back up on the next
+ *  push. Returns true when the stored data actually changed. */
+export async function replaceColl(coll: string, rows: Row[]): Promise<boolean> {
+  const next = JSON.stringify(rows);
+  if (JSON.stringify(await loadColl(coll)) === next) return false;
+  const key = "localdb:" + coll;
+  if (hasTauri) await invoke("cache_set", { key, value: next });
+  else localStorage.setItem(key, next);
+  return true;
+}
+
 const nextId = (rows: Row[]): number =>
   rows.reduce((m, r) => (typeof r.id === "number" && r.id > m ? r.id : m), 0) + 1;
 
 // ---- sync journal ----------------------------------------------------------
-// Records which collections changed (and which row ids were deleted) since the
-// last cloud push, so sync.ts can upload only what moved. Presence of a table
-// key = dirty; `v` bumps on every write so the pusher can detect writes that
+// Records which collections changed — per row: changed ids + deleted ids —
+// since the last cloud push, so sync.ts uploads only the rows that moved.
+// Row-level matters once several users/devices share one cloud org: pushing a
+// whole collection would overwrite teammates' newer rows with stale copies.
+// Presence of a table key = dirty; `all` = push every row (first seed, legacy
+// journals); `v` bumps on every write so the pusher can detect writes that
 // landed mid-sync and keep the journal instead of clearing it.
 
 export type SyncJournal = {
   v: number;
-  tables: Record<string, { deleted: any[] }>;
+  tables: Record<string, { all?: boolean; changed: any[]; deleted: any[] }>;
 };
 
 const JOURNAL_KEY = "syncjournal";
@@ -62,7 +77,18 @@ async function journalLoad(): Promise<SyncJournal> {
       ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
       : localStorage.getItem(JOURNAL_KEY);
     const j = raw ? JSON.parse(raw) : null;
-    if (j && typeof j.v === "number" && j.tables) return j as SyncJournal;
+    if (j && typeof j.v === "number" && j.tables) {
+      for (const t of Object.keys(j.tables)) {
+        const e = j.tables[t];
+        // Journals written before row-level tracking meant "whole collection".
+        if (!Array.isArray(e.changed)) {
+          e.changed = [];
+          e.all = true;
+        }
+        if (!Array.isArray(e.deleted)) e.deleted = [];
+      }
+      return j as SyncJournal;
+    }
   } catch {
     /* corrupt journal → start fresh; worst case a full re-push (idempotent) */
   }
@@ -75,16 +101,25 @@ async function journalSave(j: SyncJournal): Promise<void> {
   else localStorage.setItem(JOURNAL_KEY, json);
 }
 
-/** Mark a collection dirty (optionally recording deleted row ids) and notify
- *  the auto-sync scheduler. No-op for collections the cloud doesn't take. */
-export async function journalMark(coll: string, deletedIds?: any[]): Promise<void> {
+/** Mark rows dirty and notify the auto-sync scheduler. Bare call (no opts) or
+ *  `all: true` marks the whole collection. `silent` skips the write event —
+ *  used when re-marking failed pushes, so a permanently bad row can't put the
+ *  scheduler in a hot retry loop. No-op for collections the cloud doesn't take. */
+export async function journalMark(
+  coll: string,
+  opts?: { changed?: any[]; deleted?: any[]; all?: boolean; silent?: boolean }
+): Promise<void> {
   if (!PUSH_SET.has(coll)) return;
   const j = await journalLoad();
   j.v++;
-  const entry = (j.tables[coll] ??= { deleted: [] });
-  for (const id of deletedIds ?? []) if (id != null) entry.deleted.push(id);
+  const entry = (j.tables[coll] ??= { changed: [], deleted: [] });
+  if (opts?.all || (!opts?.changed && !opts?.deleted)) entry.all = true;
+  for (const id of opts?.changed ?? [])
+    if (id != null && !entry.changed.includes(id)) entry.changed.push(id);
+  for (const id of opts?.deleted ?? [])
+    if (id != null && !entry.deleted.includes(id)) entry.deleted.push(id);
   await journalSave(j);
-  if (typeof window !== "undefined")
+  if (!opts?.silent && typeof window !== "undefined")
     window.dispatchEvent(new Event("filey:local-write"));
 }
 
@@ -261,7 +296,7 @@ class LocalBuilder implements PromiseLike<Result> {
           written.push(row);
         }
         await saveColl(this.coll, rows);
-        await journalMark(this.coll);
+        await journalMark(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "update") {
         const patch = this.payload[0] || {};
@@ -275,13 +310,13 @@ class LocalBuilder implements PromiseLike<Result> {
           return r;
         });
         await saveColl(this.coll, rows);
-        await journalMark(this.coll);
+        await journalMark(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "delete") {
         const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
         await saveColl(this.coll, rows);
-        await journalMark(this.coll, removed.map((r) => r.id));
+        await journalMark(this.coll, { deleted: removed.map((r) => r.id) });
         result = null;
       }
 

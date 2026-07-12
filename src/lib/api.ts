@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { sb, isConfigured } from "./supabase";
+import { sb, isConfigured, supabase } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { quotationTotals, invoiceTotals } from "./money";
 import { splitItemMeta } from "./docItems";
@@ -531,9 +531,10 @@ async function online<T>(run: () => Promise<T>): Promise<T> {
 async function sList<T>(
   table: string,
   order?: { col: string; asc: boolean }[],
-  select = "*"
+  select = "*",
+  client: any = null
 ): Promise<T[]> {
-  let q: any = sb().from(table).select(select);
+  let q: any = (client ?? sb()).from(table).select(select);
   for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
   const { data, error } = await q;
   if (error) throw error;
@@ -541,9 +542,10 @@ async function sList<T>(
 }
 async function sInsert(
   table: string,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  client: any = null
 ): Promise<number> {
-  const { data, error } = await sb()
+  const { data, error } = await (client ?? sb())
     .from(table)
     .insert(row)
     .select("id")
@@ -554,14 +556,26 @@ async function sInsert(
 async function sUpdate(
   table: string,
   id: number,
-  patch: Record<string, unknown>
+  patch: Record<string, unknown>,
+  client: any = null
 ): Promise<void> {
-  const { error } = await sb().from(table).update(patch).eq("id", id);
+  const { error } = await (client ?? sb()).from(table).update(patch).eq("id", id);
   if (error) throw error;
 }
-async function sDelete(table: string, id: number): Promise<void> {
-  const { error } = await sb().from(table).delete().eq("id", id);
+async function sDelete(table: string, id: number, client: any = null): Promise<void> {
+  const { error } = await (client ?? sb()).from(table).delete().eq("id", id);
   if (error) throw error;
+}
+
+/** Org/team data lives ONLY in the cloud. In local mode sb() is the on-device
+ *  shim, so team management must talk to the real supabase-js client (signed
+ *  in via the sync card). Cloud mode: same client as everything else. */
+function cdb(): any {
+  if (isLocalMode()) {
+    if (!supabase) throw new Error("Cloud isn't configured in this build.");
+    return supabase;
+  }
+  return sb();
 }
 
 /** Toggle a record's org-sharing. Shared rows are visible (read-only) to
@@ -4272,7 +4286,7 @@ export const org = {
     readCached<Organization | null>(
       "organization",
       async () => {
-        const rows = await sList<Organization>("organizations");
+        const rows = await sList<Organization>("organizations", undefined, "*", cdb());
         return rows[0] ?? null;
       },
       null
@@ -4282,8 +4296,8 @@ export const org = {
       "org_members",
       async () => {
         const [mems, profs] = await Promise.all([
-          sList<any>("org_members", [{ col: "id", asc: true }]),
-          sList<any>("profiles"),
+          sList<any>("org_members", [{ col: "id", asc: true }], "*", cdb()),
+          sList<any>("profiles", undefined, "*", cdb()),
         ]);
         const byId = new Map(profs.map((p) => [p.id, p]));
         return mems.map((m) => ({
@@ -4301,53 +4315,56 @@ export const org = {
   /** Create a new organization; returns its id. */
   create: (name: string) =>
     online(async () => {
-      const id = await sInsert("organizations", { name });
-      await sInsert("org_members", {
-        org_id: String(id),
-        role: "owner",
-      });
+      const id = await sInsert("organizations", { name }, cdb());
+      await sInsert("org_members", { org_id: String(id), role: "owner" }, cdb());
       return String(id);
     }),
   setRole: (memberId: number, role: string) =>
     write(
       { k: "update", t: "org_members", id: memberId, row: { role } },
-      () => sUpdate("org_members", memberId, { role }),
+      () => sUpdate("org_members", memberId, { role }, cdb()),
       undefined
     ),
   setMemberModules: (memberId: number, modules: string[] | null) =>
     write(
       { k: "update", t: "org_members", id: memberId, row: { modules } },
-      () => sUpdate("org_members", memberId, { modules }),
+      () => sUpdate("org_members", memberId, { modules }, cdb()),
       undefined
     ),
   remove: (memberId: number) =>
     write({ k: "delete", t: "org_members", id: memberId }, () =>
-      sDelete("org_members", memberId), undefined
+      sDelete("org_members", memberId, cdb()), undefined
     ),
   // ----- invitations -----
   invites: () =>
     readCached<Invitation[]>(
       "invitations",
-      () => sList<Invitation>("invitations", [{ col: "created_at", asc: false }]),
+      () =>
+        sList<Invitation>(
+          "invitations",
+          [{ col: "created_at", asc: false }],
+          "*",
+          cdb()
+        ),
       []
     ),
   invite: (email: string, role: string, modules: string[] | null) =>
     online(() =>
-      sInsert("invitations", {
-        email: email.trim().toLowerCase(),
-        role,
-        modules,
-      }).then(() => undefined)
+      sInsert(
+        "invitations",
+        { email: email.trim().toLowerCase(), role, modules },
+        cdb()
+      ).then(() => undefined)
     ),
   revokeInvite: (id: string) =>
     online(async () => {
-      const { error } = await sb().from("invitations").delete().eq("id", id);
+      const { error } = await cdb().from("invitations").delete().eq("id", id);
       if (error) throw error;
     }),
   /** Pending invitations addressed to the signed-in user's email. */
   myInvites: () =>
     online(async () => {
-      const { data, error } = await sb()
+      const { data, error } = await cdb()
         .from("invitations")
         .select("*")
         .eq("status", "pending");
@@ -4356,7 +4373,7 @@ export const org = {
     }),
   acceptInvite: (id: string) =>
     online(async () => {
-      const { error } = await sb().rpc("accept_invitation", { invite: id });
+      const { error } = await cdb().rpc("accept_invitation", { invite: id });
       if (error) throw error;
     }),
 };

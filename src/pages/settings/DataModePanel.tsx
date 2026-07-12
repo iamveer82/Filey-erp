@@ -7,9 +7,11 @@ import {
   setAutoSyncEnabled,
   getSyncStatus,
   syncNow,
+  syncCycle,
   markAllForSync,
   cloudSessionEmail,
   cloudSignIn,
+  cloudSignUp,
   cloudSignOut,
   type SyncStatus,
 } from "../../lib/sync";
@@ -19,6 +21,7 @@ import {
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
+import { canUseLocalMode, ENFORCE_LICENSING } from "../../lib/license";
 import {
   hasTauri,
   pickFolder,
@@ -33,17 +36,19 @@ import {
   restoreAll,
 } from "../../lib/localPaths";
 
-// Cloud sync card (local mode only): connect a cloud account, and every local
-// change uploads automatically so the web version stays current. One-way,
-// this device wins — web edits to the same records are overwritten.
+// Cloud sync card (local mode only): connect a cloud account and this device
+// syncs both ways — local changes upload within a second, and edits from your
+// other devices or teammates download automatically.
 function CloudSyncCard() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [signup, setSignup] = useState(false);
   const [connected, setConnected] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(autoSyncEnabled());
   const [sync, setSync] = useState<SyncStatus>(getSyncStatus());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
 
   useEffect(() => {
     cloudSessionEmail().then(setConnected).catch(() => {});
@@ -58,8 +63,18 @@ function CloudSyncCard() {
   const connect = async () => {
     setBusy(true);
     setErr("");
+    setInfo("");
     try {
-      await cloudSignIn(email.trim(), password);
+      if (signup) {
+        const r = await cloudSignUp(email.trim(), password);
+        if (r === "confirm") {
+          setInfo("Account created — confirm it from the email we sent, then connect.");
+          setSignup(false);
+          return;
+        }
+      } else {
+        await cloudSignIn(email.trim(), password);
+      }
       setConnected(email.trim());
       setPassword("");
     } catch (e: any) {
@@ -107,9 +122,9 @@ function CloudSyncCard() {
           <RefreshCw size={16} /> Cloud sync (automatic)
         </p>
         <p className="text-sm text-brand-500 mt-0.5">
-          Keep working offline on this device; changes also upload to your
-          cloud account so the web version stays current. One-way — this
-          device is the source of truth.
+          Keep working offline on this device; changes upload to your cloud
+          account within seconds, and edits from your other devices or
+          teammates download automatically. Unpushed local edits always win.
         </p>
       </div>
 
@@ -138,7 +153,7 @@ function CloudSyncCard() {
             <button
               className="btn-ghost"
               disabled={busy || sync.state === "syncing"}
-              onClick={() => void syncNow()}
+              onClick={() => void syncCycle()}
             >
               Sync now
             </button>
@@ -153,35 +168,46 @@ function CloudSyncCard() {
           </p>
         </>
       ) : (
-        <div className="flex items-end gap-2 flex-wrap">
-          <label className="text-sm text-ink">
-            <span className="block text-xs text-brand-500 mb-1">Email</span>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
-          </label>
-          <label className="text-sm text-ink">
-            <span className="block text-xs text-brand-500 mb-1">Password</span>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
+        <>
+          <div className="flex items-end gap-2 flex-wrap">
+            <label className="text-sm text-ink">
+              <span className="block text-xs text-brand-500 mb-1">Email</span>
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+              />
+            </label>
+            <label className="text-sm text-ink">
+              <span className="block text-xs text-brand-500 mb-1">Password</span>
+              <input
+                className="input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete={signup ? "new-password" : "current-password"}
+              />
+            </label>
+            <button
+              className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              disabled={busy || !email || !password}
+              onClick={connect}
+            >
+              {busy ? "Working…" : signup ? "Create account" : "Connect"}
+            </button>
+          </div>
           <button
-            className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-            disabled={busy || !email || !password}
-            onClick={connect}
+            className="text-xs text-brand-500 underline cursor-pointer"
+            onClick={() => setSignup((s) => !s)}
           >
-            {busy ? "Connecting…" : "Connect"}
+            {signup ? "Have an account? Sign in" : "New to Filey Cloud? Create an account"}
           </button>
-        </div>
+        </>
+      )}
+      {info && (
+        <p className="text-sm text-ink bg-primary-50 rounded-lg px-3 py-2">{info}</p>
       )}
       {err && (
         <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
@@ -276,9 +302,16 @@ export default function DataModePanel() {
     }
   };
 
-  const switchTo = (m: DataMode) => {
+  const switchTo = async (m: DataMode) => {
     if (m === mode) return;
     if (m === "cloud" && !cloudConfigured) return;
+    // Offline/local mode is the licensed tier; cloud is the free default.
+    if (m === "local" && !(await canUseLocalMode())) {
+      setErr(
+        "Offline mode needs a Filey Desktop license. Get one under Settings → Desktop License, then switch."
+      );
+      return;
+    }
     setDataMode(m);
     window.location.reload();
   };
@@ -341,7 +374,7 @@ export default function DataModePanel() {
     const active = mode === m;
     return (
       <button
-        onClick={() => switchTo(m)}
+        onClick={() => void switchTo(m)}
         disabled={disabled}
         className={`w-full text-left rounded-2xl border p-4 transition ${
           active
@@ -380,23 +413,29 @@ export default function DataModePanel() {
       </div>
       <div className="space-y-3">
         <Card
-          m="local"
-          icon={HardDrive}
-          title="Offline (this device)"
-          desc="Everything stored on this computer. No account, no internet, never leaves the machine."
-        />
-        <Card
           m="cloud"
           icon={Cloud}
-          title="Cloud sync"
+          title="Filey Cloud (free)"
           desc={
             cloudConfigured
-              ? "Stored in your Supabase account and synced across devices."
+              ? "Stored securely in the cloud and synced across your devices and team."
               : "Not available — Supabase isn't configured in this build."
           }
           disabled={!cloudConfigured}
         />
+        <Card
+          m="local"
+          icon={HardDrive}
+          title="Offline (this device)"
+          desc={
+            "Everything stored on this computer. No account, no internet, never leaves the machine." +
+            (ENFORCE_LICENSING ? " Requires a Filey Desktop license." : "")
+          }
+        />
       </div>
+      {err && (
+        <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
+      )}
 
       {mode === "local" && cloudConfigured && <CloudSyncCard />}
 
@@ -547,11 +586,6 @@ export default function DataModePanel() {
           >
             {busy ? progress || "Working…" : "Push local data to cloud"}
           </button>
-          {err && (
-            <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">
-              {err}
-            </p>
-          )}
           {result && (
             <div className="text-sm">
               <p className="text-success font-medium mb-1">

@@ -1,11 +1,15 @@
-// Automatic local → cloud sync. While the app runs in LOCAL mode, every write
-// is journalled (localdb.ts); this module debounces those events and pushes the
-// dirty collections to the signed-in Supabase account, so the hosted web
-// version always shows what the desktop has.
+// Automatic two-way sync between the local store and the cloud. While the app
+// runs in LOCAL mode, every write is journalled per row (localdb.ts); this
+// module debounces those events, PUSHES the changed rows to the signed-in
+// Supabase account, then PULLS back everything this account can see — its own
+// rows plus records shared by org teammates (RLS decides). That is how a
+// second device or a teammate's desktop stays current.
 //
-// Direction is one-way and THIS DEVICE WINS: rows are upserted by id, local
-// deletes delete cloud rows. Edits made in the web version to the same records
-// are overwritten on the next push — the desktop is the source of truth.
+// Conflict rule is last-writer-wins per row: pushes upsert by id, and dirty
+// tables are never overwritten by a pull (local edits win until they've been
+// pushed). ponytail: numeric local ids can collide when two devices insert
+// into the same table inside one poll window (~60s) — last push wins. Move to
+// uuid ids if teams ever hit it in practice.
 //
 // Requires a cloud session. In local mode the app itself authenticates against
 // the local shim, so the real supabase-js client is signed in separately
@@ -17,6 +21,7 @@ import { isLocalMode } from "./dataMode";
 import { PUSH_TABLES } from "./syncTables";
 import {
   loadColl,
+  replaceColl,
   readBlobBytes,
   journalSnapshot,
   journalCommit,
@@ -57,13 +62,95 @@ function setStatus(s: SyncStatus): void {
 
 /** Strip ownership columns the cloud re-stamps (user_id default, force_org_id
  *  trigger); "owner" columns and local file paths need the real uid. Shared
- *  with the one-time migration so both push paths clean rows identically. */
+ *  with the one-time migration so both push paths clean rows identically.
+ *  Null-valued keys are dropped so the cloud applies its column defaults /
+ *  triggers (updated_at, shared, status…) instead of failing a NOT NULL —
+ *  local JSON is loose, the cloud schema is strict.
+ *  ponytail: dropping nulls means clearing a field to null on desktop won't
+ *  propagate on upsert; acceptable — the alternative breaks NOT NULL columns. */
 export function cleanRowForPush(row: Record<string, any>, uid: string): Record<string, any> {
   const { user_id: _u, org_id: _o, ...rest } = row;
-  if ("owner" in rest) rest.owner = uid;
+  for (const k of Object.keys(rest)) if (rest[k] === null) delete rest[k];
+  if ("owner" in row) rest.owner = uid;
   if (typeof rest.storage_path === "string")
     rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);
   return rest;
+}
+
+// Tables that never get the org-shared flag: company_profile/app_settings are
+// org-scoped in the cloud and have no `shared` column; the user_* tables and
+// tool_runs are personal and stay visible to the owner + org admins only.
+const NO_SHARE = new Set([
+  "company_profile",
+  "app_settings",
+  "user_files",
+  "user_assets",
+  "user_folders",
+  "tool_runs",
+]);
+
+// SECURITY: shared=true may only be set for members of a REAL organization.
+// Every solo account sits in org 'default', so sharing there would expose
+// rows to unrelated users. Cached per uid; refreshed on every pull.
+let orgCache: { uid: string; inOrg: boolean } | null = null;
+async function inRealOrg(
+  supa: SupabaseClient,
+  uid: string,
+  refresh = false
+): Promise<boolean> {
+  if (!refresh && orgCache?.uid === uid) return orgCache.inOrg;
+  const { data } = await supa
+    .from("profiles")
+    .select("org_id")
+    .eq("id", uid)
+    .maybeSingle();
+  const inOrg = !!data?.org_id && data.org_id !== "default";
+  orgCache = { uid, inOrg };
+  return inOrg;
+}
+
+// FK columns whose parent may be missing in the local data (e.g. an invoice
+// pointing at a since-deleted customer). All are nullable in the cloud, so a
+// dangling reference is nulled on retry — the row itself is preserved.
+const FK_COLUMNS: Record<string, string[]> = {
+  orders: ["customer_id"],
+  order_items: ["order_id", "product_id"],
+  invoice_docs: ["customer_id", "quotation_id"],
+  invoice_doc_items: ["invoice_id", "product_id"],
+  invoice_payments: ["invoice_id"],
+  quotation_items: ["quotation_id", "product_id"],
+  transactions: ["account_id", "invoice_id"],
+  user_files: ["folder_id"],
+  stock_movements: ["product_id"],
+};
+
+/** Upsert one collection resiliently: try the whole chunk; on any error fall
+ *  back to per-row so one bad row can't block the rest, and retry a row with
+ *  its foreign keys nulled if a FK constraint is what failed. Returns the ids
+ *  that could not be pushed (rare — logged, retried next sync). */
+async function pushCollection(
+  supa: SupabaseClient,
+  table: string,
+  rows: Record<string, any>[]
+): Promise<(string | number)[]> {
+  const failed: (string | number)[] = [];
+  const fks = FK_COLUMNS[table] ?? [];
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const { error } = await supa.from(table).upsert(chunk, { onConflict: "id" });
+    if (!error) continue;
+    // Chunk failed — isolate the bad rows.
+    for (const row of chunk) {
+      let { error: e1 } = await supa.from(table).upsert(row, { onConflict: "id" });
+      if (e1 && fks.length) {
+        const stripped = { ...row };
+        for (const c of fks) delete stripped[c];
+        e1 = (await supa.from(table).upsert(stripped, { onConflict: "id" })).error;
+      }
+      if (e1) failed.push(row.id);
+    }
+  }
+  return failed;
 }
 
 async function pushFileBlobs(
@@ -125,18 +212,28 @@ export async function syncNow(client?: SupabaseClient | null): Promise<boolean> 
       }
     }
 
-    // Upserts parents-first. Whole collection per dirty table — collections
-    // are small on a single-user desktop and upserts are idempotent.
+    // Upserts parents-first, only the rows the journal saw change (whole
+    // collection on first seed). Row-level pushes are what make multi-user
+    // safe: a stale unchanged row is never re-uploaded over a teammate's
+    // newer copy. Resilient per-row fallback means messy local data
+    // (dangling FKs, etc.) can't halt the whole sync.
+    const share = await inRealOrg(supa, uid);
     let pushedAny = false;
+    const failedByTable: Record<string, (string | number)[]> = {};
     for (const t of dirty) {
-      const rows = await loadColl(t);
-      const cleaned = rows.map((r) => cleanRowForPush(r, uid));
-      for (let i = 0; i < cleaned.length; i += 200) {
-        const { error } = await supa
-          .from(t)
-          .upsert(cleaned.slice(i, i + 200), { onConflict: "id" });
-        if (error) throw new Error(`${t}: ${error.message}`);
-      }
+      const entry = j.tables[t];
+      const all = await loadColl(t);
+      const idSet = new Set(entry.changed);
+      const rows = entry.all ? all : all.filter((r) => idSet.has(r.id));
+      const cleaned = rows.map((r) => {
+        const c = cleanRowForPush(r, uid);
+        // Org members share business records with the whole team by default
+        // (Vyapar model). Per-record privacy stays a web-side choice.
+        if (share && !NO_SHARE.has(t)) c.shared = true;
+        return c;
+      });
+      const failed = await pushCollection(supa, t, cleaned);
+      if (failed.length) failedByTable[t] = failed;
       if (rows.length) pushedAny = true;
       if (t === "user_files") await pushFileBlobs(supa, uid, rows);
     }
@@ -162,6 +259,12 @@ export async function syncNow(client?: SupabaseClient | null): Promise<boolean> 
       );
 
     await journalCommit(j.v, dirty);
+    // Rows that wouldn't upsert stay marked so the next sync retries them.
+    // Silent: re-dispatching the write event would hot-loop on a bad row.
+    for (const [t, ids] of Object.entries(failedByTable)) {
+      console.warn(`[sync] ${t}: ${ids.length} row(s) failed, will retry`);
+      await journalMark(t, { changed: ids, silent: true });
+    }
     setStatus({ state: "done", at: now });
     return true;
   } catch (e: any) {
@@ -172,14 +275,91 @@ export async function syncNow(client?: SupabaseClient | null): Promise<boolean> 
   }
 }
 
+// Tables whose rows reference blobs in cloud Storage; pulling the metadata
+// without the bytes would list files that can't open locally.
+// ponytail: files sync device→cloud only; pull them once a blob-download
+// path exists in the local storage shim.
+const PULL_SKIP = new Set(["user_files", "user_assets"]);
+
+/** Cloud → local: replace every clean (non-dirty) collection with the rows
+ *  this account can see — its own plus org-shared ones (RLS decides). Full
+ *  snapshot per table: collections are small, and it makes remote deletes
+ *  propagate for free. Dirty tables are skipped — local edits win until
+ *  they've been pushed. */
+export async function pullNow(client?: SupabaseClient | null): Promise<boolean> {
+  const supa = client ?? supabase;
+  if (!isLocalMode() || !supa || !autoSyncEnabled() || running) return false;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  const { data: sess } = await supa.auth.getSession();
+  const uid = sess.session?.user?.id;
+  if (!uid) return false;
+
+  running = true;
+  try {
+    await inRealOrg(supa, uid, true); // refresh org membership for the next push
+    const before = await journalSnapshot();
+    let changed = false;
+    for (const t of PUSH_TABLES) {
+      if (PULL_SKIP.has(t) || before.tables[t]) continue;
+      const rows: Record<string, any>[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supa
+          .from(t)
+          .select("*")
+          .order("id", { ascending: true })
+          .range(from, from + 999);
+        if (error) throw new Error(`${t}: ${error.message}`);
+        rows.push(...(data ?? []));
+        if ((data ?? []).length < 1000) break;
+      }
+      // A local write raced the pull — stop; the queued push must run first.
+      if ((await journalSnapshot()).v !== before.v) break;
+      if (await replaceColl(t, rows)) changed = true;
+    }
+    if (changed && typeof window !== "undefined")
+      window.dispatchEvent(new Event("filey:remote-update"));
+    return true;
+  } catch (e: any) {
+    setStatus({ state: "error", error: e?.message ?? String(e) });
+    return false;
+  } finally {
+    running = false;
+  }
+}
+
+/** One full sync beat: seed once, push local changes, then pull what's new
+ *  from other devices and teammates. Pull after a failed push is safe — dirty
+ *  tables are skipped, so unpushed local edits can't be overwritten. */
+export async function syncCycle(client?: SupabaseClient | null): Promise<boolean> {
+  await seedIfNeeded(client);
+  const pushed = await syncNow(client);
+  const pulled = await pullNow(client);
+  return pushed && pulled;
+}
+
+/** DATA-PRESERVATION GUARD. The journal only tracks writes made since
+ *  auto-sync shipped, so a device with pre-existing local data (or one whose
+ *  cloud session predates the seed flag) must mark EVERYTHING dirty once
+ *  before its first pull — marking makes every table dirty, pull skips dirty
+ *  tables, so nothing local can be replaced until it has been pushed. */
+async function seedIfNeeded(client?: SupabaseClient | null): Promise<void> {
+  const supa = client ?? supabase;
+  if (typeof localStorage === "undefined" || !supa || !isLocalMode()) return;
+  if (localStorage.getItem(SEEDED_KEY)) return;
+  const { data } = await supa.auth.getSession();
+  if (!data.session) return; // seed the first time a session exists
+  await markAllForSync();
+  localStorage.setItem(SEEDED_KEY, "1");
+}
+
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-/** Debounced sync — a burst of writes becomes one push. */
+/** Debounced sync — a burst of writes becomes one push (then a pull). */
 export function scheduleSync(delayMs = 4000): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    void syncNow();
+    void syncCycle();
   }, delayMs);
 }
 
@@ -188,16 +368,20 @@ export function scheduleSync(delayMs = 4000): void {
 export function startAutoSync(): void {
   if (typeof window === "undefined") return;
   if (!isLocalMode() || !supabase) return;
-  window.addEventListener("filey:local-write", () => scheduleSync());
+  // Near-instant: push ~1s after a write. Short enough to feel immediate, long
+  // enough that a burst of saves (e.g. an invoice + its items) becomes one push.
+  window.addEventListener("filey:local-write", () => scheduleSync(1000));
   window.addEventListener("online", () => scheduleSync(1000));
   scheduleSync(3000); // catch up on writes made while offline or signed out
+  // Idle poll so teammate / second-device edits land within a minute.
+  setInterval(() => void syncCycle(), 60_000);
 }
 
 /** Mark every non-empty local collection dirty, then sync — the "upload all my
  *  local data" action for a first-time connect against a non-empty cloud. */
 export async function markAllForSync(): Promise<void> {
   for (const t of PUSH_TABLES) {
-    if ((await loadColl(t)).length) await journalMark(t);
+    if ((await loadColl(t)).length) await journalMark(t, { all: true, silent: true });
   }
 }
 
@@ -210,12 +394,34 @@ export async function cloudSessionEmail(): Promise<string | null> {
   return data.session?.user?.email ?? null;
 }
 
+const SEEDED_KEY = "filey_cloud_seeded";
+
+// Fresh sign-in: seed (see seedIfNeeded) and sync promptly.
+async function seedOnFirstConnect(): Promise<void> {
+  setStatus({ state: "idle" });
+  await seedIfNeeded();
+  scheduleSync(500);
+}
+
 export async function cloudSignIn(email: string, password: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured in this build.");
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error(error.message);
-  setStatus({ state: "idle" });
-  scheduleSync(500);
+  await seedOnFirstConnect();
+}
+
+/** Create a cloud account from the desktop. Returns "confirm" when the
+ *  project requires email confirmation before a session exists. */
+export async function cloudSignUp(
+  email: string,
+  password: string
+): Promise<"session" | "confirm"> {
+  if (!supabase) throw new Error("Cloud isn't configured in this build.");
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw new Error(error.message);
+  if (!data.session) return "confirm";
+  await seedOnFirstConnect();
+  return "session";
 }
 
 export async function cloudSignOut(): Promise<void> {

@@ -2,8 +2,17 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { isLocalMode } from "./dataMode";
 import { localClient } from "./localdb";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// Filey's hosted cloud — baked in so every packaged build is cloud-ready out
+// of the box (accounts, team sharing, auto-sync all point here). Env vars
+// still override for dev/self-hosting against another project. The
+// publishable key is a client-side key by design; RLS guards the data.
+const DEFAULT_URL = "https://voyrjqgaypiylwskkwpr.supabase.co";
+const DEFAULT_ANON_KEY = "sb_publishable_seG6PypmkIEN9FYKY9Of6w_UGNTGAgv";
+
+const url =
+  (import.meta.env.VITE_SUPABASE_URL as string | undefined) || DEFAULT_URL;
+const anonKey =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_ANON_KEY;
 
 export const cloudConfigured =
   !!url &&
