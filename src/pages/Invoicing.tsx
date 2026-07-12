@@ -53,7 +53,8 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
-import { invoiceTotals, invoiceLineAmount, r2 } from "../lib/money";
+import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
+import { docLineAmount, docTotals } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
 import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
 import { loadInvoiceFormat } from "../lib/numberFormat";
@@ -146,6 +147,8 @@ type Item = {
   itemFormula: { a: string; b?: string } | null;
   /** UAE e-invoice tax category code (S/Z/E/O/AE). */
   tax_category?: string;
+  /** Per-line discount % (Vyapar parity) — persisted via item custom meta. */
+  discount?: number;
 };
 
 // Pages are driven only by manual breaks set by the user. Default = one A4 page.
@@ -292,6 +295,7 @@ function blankForm(
     customer_email: "",
     issue_date: today(),
     due_date: undefined,
+    round_off: false,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days.",
     tax_rate: c.default_tax_rate ?? 5,
@@ -433,6 +437,7 @@ const editInvoice = async (id: number) => {
         po_date: d.po_date,
         date_of_supply: d.date_of_supply,
         payment_terms: d.payment_terms,
+        round_off: d.round_off ?? false,
         notes: d.notes,
         terms: d.terms,
         tax_rate: d.tax_rate,
@@ -484,6 +489,7 @@ const editInvoice = async (id: number) => {
             calcMode,
             amount,
             itemFormula,
+            discount,
           } = splitItemMeta(i.custom);
           return {
             description: i.description,
@@ -497,6 +503,7 @@ const editInvoice = async (id: number) => {
             amount: amount ?? 0,
             itemFormula: itemFormula || null,
             tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
+            discount,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -590,6 +597,7 @@ const editInvoice = async (id: number) => {
             calcMode,
             amount,
             itemFormula,
+            discount,
           } = splitItemMeta(i.custom);
           return {
             description: i.description,
@@ -603,6 +611,7 @@ const editInvoice = async (id: number) => {
             amount: amount ?? 0,
             itemFormula: itemFormula || null,
             tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
+            discount,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -1733,11 +1742,9 @@ function Editor({
       toast.error("Add a customer email (Invoice Details) to send this invoice.");
       return;
     }
-    const t = invoiceTotals(
-      form.items,
-      form.discount || 0,
-      form.tax_rate || 0,
-      form.unit_price_formula
+    const t = applyRoundOff(
+      docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula),
+      !!form.round_off
     );
     let portalUrl = "";
     try {
@@ -2500,6 +2507,9 @@ function Editor({
                       </th>
                     ))}
                     <th className="py-2 px-2 w-32 text-right">Unit Price</th>
+                    <th className="py-2 px-2 w-20 text-right" title="Per-line discount %">
+                      Disc %
+                    </th>
                     {(form.tax_rate || 0) > 0 && (
                       <th className="py-2 px-2 w-24 text-right">VAT</th>
                     )}
@@ -2646,12 +2656,25 @@ function Editor({
                           }
                         />
                       </td>
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          className="input text-right !px-2"
+                          placeholder="0"
+                          value={it.discount || ""}
+                          onChange={(e) =>
+                            setItem(i, {
+                              discount: Math.min(100, Math.max(0, numInput(e.target.value))),
+                            })
+                          }
+                        />
+                      </td>
                       {(form.tax_rate || 0) > 0 && (
                         <td className="py-2 px-2 text-right text-brand-500">
                           {m(
-                            ((it.calcMode === "manual"
-                              ? it.amount || 0
-                              : invoiceLineAmount(it, form.unit_price_formula)) *
+                            (docLineAmount(it, form.unit_price_formula) *
                               (form.tax_rate || 0)) /
                               100
                           )}
@@ -2676,7 +2699,7 @@ function Editor({
                             }}
                           />
                         ) : (
-                          m(invoiceLineAmount(it, form.unit_price_formula))
+                          m(docLineAmount(it, form.unit_price_formula))
                         )}
                       </td>
                       <td className="py-2">
@@ -2896,6 +2919,14 @@ function Editor({
                     )}
                 </div>
               )}
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!form.round_off}
+                onChange={(e) => set("round_off", e.target.checked)}
+              />
+              Round off total to whole {form.currency || "AED"}
+            </label>
             {showDiscount && (
               <div className="mt-3 max-w-xs">
                 <Field label="Discount (amount)">

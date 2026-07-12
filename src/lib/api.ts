@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured, supabase } from "./supabase";
 import { isLocalMode } from "./dataMode";
-import { quotationTotals, invoiceTotals } from "./money";
-import { splitItemMeta } from "./docItems";
+import { quotationTotals, applyRoundOff } from "./money";
+import { splitItemMeta, docTotals as lineAwareTotals } from "./docItems";
 import { getExchangeRates } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
@@ -290,6 +290,8 @@ export interface InvoiceDoc {
   date_of_supply?: string;
   /** Payment-terms preset id (e.g. "net30") — drives due_date autofill. */
   payment_terms?: string;
+  /** Round the grand total to a whole currency unit (Vyapar parity). */
+  round_off?: boolean;
   tax_rate: number;
   discount: number;
   quotation_id?: number;
@@ -2071,6 +2073,7 @@ function docTotal(
     tax_rate: number;
     discount: number;
     unit_price_formula?: { a: string; b?: string } | null;
+    round_off?: boolean | null;
   },
   items: {
     qty: number;
@@ -2078,11 +2081,14 @@ function docTotal(
     custom?: Record<string, string> | null;
   }[]
 ) {
-  return invoiceTotals(
-    docLineItems(items),
-    d.discount,
-    d.tax_rate,
-    d.unit_price_formula
+  return applyRoundOff(
+    lineAwareTotals(
+      docLineItems(items) as any,
+      d.discount,
+      d.tax_rate,
+      d.unit_price_formula
+    ),
+    !!d.round_off
   ).total;
 }
 
@@ -2090,22 +2096,28 @@ function docLineItems(
   items: { qty: number; unit_price: number; custom?: Record<string, string> | null }[]
 ) {
   return items.map((it) => {
-    const { calcMode, amount, itemFormula } = splitItemMeta(it.custom);
-    return { ...it, calcMode, amount, itemFormula };
+    const { calcMode, amount, itemFormula, discount, tax } = splitItemMeta(it.custom);
+    return { ...it, calcMode, amount, itemFormula, discount, tax };
   });
 }
 
 /** Net (ex-VAT, after discount), VAT amount and gross — used to split the ledger
- *  so revenue/inventory exclude VAT and the tax sits in its own account. */
+ *  so revenue/inventory exclude VAT and the tax sits in its own account.
+ *  Line-aware (per-line discount/tax from item meta) + round-off: the signed
+ *  rounding adjustment lands in `net` so net + tax always equals gross. */
 function docTotals(
   d: {
     tax_rate: number;
     discount: number;
     unit_price_formula?: { a: string; b?: string } | null;
+    round_off?: boolean | null;
   },
   items: { qty: number; unit_price: number; custom?: Record<string, string> | null }[]
 ) {
-  const t = invoiceTotals(docLineItems(items), d.discount, d.tax_rate, d.unit_price_formula);
+  const t = applyRoundOff(
+    lineAwareTotals(docLineItems(items) as any, d.discount, d.tax_rate, d.unit_price_formula),
+    !!d.round_off
+  );
   return { net: Math.round((t.total - t.tax) * 100) / 100, tax: t.tax, total: t.total };
 }
 

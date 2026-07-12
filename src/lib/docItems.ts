@@ -68,6 +68,10 @@ export const CM_KEY = "__calc_mode";
 export const MA_KEY = "__manual_amount";
 export const FA_KEY = "__formula_a";
 export const FB_KEY = "__formula_b";
+// Per-line discount % / tax % (Vyapar parity) — persisted in the same custom
+// jsonb as the other item meta, so no DB schema change is needed.
+export const DISC_KEY = "__disc_pct";
+export const TAXP_KEY = "__tax_pct";
 
 const isCalcMode = (v: string): v is CalcMode =>
   v === "auto" || v === "manual" || v === "formula";
@@ -90,7 +94,11 @@ export const splitItemMeta = (custom?: Record<string, string> | null) => {
     : undefined;
   delete c[FA_KEY];
   delete c[FB_KEY];
-  return { custom: c, pageBreakBefore, calcMode, amount, itemFormula };
+  const discount = num(c[DISC_KEY] || "") || undefined;
+  delete c[DISC_KEY];
+  const tax = num(c[TAXP_KEY] || "") || undefined;
+  delete c[TAXP_KEY];
+  return { custom: c, pageBreakBefore, calcMode, amount, itemFormula, discount, tax };
 };
 
 export const mergeItemMeta = (
@@ -100,11 +108,17 @@ export const mergeItemMeta = (
     calcMode?: CalcMode;
     amount?: number;
     itemFormula?: { a: string; b?: string } | null;
+    discount?: number;
+    tax?: number;
   }
 ): Record<string, string> | undefined => {
   const c: Record<string, string> = { ...(it.custom || {}) };
   if (it.pageBreakBefore) c[PB_KEY] = "1";
   else delete c[PB_KEY];
+  if ((it.discount || 0) > 0) c[DISC_KEY] = String(it.discount);
+  else delete c[DISC_KEY];
+  if ((it.tax || 0) > 0) c[TAXP_KEY] = String(it.tax);
+  else delete c[TAXP_KEY];
   if (it.calcMode) c[CM_KEY] = it.calcMode;
   else delete c[CM_KEY];
   if (it.calcMode === "manual") c[MA_KEY] = String(it.amount || 0);

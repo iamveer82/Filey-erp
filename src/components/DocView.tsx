@@ -2,7 +2,7 @@ import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
 import { docTotals, docLineAmount } from "../lib/docItems";
 import { ENFORCE_LICENSING, currentTier } from "../lib/license";
-import type { CalcMode } from "../lib/money";
+import { applyRoundOff, type CalcMode } from "../lib/money";
 import { loadCustomTemplates } from "./TemplateDesigner";
 import { resolveTemplateId } from "./DocTemplates";
 import {
@@ -78,6 +78,7 @@ export interface DocViewForm {
   po_number?: string | null;
   po_date?: string | null;
   date_of_supply?: string | null;
+  round_off?: boolean | null;
   tax_rate?: number | null;
   discount?: number | null;
   notes?: string | null;
@@ -118,11 +119,9 @@ export default function DocView({
   showFooter = true,
   labels,
 }: DocViewProps) {
-  const t = docTotals(
-    form.items,
-    form.discount || 0,
-    form.tax_rate || 0,
-    form.unit_price_formula
+  const t = applyRoundOff(
+    docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula),
+    !!form.round_off
   );
   const ccy = form.currency || "AED";
   const m = (v: number) => money(v, ccy);
@@ -189,6 +188,9 @@ export default function DocView({
         <Row k="Subtotal" v={m(t.subtotal)} />
         {(t.discount || 0) > 0 && <Row k="Discount" v={`- ${m(t.discount)}`} />}
         {(form.tax_rate || 0) > 0 && <Row k={`VAT (${form.tax_rate}%)`} v={m(t.tax)} />}
+        {t.round_off !== 0 && (
+          <Row k="Round off" v={`${t.round_off > 0 ? "+" : ""}${m(t.round_off)}`} />
+        )}
         <div
           className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
           style={{ borderColor: a, color: a }}
@@ -843,7 +845,10 @@ export default function DocView({
       return { cat, taxable, rate, tax: (taxable * rate) / 100 };
     });
     const vat = breakdown.reduce((s, b) => s + b.tax, 0);
-    const grandTotal = netAfterDisc + vat;
+    const grandTotal = form.round_off
+      ? Math.round(netAfterDisc + vat)
+      : netAfterDisc + vat;
+    const roundOffAmt = grandTotal - (netAfterDisc + vat);
 
     return (
       <div
@@ -1036,6 +1041,15 @@ export default function DocView({
                 <span className="text-neutral-500">VAT</span>
                 <span>{m(vat)}</span>
               </div>
+              {Math.abs(roundOffAmt) >= 0.005 && (
+                <div className="flex justify-between py-1">
+                  <span className="text-neutral-500">Round off</span>
+                  <span>
+                    {roundOffAmt > 0 ? "+" : ""}
+                    {m(roundOffAmt)}
+                  </span>
+                </div>
+              )}
               <div
                 className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
                 style={{ borderColor: a, color: a }}

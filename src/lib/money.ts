@@ -87,6 +87,19 @@ export function invoiceTotals(
   };
 }
 
+export interface RoundedTotals extends Totals {
+  /** Signed adjustment applied to reach a whole-currency total (±0.50 max). */
+  round_off: number;
+}
+
+/** Vyapar-style round-off: nudge the grand total to the nearest whole unit.
+ *  Applied AFTER tax so ledger + doc agree; disabled → zero adjustment. */
+export function applyRoundOff(t: Totals, enabled?: boolean): RoundedTotals {
+  if (!enabled) return { ...t, round_off: 0 };
+  const total = Math.round(t.total);
+  return { ...t, round_off: r2(total - t.total), total };
+}
+
 /** Quotation: per-line discount (%) then per-line tax (%). */
 export function quotationTotals(
   items: { qty: number; rate: number; discount: number; tax: number }[]

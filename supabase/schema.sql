@@ -1152,6 +1152,7 @@ alter table invoice_docs add column if not exists po_number text;
 alter table invoice_docs add column if not exists payment_terms text;
 alter table invoice_docs add column if not exists po_date date;
 alter table invoice_docs add column if not exists date_of_supply date;
+alter table invoice_docs add column if not exists round_off boolean not null default false;
 alter table crm_customers add column if not exists credit_limit numeric(14,2);
 alter table crm_customers add column if not exists opening_balance numeric(14,2);
 alter table invoice_docs add column if not exists custom_columns jsonb;
