@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, Sparkles, CheckCircle2, Clock } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   erp,
@@ -17,15 +17,12 @@ import {
   type PoSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { num, aed, fmtDate, cn } from "../lib/format";
+import { num, aed, cn } from "../lib/format";
 import {
-  MetricCard,
   Card,
-  Badge,
   Skeleton,
   ErrorBanner,
 } from "../components/ui";
-import AppIcon from "../components/AppIcon";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
    Minimal iOS-style dashboard. NOT drag-drop. Sections are fixed and ordered:
@@ -48,7 +45,7 @@ export default function ModernOverview() {
   const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [period, setPeriod] = useState<Period>("month");
+  const [period] = useState<Period>("year");
 
   const load = async () => {
     setError("");
@@ -245,6 +242,9 @@ export default function ModernOverview() {
       .slice(0, 8);
   }, [orders, invoices, expenses]);
 
+  // Suppress unused computed values (kept for data loading side-effects)
+  void receivable; void payable; void profit; void activity;
+
   const isEmpty =
     products.length === 0 &&
     orders.length === 0 &&
@@ -255,250 +255,89 @@ export default function ModernOverview() {
   return (
     <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-6 space-y-6">
       {/* ── Header ── */}
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-[28px] leading-tight font-bold text-ink tracking-tight">
-            {companyName || "Overview"}
-          </h1>
-          <p className="text-sm text-brand-500 mt-1">
-            Good {greeting()} — here's your business at a glance.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => nav("/invoicing")} className="btn-primary">
-            <Plus size={15} /> New invoice
-          </button>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h1 className="text-[15px] font-semibold text-ink">
+          Welcome back, {companyName || "your business"}
+        </h1>
+        <div className="flex items-center gap-1.5 text-xs text-success">
+          <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
+          Live
         </div>
       </div>
 
       {error && <ErrorBanner message={error} />}
 
-      {/* ── 4 KPI Cards ── */}
+      {/* ── 4 KPI Cards (2×2 grid like website) ── */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiMetric
+        <SimpleKpi
           loading={loading}
-          label="Revenue"
-          value={revenue.total}
-          format={aed}
-          icon={<AppIcon name="invoicing" className="w-5 h-5" />}
-          iconClass="bg-primary-100 text-ink"
-          change={`${revenue.count} invoices`}
+          label="Total Items"
+          value={num(stockBreakdown.total)}
+          change={`+${num(orders.length)} orders`}
           changeTone="up"
         />
-        <KpiMetric
+        <SimpleKpi
           loading={loading}
-          label="Collected"
-          value={revenue.collected}
-          format={aed}
-          icon={<AppIcon name="money" className="w-5 h-5" />}
-          iconClass="bg-success/15 text-success"
-          change={receivable.total > 0 ? `${aed(receivable.total)} pending` : "All settled"}
-          changeTone={receivable.total > 0 ? "warn" : "up"}
+          label="Inventory Value"
+          value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))}
+          change={`${num(products.length)} products`}
+          changeTone="up"
         />
-        <KpiMetric
+        <SimpleKpi
           loading={loading}
-          label="Net profit"
-          value={profit.net}
-          format={aed}
-          icon={<AppIcon name="reports" className="w-5 h-5" />}
-          iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
-          change={`Expenses ${aed(profit.expenseTotal)}`}
-          changeTone={profit.net >= 0 ? "up" : "down"}
+          label="Open Orders"
+          value={num(orderStats.progress + orderStats.completed)}
+          change={`${orderStats.overdue > 0 ? `${orderStats.overdue} overdue` : "On track"}`}
+          changeTone={orderStats.overdue > 0 ? "down" : "up"}
         />
-        <KpiMetric
+        <SimpleKpi
           loading={loading}
-          label="Products"
-          value={stockBreakdown.total}
-          format={(n) => num(n)}
-          icon={<AppIcon name="inventory" className="w-[18px] h-[18px]" />}
-          iconClass={
-            stockBreakdown.low > 0 || stockBreakdown.out > 0
-              ? "bg-danger/15 text-danger"
-              : "bg-primary-100 text-ink"
-          }
-          change={
-            stockBreakdown.low > 0
-              ? `${stockBreakdown.low} low stock`
-              : stockBreakdown.out > 0
-                ? `${stockBreakdown.out} out`
-                : "All in stock"
-          }
-          changeTone={stockBreakdown.low > 0 || stockBreakdown.out > 0 ? "down" : "up"}
+          label="Overdue"
+          value={num(lowStock.length)}
+          change={lowStock.length > 0 ? "Need attention" : "All good"}
+          changeTone={lowStock.length > 0 ? "down" : "up"}
         />
       </section>
 
-      {/* ── Bar Chart + Quick Stats ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Orders bar chart */}
-        <Card className="p-5 lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-sm font-semibold text-ink">Orders over time</p>
-              <p className="text-xs text-brand-500 mt-0.5">{orderStats.total} orders in window</p>
-            </div>
-            <div className="flex items-center gap-1 p-0.5 rounded-full bg-brand-100 dark:bg-white/10">
-              {(["today", "week", "month", "quarter", "year"] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={cn(
-                    "px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors",
-                    period === p
-                      ? "bg-white text-ink shadow-sm dark:bg-[#3A3D45]"
-                      : "text-brand-500 hover:text-ink"
-                  )}
-                >
-                  {p[0].toUpperCase() + p.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {loading ? (
-            <Skeleton className="h-40 w-full" />
-          ) : (
-            <>
-              {/* Status badges */}
-              <div className="flex flex-wrap items-center gap-1.5 mb-4">
-                <Badge tone="success">
-                  <span className="inline-flex items-center gap-1">
-                    <CheckCircle2 size={10} /> {orderStats.completed} done
-                  </span>
-                </Badge>
-                <Badge tone="warn">
-                  <span className="inline-flex items-center gap-1">
-                    <Clock size={10} /> {orderStats.progress} active
-                  </span>
-                </Badge>
-                {orderStats.overdue > 0 && (
-                  <Badge tone="danger">
-                    <span className="inline-flex items-center gap-1">
-                      <AppIcon name="danger" className="w-3 h-3" /> {orderStats.overdue} overdue
-                    </span>
-                  </Badge>
-                )}
-              </div>
-
-              {/* Minimal bar chart */}
-              <div className="flex items-end gap-1.5 h-[140px] pt-2">
-                {trend.map((d, i) => {
-                  const max = Math.max(1, ...trend.map((t) => t.items));
-                  const h = (d.items / max) * 100;
-                  return (
-                    <div
-                      key={i}
-                      className="flex-1 flex flex-col items-center gap-1 group"
-                    >
-                      <div
-                        className="w-full rounded-t-md bg-primary-400 transition-all duration-200 ease-out group-hover:bg-primary-500 group-hover:scale-y-105 origin-bottom"
-                        style={{
-                          height: `${Math.max(4, h)}%`,
-                          opacity: d.items > 0 ? 0.8 : 0.25,
-                        }}
-                        title={`${d.name}: ${d.items} orders`}
-                      />
-                      <span className="text-[9px] text-brand-400 tabular-nums">{d.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </Card>
-
-        {/* Quick stats column */}
-        <div className="space-y-4">
-          {/* Money breakdown */}
-          <Card className="p-4">
-            <p className="text-sm font-semibold text-ink mb-3">Money</p>
-            {loading ? (
-              <Skeleton className="h-24 w-full" />
-            ) : (
-              <div className="space-y-2.5">
-                <MoneyRow label="Revenue" value={revenue.total} tone="text-ink" />
-                <MoneyRow label="Receivable" value={receivable.total} tone="text-warning" />
-                <MoneyRow label="Payable" value={payable.total} tone="text-warning" />
-                <MoneyRow label="Expenses" value={-profit.expenseTotal} tone="text-danger" />
-                <div className="pt-2 mt-2 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
-                  <span className="text-sm font-semibold text-ink">Net</span>
-                  <span
-                    className={cn(
-                      "text-lg font-bold tabular-nums tracking-tight",
-                      profit.net >= 0 ? "text-success" : "text-danger"
-                    )}
-                  >
-                    {aed(profit.net)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Inventory health */}
-          <Card className="p-4">
-            <p className="text-sm font-semibold text-ink mb-3">Inventory</p>
-            {loading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : (
-              <div className="space-y-2">
-                <StockBar
-                  rows={[
-                    { label: "In stock", value: stockBreakdown.inStock, tone: "bg-success" },
-                    { label: "Low stock", value: stockBreakdown.low, tone: "bg-warning" },
-                    { label: "Out of stock", value: stockBreakdown.out, tone: "bg-danger" },
-                  ]}
-                  total={Math.max(1, stockBreakdown.total)}
-                />
-                {lowStock.length > 0 && (
-                  <button
-                    onClick={() => nav("/inventory")}
-                    className="text-xs font-semibold text-brand-500 hover:text-ink pt-1"
-                  >
-                    {lowStock.length} need attention →
-                  </button>
-                )}
-              </div>
-            )}
-          </Card>
+      {/* ── Monthly Revenue Bar Chart (website style) ── */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-brand-500">Monthly Revenue</span>
+          <span className="text-xs font-semibold text-[#FFD600]">2026</span>
         </div>
-      </section>
-
-      {/* ── Recent Activity ── */}
-      <section>
-        <Card className="p-4">
-          <p className="text-sm font-semibold text-ink mb-3">Recent activity</p>
-          {loading ? (
-            <div className="space-y-1.5">
-              <Skeleton className="h-6 w-full" />
-              <Skeleton className="h-6 w-full" />
-              <Skeleton className="h-6 w-full" />
-            </div>
-          ) : activity.length === 0 ? (
-            <p className="text-xs text-brand-500 py-2">No activity yet.</p>
-          ) : (
-            <ul className="divide-y divide-brand-100 dark:divide-[#3A3D45]">
-              {activity.slice(0, 4).map((a, i) => {
-                const ev = a.event;
-                const iconName =
-                  ev === "order" ? "orders" : ev === "invoice" ? "invoicing" : "orders";
+        {loading ? (
+          <Skeleton className="h-[120px] w-full" />
+        ) : (
+          <>
+            {/* Yellow bars */}
+            <div className="flex items-end gap-1 h-[120px]">
+              {trend.map((d, i) => {
+                const max = Math.max(1, ...trend.map((t) => t.items));
+                const h = (d.items / max) * 100;
+                const isPeak = d.items === Math.max(...trend.map((t) => t.items));
                 return (
-                  <li key={i} className="flex items-center gap-2.5 py-2">
-                    <div className="rounded-lg p-1 bg-brand-50 text-brand-400 dark:bg-white/5 shrink-0">
-                      <AppIcon name={iconName} className="w-3 h-3" />
-                    </div>
-                    <span className="text-xs font-medium text-ink truncate flex-1">
-                      {a.who} <span className="text-brand-500">{a.what}</span>
-                    </span>
-                    <span className="text-[10px] text-brand-400 tabular-nums shrink-0">
-                      {fmtDate(a.when)}
-                    </span>
-                  </li>
+                  <div
+                    key={i}
+                    className="flex-1 rounded-t-[4px] transition-all duration-200 ease-out hover:!opacity-100 hover:scale-y-105 origin-bottom min-h-[8px] cursor-pointer"
+                    style={{
+                      height: `${Math.max(8, h)}%`,
+                      backgroundColor: "#FFD600",
+                      opacity: isPeak ? 1 : 0.75,
+                    }}
+                    title={`${d.name}: ${d.items} orders`}
+                  />
                 );
               })}
-            </ul>
-          )}
-        </Card>
-      </section>
+            </div>
+            {/* Month axis */}
+            <div className="flex justify-between mt-2 text-[10px] text-brand-400">
+              {trend.filter((_, i) => i % Math.ceil(trend.length / 6) === 0).map((d, i) => (
+                <span key={i}>{d.name}</span>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
 
       {/* ── Empty state ── */}
       {isEmpty && !loading && (
@@ -526,106 +365,48 @@ export default function ModernOverview() {
 
 /* ── Small presentation helpers ─── */
 
-function KpiMetric({
+function SimpleKpi({
   loading,
   label,
   value,
-  format,
-  icon,
-  iconClass = "bg-primary-100 text-ink",
   change,
   changeTone = "up",
 }: {
   loading: boolean;
   label: string;
-  value: number;
-  format: (n: number) => string;
-  icon: ReactNode;
-  iconClass?: string;
+  value: string;
   change?: string;
   changeTone?: "up" | "down" | "warn";
 }) {
-  const formatted = format(value);
   if (loading) {
     return (
       <Card className="p-4">
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-8 w-20" />
-        </div>
+        <Skeleton className="h-3 w-20 mb-2" />
+        <Skeleton className="h-7 w-24 mb-1" />
+        <Skeleton className="h-3 w-16" />
       </Card>
     );
   }
   return (
-    <MetricCard
-      label={label}
-      value={formatted}
-      icon={icon}
-      iconClass={iconClass}
-      change={change}
-      changeTone={changeTone}
-    />
+    <Card className="p-4">
+      <p className="text-xs text-brand-500 mb-1.5">{label}</p>
+      <p className="text-[24px] font-bold text-ink tabular-nums tracking-tight leading-tight">
+        {value}
+      </p>
+      {change && (
+        <p
+          className={cn(
+            "text-xs font-medium mt-1",
+            changeTone === "up" && "text-success",
+            changeTone === "down" && "text-danger",
+            changeTone === "warn" && "text-warning"
+          )}
+        >
+          {change}
+        </p>
+      )}
+    </Card>
   );
 }
 
-function StockBar({
-  rows,
-  total,
-}: {
-  rows: { label: string; value: number; tone: string }[];
-  total: number;
-}) {
-  return (
-    <div>
-      <div className="flex h-2 rounded-full overflow-hidden bg-brand-100 dark:bg-white/5">
-        {rows.map((r) =>
-          r.value > 0 ? (
-            <div
-              key={r.label}
-              className={cn(r.tone)}
-              style={{ width: `${(r.value / total) * 100}%` }}
-              title={`${r.label}: ${r.value}`}
-            />
-          ) : null
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-3">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-center gap-1.5">
-            <span className={cn("w-2 h-2 rounded-full shrink-0", r.tone)} />
-            <span className="text-xs text-brand-500 truncate">{r.label}</span>
-            <span className="ml-auto text-xs font-semibold text-ink tabular-nums">
-              {num(r.value)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MoneyRow({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: string;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-brand-500">{label}</span>
-      <span className={cn("text-sm font-semibold tabular-nums", tone)}>
-        {value < 0 ? `- ${aed(Math.abs(value))}` : aed(value)}
-      </span>
-    </div>
-  );
-}
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "morning";
-  if (h < 18) return "afternoon";
-  return "evening";
-}
+// Unused helpers removed — dashboard is now minimal (KPI cards + bar chart only)
