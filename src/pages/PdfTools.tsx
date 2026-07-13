@@ -3,12 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   LayoutGrid,
-  Download,
-  Eye,
   Signature,
   Sparkles,
-  Wand2,
-  ChevronRight,
   ArrowRight,
   ArrowLeft,
   FileText,
@@ -25,11 +21,7 @@ import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
 import {
   uploadOutputs,
-  downloadBytes,
-  fileNameOf,
   ensureRoom,
-  usedBytes,
-  STORAGE_QUOTA_BYTES,
 } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
 import {
@@ -40,7 +32,6 @@ import {
   ToolFields,
   defaultParams,
 } from "../components/PdfToolbox";
-import PreviewModal from "../components/PreviewModal";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import ESignStudio from "../components/ESignStudio";
@@ -65,37 +56,11 @@ const LIVE_PREVIEW_TOOLS = new Set([
   "greyscale",
 ]);
 
-interface RunLog {
-  id: number;
-  toolId: string;
-  toolName: string;
-  file: string;
-  paths: string[];
-  ts: number;
-}
-
-function mb(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function ago(ts: number): string {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 export default function ToolsPage() {
   const [active, setActive] = useState<Tool | null>(null);
-  const [runs, setRuns] = useState<RunLog[]>([]);
   const [showAll, setShowAll] = useState(false);
   // Reset to 8-tool view when switching category tabs.
   const [cat, setCat] = useState<string>("All Tools");
-  const { profile } = useAuth();
-  const firstName = profile?.name?.split(" ")[0] || "there";
   const [params, setParams] = useSearchParams();
   const closeActive = () => setParams({});
 
@@ -112,38 +77,7 @@ export default function ToolsPage() {
       if (t) setActive(t);
     }
   }, [params, active]);
-  const [preview, setPreview] = useState<RunLog | null>(null);
-  const [used, setUsed] = useState(0);
   const { toast } = useUI();
-
-  const refreshRuns = () => {
-    toolRuns
-      .list()
-      .then((rows) =>
-        setRuns(
-          rows.slice(0, 20).map((r) => ({
-            id: r.id,
-            toolId: r.tool,
-            toolName: r.tool_name,
-            file: r.file_name,
-            paths: r.storage_paths ?? [],
-            ts: new Date(r.created_at).getTime(),
-          }))
-        )
-      )
-      .catch(() => {
-        if (isConfigured) toast.error("Failed to load recent files");
-      });
-    usedBytes()
-      .then(setUsed)
-      .catch(() => {
-        if (isConfigured) toast.error("Failed to load storage usage");
-      });
-  };
-
-  useEffect(() => {
-    refreshRuns();
-  }, []);
 
   const logRun = async (toolId: string, files: string[], outputs: OutFile[]) => {
     const t = toolById(toolId);
@@ -164,27 +98,10 @@ export default function ToolsPage() {
       if (isConfigured)
         toast.info("Output downloaded, but couldn't be archived to recent activity.");
     }
-    refreshRuns();
   };
 
   const openTool = (toolId: string) => {
     setParams({ tool: toolId });
-  };
-
-  const downloadRun = async (r: RunLog) => {
-    if (!r.paths.length) {
-      toast.info("This output wasn't archived — re-run the tool to download it again.");
-      openTool(r.toolId);
-      return;
-    }
-    try {
-      for (const p of r.paths) {
-        const got = await downloadBytes(p);
-        if (got) downloadFile({ name: fileNameOf(p), bytes: got.bytes });
-      }
-    } catch (e) {
-      toast.error(`Could not download: ${e instanceof Error ? e.message : String(e)}`);
-    }
   };
 
   const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
@@ -194,7 +111,6 @@ export default function ToolsPage() {
     cat === "All Tools"
       ? PDF_TOOLS
       : PDF_TOOLS.filter((t) => t.cat === cat);
-  const askFiley = () => window.dispatchEvent(new Event("filey:copilot:open"));
 
   if (active) {
     return (
@@ -212,233 +128,81 @@ export default function ToolsPage() {
       <div className="mb-6">
         <h1 className="text-[28px] leading-9 font-semibold text-ink">Tools</h1>
         <p className="mt-1 text-sm text-brand-500 dark:text-brand-400">
-          An AI workspace assistant that helps manage files intelligently
+          Convert, merge, split &amp; edit your files — all on-device
         </p>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_340px] gap-5 items-start">
-        {/* ── Main column ─────────────────────────────────────────────────── */}
-        <main className="min-w-0">
-          {/* CATEGORY TABS — modern pill style */}
-          <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
-            {cats.map((c) => (
-              <button
-                key={c}
-                onClick={() => {
-                  setCat(c);
-                  setShowAll(false);
-                }}
-                className={`whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                  cat === c
-                    ? "bg-brand-100 text-ink dark:bg-white/10 dark:text-white"
-                    : "text-brand-500 hover:text-ink hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-white/5 dark:hover:text-white"
-                }`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-
-          {/* TOOLS GRID */}
-          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {cat === "All Tools" && (
-              <ToolMiniCard
-                name="E-sign PDF"
-                desc="Draw, type or upload — place &amp; download"
-                Icon={Signature}
-                badgeBg="bg-primary-400"
-                badgeFg="text-white"
-                flow={{ from: "PDF", to: "PDF" }}
-                onUse={() => setParams({ tool: "esign" })}
-              />
-            )}
-            {(showAll ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
-              <ToolMiniCard
-                key={t.id}
-                name={t.name}
-                desc={t.desc}
-                Icon={t.icon}
-                badgeBg="bg-primary-100 dark:bg-primary-400/15"
-                badgeFg="text-ink dark:text-primary-300"
-                flow={toolFlow(t)}
-                onUse={() => openTool(t.id)}
-              />
-            ))}
-          </div>
-
-          {filteredTools.length > 8 && !showAll && (
-            <div className="mb-4 flex justify-center">
-              <button onClick={() => setShowAll(true)} className="btn-ghost">
-                <LayoutGrid size={14} /> View all {filteredTools.length} tools
-              </button>
-            </div>
-          )}
-
-          {/* Supported formats */}
-          <Card className="mb-4 p-4">
-            <p className="mb-3 text-sm font-semibold text-ink">Works with your files</p>
-            <p className="-mt-1 mb-4 text-xs text-brand-400 dark:text-brand-400">
-              Convert, merge, split &amp; export across formats — all on-device
-            </p>
-            <div className="flex flex-wrap gap-x-6 gap-y-4">
-              {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
-                (f) => (
-                  <FileCard key={f} formatFile={f} />
-                )
-              )}
-            </div>
-          </Card>
-
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-400">
-            <CheckCircle2 size={12} className="text-success" />
-            All processing happens locally — files never leave this device.
-          </p>
-        </main>
-
-        {/* ── Right AI panel ──────────────────────────────────────────────── */}
-        <aside className="space-y-4 self-start lg:sticky lg:top-4">
-          {/* Filey Assistant chat */}
-          <Card className="p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-primary-400" />
-              <span className="text-sm font-medium text-ink">Filey Assistant</span>
-              <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-medium text-success">
-                <span className="h-1.5 w-1.5 rounded-full bg-success" /> Online
-              </span>
-            </div>
-            <div className="rounded-2xl bg-brand-50 px-3 py-2 text-sm leading-snug text-ink dark:bg-white/8">
-              Hi {firstName} 👋
-              <br />
-              What would you like to do today?
-            </div>
-            <div className="mt-3 space-y-1.5">
-              {[
-                "Merge multiple PDFs",
-                "Extract invoice data",
-                "Organize documents",
-                "Summarize long PDFs",
-              ].map((s) => (
-                <button
-                  key={s}
-                  aria-label={s}
-                  onClick={askFiley}
-                  className="flex w-full items-center justify-between rounded-xl bg-brand-50 px-3 py-2 text-xs font-medium text-brand-500 transition hover:bg-brand-100 hover:text-ink dark:bg-white/5 dark:text-brand-400 dark:hover:bg-white/10 dark:hover:text-white cursor-pointer"
-                >
-                  {s} <ChevronRight size={12} />
-                </button>
-              ))}
-            </div>
-            <button onClick={askFiley} className="btn-primary mt-3 w-full">
-              Ask Filey Anything <ArrowRight size={14} />
-            </button>
-          </Card>
-
-          {/* Smart recommendations */}
-          <Card className="p-4">
-            <p className="mb-3 text-sm font-medium text-ink">Smart suggestions</p>
-            <div className="space-y-1">
-              {[
-                {
-                  Icon: Wand2,
-                  color: "#8B5CF6",
-                  title: "Extract tables from invoices",
-                  desc: "Turn PDF tables into a spreadsheet",
-                  onClick: askFiley,
-                },
-                {
-                  Icon: FileText,
-                  color: "#2563EB",
-                  title: "Compress large reports",
-                  desc: "Shrink heavy PDFs in seconds",
-                  onClick: () => openTool("compress"),
-                },
-                {
-                  Icon: LayoutGrid,
-                  color: "#2CADF6",
-                  title: "Merge multiple PDFs",
-                  desc: "Combine into one document",
-                  onClick: () => openTool("merge"),
-                },
-              ].map((r) => (
-                <button
-                  key={r.title}
-                  onClick={r.onClick}
-                  className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
-                >
-                  <span
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-xl"
-                    style={{ background: r.color + "22", color: r.color }}
-                  >
-                    <r.Icon size={14} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-ink">
-                      {r.title}
-                    </span>
-                    <span className="block truncate text-[11px] text-brand-400 dark:text-brand-500">
-                      {r.desc}
-                    </span>
-                  </span>
-                  <ChevronRight size={14} className="shrink-0 text-brand-300 dark:text-brand-400" />
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          {/* Recent activity */}
-          <Card className="p-4">
-            <div className="mb-2.5 flex items-center justify-between">
-              <p className="text-sm font-medium text-ink">Recent activity</p>
-              <span className="text-[10px] font-medium text-brand-400 dark:text-brand-500">
-                {mb(used)} / {mb(STORAGE_QUOTA_BYTES)}
-              </span>
-            </div>
-            {runs.length === 0 ? (
-              <p className="text-xs text-brand-400 dark:text-brand-500">
-                Nothing yet — processed files will appear here.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {runs.slice(0, 5).map((r) => (
-                  <li key={r.id} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-ink">
-                        {r.toolName}
-                      </span>
-                      <span className="block truncate text-[10px] text-brand-400 dark:text-brand-500">
-                        {r.file} · {ago(r.ts)}
-                      </span>
-                    </span>
-                    <button
-                      onClick={() => setPreview(r)}
-                      aria-label="Preview"
-                      className="cursor-pointer text-brand-400 hover:text-ink dark:hover:text-white"
-                    >
-                      <Eye size={13} />
-                    </button>
-                    <button
-                      onClick={() => downloadRun(r)}
-                      aria-label="Download"
-                      className="cursor-pointer text-brand-400 hover:text-ink dark:hover:text-white"
-                    >
-                      <Download size={13} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </aside>
+      {/* CATEGORY TABS */}
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+        {cats.map((c) => (
+          <button
+            key={c}
+            onClick={() => {
+              setCat(c);
+              setShowAll(false);
+            }}
+            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+              cat === c
+                ? "bg-brand-100 text-ink dark:bg-white/10 dark:text-white"
+                : "text-brand-500 hover:text-ink hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-white/5 dark:hover:text-white"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
       </div>
 
-      {/* modals (workspace renders as a full page above when active) */}
-      <PreviewModal
-        open={!!preview}
-        title={preview?.file}
-        paths={preview?.paths ?? []}
-        onClose={() => setPreview(null)}
-      />
+      {/* TOOLS GRID */}
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {cat === "All Tools" && (
+          <ToolMiniCard
+            name="E-sign PDF"
+            desc="Draw, type or upload — place & download"
+            Icon={Signature}
+            badgeBg="bg-primary-400"
+            badgeFg="text-white"
+            flow={{ from: "PDF", to: "PDF" }}
+            onUse={() => setParams({ tool: "esign" })}
+          />
+        )}
+        {(showAll ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
+          <ToolMiniCard
+            key={t.id}
+            name={t.name}
+            desc={t.desc}
+            Icon={t.icon}
+            badgeBg="bg-primary-100 dark:bg-primary-400/15"
+            badgeFg="text-ink dark:text-primary-300"
+            flow={toolFlow(t)}
+            onUse={() => openTool(t.id)}
+          />
+        ))}
+      </div>
+
+      {filteredTools.length > 8 && !showAll && (
+        <div className="mb-4 flex justify-center">
+          <button onClick={() => setShowAll(true)} className="btn-ghost">
+            <LayoutGrid size={14} /> View all {filteredTools.length} tools
+          </button>
+        </div>
+      )}
+
+      {/* Supported formats */}
+      <Card className="mb-4 p-4">
+        <p className="mb-3 text-sm font-semibold text-ink">Works with your files</p>
+        <div className="flex flex-wrap gap-x-6 gap-y-4">
+          {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
+            (f) => (
+              <FileCard key={f} formatFile={f} />
+            )
+          )}
+        </div>
+      </Card>
+
+      <p className="flex items-center gap-1.5 text-[11px] text-brand-400">
+        <CheckCircle2 size={12} className="text-success" />
+        All processing happens locally — files never leave this device.
+      </p>
     </div>
   );
 }

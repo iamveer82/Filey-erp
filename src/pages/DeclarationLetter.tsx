@@ -649,7 +649,7 @@ function DeclarationEditor({
           </Card>
 
           {/* Branding */}
-          <div className="card">
+          <Card>
             <p className="font-medium text-ink mb-3">Branding</p>
             <label className="flex items-center justify-between py-1.5 mb-3 cursor-pointer">
               <span className="text-sm text-ink flex items-center gap-2">
@@ -704,24 +704,28 @@ function DeclarationEditor({
               </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="flex items-center justify-between card !p-3 cursor-pointer">
-                <span className="text-sm font-medium text-ink">Show stamp</span>
-                <input
-                  type="checkbox"
-                  className="toggle"
-                  checked={showStamp}
-                  onChange={(e) => setShowStamp(e.target.checked)}
-                />
-              </label>
-              <label className="flex items-center justify-between card !p-3 cursor-pointer">
-                <span className="text-sm font-medium text-ink">Show signature</span>
-                <input
-                  type="checkbox"
-                  className="toggle"
-                  checked={showSignature}
-                  onChange={(e) => setShowSignature(e.target.checked)}
-                />
-              </label>
+              <Card className="!p-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm font-medium text-ink">Show stamp</span>
+                  <input
+                    type="checkbox"
+                    className="toggle"
+                    checked={showStamp}
+                    onChange={(e) => setShowStamp(e.target.checked)}
+                  />
+                </label>
+              </Card>
+              <Card className="!p-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm font-medium text-ink">Show signature</span>
+                  <input
+                    type="checkbox"
+                    className="toggle"
+                    checked={showSignature}
+                    onChange={(e) => setShowSignature(e.target.checked)}
+                  />
+                </label>
+              </Card>
             </div>
             {(showStamp || showSignature) &&
               (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
@@ -747,13 +751,13 @@ function DeclarationEditor({
                     )}
                 </div>
               )}
-          </div>
+          </Card>
           </div>
         }
         right={
           <div className="sticky top-4 space-y-4">
             
-          <div className="card !p-4">
+          <Card className="!p-4">
             <div className="no-print flex items-start justify-between mb-3">
               <div>
                 <p className="font-medium text-ink">Preview</p>
@@ -890,8 +894,8 @@ function DeclarationEditor({
                   <Plus size={14} />
                 </button>
               </div>
-            </div>
           </div>
+          </Card>
           </div>
         }
       />
