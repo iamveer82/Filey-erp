@@ -378,7 +378,7 @@ export default function ModernOverview() {
       {show("kpis") && (
         <section
           aria-labelledby="kpi-heading"
-          className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4"
+          className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"
         >
           <h2 id="kpi-heading" className="sr-only">
             Key performance indicators
@@ -391,6 +391,8 @@ export default function ModernOverview() {
             format={aed}
             icon={<AppIcon name="invoicing" className="w-5 h-5" />}
             iconClass="bg-primary-100 text-ink"
+            change={`${revenue.count} invoices`}
+            changeTone="up"
           />
           <KpiMetric
             loading={loading}
@@ -399,6 +401,8 @@ export default function ModernOverview() {
             format={aed}
             icon={<AppIcon name="money" className="w-5 h-5" />}
             iconClass="bg-success/15 text-success"
+            change={receivable.total > 0 ? `${aed(receivable.total)} pending` : "All settled"}
+            changeTone={receivable.total > 0 ? "warn" : "up"}
           />
           <KpiMetric
             loading={loading}
@@ -411,6 +415,8 @@ export default function ModernOverview() {
             format={aed}
             icon={<AppIcon name="outstanding" className="w-5 h-5" />}
             iconClass="bg-danger/15 text-danger"
+            change={receivable.parties > 0 ? "Awaiting payment" : "Nothing due"}
+            changeTone={receivable.parties > 0 ? "down" : "up"}
           />
           <KpiMetric
             loading={loading}
@@ -423,6 +429,8 @@ export default function ModernOverview() {
             format={aed}
             icon={<AppIcon name="purchase" className="w-5 h-5" />}
             iconClass="bg-warning/15 text-warning"
+            change={payable.parties > 0 ? "To suppliers" : "All paid"}
+            changeTone={payable.parties > 0 ? "warn" : "up"}
           />
           <KpiMetric
             loading={loading}
@@ -431,6 +439,8 @@ export default function ModernOverview() {
             format={aed}
             icon={<AppIcon name="reports" className="w-5 h-5" />}
             iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
+            change={`Expenses ${aed(profit.expenseTotal)}`}
+            changeTone={profit.net >= 0 ? "up" : "down"}
           />
           <KpiMetric
             loading={loading}
@@ -442,6 +452,16 @@ export default function ModernOverview() {
               stockBreakdown.low > 0 || stockBreakdown.out > 0
                 ? "bg-danger/15 text-danger"
                 : "bg-primary-100 text-ink"
+            }
+            change={
+              stockBreakdown.low > 0
+                ? `${stockBreakdown.low} low stock`
+                : stockBreakdown.out > 0
+                  ? `${stockBreakdown.out} out`
+                  : "All in stock"
+            }
+            changeTone={
+              stockBreakdown.low > 0 || stockBreakdown.out > 0 ? "down" : "up"
             }
           />
         </section>
@@ -813,6 +833,8 @@ function KpiMetric({
   format,
   icon,
   iconClass = "bg-primary-100 text-ink",
+  change,
+  changeTone = "up",
 }: {
   loading: boolean;
   label: string;
@@ -820,6 +842,8 @@ function KpiMetric({
   format: (n: number) => string;
   icon: ReactNode;
   iconClass?: string;
+  change?: string;
+  changeTone?: "up" | "down" | "warn";
 }) {
   const formatted = format(value);
   if (loading) {
@@ -832,7 +856,16 @@ function KpiMetric({
       </Card>
     );
   }
-  return <MetricCard label={label} value={formatted} icon={icon} iconClass={iconClass} />;
+  return (
+    <MetricCard
+      label={label}
+      value={formatted}
+      icon={icon}
+      iconClass={iconClass}
+      change={change}
+      changeTone={changeTone}
+    />
+  );
 }
 
 function StockBar({

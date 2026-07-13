@@ -181,6 +181,8 @@ export function MetricCard({
   iconClass = "bg-primary-100 text-ink",
   rawValue,
   formatValue,
+  change,
+  changeTone = "up",
 }: {
   label: string;
   value: string;
@@ -189,26 +191,50 @@ export function MetricCard({
   iconClass?: string;
   rawValue?: number;
   formatValue?: (n: number) => string;
+  /** Optional change string like "+12% vs last month" */
+  change?: string;
+  /** Tone for the change text: up (green), down (red), warn (amber) */
+  changeTone?: "up" | "down" | "warn";
 }) {
   const display = rawValue !== undefined && formatValue ? formatValue(rawValue) : value;
   const numRef = useFitText<HTMLParagraphElement>(display);
+  const toneClass =
+    changeTone === "down"
+      ? "text-danger"
+      : changeTone === "warn"
+        ? "text-warning"
+        : "text-success";
   return (
-    <CardPrimitive className="p-4 h-full">
+    <CardPrimitive
+      className="p-4 h-full transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-[3px] hover:shadow-lg active:scale-[0.98]"
+    >
       <div className="flex items-start gap-3 h-full min-h-0">
         {icon && (
-          <div className={cn("rounded-xl p-1.5 shrink-0", iconClass)} style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
+          <div
+            className={cn("rounded-xl p-1.5 shrink-0", iconClass)}
+            style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            {icon}
+          </div>
         )}
         <div className="min-w-0 flex-1 flex flex-col justify-center h-full overflow-hidden">
-          <p className="text-xs font-medium text-brand-500 leading-4 truncate">{label}</p>
+          <p className="text-[11px] font-medium text-brand-500 leading-4 truncate tracking-tight">
+            {label}
+          </p>
           <p
             ref={numRef}
-            className="leading-tight font-semibold text-ink mt-0.5 tabular-nums whitespace-nowrap overflow-hidden"
+            className="text-[22px] leading-tight font-bold text-ink mt-0.5 tabular-nums tracking-tight whitespace-nowrap overflow-hidden"
           >
             {display}
           </p>
+          {change && (
+            <p className={cn("text-[11px] font-medium mt-0.5 leading-4", toneClass)}>
+              {change}
+            </p>
+          )}
         </div>
       </div>
-      {delta !== undefined && (
+      {delta !== undefined && !change && (
         <div className="mt-3">
           <Delta value={delta} />
         </div>
