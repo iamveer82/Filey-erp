@@ -47,3 +47,5 @@ supabase/.temp/
 # Tauri updater signing private key — NEVER commit
 src-tauri/updater_signing.key
 src-tauri/updater_signing.key.pub
+src-tauri/filey-key
+src-tauri/filey-key.pub

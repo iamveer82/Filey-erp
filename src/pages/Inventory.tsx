@@ -6,7 +6,6 @@ import {
   Boxes,
   AlertTriangle,
   Layers,
-  Tag,
   MoreHorizontal,
   Download,
   Upload,
@@ -254,30 +253,38 @@ export default function Inventory() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <MetricCard
           label="Total SKUs"
           value={num(products.length)}
           icon={<Boxes size={20} />}
           iconClass="bg-primary-100 text-ink"
+          change={`${categories.length} categories`}
+          changeTone="up"
         />
         <MetricCard
-          label="Inventory Value"
+          label="Stock Value"
           value={aed(invValue)}
           icon={<Layers size={20} />}
           iconClass="bg-primary-100 text-ink"
+          change="At cost"
+          changeTone="up"
         />
         <MetricCard
           label="Low Stock"
           value={num(lowStock.length)}
           icon={<AlertTriangle size={20} />}
-          iconClass="bg-danger/15 text-danger"
+          iconClass="bg-warning/15 text-warning"
+          change={lowStock.length > 0 ? "Needs reorder" : "All good"}
+          changeTone={lowStock.length > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Categories"
-          value={num(categories.length)}
-          icon={<Tag size={20} />}
-          iconClass="bg-primary-100 text-ink"
+          label="Out of Stock"
+          value={num(outOfStock.length)}
+          icon={<PackageMinus size={20} />}
+          iconClass="bg-danger/15 text-danger"
+          change={outOfStock.length > 0 ? "Restock needed" : "None"}
+          changeTone={outOfStock.length > 0 ? "down" : "up"}
         />
       </div>
 
@@ -363,7 +370,7 @@ export default function Inventory() {
             </select>
           </div>
         )}
-        <span className="ml-auto text-xs font-medium text-brand-500">
+        <span className="ml-auto text-[11px] font-medium text-brand-500 tracking-tight">
           {filtered.length} of {products.length}
         </span>
       </div>
@@ -377,7 +384,9 @@ export default function Inventory() {
       {showAlerts && (
         <InfoCard title="Stock Alerts" className="mb-4">
           <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle size={18} className="text-danger" />
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-danger/10">
+              <AlertTriangle size={18} className="text-danger" />
+            </div>
             <div className="flex items-center gap-2">
               <Badge tone="danger">{outOfStock.length} out</Badge>
               <Badge tone="warn">{lowStock.length - outOfStock.length} low</Badge>
@@ -394,17 +403,17 @@ export default function Inventory() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {lowStock.slice(0, 6).map((p) => (
-              <Card key={p.id} className="p-3 flex items-center justify-between gap-3" hover>
+              <Card key={p.id} className="p-3 flex items-center justify-between gap-3 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-[3px] hover:shadow-lg active:scale-[0.98]" hover>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink truncate">
+                  <p className="text-sm font-semibold text-ink truncate tracking-tight">
                     {p.name}
                   </p>
-                  <p className="text-[11px] text-brand-500 font-medium">
+                  <p className="text-[11px] text-brand-500 font-medium tracking-tight">
                     {p.sku}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-semibold text-ink">
+                  <span className="text-sm font-bold text-ink tabular-nums tracking-tight">
                     {p.quantity}
                   </span>
                   {p.quantity === 0 ? (
@@ -417,7 +426,7 @@ export default function Inventory() {
             ))}
           </div>
           {lowStock.length > 6 && (
-            <p className="text-xs text-brand-500 mt-3">
+            <p className="text-xs text-brand-500 mt-3 font-medium tracking-tight">
               +{lowStock.length - 6} more items need attention
             </p>
           )}
