@@ -19,9 +19,8 @@ import {
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-import { PageHeader, InfoCard } from "../components/ui";
+import { Card } from "../components/ui";
 import FileCard from "../components/FileCard";
-import ColorOrb from "../components/ColorOrb";
 import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
 import {
@@ -209,16 +208,19 @@ export default function ToolsPage() {
 
   return (
     <div className="animate-fade-up">
-      <PageHeader
-        title="Tools"
-        subtitle="An AI workspace assistant that helps manage files intelligently"
-      />
+      {/* ── Page header ─────────────────────────────────────────────────── */}
+      <div className="mb-6">
+        <h1 className="text-[28px] leading-9 font-semibold text-ink">Tools</h1>
+        <p className="mt-1 text-sm text-brand-500 dark:text-brand-400">
+          An AI workspace assistant that helps manage files intelligently
+        </p>
+      </div>
 
       <div className="grid lg:grid-cols-[1fr_340px] gap-5 items-start">
         {/* ── Main column ─────────────────────────────────────────────────── */}
         <main className="min-w-0">
-          {/* CATEGORY TABS */}
-          <div className="mb-4 flex gap-1 overflow-x-auto border-b border-brand-200/60 dark:border-[#2C2C2E]">
+          {/* CATEGORY TABS — modern pill style */}
+          <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
             {cats.map((c) => (
               <button
                 key={c}
@@ -226,14 +228,13 @@ export default function ToolsPage() {
                   setCat(c);
                   setShowAll(false);
                 }}
-                className={`relative whitespace-nowrap px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
-                  cat === c ? "text-ink" : "text-brand-500 hover:text-ink"
+                className={`whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                  cat === c
+                    ? "bg-brand-100 text-ink dark:bg-white/10 dark:text-white"
+                    : "text-brand-500 hover:text-ink hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-white/5 dark:hover:text-white"
                 }`}
               >
                 {c}
-                {cat === c && (
-                  <span className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-primary-400" />
-                )}
               </button>
             ))}
           </div>
@@ -274,8 +275,9 @@ export default function ToolsPage() {
           )}
 
           {/* Supported formats */}
-          <InfoCard title="Works with your files" className="mb-4">
-            <p className="-mt-3 mb-5 text-xs text-brand-400">
+          <Card className="mb-4 p-4">
+            <p className="mb-3 text-sm font-semibold text-ink">Works with your files</p>
+            <p className="-mt-1 mb-4 text-xs text-brand-400 dark:text-brand-400">
               Convert, merge, split &amp; export across formats — all on-device
             </p>
             <div className="flex flex-wrap gap-x-6 gap-y-4">
@@ -285,7 +287,7 @@ export default function ToolsPage() {
                 )
               )}
             </div>
-          </InfoCard>
+          </Card>
 
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-brand-400">
             <CheckCircle2 size={12} className="text-success" />
@@ -296,9 +298,9 @@ export default function ToolsPage() {
         {/* ── Right AI panel ──────────────────────────────────────────────── */}
         <aside className="space-y-4 self-start lg:sticky lg:top-4">
           {/* Filey Assistant chat */}
-          <div className="card p-4">
+          <Card className="p-4">
             <div className="mb-3 flex items-center gap-2">
-              <ColorOrb dimension="22px" />
+              <span className="h-2 w-2 rounded-full bg-primary-400" />
               <span className="text-sm font-medium text-ink">Filey Assistant</span>
               <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-medium text-success">
                 <span className="h-1.5 w-1.5 rounded-full bg-success" /> Online
@@ -320,7 +322,7 @@ export default function ToolsPage() {
                   key={s}
                   aria-label={s}
                   onClick={askFiley}
-                  className="flex w-full items-center justify-between rounded-2xl border border-brand-200 bg-white px-3 py-2 text-xs font-medium text-brand-500 transition hover:border-primary-300 hover:text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#DDE0E4] dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="flex w-full items-center justify-between rounded-xl bg-brand-50 px-3 py-2 text-xs font-medium text-brand-500 transition hover:bg-brand-100 hover:text-ink dark:bg-white/5 dark:text-brand-400 dark:hover:bg-white/10 dark:hover:text-white cursor-pointer"
                 >
                   {s} <ChevronRight size={12} />
                 </button>
@@ -329,12 +331,12 @@ export default function ToolsPage() {
             <button onClick={askFiley} className="btn-primary mt-3 w-full">
               Ask Filey Anything <ArrowRight size={14} />
             </button>
-          </div>
+          </Card>
 
           {/* Smart recommendations */}
-          <div className="card p-4">
+          <Card className="p-4">
             <p className="mb-3 text-sm font-medium text-ink">Smart suggestions</p>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {[
                 {
                   Icon: Wand2,
@@ -361,42 +363,42 @@ export default function ToolsPage() {
                 <button
                   key={r.title}
                   onClick={r.onClick}
-                  className="flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+                  className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
                 >
                   <span
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-xl"
                     style={{ background: r.color + "22", color: r.color }}
                   >
-                    <r.Icon size={16} />
+                    <r.Icon size={14} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-xs font-medium text-ink">
                       {r.title}
                     </span>
-                    <span className="block truncate text-[11px] text-brand-400">
+                    <span className="block truncate text-[11px] text-brand-400 dark:text-brand-500">
                       {r.desc}
                     </span>
                   </span>
-                  <ChevronRight size={14} className="shrink-0 text-brand-300" />
+                  <ChevronRight size={14} className="shrink-0 text-brand-300 dark:text-brand-400" />
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
 
           {/* Recent activity */}
-          <div className="card p-4">
-            <div className="mb-3 flex items-center justify-between">
+          <Card className="p-4">
+            <div className="mb-2.5 flex items-center justify-between">
               <p className="text-sm font-medium text-ink">Recent activity</p>
-              <span className="text-[10px] font-medium text-brand-400">
+              <span className="text-[10px] font-medium text-brand-400 dark:text-brand-500">
                 {mb(used)} / {mb(STORAGE_QUOTA_BYTES)}
               </span>
             </div>
             {runs.length === 0 ? (
-              <p className="text-xs text-brand-400">
+              <p className="text-xs text-brand-400 dark:text-brand-500">
                 Nothing yet — processed files will appear here.
               </p>
             ) : (
-              <ul className="space-y-2.5">
+              <ul className="space-y-2">
                 {runs.slice(0, 5).map((r) => (
                   <li key={r.id} className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
@@ -404,21 +406,21 @@ export default function ToolsPage() {
                       <span className="block truncate text-xs font-medium text-ink">
                         {r.toolName}
                       </span>
-                      <span className="block truncate text-[10px] text-brand-400">
+                      <span className="block truncate text-[10px] text-brand-400 dark:text-brand-500">
                         {r.file} · {ago(r.ts)}
                       </span>
                     </span>
                     <button
                       onClick={() => setPreview(r)}
                       aria-label="Preview"
-                      className="cursor-pointer text-brand-400 hover:text-ink"
+                      className="cursor-pointer text-brand-400 hover:text-ink dark:hover:text-white"
                     >
                       <Eye size={13} />
                     </button>
                     <button
                       onClick={() => downloadRun(r)}
                       aria-label="Download"
-                      className="cursor-pointer text-brand-400 hover:text-ink"
+                      className="cursor-pointer text-brand-400 hover:text-ink dark:hover:text-white"
                     >
                       <Download size={13} />
                     </button>
@@ -426,7 +428,7 @@ export default function ToolsPage() {
                 ))}
               </ul>
             )}
-          </div>
+          </Card>
         </aside>
       </div>
 
@@ -460,35 +462,35 @@ function ToolMiniCard({
   onUse: () => void;
 }) {
   return (
-    <button
+    <Card
       onClick={onUse}
-      className="group flex flex-col gap-2 rounded-2xl border border-brand-200 bg-white p-4 text-left transition-colors hover:bg-brand-50 hover:border-primary-300 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] cursor-pointer"
+      className="group flex flex-col gap-2 p-4 transition-transform duration-200 hover:scale-[1.02]"
     >
       <div className="flex items-center justify-between gap-2">
         <span
-          className={`grid h-12 w-12 place-items-center rounded-md transition-colors ${badgeBg} ${badgeFg}`}
+          className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl transition-colors ${badgeBg} ${badgeFg}`}
         >
-          <Icon size={22} />
+          <Icon size={20} />
         </span>
         {flow && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-500 dark:border-[#3A3D45] dark:bg-white/5"
+            className="inline-flex items-center gap-0.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand-500 dark:bg-white/5 dark:text-brand-400"
             title={`${flow.from} to ${flow.to}`}
           >
             {flow.from}
-            <ArrowRight size={10} className="text-primary-400" />
+            <ArrowRight size={9} className="text-primary-400" />
             {flow.to}
           </span>
         )}
       </div>
-      <p className="mt-1 text-[15px] font-medium leading-tight text-ink">{name}</p>
-      <p className="line-clamp-2 text-xs text-brand-500">{desc}</p>
-      <div className="mt-auto flex items-center justify-between pt-2">
-        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-400">
+      <p className="mt-1 text-sm font-semibold leading-tight text-ink">{name}</p>
+      <p className="line-clamp-2 text-xs text-brand-500 dark:text-brand-400">{desc}</p>
+      <div className="mt-auto flex items-center pt-1">
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-400 transition-colors group-hover:text-ink dark:group-hover:text-white">
           Use tool <ArrowRight size={11} />
         </span>
       </div>
-    </button>
+    </Card>
   );
 }
 
