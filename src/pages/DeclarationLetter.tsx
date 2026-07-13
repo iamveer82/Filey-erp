@@ -23,7 +23,7 @@ import {
 } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { errMsg, fmtDate } from "../lib/format";
-import { PageHeader, Field, MetricCard, DataTable } from "../components/ui";
+import { PageHeader, Field, MetricCard, DataTable, Card } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
@@ -492,7 +492,7 @@ function DeclarationEditor({
           <div className="no-print space-y-4">
             
           {/* Parties */}
-          <div className="card">
+          <Card>
             <div className="mb-4">
               <Field label="Letter Title">
                 <input
@@ -588,10 +588,10 @@ function DeclarationEditor({
                 />
               </Field>
             </div>
-          </div>
+          </Card>
 
           {/* Reference / figures */}
-          <div className="card">
+          <Card>
             <p className="font-medium text-ink mb-3">Order Reference</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="LPO Number">
@@ -627,10 +627,10 @@ function DeclarationEditor({
                 />
               </Field>
             </div>
-          </div>
+          </Card>
 
           {/* Body */}
-          <div className="card">
+          <Card>
             <p className="font-medium text-ink mb-1">Declaration Text</p>
             <p className="text-xs text-brand-400 mb-3">
               Tokens like <code className="font-medium">{"{company}"}</code>,{" "}
@@ -646,7 +646,7 @@ function DeclarationEditor({
               value={form.body}
               onChange={(e) => set("body", e.target.value)}
             />
-          </div>
+          </Card>
 
           {/* Branding */}
           <div className="card">

@@ -32,6 +32,7 @@ import {
   PageHeader,
   MetricCard,
   InfoCard,
+  Card,
   Badge,
   Modal,
   Field,
@@ -200,9 +201,9 @@ export default function Crm() {
         </div>
       )}
       {loading && customers.length === 0 && opps.length === 0 && !error && (
-        <div className="card mb-4">
+        <Card className="mb-4">
           <Spinner label="Loading CRM…" />
-        </div>
+        </Card>
       )}
 
       <Tabs

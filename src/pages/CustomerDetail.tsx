@@ -21,7 +21,7 @@ import {
   type Order,
   type Opportunity,
 } from "../lib/api";
-import { PageHeader, StatCard, DataTable, Badge, statusTone } from "../components/ui";
+import { PageHeader, StatCard, DataTable, Badge, statusTone, Card } from "../components/ui";
 import { aed, num, fmtDate } from "../lib/format";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -125,12 +125,12 @@ export default function CustomerDetail() {
         <Link to="/customers" className="btn-ghost h-9 inline-flex mb-6">
           <ArrowLeft size={15} /> Back to Customers
         </Link>
-        <div className="card text-center py-16">
+        <Card className="text-center py-16">
           <p className="text-lg font-medium text-ink">Customer not found</p>
           <p className="text-sm text-brand-500 mt-2">
             This customer may have been removed.
           </p>
-        </div>
+        </Card>
       </div>
     );
   }
@@ -147,7 +147,7 @@ export default function CustomerDetail() {
       />
 
       <div className="grid lg:grid-cols-4 gap-4 mb-5">
-        <div className="card lg:col-span-1">
+        <Card className="lg:col-span-1">
           <p className="stat-label mb-3">Contact</p>
           <ul className="space-y-2.5 text-sm">
             {customer?.company && (
@@ -169,7 +169,7 @@ export default function CustomerDetail() {
               <span>{customer?.address || "—"}</span>
             </li>
           </ul>
-        </div>
+        </Card>
         <div className="lg:col-span-3 grid sm:grid-cols-3 gap-4">
           <StatCard
             label="Total invoiced"

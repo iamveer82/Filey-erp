@@ -19,7 +19,7 @@ export default function NotFound() {
             <Home size={15} /> Dashboard
           </button>
         </div>
-        </Card>
-        </div>
+      </Card>
+    </div>
   );
 }
