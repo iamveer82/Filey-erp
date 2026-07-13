@@ -120,23 +120,30 @@ export default function BankAccounts() {
           </div>
         }
       />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <MetricCard
           label="Accounts"
           value={String(accounts.length)}
           icon={<Building2 size={20} />}
+          iconClass="bg-primary-100 text-ink"
+          change={accounts.length > 0 ? "Connected" : "None yet"}
+          changeTone={accounts.length > 0 ? "up" : "warn"}
         />
         <MetricCard
           label="Total Balance"
           value={aed(total)}
           icon={<Wallet size={20} />}
           iconClass="bg-success/15 text-success"
+          change="Across all accounts"
+          changeTone="up"
         />
         <MetricCard
           label="Currencies"
           value={String(currencies)}
           icon={<Coins size={20} />}
           iconClass="bg-secondary/20 text-ink"
+          change={currencies > 1 ? "Multi-currency" : "Single currency"}
+          changeTone="up"
         />
       </div>
       <DataTable<BankAccount>
@@ -193,7 +200,7 @@ export default function BankAccounts() {
             render: (a) => (
               <button
                 aria-label={`Delete ${a.bank_name} account`}
-                className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
+                className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
                 onClick={() => del(a)}
               >
                 <Trash2 size={15} />
@@ -307,9 +314,9 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const Stat = ({ n, label, tone }: { n: number; label: string; tone: string }) => (
-    <div className="rounded-xl border border-brand-100 p-3">
-      <p className={`text-2xl font-semibold tabular-nums ${tone}`}>{n}</p>
-      <p className="text-xs text-brand-500 mt-0.5">{label}</p>
+    <div className="rounded-xl border border-brand-200 bg-white p-3 dark:bg-[#24262C] dark:border-[#3A3D45]">
+      <p className={`text-2xl font-bold tabular-nums tracking-tight ${tone}`}>{n}</p>
+      <p className="text-[11px] text-brand-500 mt-0.5 font-medium tracking-tight">{label}</p>
     </div>
   );
 
@@ -410,7 +417,7 @@ function ReconList({
     <div>
       <p className="text-sm font-semibold text-ink">{title}</p>
       <p className="text-xs text-brand-500 mb-1">{hint}</p>
-      <div className="max-h-40 overflow-y-auto rounded-xl border border-brand-100 divide-y divide-brand-100">
+      <div className="max-h-40 overflow-y-auto rounded-xl border border-brand-200 divide-y divide-brand-100 dark:border-[#3A3D45] dark:divide-[#2A2C33]">
         {rows.map((r, i) => (
           <div
             key={i}

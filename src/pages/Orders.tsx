@@ -15,10 +15,11 @@ import {
 import { erp, Order, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { aed, fmtDate, numInput, num, cn, getDisplayCurrency } from "../lib/format";
 import { nextDocNumber } from "../lib/docNumber";
 import {
   PageHeader,
+  MetricCard,
   DataTable,
   Badge,
   statusTone,
@@ -29,7 +30,6 @@ import {
   FilterChip,
   SearchInput,
 } from "../components/ui";
-import StatStrip from "../components/StatStrip";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
@@ -136,31 +136,40 @@ export default function Orders() {
         </div>
       )}
 
-      <StatStrip
-        className="mb-4"
-        items={[
-          {
-            label: "Total Orders",
-            value: String(orders.length),
-            icon: <ClipboardList size={16} />,
-          },
-          {
-            label: "Completed",
-            value: String(stats.completed),
-            icon: <CheckCircle2 size={16} />,
-          },
-          {
-            label: "In Progress",
-            value: String(stats.progress),
-            icon: <Clock size={16} />,
-          },
-          {
-            label: "Order Value",
-            value: aed(stats.value),
-            icon: <Wallet size={16} />,
-          },
-        ]}
-      />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <MetricCard
+          label="Total Orders"
+          value={num(orders.length)}
+          icon={<ClipboardList size={20} />}
+          iconClass="bg-primary-100 text-ink"
+          change={`${stats.returns} cancelled`}
+          changeTone={stats.returns > 0 ? "warn" : "up"}
+        />
+        <MetricCard
+          label="Completed"
+          value={num(stats.completed)}
+          icon={<CheckCircle2 size={20} />}
+          iconClass="bg-success/15 text-success"
+          change={stats.completed > 0 ? "Fulfilled" : "None yet"}
+          changeTone="up"
+        />
+        <MetricCard
+          label="In Progress"
+          value={num(stats.progress)}
+          icon={<Clock size={20} />}
+          iconClass="bg-info/15 text-info"
+          change={stats.progress > 0 ? "Active" : "All done"}
+          changeTone={stats.progress > 0 ? "warn" : "up"}
+        />
+        <MetricCard
+          label="Order Value"
+          value={aed(stats.value)}
+          icon={<Wallet size={20} />}
+          iconClass="bg-primary-100 text-ink"
+          change="Total booked"
+          changeTone="up"
+        />
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <SearchInput
@@ -200,7 +209,7 @@ export default function Orders() {
         >
           Cancelled
         </FilterChip>
-        <span className="ml-auto text-xs font-medium text-brand-400">
+        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">
           {filteredOrders.length} of {orders.length}
         </span>
       </div>
@@ -304,14 +313,14 @@ export default function Orders() {
                   )}
                   <button
                     aria-label="Edit order"
-                    className="text-brand-500 hover:bg-brand-100 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
                     onClick={() => setEditId(o.id)}
                   >
                     <Pencil size={15} />
                   </button>
                   <button
                     aria-label="Delete order"
-                    className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
                       const ok = await confirm({
                         title: "Delete order",

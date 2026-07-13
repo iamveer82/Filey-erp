@@ -92,29 +92,38 @@ export default function People() {
           <ErrorBanner message={error} />
         </div>
       )}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <MetricCard
           label="Headcount"
           value={num(sum?.headcount ?? emps.length)}
           icon={<Users size={20} />}
+          iconClass="bg-primary-100 text-ink"
+          change={`${emps.filter((e) => e.status === "active").length} active`}
+          changeTone="up"
         />
         <MetricCard
           label="Present Today"
           value={num(sum?.present_today ?? 0)}
           icon={<UserCheck size={20} />}
           iconClass="bg-success/15 text-success"
+          change={sum?.present_today ? "Checked in" : "None yet"}
+          changeTone={sum?.present_today ? "up" : "warn"}
         />
         <MetricCard
           label="On Leave"
           value={num(sum?.on_leave ?? 0)}
           icon={<CalendarOff size={20} />}
           iconClass="bg-secondary-400/20 text-secondary-600"
+          change={sum?.on_leave ? "Absent" : "All present"}
+          changeTone={sum?.on_leave ? "warn" : "up"}
         />
         <MetricCard
           label="Monthly Payroll"
           value={aed(sum?.monthly_payroll ?? 0)}
           icon={<Wallet size={20} />}
           iconClass="bg-info/15 text-info"
+          change="Total cost"
+          changeTone="up"
         />
       </div>
 

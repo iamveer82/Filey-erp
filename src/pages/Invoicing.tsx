@@ -874,47 +874,58 @@ const editInvoice = async (id: number) => {
       />
 
       <div
-        className={`grid grid-cols-2 ${
-          isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"
-        } gap-4 mb-4`}
-      >
-        <MetricCard
-          label="Invoices"
-          value={num(docs.length)}
-          icon={<FileText size={20} />}
-        />
-        <MetricCard
-          label="Outstanding"
-          value={money(outstanding, statCcy)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
-        />
-        <MetricCard
-          label="Paid"
-          value={money(paidTotal, statCcy)}
-          icon={<CheckCircle2 size={20} />}
-          iconClass="bg-success/15 text-success"
-        />
-        <MetricCard
-          label="Overdue"
-          value={num(overdueCount)}
-          icon={<Clock size={20} />}
-          iconClass="bg-danger/15 text-danger"
-        />
-        {!isPurchase && (
-          <MetricCard
-            label="Customer advances"
-            value={money(advancesTotal, statCcy)}
-            icon={<CreditCard size={20} />}
-            iconClass="bg-primary-400/20 text-primary-600"
-          />
-        )}
-      </div>
+            className={`grid grid-cols-2 ${isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"} gap-3 mb-4`}
+          >
+            <MetricCard
+              label="Invoices"
+              value={num(docs.length)}
+              icon={<FileText size={20} />}
+              change={`${filteredDocs.length} shown`}
+              changeTone="up"
+            />
+            <MetricCard
+              label="Outstanding"
+              value={money(outstanding, statCcy)}
+              icon={<Wallet size={20} />}
+              iconClass="bg-secondary-400/20 text-secondary-600"
+              change={outstanding > 0 ? "Awaiting payment" : "All settled"}
+              changeTone={outstanding > 0 ? "warn" : "up"}
+            />
+            <MetricCard
+              label="Paid"
+              value={money(paidTotal, statCcy)}
+              icon={<CheckCircle2 size={20} />}
+              iconClass="bg-success/15 text-success"
+              change="Collected"
+              changeTone="up"
+            />
+            <MetricCard
+              label="Overdue"
+              value={num(overdueCount)}
+              icon={<Clock size={20} />}
+              iconClass="bg-danger/15 text-danger"
+              change={overdueCount > 0 ? "Past due date" : "None"}
+              changeTone={overdueCount > 0 ? "down" : "up"}
+            />
+            {!isPurchase && (
+              <MetricCard
+                label="Customer Advances"
+                value={money(advancesTotal, statCcy)}
+                icon={<CreditCard size={20} />}
+                iconClass="bg-primary-400/20 text-primary-600"
+                change="Prepayments"
+                changeTone="up"
+              />
+            )}
+          </div>
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
-          <p className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink">
-            <Repeat size={15} /> Recurring invoices
+          <p className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink tracking-tight">
+            <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-100">
+              <Repeat size={14} className="text-primary-700" />
+            </div>
+            Recurring invoices
           </p>
           <ul className="space-y-1.5">
             {recurs
@@ -967,8 +978,8 @@ const editInvoice = async (id: number) => {
 
       {search && filteredDocs.length > 0 && (
         <div className="mb-4">
-          <p className="mb-2 text-sm text-brand-500">
-            Totals for <span className="font-medium text-ink">“{search}”</span>
+          <p className="mb-2 text-sm text-brand-500 tracking-tight">
+            Totals for <span className="font-semibold text-ink">“{search}”</span>
           </p>
           <StatStrip
             items={[
@@ -1147,28 +1158,28 @@ const editInvoice = async (id: number) => {
                 <button
                   aria-label="Payments"
                   title="Record payment"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={() => setPayFor(d)}
                 >
                   <CreditCard size={15} />
                 </button>
                 <button
                   aria-label="Edit"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={() => editInvoice(d.id)}
                 >
                   <Pencil size={15} />
                 </button>
                 <button
                   aria-label="Duplicate"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={() => duplicateInvoice(d.id)}
                 >
                   <Copy size={15} />
                 </button>
                 <button
                   aria-label="Delete"
-                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
                     if (
                       !(await confirm({

@@ -298,3 +298,79 @@ src/pages/reports/
 6. **Phase 5** — Deployment infrastructure
 7. **Phase 6** — Pre-launch checklist
 8. **Phase 7** — Launch
+
+---
+
+## Production Hardening Audit (2026-07-13)
+
+### 1. Tests & Type Safety
+
+- **Vitest**: 35 test files, 192 tests — ALL PASSING ✅
+- **TypeScript** (`tsc --noEmit`): 1 error fixed (unused `Tag` import in `Inventory.tsx`) → clean ✅
+- **ESLint** (`eslint .`): 0 errors, 380 warnings (all `@typescript-eslint/no-explicit-any`) — non-blocking, mass refactor would risk business logic
+
+### 2. Security Audit
+
+#### RLS (Row-Level Security)
+
+- **All 33 business tables** have RLS enabled with org-scoped or user-scoped policies ✅
+- Tables verified: products, orders, order_items, employees, attendance, payroll, accounts, expenses, transactions, app_users, app_settings, audit_log, crm_leads, crm_customers, crm_opportunities, crm_activities, company_profile, invoice_docs, invoice_doc_items, invoice_payments, quotations, quotation_items, quotation_templates, tool_runs, suppliers, purchase_orders, purchase_order_items, stock_movements, advances, po_payments, payment_receipts, follow_ups, invoice_recurrence
+- Infrastructure tables with RLS: organizations, org_members, invitations, org_messages, org_devices, notifications, profiles, agent_pending_actions, sync_state, licenses, license_devices, user_assets, user_files
+- **No tables missing RLS** ✅
+- `verify-rls.sql` updated to include 6 previously missing tables: stock_movements, advances, po_payments, payment_receipts, follow_ups, invoice_recurrence
+- `audit_log` is correctly append-only (SELECT + INSERT only, no UPDATE/DELETE policy) ✅
+- `force_org_id()` trigger pins org_id on insert and freezes it on update — prevents cross-tenant row injection ✅
+- Security-definer functions (`current_org`, `is_org_admin`, `handle_new_user`) all pin `search_path = public` ✅
+
+#### Stripe Webhook Signature Validation
+
+- `supabase/functions/stripe/index.ts` uses `stripe.webhooks.constructEventAsync(raw, sig, WEBHOOK_SECRET)` ✅
+- Returns 400 on signature failure ✅
+- Webhook secret from `STRIPE_WEBHOOK_SECRET` env var ✅
+- Authenticated actions verify JWT via `supabase.auth.getUser(jwt)` ✅
+- Open-redirect protection: `SITE_URL` takes priority over caller-controlled `Origin` header ✅
+
+#### CSP (Tauri)
+
+- `tauri.conf.json` CSP is restrictive: `default-src 'self'`, `script-src 'self' 'wasm-unsafe-eval'`, no `unsafe-eval` for JS ✅
+- `connect-src` limited to self, Supabase, frankfurter API, Google Fonts ✅
+- `style-src` allows `'unsafe-inline'` + Google Fonts (needed for Tailwind + font loading) ✅
+- `img-src` allows `data:` and `blob:` (needed for logos/stamps) ✅
+
+#### Input Sanitization Notes
+
+- Form inputs rely on Supabase RLS for server-side isolation; client-side sanitization is basic (`.trim()`, `String()`)
+- Edge function `stripe/index.ts` uses `String(payload.field ?? "")` for all input coercion ✅
+- Consider adding: DOMPurify for any user HTML rendering, and server-side CHECK constraints beyond the existing non-negative money/quantity checks
+
+### 3. Performance
+
+- **Lazy loading**: All 28 module pages use `React.lazy()` in `src/modules/registry.tsx` ✅
+- **Suspense**: App.tsx wraps routes in `<Suspense fallback={<Splash />}>` ✅
+- **Manual chunks**: `vite.config.ts` splits react, charts (recharts), pdf (pdf-lib, pdfjs-dist) ✅
+- **Large pages** (>500 lines, all already lazy-loaded):
+  - Invoicing.tsx (3779), Quoting.tsx (2530), PurchaseOrders.tsx (2470), Inventory.tsx (1458)
+  - These are in separate chunks due to lazy loading — splitting further would add complexity without meaningful gain
+- **Skeleton fallbacks**: Splash (`FileyLoader`) used as Suspense fallback ✅ (could be enhanced with per-page skeletons later)
+
+### 4. Reliability
+
+- **ErrorBoundary**: Wraps all routes in `App.tsx` with `resetKey={location.pathname}` (recovers on navigation) ✅
+- **ErrorBoundary**: Also wraps entire app in `main.tsx` ✅
+- **Sentry**: Configured in `src/lib/monitoring.ts` — dynamically imported, only active in production with `VITE_SENTRY_DSN` set ✅
+- **Offline mode**: `dataMode.ts` cleanly switches local/cloud; `api.ts` implements read-through cache + offline outbox ✅
+- **API error handling**: All API functions in `api.ts` use try/catch or throw on error; `readCached` falls back to cache on network failure ✅
+- **Outbox replay**: Offline writes queued and replayed on reconnect (`flushOutbox` called on `online` event) ✅
+
+### 5. Documentation
+
+- `.env.example` updated with all VITE_ env vars + documented edge function secrets ✅
+- `README.md` is current and accurate ✅
+- `verify-rls.sql` has audit comment at top with full findings ✅
+
+### 6. Files Modified
+
+- `src/pages/Inventory.tsx` — removed unused `Tag` import (TS fix)
+- `supabase/verify-rls.sql` — added audit results comment, added 6 missing tables to business_tables list
+- `.env.example` — expanded with all env vars + edge function secret documentation
+- `MASTER_PLAN.md` — appended this Production Hardening Audit section

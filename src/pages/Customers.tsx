@@ -195,22 +195,28 @@ export default function Customers() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-3 gap-3 mb-4">
         <MetricCard
           label="Customers"
           value={num(rows.length)}
           icon={<Users size={20} />}
+          change={`${segments.length} segments`}
+          changeTone="up"
         />
         <MetricCard
           label="With TRN"
           value={num(withTrn)}
           icon={<BadgeCheck size={20} />}
           iconClass="bg-info/15 text-info"
+          change={`${rows.length - withTrn} without TRN`}
+          changeTone={withTrn < rows.length ? "warn" : "up"}
         />
         <MetricCard
-          label="With email"
+          label="With Email"
           value={num(rows.filter((c) => c.email).length)}
           icon={<Mail size={20} />}
+          change={`${rows.filter((c) => !c.email).length} missing`}
+          changeTone={rows.some((c) => !c.email) ? "warn" : "up"}
         />
       </div>
 
@@ -256,7 +262,7 @@ export default function Customers() {
             Clear filters
           </button>
         )}
-        <span className="ml-auto text-xs text-brand-400">{filtered.length} shown</span>
+        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">{filtered.length} shown</span>
       </div>
 
       <DataTable<CrmCustomer>
@@ -334,7 +340,7 @@ export default function Customers() {
               <div className="flex items-center justify-end gap-1">
                 <button
                   aria-label="Edit"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={() => {
                     setEdit(c);
                     setOpen(true);
@@ -344,7 +350,7 @@ export default function Customers() {
                 </button>
                 <button
                   aria-label="Delete"
-                  className="rounded-full p-1.5 text-danger hover:bg-danger/8 cursor-pointer"
+                  className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
                   onClick={async () => {
                     const ok = await confirm({
                       title: "Delete customer",
@@ -362,7 +368,7 @@ export default function Customers() {
                 </button>
                 <button
                   onClick={() => setDetail(c)}
-                  className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-brand-500 hover:bg-brand-100 dark:text-brand-300 dark:hover:bg-white/10 cursor-pointer"
+                  className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 dark:text-brand-300 dark:hover:bg-white/10 cursor-pointer transition-colors duration-200"
                 >
                   View <ArrowRight size={11} />
                 </button>

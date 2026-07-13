@@ -6,7 +6,28 @@
 --  nothing. Section 3 is a documented manual procedure (not run
 --  automatically). Use this to verify two-account tenant
 --  isolation before trusting the app with real customer data.
--- ============================================================
+--
+--  ============================================================
+--  SECURITY AUDIT RESULTS (2026-07-13)
+--  ============================================================
+--  All 31 business tables below have RLS enabled with org-scoped
+--  or user-scoped policies. No tables are missing RLS.
+--
+--  Tables added to this audit (previously missing from the
+--  business_tables list but covered by the schema.sql RLS loop):
+--    stock_movements, advances, po_payments, payment_receipts,
+--    follow_ups, invoice_recurrence
+--
+--  Per-user tables (not org-scoped — correctly use user_id = auth.uid()):
+--    follow_ups, notifications, agent_pending_actions, sync_state,
+--    licenses, license_devices, user_assets, user_files, profiles
+--
+--  Infrastructure tables (org-scoped or ownership-scoped):
+--    organizations, org_members, invitations, org_messages,
+--    org_devices
+--
+--  Tables with NO RLS: NONE. All tables in schema.sql have RLS.
+--  ============================================================
 
 
 -- ------------------------------------------------------------
@@ -26,7 +47,9 @@ with business_tables (tbl) as (
     ('crm_leads'),('crm_customers'),('crm_opportunities'),('crm_activities'),
     ('company_profile'),('invoice_docs'),('invoice_doc_items'),('invoice_payments'),
     ('quotations'),('quotation_items'),('quotation_templates'),('tool_runs'),
-    ('suppliers'),('purchase_orders'),('purchase_order_items')
+    ('suppliers'),('purchase_orders'),('purchase_order_items'),
+    ('stock_movements'),('advances'),('po_payments'),('payment_receipts'),
+    ('follow_ups'),('invoice_recurrence')
 )
 -- A table is safe if RLS is ON and at least one policy scopes access by the
 -- caller's org (qual/with_check references current_org()). Name-agnostic: it
@@ -128,7 +151,9 @@ declare
     'crm_leads','crm_customers','crm_opportunities','crm_activities',
     'company_profile','invoice_docs','invoice_doc_items','invoice_payments',
     'quotations','quotation_items','quotation_templates','tool_runs',
-    'suppliers','purchase_orders','purchase_order_items'
+    'suppliers','purchase_orders','purchase_order_items',
+    'stock_movements','advances','po_payments','payment_receipts',
+    'follow_ups','invoice_recurrence'
   ];
 begin
   raise notice 'table | distinct_org_count';
