@@ -15,6 +15,7 @@ $env:PATH = ($env:PATH -split ';' | Where-Object {
 # Set signing key for auto-updater
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "C:\Users\iamvi\Documents\GitHub\Filey-erp\src-tauri\filey-key" -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY.Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 
 Set-Location "C:\Users\iamvi\Documents\GitHub\Filey-erp"
 npm run tauri build

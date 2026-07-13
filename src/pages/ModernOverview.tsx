@@ -242,8 +242,7 @@ export default function ModernOverview() {
       .slice(0, 8);
   }, [orders, invoices, expenses]);
 
-  // Suppress unused computed values (kept for data loading side-effects)
-  void receivable; void payable; void profit; void activity;
+  void lowStock; void stockBreakdown; void payable; void activity;
 
   const isEmpty =
     products.length === 0 &&
@@ -267,35 +266,39 @@ export default function ModernOverview() {
 
       {error && <ErrorBanner message={error} />}
 
-      {/* ── 4 KPI Cards (2×2 grid like website) ── */}
+      {/* ── 4 KPI Cards — clickable, live data ── */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <SimpleKpi
           loading={loading}
-          label="Total Items"
-          value={num(stockBreakdown.total)}
-          change={`+${num(orders.length)} orders`}
+          label="Invoices"
+          value={num(revenue.count)}
+          change={aed(revenue.total)}
           changeTone="up"
+          onClick={() => nav("/invoicing")}
         />
         <SimpleKpi
           loading={loading}
-          label="Inventory Value"
-          value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))}
-          change={`${num(products.length)} products`}
+          label="Revenue"
+          value={aed(revenue.collected)}
+          change={receivable.total > 0 ? `${aed(receivable.total)} pending` : "All collected"}
+          changeTone={receivable.total > 0 ? "warn" : "up"}
+          onClick={() => nav("/invoicing")}
+        />
+        <SimpleKpi
+          loading={loading}
+          label="Sales (Orders)"
+          value={num(orderStats.total)}
+          change={`${orderStats.progress} active · ${orderStats.completed} done`}
           changeTone="up"
+          onClick={() => nav("/orders")}
         />
         <SimpleKpi
           loading={loading}
-          label="Open Orders"
-          value={num(orderStats.progress + orderStats.completed)}
-          change={`${orderStats.overdue > 0 ? `${orderStats.overdue} overdue` : "On track"}`}
-          changeTone={orderStats.overdue > 0 ? "down" : "up"}
-        />
-        <SimpleKpi
-          loading={loading}
-          label="Overdue"
-          value={num(lowStock.length)}
-          change={lowStock.length > 0 ? "Need attention" : "All good"}
-          changeTone={lowStock.length > 0 ? "down" : "up"}
+          label="Net Profit"
+          value={aed(profit.net)}
+          change={`Expenses ${aed(profit.expenseTotal)}`}
+          changeTone={profit.net >= 0 ? "up" : "down"}
+          onClick={() => nav("/reports")}
         />
       </section>
 
@@ -371,12 +374,14 @@ function SimpleKpi({
   value,
   change,
   changeTone = "up",
+  onClick,
 }: {
   loading: boolean;
   label: string;
   value: string;
   change?: string;
   changeTone?: "up" | "down" | "warn";
+  onClick?: () => void;
 }) {
   if (loading) {
     return (
@@ -388,7 +393,13 @@ function SimpleKpi({
     );
   }
   return (
-    <Card className="p-4">
+    <Card
+      className={cn(
+        "p-4 transition-all duration-200",
+        onClick && "cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5 hover:scale-[1.02] hover:shadow-md"
+      )}
+      onClick={onClick}
+    >
       <p className="text-xs text-brand-500 mb-1.5">{label}</p>
       <p className="text-[24px] font-bold text-ink tabular-nums tracking-tight leading-tight">
         {value}

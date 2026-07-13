@@ -112,14 +112,16 @@ export function Card({
   children,
   className,
   hover,
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
   tone?: "default" | "accent" | "dark";
   hover?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <CardPrimitive className={cn("p-5", hover && "cursor-pointer", className)}>
+    <CardPrimitive className={cn("p-5", (hover || onClick) && "cursor-pointer", className)} onClick={onClick}>
       {children}
     </CardPrimitive>
   );

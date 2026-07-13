@@ -69,15 +69,18 @@ export function ReportBarChart({
             />
             <ChartTooltip content={<ChartTooltipContent />} />
             <ChartLegend content={<ChartLegendContent />} />
-            {Object.keys(config).map((key, idx) => (
-              <ChartBar
-                key={key}
-                dataKey={key}
-                fill={`var(--color-${key})`}
-                radius={[4, 4, 0, 0]}
-                seriesIndex={idx}
-              />
-            ))}
+            {Object.keys(config).map((key) => {
+              const cfg = config[key];
+              const color = typeof cfg === "object" && cfg && "color" in cfg ? (cfg as { color?: string }).color : "#FFD600";
+              return (
+                <ChartBar
+                  key={key}
+                  dataKey={key}
+                  fill={color ?? "#FFD600"}
+                  radius={[4, 4, 0, 0]}
+                />
+              );
+            })}
           </BarChart>
         </ChartContainer>
       )}
