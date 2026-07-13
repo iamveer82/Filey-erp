@@ -134,7 +134,7 @@ interface DcRecord {
 
 function loadDcs(): DcRecord[] {
   try {
-    return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]");
+    try { return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]"); } catch { return []; }
   } catch (e) {
     console.warn("Failed to load delivery challans", e);
     return [];

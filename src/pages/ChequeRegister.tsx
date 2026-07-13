@@ -37,7 +37,7 @@ interface Cheque {
 
 function loadCheques(): Cheque[] {
   try {
-    return JSON.parse(localStorage.getItem(CHEQUE_KEY) || "[]");
+    try { return JSON.parse(localStorage.getItem(CHEQUE_KEY) || "[]"); } catch { return []; }
   } catch (e) {
     console.warn("Failed to load cheques", e);
     return [];

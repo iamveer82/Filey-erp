@@ -19,7 +19,7 @@ interface EmailTemplate {
 
 function load(): EmailTemplate[] {
   try {
-    return JSON.parse(localStorage.getItem(TMPL_KEY) || "[]");
+    try { return JSON.parse(localStorage.getItem(TMPL_KEY) || "[]"); } catch { return []; }
   } catch (e) {
     console.warn("Failed to load email templates", e);
     return [];

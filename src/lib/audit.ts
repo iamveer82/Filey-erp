@@ -44,7 +44,7 @@ export function audit(
 /** Get all audit entries, newest first. */
 export function getAuditLog(): AuditEntry[] {
   try {
-    return JSON.parse(localStorage.getItem(AUDIT_KEY) || "[]");
+    try { return JSON.parse(localStorage.getItem(AUDIT_KEY) || "[]"); } catch { return []; }
   } catch (e) {
     console.warn("Failed to parse audit log", e);
     return [];

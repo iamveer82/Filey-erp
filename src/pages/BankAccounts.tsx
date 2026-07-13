@@ -37,7 +37,7 @@ interface BankAccount {
 
 function load(): BankAccount[] {
   try {
-    return JSON.parse(localStorage.getItem(BANK_KEY) || "[]");
+    try { return JSON.parse(localStorage.getItem(BANK_KEY) || "[]"); } catch { return []; }
   } catch (e) {
     console.warn("Failed to load bank accounts", e);
     return [];
