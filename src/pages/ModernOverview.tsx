@@ -24,10 +24,7 @@ import {
   Badge,
   Skeleton,
   ErrorBanner,
-  Timeline,
-  TimelineItem,
 } from "../components/ui";
-import AiSummaryCard from "../components/AiSummaryCard";
 import AppIcon from "../components/AppIcon";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
@@ -466,57 +463,41 @@ export default function ModernOverview() {
         </div>
       </section>
 
-      {/* ── Recent Activity + AI ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Recent Activity ── */}
+      <section>
         <Card className="p-4">
           <p className="text-sm font-semibold text-ink mb-3">Recent activity</p>
           {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
+            <div className="space-y-1.5">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-full" />
             </div>
           ) : activity.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-50 text-brand-400 dark:bg-white/5 mb-2">
-                <Sparkles size={18} />
-              </div>
-              <p className="text-sm font-semibold text-ink">Quiet so far</p>
-              <p className="text-xs text-brand-500 mt-0.5 max-w-[28ch]">
-                New orders, invoices, and expenses will appear here.
-              </p>
-            </div>
+            <p className="text-xs text-brand-500 py-2">No activity yet.</p>
           ) : (
-            <Timeline>
-              {activity.slice(0, 6).map((a, i) => {
+            <ul className="divide-y divide-brand-100 dark:divide-[#3A3D45]">
+              {activity.slice(0, 4).map((a, i) => {
                 const ev = a.event;
                 const iconName =
                   ev === "order" ? "orders" : ev === "invoice" ? "invoicing" : "orders";
-                const status: "done" | "current" | "default" =
-                  a.tone === "ok" ? "done" : a.tone === "warn" ? "current" : "default";
                 return (
-                  <TimelineItem
-                    key={i}
-                    icon={<AppIcon name={iconName} className="w-3 h-3" />}
-                    status={status}
-                    title={
-                      <>
-                        <span className="font-semibold">{a.who}</span>{" "}
-                        <span className="text-brand-600 dark:text-brand-400">{a.what}</span>
-                      </>
-                    }
-                    subtitle={fmtDate(a.when)}
-                    last={i === Math.min(activity.length - 1, 5)}
-                  />
+                  <li key={i} className="flex items-center gap-2.5 py-2">
+                    <div className="rounded-lg p-1 bg-brand-50 text-brand-400 dark:bg-white/5 shrink-0">
+                      <AppIcon name={iconName} className="w-3 h-3" />
+                    </div>
+                    <span className="text-xs font-medium text-ink truncate flex-1">
+                      {a.who} <span className="text-brand-500">{a.what}</span>
+                    </span>
+                    <span className="text-[10px] text-brand-400 tabular-nums shrink-0">
+                      {fmtDate(a.when)}
+                    </span>
+                  </li>
                 );
               })}
-            </Timeline>
+            </ul>
           )}
         </Card>
-
-        <div className="space-y-4">
-          <AiSummaryCard />
-        </div>
       </section>
 
       {/* ── Empty state ── */}
