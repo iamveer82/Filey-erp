@@ -16,6 +16,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, degrees } from "https://esm.sh/pdf-lib@1.17.1";
+import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -46,6 +47,15 @@ serve(async (req) => {
     const { data: u } = await client.auth.getUser();
     const user = u.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
+
+    // RATE LIMIT: max 15 tool runs per hour per user
+    const adminClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const allowed = await rateLimit(adminClient, user.id, "run_tool", 15, 3600);
+    if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
+    await logAction(adminClient, user.id, "run_tool", { jobId: jobId ?? "" });
 
     const body = await req.json();
     jobId = body?.jobId ?? null;

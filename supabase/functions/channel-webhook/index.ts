@@ -50,6 +50,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { parseTelegramUpdate } from "./parse.ts";
 import { ALL_TOOLS, runTool } from "./tools.ts";
+import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 
 /** Last few logged turns for this chat — the agent's short-term memory, so it
  *  can follow "and the one before that?" like a person would. Consecutive
@@ -326,6 +327,18 @@ serve(async (req) => {
     update = await req.json();
   } catch {
     return new Response("ok");
+  }
+
+  // RATE LIMIT: max 30 messages per hour from Telegram (prevents spam flood)
+  const OWNER = Deno.env.get("OWNER_USER_ID") ?? "";
+  const supa = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+  if (OWNER) {
+    const allowed = await rateLimit(supa, OWNER, "channel_webhook", 30, 3600);
+    if (!allowed) return new Response("rate limited", { status: 429 });
+    await logAction(supa, OWNER, "channel_webhook", { chat: msg.externalId });
   }
 
   const msg = parseTelegramUpdate(update);

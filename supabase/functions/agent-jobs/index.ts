@@ -21,6 +21,7 @@
 // explicitly (same rule as channel-webhook/tools.ts). Writes are drafts only.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -215,6 +216,12 @@ Deno.serve(async (req) => {
     return new Response("forbidden", { status: 403 });
   }
   if (!OWNER) return Response.json({ error: "OWNER_USER_ID not set" }, { status: 400 });
+
+  // RATE LIMIT: max 5 agent job runs per hour (scheduled cron + manual)
+  const supa0 = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const allowed = await rateLimit(supa0, OWNER, "agent_jobs", 5, 3600);
+  if (!allowed) return Response.json({ error: "Rate limit exceeded — try again later." }, { status: 429 });
+  await logAction(supa0, OWNER, "agent_jobs", { job: "all" });
 
   let job = "all";
   try {

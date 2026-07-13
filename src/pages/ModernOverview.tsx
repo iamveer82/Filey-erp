@@ -1,17 +1,6 @@
-import { useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from "react";
-import {
-  Plus,
-  Sparkles,
-  ArrowUpRight,
-  CheckCircle2,
-  Clock,
-  Layout,
-  Eye,
-  EyeOff,
-} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Plus, Sparkles, CheckCircle2, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-// ponytail: lazy so recharts (~397kB) splits out of the dashboard entry chunk
-const TrendChart = lazy(() => import("../components/TrendChart"));
 import {
   erp,
   fin,
@@ -31,7 +20,6 @@ import { useLiveSync } from "../lib/realtime";
 import { num, aed, fmtDate, cn } from "../lib/format";
 import {
   MetricCard,
-  InfoCard,
   Card,
   Badge,
   Skeleton,
@@ -40,7 +28,6 @@ import {
   TimelineItem,
 } from "../components/ui";
 import AiSummaryCard from "../components/AiSummaryCard";
-import InsightsCard from "../components/InsightsCard";
 import AppIcon from "../components/AppIcon";
 
 /* ── Modern Overview (preview) ─────────────────────────────────────────────
@@ -49,29 +36,6 @@ import AppIcon from "../components/AppIcon";
    + AI briefing. Data loaders mirror the old Overview — no schema/API changes. */
 
 type Period = "today" | "week" | "month" | "quarter" | "year";
-
-const ALL_CARDS = [
-  "kpis",
-  "orders",
-  "activity",
-  "inventory",
-  "attention",
-  "money",
-  "customers",
-  "ai",
-] as const;
-type CardId = (typeof ALL_CARDS)[number];
-
-const DEFAULT_VISIBLE: CardId[] = [
-  "kpis",
-  "orders",
-  "activity",
-  "inventory",
-  "attention",
-  "money",
-  "customers",
-  "ai",
-];
 
 export default function ModernOverview() {
   const nav = useNavigate();
@@ -88,20 +52,6 @@ export default function ModernOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState<Period>("month");
-  const [visible, setVisible] = useState<CardId[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("dashboard.cards") || "null");
-      if (
-        Array.isArray(saved) &&
-        saved.every((c: string) => ALL_CARDS.includes(c as CardId))
-      )
-        return saved as CardId[];
-    } catch (e) {
-      console.warn("Failed to parse dashboard card visibility", e);
-    }
-    return DEFAULT_VISIBLE;
-  });
-  const [editing, setEditing] = useState(false);
 
   const load = async () => {
     setError("");
@@ -302,177 +252,93 @@ export default function ModernOverview() {
     products.length === 0 &&
     orders.length === 0 &&
     invoices.length === 0 &&
-    customers.length === 0;
-
-  const show = (id: CardId) => visible.includes(id);
-  const toggle = (id: CardId) => {
-    setVisible((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      localStorage.setItem("dashboard.cards", JSON.stringify(next));
-      return next;
-    });
-  };
+    customers.length === 0 &&
+    quotations.length === 0;
 
   return (
-    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-4 space-y-4">
-      {/* Header */}
+    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* ── Header ── */}
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-[28px] leading-9 font-semibold text-ink">
-            Good {greeting()}
+          <h1 className="text-[28px] leading-tight font-bold text-ink tracking-tight">
+            {companyName || "Overview"}
           </h1>
           <p className="text-sm text-brand-500 mt-1">
-            Here's how {companyName || "your business"} is moving today.
+            Good {greeting()} — here's your business at a glance.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setEditing((v) => !v)}
-            className={cn("chip", editing && "chip-active")}
-          >
-            <Layout size={15} /> {editing ? "Done" : "Edit cards"}
-          </button>
           <button onClick={() => nav("/invoicing")} className="btn-primary">
             <Plus size={15} /> New invoice
-          </button>
-          <button onClick={() => nav("/purchase-orders")} className="btn-ghost">
-            <Plus size={15} /> Purchase order
           </button>
         </div>
       </div>
 
-      {editing && (
-        <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-3 dark:bg-primary-400/10 dark:border-primary-500/20">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium text-ink">Visible cards</p>
-            <button
-              onClick={() => {
-                setVisible(DEFAULT_VISIBLE);
-                localStorage.setItem("dashboard.cards", JSON.stringify(DEFAULT_VISIBLE));
-              }}
-              className="text-xs font-medium text-brand-500 hover:text-ink"
-            >
-              Reset
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {ALL_CARDS.map((id) => {
-              const on = visible.includes(id);
-              return (
-                <button
-                  key={id}
-                  onClick={() => toggle(id)}
-                  className={cn("chip", on && "chip-active")}
-                >
-                  {on ? <Eye size={13} /> : <EyeOff size={13} />}
-                  {id[0].toUpperCase() + id.slice(1)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {error && <ErrorBanner message={error} />}
 
-      {show("kpis") && (
-        <section
-          aria-labelledby="kpi-heading"
-          className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3"
-        >
-          <h2 id="kpi-heading" className="sr-only">
-            Key performance indicators
-          </h2>
+      {/* ── 4 KPI Cards ── */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiMetric
+          loading={loading}
+          label="Revenue"
+          value={revenue.total}
+          format={aed}
+          icon={<AppIcon name="invoicing" className="w-5 h-5" />}
+          iconClass="bg-primary-100 text-ink"
+          change={`${revenue.count} invoices`}
+          changeTone="up"
+        />
+        <KpiMetric
+          loading={loading}
+          label="Collected"
+          value={revenue.collected}
+          format={aed}
+          icon={<AppIcon name="money" className="w-5 h-5" />}
+          iconClass="bg-success/15 text-success"
+          change={receivable.total > 0 ? `${aed(receivable.total)} pending` : "All settled"}
+          changeTone={receivable.total > 0 ? "warn" : "up"}
+        />
+        <KpiMetric
+          loading={loading}
+          label="Net profit"
+          value={profit.net}
+          format={aed}
+          icon={<AppIcon name="reports" className="w-5 h-5" />}
+          iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
+          change={`Expenses ${aed(profit.expenseTotal)}`}
+          changeTone={profit.net >= 0 ? "up" : "down"}
+        />
+        <KpiMetric
+          loading={loading}
+          label="Products"
+          value={stockBreakdown.total}
+          format={(n) => num(n)}
+          icon={<AppIcon name="inventory" className="w-[18px] h-[18px]" />}
+          iconClass={
+            stockBreakdown.low > 0 || stockBreakdown.out > 0
+              ? "bg-danger/15 text-danger"
+              : "bg-primary-100 text-ink"
+          }
+          change={
+            stockBreakdown.low > 0
+              ? `${stockBreakdown.low} low stock`
+              : stockBreakdown.out > 0
+                ? `${stockBreakdown.out} out`
+                : "All in stock"
+          }
+          changeTone={stockBreakdown.low > 0 || stockBreakdown.out > 0 ? "down" : "up"}
+        />
+      </section>
 
-          <KpiMetric
-            loading={loading}
-            label="Revenue (issued)"
-            value={revenue.total}
-            format={aed}
-            icon={<AppIcon name="invoicing" className="w-5 h-5" />}
-            iconClass="bg-primary-100 text-ink"
-            change={`${revenue.count} invoices`}
-            changeTone="up"
-          />
-          <KpiMetric
-            loading={loading}
-            label="Collected"
-            value={revenue.collected}
-            format={aed}
-            icon={<AppIcon name="money" className="w-5 h-5" />}
-            iconClass="bg-success/15 text-success"
-            change={receivable.total > 0 ? `${aed(receivable.total)} pending` : "All settled"}
-            changeTone={receivable.total > 0 ? "warn" : "up"}
-          />
-          <KpiMetric
-            loading={loading}
-            label={
-              receivable.parties > 0
-                ? `Receivable · ${receivable.parties} ${receivable.parties === 1 ? "party" : "parties"}`
-                : "Receivable"
-            }
-            value={receivable.total}
-            format={aed}
-            icon={<AppIcon name="outstanding" className="w-5 h-5" />}
-            iconClass="bg-danger/15 text-danger"
-            change={receivable.parties > 0 ? "Awaiting payment" : "Nothing due"}
-            changeTone={receivable.parties > 0 ? "down" : "up"}
-          />
-          <KpiMetric
-            loading={loading}
-            label={
-              payable.parties > 0
-                ? `Payable · ${payable.parties} ${payable.parties === 1 ? "party" : "parties"}`
-                : "Payable"
-            }
-            value={payable.total}
-            format={aed}
-            icon={<AppIcon name="purchase" className="w-5 h-5" />}
-            iconClass="bg-warning/15 text-warning"
-            change={payable.parties > 0 ? "To suppliers" : "All paid"}
-            changeTone={payable.parties > 0 ? "warn" : "up"}
-          />
-          <KpiMetric
-            loading={loading}
-            label="Net profit"
-            value={profit.net}
-            format={aed}
-            icon={<AppIcon name="reports" className="w-5 h-5" />}
-            iconClass={profit.net >= 0 ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}
-            change={`Expenses ${aed(profit.expenseTotal)}`}
-            changeTone={profit.net >= 0 ? "up" : "down"}
-          />
-          <KpiMetric
-            loading={loading}
-            label="Products"
-            value={stockBreakdown.total}
-            format={(n) => num(n)}
-            icon={<AppIcon name="inventory" className="w-[18px] h-[18px]" />}
-            iconClass={
-              stockBreakdown.low > 0 || stockBreakdown.out > 0
-                ? "bg-danger/15 text-danger"
-                : "bg-primary-100 text-ink"
-            }
-            change={
-              stockBreakdown.low > 0
-                ? `${stockBreakdown.low} low stock`
-                : stockBreakdown.out > 0
-                  ? `${stockBreakdown.out} out`
-                  : "All in stock"
-            }
-            changeTone={
-              stockBreakdown.low > 0 || stockBreakdown.out > 0 ? "down" : "up"
-            }
-          />
-        </section>
-      )}
-
-      {/* Two-column main row: orders chart + recent activity ───────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
-        <InfoCard
-          className="lg:col-span-2 max-h-[340px]"
-          title="Orders over time"
-          action={
+      {/* ── Bar Chart + Quick Stats ── */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Orders bar chart */}
+        <Card className="p-5 lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-sm font-semibold text-ink">Orders over time</p>
+              <p className="text-xs text-brand-500 mt-0.5">{orderStats.total} orders in window</p>
+            </div>
             <div className="flex items-center gap-1 p-0.5 rounded-full bg-brand-100 dark:bg-white/10">
               {(["today", "week", "month", "quarter", "year"] as const).map((p) => (
                 <button
@@ -489,19 +355,14 @@ export default function ModernOverview() {
                 </button>
               ))}
             </div>
-          }
-        >
+          </div>
+
           {loading ? (
             <Skeleton className="h-40 w-full" />
           ) : (
             <>
-              <div className="flex items-baseline gap-3 mb-2">
-                <span className="text-2xl font-semibold text-ink tabular-nums">
-                  {orderStats.total}
-                </span>
-                <span className="text-sm text-brand-500">orders in window</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              {/* Status badges */}
+              <div className="flex flex-wrap items-center gap-1.5 mb-4">
                 <Badge tone="success">
                   <span className="inline-flex items-center gap-1">
                     <CheckCircle2 size={10} /> {orderStats.completed} done
@@ -509,7 +370,7 @@ export default function ModernOverview() {
                 </Badge>
                 <Badge tone="warn">
                   <span className="inline-flex items-center gap-1">
-                    <Clock size={10} /> {orderStats.progress} in progress
+                    <Clock size={10} /> {orderStats.progress} active
                   </span>
                 </Badge>
                 {orderStats.overdue > 0 && (
@@ -519,43 +380,115 @@ export default function ModernOverview() {
                     </span>
                   </Badge>
                 )}
-                {orderStats.returns > 0 && (
-                  <Badge tone="neutral">{orderStats.returns} returns</Badge>
-                )}
               </div>
-              <div className="flex-1 min-h-[160px]">
-                <Suspense fallback={<Skeleton className="h-full w-full" />}>
-                  <TrendChart
-                    data={trend.map((d) => ({ name: d.name, value: d.items }))}
-                    gradientId="moFill"
-                    height="100%"
-                  />
-                </Suspense>
+
+              {/* Minimal bar chart */}
+              <div className="flex items-end gap-1.5 h-[140px] pt-2">
+                {trend.map((d, i) => {
+                  const max = Math.max(1, ...trend.map((t) => t.items));
+                  const h = (d.items / max) * 100;
+                  return (
+                    <div
+                      key={i}
+                      className="flex-1 flex flex-col items-center gap-1 group"
+                    >
+                      <div
+                        className="w-full rounded-t-md bg-primary-400 transition-all duration-200 ease-out group-hover:bg-primary-500 group-hover:scale-y-105 origin-bottom"
+                        style={{
+                          height: `${Math.max(4, h)}%`,
+                          opacity: d.items > 0 ? 0.8 : 0.25,
+                        }}
+                        title={`${d.name}: ${d.items} orders`}
+                      />
+                      <span className="text-[9px] text-brand-400 tabular-nums">{d.name}</span>
+                    </div>
+                  );
+                })}
               </div>
             </>
           )}
-        </InfoCard>
+        </Card>
 
-        <InfoCard title="Recent activity">
+        {/* Quick stats column */}
+        <div className="space-y-4">
+          {/* Money breakdown */}
+          <Card className="p-4">
+            <p className="text-sm font-semibold text-ink mb-3">Money</p>
+            {loading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : (
+              <div className="space-y-2.5">
+                <MoneyRow label="Revenue" value={revenue.total} tone="text-ink" />
+                <MoneyRow label="Receivable" value={receivable.total} tone="text-warning" />
+                <MoneyRow label="Payable" value={payable.total} tone="text-warning" />
+                <MoneyRow label="Expenses" value={-profit.expenseTotal} tone="text-danger" />
+                <div className="pt-2 mt-2 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
+                  <span className="text-sm font-semibold text-ink">Net</span>
+                  <span
+                    className={cn(
+                      "text-lg font-bold tabular-nums tracking-tight",
+                      profit.net >= 0 ? "text-success" : "text-danger"
+                    )}
+                  >
+                    {aed(profit.net)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Inventory health */}
+          <Card className="p-4">
+            <p className="text-sm font-semibold text-ink mb-3">Inventory</p>
+            {loading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <div className="space-y-2">
+                <StockBar
+                  rows={[
+                    { label: "In stock", value: stockBreakdown.inStock, tone: "bg-success" },
+                    { label: "Low stock", value: stockBreakdown.low, tone: "bg-warning" },
+                    { label: "Out of stock", value: stockBreakdown.out, tone: "bg-danger" },
+                  ]}
+                  total={Math.max(1, stockBreakdown.total)}
+                />
+                {lowStock.length > 0 && (
+                  <button
+                    onClick={() => nav("/inventory")}
+                    className="text-xs font-semibold text-brand-500 hover:text-ink pt-1"
+                  >
+                    {lowStock.length} need attention →
+                  </button>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
+      </section>
+
+      {/* ── Recent Activity + AI ── */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="p-4">
+          <p className="text-sm font-semibold text-ink mb-3">Recent activity</p>
           {loading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
             </div>
           ) : activity.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
+            <div className="flex flex-col items-center justify-center py-6 text-center">
               <div className="grid h-10 w-10 place-items-center rounded-2xl bg-brand-50 text-brand-400 dark:bg-white/5 mb-2">
                 <Sparkles size={18} />
               </div>
               <p className="text-sm font-semibold text-ink">Quiet so far</p>
               <p className="text-xs text-brand-500 mt-0.5 max-w-[28ch]">
-                New orders, invoices, and expenses will appear here as they happen.
+                New orders, invoices, and expenses will appear here.
               </p>
             </div>
           ) : (
             <Timeline>
-              {activity.map((a, i) => {
+              {activity.slice(0, 6).map((a, i) => {
                 const ev = a.event;
                 const iconName =
                   ev === "order" ? "orders" : ev === "invoice" ? "invoicing" : "orders";
@@ -569,238 +502,24 @@ export default function ModernOverview() {
                     title={
                       <>
                         <span className="font-semibold">{a.who}</span>{" "}
-                        <span className="text-brand-600 dark:text-brand-400">
-                          {a.what}
-                        </span>
+                        <span className="text-brand-600 dark:text-brand-400">{a.what}</span>
                       </>
                     }
                     subtitle={fmtDate(a.when)}
-                    last={i === activity.length - 1}
+                    last={i === Math.min(activity.length - 1, 5)}
                   />
                 );
               })}
             </Timeline>
           )}
-        </InfoCard>
-      </section>
+        </Card>
 
-      {/* Inventory at a glance + low stock list ───────────────────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <InfoCard
-          title="Inventory at a glance"
-          action={
-            <button
-              onClick={() => nav("/inventory")}
-              className="inline-flex items-center gap-0.5 text-xs font-semibold text-brand-500 hover:text-ink"
-            >
-              Open <ArrowUpRight size={12} />
-            </button>
-          }
-        >
-          {loading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : (
-            <div className="space-y-3">
-              <StockBar
-                rows={[
-                  { label: "In stock", value: stockBreakdown.inStock, tone: "bg-success" },
-                  { label: "Low stock", value: stockBreakdown.low, tone: "bg-warning" },
-                  { label: "Out of stock", value: stockBreakdown.out, tone: "bg-danger" },
-                  { label: "Slow moving", value: stockBreakdown.dead, tone: "bg-brand-300" },
-                ]}
-                total={Math.max(1, stockBreakdown.total)}
-              />
-              <div className="grid grid-cols-3 gap-2 pt-2">
-                <Mini label="SKUs" value={num(stockBreakdown.total)} />
-                <Mini
-                  label="Categories"
-                  value={num(new Set(products.map((p) => p.category || "Unsorted")).size)}
-                />
-                <Mini label="Value"
-                  value={aed(products.reduce((s, p) => s + p.quantity * p.cost_price, 0))}
-                />
-              </div>
-            </div>
-          )}
-        </InfoCard>
-
-        <InfoCard
-          className="lg:col-span-2"
-          title="Needs attention"
-          action={
-            <div className="flex items-center gap-2">
-              {lowStock.length > 0 && <Badge tone="warn">{lowStock.length}</Badge>}
-              <button
-                onClick={() => nav("/inventory")}
-                className="inline-flex items-center gap-0.5 text-xs font-semibold text-brand-500 hover:text-ink"
-              >
-                Reorder <ArrowUpRight size={12} />
-              </button>
-            </div>
-          }
-        >
-          {loading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : lowStock.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-success/10 text-success mb-3">
-                <CheckCircle2 size={22} />
-              </div>
-              <p className="text-sm font-semibold text-ink">All good</p>
-              <p className="text-xs text-brand-500 mt-0.5 max-w-[28ch]">
-                No products are at or below reorder level.
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-brand-100 dark:divide-[#3A3D45]">
-              {lowStock.slice(0, 6).map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-brand-50 -mx-2 px-2 rounded-2xl"
-                  onClick={() => nav("/inventory")}
-                >
-                  <div className="rounded-2xl p-1.5 bg-warning/15 text-warning shrink-0">
-                    <AppIcon name="inventory" className="w-[14px] h-[14px]" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-ink truncate">{p.name}</p>
-                    <p className="text-[11px] text-brand-400">
-                      {p.category || "Uncategorised"} · SKU {p.sku}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-base font-semibold text-ink tabular-nums">{p.quantity}</p>
-                    <p className="text-[11px] text-brand-400">reorder {p.reorder_level}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </InfoCard>
-      </section>
-
-      {/* Money + Customer snapshot + AI summary ───────────────────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <InfoCard title="Money this period">
-          {loading ? (
-            <Skeleton className="h-28 w-full" />
-          ) : (
-            <div className="space-y-2.5">
-              <MoneyRow label="Revenue" value={revenue.total} tone="text-ink" />
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-brand-500">PO commitments</span>
-                <span className="text-sm font-semibold tabular-nums text-warning">
-                  {aed(profit.poTotal)}
-                </span>
-              </div>
-              <MoneyRow
-                label="Expenses"
-                value={-profit.expenseTotal}
-                tone="text-danger"
-              />
-              {/* Composition bar — visual breakdown of where money went */}
-              <div className="pt-2">
-                <div className="flex h-2 rounded-full overflow-hidden bg-brand-100 dark:bg-white/5">
-                  {revenue.total > 0 && (
-                    <div
-                      className="bg-success"
-                      style={{
-                        width: `${(revenue.collected / revenue.total) * 100}%`,
-                      }}
-                      title={`Collected: ${aed(revenue.collected)}`}
-                    />
-                  )}
-                  {revenue.outstanding > 0 && (
-                    <div
-                      className="bg-warning"
-                      style={{
-                        width: `${(revenue.outstanding / revenue.total) * 100}%`,
-                      }}
-                      title={`Outstanding: ${aed(revenue.outstanding)}`}
-                    />
-                  )}
-                  {profit.expenseTotal > 0 && (
-                    <div
-                      className="bg-danger"
-                      style={{
-                        width: `${Math.min(100, (profit.expenseTotal / Math.max(1, revenue.total)) * 100)}%`,
-                      }}
-                      title={`Expenses: ${aed(profit.expenseTotal)}`}
-                    />
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-brand-500">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-success" /> Collected
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-warning" /> Outstanding
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-danger" /> Expenses
-                  </span>
-                </div>
-              </div>
-              <div className="pt-2 mt-2 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
-                <span className="text-sm font-semibold text-ink">Net</span>
-                <span
-                  className={cn(
-                    "text-lg font-bold tabular-nums",
-                    profit.net >= 0 ? "text-success" : "text-danger"
-                  )}
-                >
-                  {aed(profit.net)}
-                </span>
-              </div>
-              <p className="text-[10px] text-brand-400 leading-snug pt-1">
-                Net = revenue − cash expenses. Material cost excluded.
-              </p>
-            </div>
-          )}
-        </InfoCard>
-
-        <InfoCard title="Customer snapshot">
-          {loading ? (
-            <Skeleton className="h-28 w-full" />
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <Tile
-                icon={<AppIcon name="customers" className="w-[14px] h-[14px]" />}
-                label="Customers"
-                value={num(customers.length)}
-              />
-              <Tile
-                icon={<AppIcon name="quotations" className="w-[14px] h-[14px]" />}
-                label="Open quotes"
-                value={num(
-                  quotations.filter((q) => (q.status || "").toLowerCase() !== "accepted")
-                    .length
-                )}
-              />
-              <Tile
-                icon={<AppIcon name="po" className="w-[14px] h-[14px]" />}
-                label="Open POs"
-                value={num(
-                  posList.filter((p) =>
-                    ["open", "pending", "sent"].includes((p.status || "").toLowerCase())
-                  ).length
-                )}
-              />
-              <Tile
-                icon={<AppIcon name="orders" className="w-[14px] h-[14px]" />}
-                label="In progress"
-                value={num(orderStats.progress)}
-              />
-            </div>
-          )}
-        </InfoCard>
-
-        <div className="lg:col-span-1 space-y-4">
+        <div className="space-y-4">
           <AiSummaryCard />
-          <InsightsCard />
         </div>
       </section>
 
+      {/* ── Empty state ── */}
       {isEmpty && !loading && (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300 mb-4">
@@ -824,7 +543,7 @@ export default function ModernOverview() {
   );
 }
 
-/* ── Small presentation helpers (use shared tokens, no card styles) ─────── */
+/* ── Small presentation helpers ─── */
 
 function KpiMetric({
   loading,
@@ -904,15 +623,6 @@ function StockBar({
   );
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-brand-50 dark:bg-white/5 px-3 py-2 min-w-0">
-      <p className="text-xs font-medium text-brand-500">{label}</p>
-      <p className="text-sm font-semibold text-ink tabular-nums mt-0.5">{value}</p>
-    </div>
-  );
-}
-
 function MoneyRow({
   label,
   value,
@@ -928,18 +638,6 @@ function MoneyRow({
       <span className={cn("text-sm font-semibold tabular-nums", tone)}>
         {value < 0 ? `- ${aed(Math.abs(value))}` : aed(value)}
       </span>
-    </div>
-  );
-}
-
-function Tile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-brand-50 dark:bg-white/5 px-3 py-2.5 min-w-0">
-      <div className="flex items-center gap-1.5">
-        <span className="text-ink w-[14px] h-[14px] flex items-center justify-center">{icon}</span>
-        <p className="text-xs font-medium text-brand-500 leading-4">{label}</p>
-      </div>
-      <p className="text-base font-semibold text-ink tabular-nums mt-1 leading-6">{value}</p>
     </div>
   );
 }
