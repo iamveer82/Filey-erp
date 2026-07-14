@@ -40,11 +40,34 @@ export default function FitPreview({
   useEffect(() => {
     const box = boxRef.current;
     if (!box) return;
-    // Measure once on mount — never resize. ResizeObserver was causing
-    // jarring zoom in/out on every focus/blur (autofill dropdowns,
-    // scrollbar shifts). The preview stays at its initial fit forever.
-    const avail = box.clientWidth - 32;
-    if (avail > 0) setFitW(avail);
+
+    // Measure after content has rendered and scrollbars have appeared.
+    // Measuring synchronously on mount can read a clientWidth that doesn't
+    // yet include the vertical scrollbar (the invoice content hasn't
+    // painted yet). Once it does, the scrollbar steals ~15px from the
+    // available width, but our scale was already locked in — so the right
+    // edge of the invoice gets clipped behind overflow:hidden.
+    //
+    // requestAnimationFrame fires after the next paint, by which point
+    // children have rendered and any scrollbar is present in clientWidth.
+    const measure = () => {
+      const avail = box.clientWidth - 32; // 32 = p-4 (16px each side)
+      if (avail > 0) setFitW(avail);
+    };
+
+    const raf = requestAnimationFrame(measure);
+
+    // Re-measure on window resize (panel width can change when the
+    // browser window resizes). We deliberately do NOT use ResizeObserver
+    // on the box itself — it fires on every scrollbar show/hide and
+    // focus/blur, causing jarring zoom jumps.
+    const onResize = () => requestAnimationFrame(measure);
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
 
   // Shrink the A4 sheet to the panel width (never enlarge past 1:1), then
@@ -55,12 +78,12 @@ export default function FitPreview({
   return (
     <div
       ref={boxRef}
-      className="fp-box bg-brand-100 dark:bg-[#16171A] rounded-2xl p-4 overflow-auto max-h-[70vh]"
+      className="fp-box bg-brand-100 dark:bg-[#16171A] rounded-2xl p-4 overflow-y-auto overflow-x-hidden max-h-[70vh]"
     >
       {scale <= 0.98 ? (
         /* Scale down: render at full resolution, then GPU-scale to fit.
- Text/borders render crisp at native size; GPU handles downscale.
- Viewport clips overflow so layout stays at the scaled dimensions. */
+           Text/borders render crisp at native size; GPU handles downscale.
+           Viewport clips overflow so layout stays at the scaled dimensions. */
         <div
           className="mx-auto"
           style={{
@@ -84,8 +107,8 @@ export default function FitPreview({
         </div>
       ) : (
         /* Scale up (zoom in): use CSS zoom so browser re-layouts at the
- larger size — crisper than bitmap-scaling a full-size render.
- Overflow on fp-box enables scrolling when zoomed past 100%. */
+           larger size — crisper than bitmap-scaling a full-size render.
+           Overflow on fp-box enables scrolling when zoomed past 100%. */
         <div
           className="invoice-print bg-white mx-auto"
           style={{
