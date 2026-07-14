@@ -631,7 +631,7 @@ export default function PaymentReceipt() {
                   </div>
                 }
                 right={
-                  <FitPreview baseWidth={794} zoom={zoom}>
+                  <FitPreview baseWidth={794} zoom={zoom} padding={0}>
                     <div ref={previewRef}>
                       <div style={{ position: "relative", minHeight: 1027 }}>
                         <DocView

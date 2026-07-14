@@ -1,0 +1,11 @@
+{
+  "version": "1.1.0",
+  "notes": "Tools page minimal, Card components everywhere, yellow bar charts, clickable dashboard KPIs",
+  "pub_date": "2026-07-13T22:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmZGdUFvejd2Sy9LdFQzZndrc3M3NDNRVUlVVXFwVVZITW82OFZZZ3VvQWZqUmtFY0RIcGtiRXVCclRuaUw2cisvQlBrZGZ2STRIWmxUamdhem5UU2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTY1NzIwCWZpbGU6RmlsZXkgRVJQXzEuMS4wX3g2NC1zZXR1cC5leGUKaDc4V0lGZG1sMGMzMVQ4Qll1OHdaTFV1eVI0QVpSSjJBeFBjQUVZejJWc3VlcENyWHZjazJxb0UwaTBMVysrNytIMUxoQzl3SHViOXFNN0NuTzRZQ1E9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v1.1.0/Filey.ERP_1.1.0_x64-setup.exe"
+    }
+  }
+}

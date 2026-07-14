@@ -1751,7 +1751,7 @@ function Editor({
                 </div>
               </div>
 
-              <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom}>
+              <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
                 <div ref={poRef}>
                   <div
                     style={{
