@@ -5,49 +5,70 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary — trust blue (professional ERP/CRM accent).
-        // `primary-400` is the canonical action color used by .btn-primary,
-        // focus rings and active chips; darker steps drive hover/press.
-        primary: {
-          50: "#FFFBE6",
-          100: "#FFF5C2",
-          200: "#FFEB8A",
-          300: "#FFE152",
-          400: "#FFD600",
-          500: "#E5C100",
-          600: "#CCAC00",
-          700: "#998100",
-          800: "#665600",
-          900: "#332B00",
+        // ── Token-driven palette (Emergent reference design system). All
+        // surface/text colors resolve to hsl CSS vars declared in index.css,
+        // so light/dark flip via the `.dark` class with zero per-class hexes.
+        background: "hsl(var(--background) / <alpha-value>)",
+        foreground: "hsl(var(--foreground) / <alpha-value>)",
+        card: {
+          DEFAULT: "hsl(var(--card) / <alpha-value>)",
+          foreground: "hsl(var(--card-foreground) / <alpha-value>)",
         },
-        // Secondary — amber accent for subtle highlights.
+        popover: {
+          DEFAULT: "hsl(var(--popover) / <alpha-value>)",
+          foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
+          foreground: "hsl(var(--muted-foreground) / <alpha-value>)",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
+          foreground: "hsl(var(--accent-foreground) / <alpha-value>)",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
+          foreground: "hsl(var(--destructive-foreground) / <alpha-value>)",
+        },
+        border: "hsl(var(--border) / <alpha-value>)",
+        input: "hsl(var(--input) / <alpha-value>)",
+        ring: "hsl(var(--ring) / <alpha-value>)",
+        sidebar: "hsl(var(--sidebar) / <alpha-value>)",
+        hover: "hsl(var(--hover) / <alpha-value>)",
+        // Primary — amber CTA (reference: bg-amber-400 text-neutral-900,
+        // hover amber-300, border amber-500/60). Tracks Tailwind amber.
+        primary: {
+          50: "#fffbeb",
+          100: "#fef3c7",
+          200: "#fde68a",
+          300: "#fcd34d",
+          400: "#fbbf24",
+          500: "#f59e0b",
+          600: "#d97706",
+          700: "#b45309",
+          800: "#92400e",
+          900: "#78350f",
+        },
         secondary: {
           DEFAULT: "#FFBA3D",
           400: "#FFBA3D",
           500: "#F5A623",
           600: "#E0900F",
         },
-        // `brand-*` is the neutral utility ramp (shadcn-style theme). Tuned to
-        // a cool *slate* (vs flat grey) so neutrals pair with the trust-blue
-        // primary and read more enterprise: light end = quiet surfaces /
-        // hairlines, mid/dark = readable text. Values track Tailwind slate.
+        // Legacy `brand-*` ramp — aliased onto the token system so every
+        // existing page inherits the new theme without edits. Light end =
+        // quiet surfaces/hairlines, mid = muted text, dark = readable text.
         brand: {
-          50: "#F8FAFC",
-          100: "#F1F5F9",
-          200: "#E2E8F0",
-          300: "#CBD5E1",
-          400: "#94A3B8",
-          500: "#64748B",
-          600: "#475569",
-          700: "#334155",
-          800: "#1E293B",
-          900: "#0F172A",
-        },
-        // emerald-* kept as an alias so existing usages render success-green
-        emerald: {
-          400: "#22C55E",
-          500: "#16A34A",
-          600: "#15803D",
+          50: "hsl(var(--muted) / <alpha-value>)",
+          100: "hsl(var(--muted) / <alpha-value>)",
+          200: "hsl(var(--border) / <alpha-value>)",
+          300: "hsl(var(--border) / <alpha-value>)",
+          400: "hsl(var(--muted-foreground) / <alpha-value>)",
+          500: "hsl(var(--muted-foreground) / <alpha-value>)",
+          600: "hsl(var(--muted-foreground) / <alpha-value>)",
+          700: "hsl(var(--foreground) / <alpha-value>)",
+          800: "hsl(var(--foreground) / <alpha-value>)",
+          900: "hsl(var(--foreground) / <alpha-value>)",
         },
         // design.md §2 — exact spec hex
         success: "#3FB984",
@@ -55,17 +76,13 @@ export default {
         warning: "#F59E0B",
         danger: "#E5484D",
         accentpurple: "#7C3AED",
-        // Primary text — slate-900 (cool near-black) to match the slate ramp.
-        ink: "#0F172A",
-        surface: "#F1F5F9",
-        background: "#F8FAFC",
-        // App canvas — a faint cool white so white cards lift off it cleanly.
-        canvas: "#F8FAFC",
-        hairline: "#E2E8F0",
+        // Legacy aliases → tokens (ink = primary text, hairline = border,
+        // surface = card, canvas = page background).
+        ink: "hsl(var(--foreground) / <alpha-value>)",
+        surface: "hsl(var(--card) / <alpha-value>)",
+        canvas: "hsl(var(--background) / <alpha-value>)",
+        hairline: "hsl(var(--border) / <alpha-value>)",
         chartdark: "#1E293B",
-        // shadcn-style aliases so pasted components (Folder, FileCard) work.
-        foreground: "#0F172A",
-        border: "#E2E8F0",
       },
       fontFamily: {
         // Linear-style dense UI face for body/navigation/data. Self-hosted via
@@ -73,14 +90,12 @@ export default {
         // offline. "Inter Variable" is the variable-font family name; plain
         // "Inter" kept as a fallback.
         sans: ['"Inter Variable"', '"Inter"', "system-ui", "-apple-system", "sans-serif"],
-        // Plus Jakarta Sans is referenced but not bundled — falls back to Inter
-        // (same as before). Self-host it to honour design.md if desired.
-        display: ['"Plus Jakarta Sans"', '"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
+        // Reference design is Inter-only — display and pixel are aliases so
+        // every existing font-display/font-pixel usage renders plain Inter.
+        display: ['"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
-        // Geist Pixel Square (@font-face in index.css, vendored woff2).
-        // Display accent only — wordmark + stat numbers per design.md §3.
-        pixel: ['"Geist Pixel"', '"IBM Plex Mono"', "ui-monospace", "monospace"],
+        pixel: ['"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
       },
       letterSpacing: {
         tighter: "-0.04em",
@@ -130,15 +145,15 @@ export default {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
         },
+        // Reference enter: opacity + 4px rise, 250ms ease-out.
         "fade-in": {
-          "0%": { opacity: "0" },
-          "100%": { opacity: "1" },
+          "0%": { opacity: "0", transform: "translateY(4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
         },
       },
       animation: {
-        // design.md motion: page content fades in ≤150ms, opacity only.
         "fade-up": "fade-up 0.15s ease-out both",
-        "fade-in": "fade-in 0.15s ease-out both",
+        "fade-in": "fade-in 0.25s ease-out both",
       },
     },
   },

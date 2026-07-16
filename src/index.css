@@ -4,21 +4,98 @@
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
 @config "../tailwind.config.js";
 
-/* Geist Pixel (Square) — display accent for the wordmark and stat numbers
-   only (see design.md §3). Single weight; never body text. Vendored in
-   public/fonts/geist-pixel (OFL) — no CDN, works offline and under the
-   Tauri CSP. */
-@font-face {
-  font-family: "Geist Pixel";
-  src: url("/fonts/geist-pixel/GeistPixel-Square.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
+/* ── Design tokens (Emergent reference) ──────────────────────────────────
+   Neutral zinc hsl scale; every Tailwind surface/text color in
+   tailwind.config.js resolves through these, so the `.dark` class flips
+   the whole app. Values are verbatim from the reference frontend. */
+@layer base {
+  :root {
+    /* Light theme */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.5rem;
+    --sidebar: 240 4% 97.5%;
+    --hover: 240 4.8% 95.9%;
+
+    /* Chart palette (light) — consumed by recharts via useChartColors and
+       the legacy --chart-* names below. */
+    --chart-primary: 240 10% 3.9%;
+    --chart-secondary: 240 3.8% 46.1%;
+    --chart-grid: #f3f4f6;
+    --chart-axis: 240 3.8% 60%;
+    --tooltip-bg: 0 0% 100%;
+    --tooltip-border: 240 5.9% 90%;
+    --tooltip-fg: 240 10% 3.9%;
+
+    /* Legacy chart vars (ModernOverview et al until Phase 3 rebuild). */
+    --chart-stroke: #f59e0b;
+    --chart-fill-start: #f59e0b;
+    --chart-fill-end: #fde68a;
+    --chart-fill-opacity-start: 0.35;
+    --chart-fill-opacity-end: 0.05;
+    --chart-tick: #9ca3af;
+    --chart-tooltip-bg: #ffffff;
+    --chart-tooltip-border: #e5e7eb;
+  }
+
+  .dark {
+    /* Dark theme — near-black */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 6%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 6%;
+    --popover-foreground: 0 0% 93%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 93%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 62%;
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 93%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 0 0% 40%;
+    --sidebar: 0 0% 5%;
+    --hover: 0 0% 10%;
+
+    /* Chart palette (dark) */
+    --chart-primary: 0 0% 96%;
+    --chart-secondary: 0 0% 63%;
+    --chart-grid: #1f1f1f;
+    --chart-axis: 0 0% 45%;
+    --tooltip-bg: 0 0% 8%;
+    --tooltip-border: 0 0% 15%;
+    --tooltip-fg: 0 0% 93%;
+
+    --chart-stroke: #fbbf24;
+    --chart-fill-start: #fbbf24;
+    --chart-fill-end: #78350f;
+    --chart-tick: #666666;
+    --chart-tooltip-bg: #0e0e0e;
+    --chart-tooltip-border: #262626;
+  }
 }
 
 /* v3 → v4 compatibility shims
    1. v4 dropped the Preflight default border color (now `currentColor`).
-      Restore the warm hairline so any bare `border` reads as before.
+      Restore the token hairline so any bare `border` reads as before.
    2. v4 renamed the bottom of the shadow/radius/blur scales and removed
       the bare aliases; re-add them at their v3 values so existing
       `rounded` / `shadow` / `blur` usages keep rendering. */
@@ -26,36 +103,7 @@
   *,
   ::before,
   ::after {
-    border-color: #e2e8f0;
-  }
-  .dark *,
-  .dark ::before,
-  .dark ::after {
-    border-color: #3a3d45;
-  }
-
-  /* Chart colors for recharts components (ModernOverview trend chart) */
-  :root {
-    --chart-stroke: theme(colors.primary.500);
-    --chart-fill-start: theme(colors.primary.500);
-    --chart-fill-end: theme(colors.primary.200);
-    --chart-fill-opacity-start: 0.35;
-    --chart-fill-opacity-end: 0.05;
-    --chart-grid: theme(colors.brand.200);
-    --chart-tick: theme(colors.brand.500);
-    --chart-tooltip-bg: theme(colors.surface);
-    --chart-tooltip-border: theme(colors.brand.200);
-  }
-  .dark {
-    --chart-stroke: theme(colors.primary.400);
-    --chart-fill-start: theme(colors.primary.400);
-    --chart-fill-end: theme(colors.primary.800);
-    --chart-fill-opacity-start: 0.35;
-    --chart-fill-opacity-end: 0.05;
-    --chart-grid: theme(colors.brand.800);
-    --chart-tick: theme(colors.brand.400);
-    --chart-tooltip-bg: theme(colors.surface);
-    --chart-tooltip-border: theme(colors.brand.700);
+    border-color: hsl(var(--border));
   }
 }
 @layer utilities {
@@ -77,29 +125,26 @@
     height: 100%;
   }
   body {
-    @apply bg-canvas text-ink font-sans antialiased
-           dark:bg-[#0F1011] dark:text-[#F4F5F6];
+    @apply bg-background text-foreground font-sans antialiased;
     margin: 0;
-    letter-spacing: -0.025em;
-    /* Optical sizing: Inter/Jakarta are variable fonts with an opsz axis —
-       let glyph shapes adapt to size the way Apple's system fonts do
-       (heavier optical weight small, refined large). Pure craft, no layout
-       cost. */
+    /* Optical sizing: Inter is a variable font with an opsz axis — let glyph
+       shapes adapt to size. Pure craft, no layout cost. */
     font-optical-sizing: auto;
     /* Inter-specific numeric alternates / tabular numbers */
     font-feature-settings: "cv01" 1, "cv03" 1, "cv11" 1, "ss03" 1;
   }
-  /* Display face (Plus Jakarta Sans) for headings; body stays Inter for dense
-     data and long-form readability. Tight tracking on large type like Linear. */
-  h1 {
-    @apply font-display tracking-tighter;
-  }
+  /* Inter everywhere (reference design); tight tracking on headings only. */
+  h1,
   h2,
   h3,
   h4,
   h5,
   h6 {
-    @apply font-display tracking-tight;
+    @apply tracking-tight;
+  }
+  ::selection {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
   }
   /* Hide the up/down spinner on number inputs app-wide */
   input[type="number"]::-webkit-outer-spin-button,
@@ -113,18 +158,21 @@
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
     height: 8px;
   }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
   *::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 8px;
+    background: hsl(var(--border));
+    border-radius: 6px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: hsl(var(--muted-foreground) / 0.4);
   }
   /* Every enabled control reads as clickable (a11y: cursor-pointer). */
   button:not(:disabled),
@@ -146,30 +194,26 @@
 }
 
 @layer components {
-  /* Cards — white surface, 16px radius, soft shadow. `.card` is the
-     canonical name; `.bento-card` is kept as an alias so existing
-     pages reskin automatically. */
+  /* Cards — flat token surface, 12px radius, hairline border (reference:
+     rounded-xl border border-border bg-card). `.bento-card` kept as an
+     alias so existing pages reskin automatically. */
   .card,
   .bento-card {
-    @apply relative rounded-2xl bg-white border border-brand-200/80 shadow-bento p-5
-           transition-[box-shadow,border-color,transform] duration-200
-           dark:bg-[#24262C] dark:border-[#3A3D45];
+    @apply relative rounded-xl bg-card border border-border p-5
+           transition-[border-color] duration-200;
   }
-  /* Minimal: hover is a quiet shadow + a subtle primary-tinted border, no
-     movement — keeps data-dense screens calm while signalling interactivity. */
+  /* Quiet hover — border lift only, no shadow/movement. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:shadow-bento-hover hover:border-primary-300/70
-           cursor-pointer dark:hover:border-primary-500/50;
+    @apply hover:border-muted-foreground/40 cursor-pointer;
   }
   .card-dark {
-    @apply relative rounded-2xl bg-ink text-white shadow-bento ring-1 ring-inset ring-white/10 p-5;
+    @apply relative rounded-xl bg-foreground text-background ring-1 ring-inset ring-white/10 p-5;
   }
-  /* Quiet accent card — white surface with a primary left rule. */
+  /* Quiet accent card — card surface with an amber left rule. */
   .card-accent {
-    @apply relative overflow-hidden rounded-2xl bg-white border border-brand-200/80
-           border-l-4 border-l-primary-400 shadow-bento p-5 text-ink
-           dark:bg-[#24262C] dark:border-[#3A3D45] dark:border-l-primary-400;
+    @apply relative overflow-hidden rounded-xl bg-card border border-border
+           border-l-4 border-l-primary-400 p-5 text-foreground;
   }
 
   /* Legacy decorative hooks — neutralized for the minimal theme. Kept as
@@ -190,6 +234,21 @@
 }
 .animate-shimmer {
   animation: shimmer 2s infinite;
+}
+
+/* Reference route-enter: opacity + 4px rise. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fadeIn 0.25s ease-out;
 }
 
 /* ── Materialize: the one sanctioned enter primitive (design.md §9). ──
@@ -270,52 +329,49 @@
 
 /* ── Empty-state background — flat quiet surface (minimal theme). ── */
 .empty-gradient {
-  background: #fafafa;
-}
-.dark .empty-gradient {
-  background: rgba(255, 255, 255, 0.04);
+  background: hsl(var(--muted) / 0.5);
 }
 
 @layer components {
   .stat-label {
-    @apply text-[12px] font-medium text-brand-500;
+    @apply text-[12.5px] text-muted-foreground;
   }
   .stat-value {
-    @apply text-[24px] leading-8 font-semibold text-ink mt-1 tabular-nums;
+    @apply text-[26px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
   }
 
-  /* ── Buttons — uniform 40px height, centered, focus-visible ring,
-        subtle press feedback. ── */
+  /* ── Buttons — reference scale: 32px height, 6px radius, 13px text.
+        Primary = amber CTA; ghost = bordered card surface (SectionButton). ── */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 h-10 rounded-full
-           bg-primary-400 px-5 text-sm font-semibold text-ink select-none
-           transition-colors duration-200 hover:bg-primary-500
+    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+           bg-primary-400 px-3 text-[13px] font-medium text-neutral-900 select-none
+           border border-primary-500/60
+           transition-colors duration-200 hover:bg-primary-300
            active:scale-[0.97] outline-none
-           focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed
            disabled:hover:bg-primary-400 cursor-pointer;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 h-10 rounded-full
-           bg-primary-100 px-5 text-sm font-semibold text-ink
-           select-none transition-colors duration-200 hover:bg-primary-200
+    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+           bg-foreground px-3 text-[13px] font-medium text-background
+           border border-foreground select-none
+           transition-opacity duration-200 hover:opacity-90
            active:scale-[0.97] outline-none
-           focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 h-10 rounded-full
-           px-4 text-sm font-semibold text-brand-700 border border-brand-200
-           bg-white select-none transition-colors duration-200
-           hover:bg-brand-50 hover:text-ink active:scale-[0.97]
-           outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
-           dark:bg-white/5 dark:text-[#DDE0E4] dark:border-[#3A3D45]
-           dark:hover:bg-white/10 dark:hover:text-[#F4F5F6];
+    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+           px-3 text-[13px] font-medium text-foreground border border-border
+           bg-card select-none transition-colors duration-200
+           hover:bg-hover active:scale-[0.97]
+           outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 h-10 rounded-full
-           bg-danger px-5 text-sm font-semibold text-white select-none
+    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+           bg-danger px-3 text-[13px] font-medium text-white select-none
            transition-colors duration-200 hover:opacity-90 active:scale-[0.97]
            outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
@@ -342,28 +398,24 @@
     }
   }
 
-  /* ── Form controls — shared 40px height so labels, inputs, selects
-        and buttons align on the same baseline across every page. ── */
+  /* ── Form controls — reference: h-9, 6px radius, 13px text, quiet focus
+        (border darkens to muted-foreground, no ring). ── */
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-xl border border-brand-200 bg-white px-3.5 text-sm
-           text-ink placeholder:text-brand-400
-           transition-[box-shadow,border-color] duration-200
-           hover:border-brand-300
-           focus:outline-none focus:border-primary-400 focus:ring-[3px] focus:ring-primary-400/15
-           disabled:bg-brand-50 disabled:text-brand-400
-           disabled:cursor-not-allowed disabled:opacity-60
-           dark:bg-[#1A1B1E] dark:border-[#3A3D45] dark:text-[#F4F5F6]
-           dark:focus:border-primary-400 dark:focus:ring-primary-400/25
-           dark:disabled:bg-[#24262C];
+    @apply w-full rounded-md border border-border bg-background px-3 text-[13px]
+           text-foreground placeholder:text-muted-foreground
+           transition-[border-color] duration-200
+           focus:outline-none focus:border-muted-foreground
+           disabled:bg-muted disabled:text-muted-foreground
+           disabled:cursor-not-allowed disabled:opacity-60;
   }
   .input,
   .select {
-    @apply h-10;
+    @apply h-9;
   }
   .textarea {
-    @apply py-2.5 min-h-[88px] resize-y leading-relaxed;
+    @apply py-2 min-h-[88px] resize-y leading-relaxed;
   }
   .select {
     @apply appearance-none bg-no-repeat pr-9 cursor-pointer;
@@ -374,33 +426,30 @@
     @apply flex flex-col;
   }
   .label {
-    @apply block text-[13px] font-medium text-brand-600 mb-1.5;
+    @apply block text-[12px] font-medium text-muted-foreground mb-1;
   }
   .help {
-    @apply text-xs text-brand-400 mt-1;
+    @apply text-xs text-muted-foreground mt-1;
   }
   .error-text {
     @apply text-xs font-medium text-danger mt-1;
   }
 
   .pill {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-border;
   }
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-brand-200
-           bg-white px-3 py-1.5 text-xs font-medium text-brand-600
-           transition-colors duration-200 hover:bg-brand-50 cursor-pointer
-           dark:bg-white/5 dark:text-[#DDE0E4] dark:border-[#3A3D45]
-           dark:hover:bg-white/10;
+    @apply inline-flex items-center gap-1.5 rounded-md border border-border
+           bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground
+           transition-colors duration-200 hover:bg-hover hover:text-foreground cursor-pointer;
   }
   .chip-active {
-    @apply border-primary-400 bg-primary-100 text-ink;
+    @apply border-foreground/30 bg-hover text-foreground;
   }
 
-  /* Chrome surfaces — flat white, no blur (minimal theme). */
+  /* Chrome surfaces — flat card surface, no blur. */
   .glass {
-    @apply bg-white border border-brand-200/80 shadow-bento
-           dark:bg-[#24262C] dark:border-[#3A3D45];
+    @apply bg-card border border-border;
   }
   /* Brand emphasis text — solid accent ink, no gradients (minimal theme). */
   .text-gradient,
@@ -408,69 +457,26 @@
     @apply text-primary-700 dark:text-primary-300;
   }
 
-  /* Brand chrome stays on the display face (Poppins); body text and
-     table data inherit Open Sans for readability. */
-  .btn-primary,
-  .btn-secondary,
-  .btn-ghost,
-  .btn-danger,
-  .label,
-  .stat-label,
-  .stat-value,
-  .th,
-  .pill,
-  .chip {
-    @apply font-display;
-  }
 
-  /* ── Tables — sticky-friendly header, hover rows, aligned cells. ── */
+  /* ── Tables — reference: quiet 12px header, 13px cells, px-5, hairline
+        row separators, hover film. ── */
   .th {
-    @apply text-left text-[13px] font-medium
-           text-brand-500 px-4 py-3 bg-brand-50
-           dark:bg-white/5 dark:text-[#B6BAC1];
+    @apply text-left text-[12px] font-medium tracking-wide
+           text-muted-foreground px-5 py-2.5 border-b border-border;
   }
   .td {
-    @apply px-4 py-3 text-sm text-brand-700 border-t border-brand-200 align-middle tabular-nums
-           dark:text-[#DDE0E4] dark:border-[#2A2C33];
+    @apply px-5 py-3 text-[13px] text-foreground border-t border-border align-middle tabular-nums;
   }
-  /* Row hover — quiet background shift only (minimal theme). */
   .row-hover {
-    @apply transition-colors duration-150 hover:bg-brand-50/70
-           dark:hover:bg-white/5;
+    @apply transition-colors duration-150 hover:bg-hover;
   }
 }
 
 /* ── Dark-mode text legibility ──────────────────────────────────────────────
-   These live OUTSIDE @layer so they win the cascade. In Tailwind 4 the
-   `utilities` layer beats the `components` layer regardless of specificity, so
-   a `.dark .text-ink` rule in @layer components loses to the base `.text-ink`
-   utility — which left bare headings (PageHeader's `text-ink`) black in dark
-   mode. Unlayered rules out-rank every layered utility, so the lift sticks.
-
-   Scope: only DARK surfaces. The default page background and `.card` are dark
-   in dark mode, but the app also has light/pastel "islands" (yellow CTAs,
-   tinted stat tiles) that must keep dark ink — those are excluded below so the
-   lift never turns text invisible on a light surface. */
-.dark .text-ink {
-  color: #f7f8f8;
-}
-.dark .text-brand-700 {
-  color: #f1f2f3;
-}
-.dark .text-brand-600 {
-  color: #e3e5e8;
-}
-.dark .text-brand-500 {
-  color: #cdd0d5;
-}
-.dark .text-brand-400 {
-  color: #b2b6bd;
-}
-.dark .text-brand-300 {
-  color: #9aa0a8;
-}
-/* Direct Tailwind neutral classes used in many pages for muted text.
-   They need the same dark-mode lift so they don't disappear on dark cards. */
+   `text-ink` / `text-brand-*` now resolve through hsl tokens and flip with
+   the `.dark` class automatically — no lifts needed for those. Only raw
+   Tailwind neutral classes (hard-coded hexes in pages) still need help.
+   These live OUTSIDE @layer so they win the cascade over base utilities. */
 .dark .text-neutral-400,
 .dark .text-neutral-500,
 .dark .text-neutral-600 {
@@ -486,17 +492,8 @@
 .dark .text-slate-600 {
   color: #b2b6bd;
 }
-/* "Islands" that stay LIGHT in dark mode keep dark ink. Listing the surface
-   class alongside `.text-ink` out-specifies the white lift above, so dark text
-   wins back there. The primary action color is now a solid blue, so any text
-   sitting on it must be WHITE in both modes — those surfaces are handled
-   separately below and are NOT listed here. Only always-light surfaces (the
-   white accent card) keep dark ink. */
-.dark .card-accent .text-ink {
-  color: #0a0a0a;
-}
-/* Text on the yellow primary / CTA surfaces is always dark ink (both modes), since
-   the surface itself stays yellow regardless of theme. */
+/* Text on the amber primary / CTA surfaces is always dark ink (both modes),
+   since the surface itself stays amber regardless of theme. */
 .text-ink.bg-primary-300,
 .text-ink.bg-primary-400,
 .text-ink.bg-primary-500,
@@ -521,27 +518,6 @@
   background-color: rgba(255, 255, 255, 0.05);
 }
 
-/* ── Surface completions ─────────────────────────────────────────────────────
-   With the text lift winning, lifted (now light) text must always sit on a
-   dark surface. `bg-brand-50` is the app's neutral "quiet surface" tint; many
-   spots pair it with an explicit `dark:bg-white/5`, but some are incomplete.
-   Map the whole family (and its hovers) to the same subtle white film centrally
-   so no incomplete spot leaves light text on a light surface. `bg-white` is NOT
-   remapped (the invoice/quote print sheet must stay white paper), and the
-   primary/danger/success tints are left alone — their text colour isn't lifted,
-   so those chips stay readable as-is. */
-.dark .bg-brand-50,
-.dark .bg-brand-50\/40,
-.dark .bg-brand-50\/60,
-.dark .bg-brand-50\/70 {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-.dark .hover\:bg-brand-50:hover,
-.dark .hover\:bg-brand-50\/60:hover,
-.dark .hover\:bg-brand-50\/70:hover {
-  background-color: rgba(255, 255, 255, 0.06);
-}
-
 /* ── Raw bg-white panels ─────────────────────────────────────────────────────
    Modals, dropdowns, popovers, sheets and panels that use a bare `bg-white`
    (no `dark:` sibling) stayed bright white in dark mode — blinding. Darken them
@@ -550,10 +526,10 @@
    The invoice/quote print sheet + paper texture are re-whitened (must stay white
    paper in both themes), and yellow CTA surfaces never use bare bg-white. */
 .dark .bg-white {
-  background-color: #24262c;
+  background-color: hsl(var(--card));
 }
 .dark .hover\:bg-white:hover {
-  background-color: #2a2d34;
+  background-color: hsl(var(--hover));
 }
 .dark .invoice-print,
 .dark .invoice-print .bg-white,

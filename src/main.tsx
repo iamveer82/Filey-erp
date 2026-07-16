@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { applyTheme } from "./lib/theme";
+import { applyAccent } from "./lib/accent";
 import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
 import "./index.css";
@@ -10,11 +11,6 @@ import "./index.css";
 import "@fontsource-variable/inter/index.css";
 // Display + document-template faces (design.md). Self-hosted so invoices/quotes
 // print in the intended fonts instead of silently falling back to Inter/Georgia.
-import "@fontsource/plus-jakarta-sans/400.css";
-import "@fontsource/plus-jakarta-sans/500.css";
-import "@fontsource/plus-jakarta-sans/600.css";
-import "@fontsource/plus-jakarta-sans/700.css";
-import "@fontsource/plus-jakarta-sans/800.css";
 import "@fontsource/lora/400.css";
 import "@fontsource/lora/500.css";
 import "@fontsource/lora/600.css";
@@ -25,6 +21,7 @@ import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
 
 applyTheme();
+applyAccent();
 initMonitoring();
 installExtensionBannerGuard();
 startAutoSync();

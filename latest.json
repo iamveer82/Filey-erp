@@ -1,11 +1,11 @@
 {
-  "version": "1.1.0",
-  "notes": "Tools page minimal, Card components everywhere, yellow bar charts, clickable dashboard KPIs",
-  "pub_date": "2026-07-13T22:00:00Z",
+  "version": "1.1.1",
+  "notes": "Patch: Fixed invoice live preview — right side was clipped due to double padding and pre-paint width measurement.",
+  "pub_date": "2026-07-14T14:28:43Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmZGdUFvejd2Sy9LdFQzZndrc3M3NDNRVUlVVXFwVVZITW82OFZZZ3VvQWZqUmtFY0RIcGtiRXVCclRuaUw2cisvQlBrZGZ2STRIWmxUamdhem5UU2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTY1NzIwCWZpbGU6RmlsZXkgRVJQXzEuMS4wX3g2NC1zZXR1cC5leGUKaDc4V0lGZG1sMGMzMVQ4Qll1OHdaTFV1eVI0QVpSSjJBeFBjQUVZejJWc3VlcENyWHZjazJxb0UwaTBMVysrNytIMUxoQzl3SHViOXFNN0NuTzRZQ1E9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v1.1.0/Filey.ERP_1.1.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlNGT2JOMjllSXRGSW9HZVh6WlVZanlJemptV0NmUGVGS2lNcjRrQWFPb2MrU0xqRFg4RUlpcXVQcTVOZjNqd2NRVmRyeUF3bnJkNlBpT0FUUzM1RXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0MDM5MzE0CWZpbGU6RmlsZXkgRVJQXzEuMS4xX3g2NC1zZXR1cC5leGUKK1Y0dTljdThzUUY4ejFkOEdoUUd4RHhwUVlUc0lSUHVUTWtBREpGczVaTW1JOUYyMGRIQkxVd0pxSVVQYW1WRjRXOG9WMjF2NERubW5pajJOKzF0RFE9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v1.1.1/Filey.ERP_1.1.1_x64-setup.exe"
     }
   }
 }

@@ -20,6 +20,8 @@ export function getTheme(): Theme {
 
 export function applyTheme(t: Theme = getTheme()): void {
   document.documentElement.classList.toggle("dark", t === "dark");
+  // Notify theme-aware hooks (useChartColors in lib/accent.ts).
+  window.dispatchEvent(new Event("filey-ui"));
 }
 
 export function setTheme(t: Theme): void {
