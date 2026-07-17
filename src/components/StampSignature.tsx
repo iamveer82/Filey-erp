@@ -87,7 +87,7 @@ export function StampSigCard({
   defaults: StampSig;
 }) {
   return (
-    <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+    <div className="rounded-3xl border border-brand-200 p-4">
       <div className="flex items-center gap-2 text-ink font-medium text-sm">
         {icon} {label}
       </div>
@@ -158,7 +158,7 @@ export function StampSigCard({
                   (k, i) => (
                     <div
                       key={k}
-                      className="flex items-center gap-1 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+                      className="flex items-center gap-1 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
                     >
                       <span className="text-[10px] font-mono font-medium text-brand-400">
                         {["T", "R", "B", "L"][i]}
@@ -168,7 +168,7 @@ export function StampSigCard({
                         min={0}
                         max={90}
                         value={value[k]}
-                        className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none dark:text-[#DDE0E4]"
+                        className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none"
                         onChange={(e) =>
                           onChange({
                             ...value,
@@ -227,7 +227,7 @@ export function StampSigAdjust({
 }) {
   const s = (value.scale ?? 100) / 100;
   return (
-    <div className="rounded-2xl border border-brand-200 p-3 dark:border-[#2C2C2E]">
+    <div className="rounded-2xl border border-brand-200 p-3">
       <div className="flex items-center gap-2 text-ink font-medium text-xs">
         {icon} {label}
       </div>
@@ -268,7 +268,7 @@ export function StampSigAdjust({
           {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map((k, i) => (
             <div
               key={k}
-              className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+              className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
             >
               <span className="text-[10px] tabular-nums font-medium text-brand-400">
                 {["T", "R", "B", "L"][i]}
@@ -278,7 +278,7 @@ export function StampSigAdjust({
                 min={0}
                 max={90}
                 value={value[k]}
-                className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none dark:text-[#DDE0E4]"
+                className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none"
                 onChange={(e) =>
                   onChange({
                     ...value,

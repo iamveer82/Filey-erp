@@ -31,7 +31,7 @@ const SheetOverlay = forwardRef<
 SheetOverlay.displayName = "SheetOverlay";
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-white dark:bg-[#1C1C1E] p-6  transition ease-out-quad data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300 border-brand-200 dark:border-[#2C2C2E]",
+  "fixed z-50 gap-4 bg-white p-6  transition ease-out-quad data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300 border-brand-200",
   {
     variants: {
       side: {

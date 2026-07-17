@@ -377,7 +377,7 @@ export default function Crm() {
               }
             >
               <div className="overflow-x-auto">
-                <table className="w-full text-sm divide-y divide-brand-100 dark:divide-[#2A2C33]">
+                <table className="w-full text-sm divide-y divide-brand-100">
                   <thead>
                     <tr className="text-left text-[11px] font-medium text-brand-400 tracking-tight">
                       <th className="py-2 font-medium">Customer</th>

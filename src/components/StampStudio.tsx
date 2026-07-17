@@ -431,7 +431,7 @@ export default function StampStudio({
   return (
     <div>
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5">
         {mode === "text" ? (
           <>
             <select
@@ -453,7 +453,7 @@ export default function StampStudio({
               type="color"
               value={badgeColor}
               onChange={(e) => setBadgeColor(e.target.value)}
-              className="h-7 w-7 cursor-pointer rounded border border-brand-200 dark:border-[#2C2C2E]"
+              className="h-7 w-7 cursor-pointer rounded border border-brand-200"
               title="Badge colour"
             />
           </>
@@ -507,7 +507,7 @@ export default function StampStudio({
           </>
         )}
 
-        <span className="mx-1 h-5 w-px bg-brand-200 dark:bg-[#2C2C2E]" />
+        <span className="mx-1 h-5 w-px bg-brand-200" />
 
         <span className="text-xs font-medium text-brand-500">Opacity</span>
         <input
@@ -568,11 +568,11 @@ export default function StampStudio({
 
       {/* ── Signature draw pad ─────────────────────────────────────────────── */}
       {padOpen && (
-        <div className="mb-2 rounded-3xl border border-brand-200 bg-white p-2 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+        <div className="mb-2 rounded-3xl border border-brand-200 bg-white p-2">
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-medium text-brand-500">Signature</span>
             {/* Pen / eraser */}
-            <div className="flex overflow-hidden rounded-3xl border border-brand-200 dark:border-[#2C2C2E]">
+            <div className="flex overflow-hidden rounded-3xl border border-brand-200">
               <button
                 onClick={() => setPenMode("draw")}
                 title="Pen"
@@ -596,7 +596,7 @@ export default function StampStudio({
                 value={penColor}
                 onChange={(e) => setPenColor(e.target.value)}
                 title="Ink colour"
-                className="h-7 w-7 cursor-pointer rounded border border-brand-200 dark:border-[#2C2C2E]"
+                className="h-7 w-7 cursor-pointer rounded border border-brand-200"
               />
             )}
             <span className="text-[11px] text-brand-400">
@@ -637,7 +637,7 @@ export default function StampStudio({
             onPointerMove={padMove}
             onPointerUp={padUp}
             onPointerLeave={padUp}
-            className={`w-full rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] dark:border-[#2C2C2E] ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
+            className={`w-full rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
             style={{ touchAction: "none", aspectRatio: "3 / 1" }}
           />
         </div>
@@ -653,7 +653,7 @@ export default function StampStudio({
                 onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}
                 title={a.name}
                 aria-label="Select saved stamp"
-                className="grid h-12 w-12 place-items-center overflow-hidden rounded-3xl border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]"
+                className="grid h-12 w-12 place-items-center overflow-hidden rounded-3xl border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400"
               >
                 <img
                   src={a.dataUrl}
@@ -678,7 +678,7 @@ export default function StampStudio({
         ref={stageRef}
         onPointerMove={onMove}
         onPointerUp={endMove}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]"
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white"
         style={{
           aspectRatio: aspect ? `${aspect.w} / ${aspect.h}` : undefined,
           touchAction: "none",

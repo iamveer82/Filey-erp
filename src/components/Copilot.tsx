@@ -344,9 +344,9 @@ export default function Copilot() {
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
       {open && (
-        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white">
           {/* header */}
-          <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3 dark:border-[#2C2C2E]">
+          <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3">
             <button
               onClick={() => setCustomizing((c) => !c)}
               aria-label="Customize assistant"
@@ -364,7 +364,7 @@ export default function Copilot() {
                   onClick={startNewChat}
                   aria-label="New chat"
                   title="New chat"
-                  className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 cursor-pointer"
                 >
                   <Plus size={16} />
                 </button>
@@ -378,8 +378,8 @@ export default function Copilot() {
                   className={cn(
                     "rounded-xl p-1.5 cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5",
                     view === "history"
-                      ? "text-ink dark:text-[#F4F5F6]"
-                      : "text-brand-400 hover:text-ink dark:hover:text-[#F4F5F6]"
+                      ? "text-ink"
+                      : "text-brand-400 hover:text-ink"
                   )}
                 >
                   <NotepadText size={16} />
@@ -390,7 +390,7 @@ export default function Copilot() {
               onClick={() => setOpen(false)}
               aria-label="Close"
               className={cn(
-                "rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer",
+                "rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 cursor-pointer",
                 !(ready && persona.onboarded) && "ml-auto"
               )}
             >
@@ -400,7 +400,7 @@ export default function Copilot() {
 
           {/* customizer */}
           {customizing && (
-            <div className="overflow-hidden border-b border-brand-100 dark:border-[#2C2C2E]">
+            <div className="overflow-hidden border-b border-brand-100">
               <div className="space-y-2.5 px-4 py-3">
                 <div className="field">
                   <label className="label">Assistant name</label>
@@ -422,7 +422,7 @@ export default function Copilot() {
                         className={cn(
                           "h-6 w-6 cursor-pointer rounded-full border border-black/10",
                           persona.orbColor.toLowerCase() === c.toLowerCase() &&
-                            "ring-2 ring-ink ring-offset-1 dark:ring-offset-[#1E2025]"
+                            "ring-2 ring-ink ring-offset-1 dark:ring-offset-background"
                         )}
                         style={{ background: c }}
                       />
@@ -433,7 +433,7 @@ export default function Copilot() {
                       onChange={(e) => save({ orbColor: e.target.value })}
                       aria-label="Custom colour"
                       title="Custom colour"
-                      className="h-6 w-8 cursor-pointer rounded border border-brand-200 bg-transparent dark:border-[#2C2C2E]"
+                      className="h-6 w-8 cursor-pointer rounded border border-brand-200 bg-transparent"
                     />
                   </div>
                 </div>
@@ -545,13 +545,13 @@ export default function Copilot() {
                             e.stopPropagation();
                             setMenuFor((m) => (m === c.id ? null : c.id));
                           }}
-                          className="rounded-xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] cursor-pointer"
+                          className="rounded-xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 cursor-pointer"
                         >
                           <MoreHorizontal size={16} />
                         </span>
                       </button>
                       {menuFor === c.id && (
-                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-2xl border border-brand-200 bg-white py-1 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-2xl border border-brand-200 bg-white py-1">
                           <MenuItem
                             icon={<Pencil size={14} />}
                             label="Rename"
@@ -622,7 +622,7 @@ export default function Copilot() {
 
           {/* input */}
           {ready && persona.onboarded && view === "chat" && (
-            <div className="border-t border-brand-100 p-2.5 dark:border-[#2C2C2E]">
+            <div className="border-t border-brand-100 p-2.5">
               {!online && (
                 <p className="mb-2 rounded-xl bg-warning/10 px-2.5 py-1.5 text-[11px] font-medium text-warning">
                   You're offline — Filey AI will reconnect automatically.
@@ -653,7 +653,7 @@ export default function Copilot() {
                   onClick={() => fileRef.current?.click()}
                   aria-label="Attach a PDF or image"
                   title="Attach a PDF or image"
-                  className="grid h-10 w-9 shrink-0 place-items-center rounded-xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer"
+                  className="grid h-10 w-9 shrink-0 place-items-center rounded-xl text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 cursor-pointer"
                 >
                   <Paperclip size={17} />
                 </button>
@@ -683,7 +683,7 @@ export default function Copilot() {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Filey AI assistant"
-        className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5 transition-colors"
+        className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors"
       >
         <ColorOrb dimension="32px" tones={tones} />
         <span className="text-sm font-medium text-ink">Ask AI</span>
@@ -710,7 +710,7 @@ function MenuItem({
         "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer",
         danger
           ? "text-danger hover:bg-danger/10"
-          : "text-ink dark:text-[#F4F5F6] hover:bg-brand-50 dark:hover:bg-white/5"
+          : "text-ink hover:bg-brand-50 dark:hover:bg-white/5"
       )}
     >
       {icon}

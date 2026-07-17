@@ -158,7 +158,7 @@ export function CustomFieldsManager({
         {/* List */}
         <div className="mt-4 flex-1 overflow-y-auto space-y-2 pr-1">
           {defs.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-brand-200 p-6 text-center text-sm text-brand-400 dark:border-[#2C2C2E]">
+            <div className="rounded-2xl border border-dashed border-brand-200 p-6 text-center text-sm text-brand-400">
               No custom fields yet. Add one below to extend the schema.
             </div>
           ) : (
@@ -173,7 +173,7 @@ export function CustomFieldsManager({
                 return (
                   <div
                     key={def.id}
-                    className="rounded-2xl border border-brand-200 p-3 dark:border-[#2C2C2E]"
+                    className="rounded-2xl border border-brand-200 p-3"
                   >
                     <div className="flex items-start gap-2">
                       <GripVertical
@@ -222,7 +222,7 @@ export function CustomFieldsManager({
                               "rounded-lg border border-dashed p-2 text-xs",
                               vErr
                                 ? "border-danger/40 bg-danger/5 text-danger"
-                                : "border-brand-200 bg-brand-50/50 text-brand-500 dark:border-[#2C2C2E] dark:bg-white/8"
+                                : "border-brand-200 bg-brand-50/50 text-brand-500 dark:bg-white/8"
                             )}
                           >
                             <span className="font-medium text-ink">Preview: </span>
@@ -273,7 +273,7 @@ export function CustomFieldsManager({
         </div>
 
         {/* Add new */}
-        <div className="mt-3 border-t border-brand-200 dark:border-[#2C2C2E] pt-3 space-y-2">
+        <div className="mt-3 border-t border-brand-200 pt-3 space-y-2">
           <p className="text-[10px] font-medium tracking-[0.06em] text-brand-400">
             Add new field
           </p>

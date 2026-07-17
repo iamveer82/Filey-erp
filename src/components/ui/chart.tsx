@@ -234,7 +234,7 @@ function ChartTooltipContent({
     <motion.div
       animate={{ opacity: 1 }}
       className={cn(
-        "grid min-w-32 items-start gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-1.5 text-xs shadow-xl dark:border-[#2C2C2E] dark:bg-[#1C1C1E]",
+        "grid min-w-32 items-start gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-1.5 text-xs shadow-xl",
         className
       )}
       initial={{ opacity: reducedMotion ? 1 : 0 }}

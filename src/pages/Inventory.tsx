@@ -587,7 +587,7 @@ export default function Inventory() {
                 <DropdownMenuTrigger asChild>
                   <button
                     aria-label={`Actions for ${p.name}`}
-                    className="rounded-full p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
+                    className="rounded-full p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 cursor-pointer transition-colors duration-200"
                   >
                     <MoreHorizontal size={16} />
                   </button>
@@ -1120,7 +1120,7 @@ function StocktakeModal({
 
       <div className="max-h-[50vh] overflow-auto rounded-xl border border-brand-100 dark:border-white/10">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-brand-50 dark:bg-[#1C1C1E] text-left">
+          <thead className="sticky top-0 bg-brand-50 text-left">
             <tr className="text-[11px] uppercase tracking-wider text-brand-400">
               <th className="px-3 py-2 font-medium">Product</th>
               <th className="px-3 py-2 font-medium text-right">Book</th>

@@ -151,20 +151,20 @@ export default function CustomerDetail() {
           <p className="stat-label mb-3">Contact</p>
           <ul className="space-y-2.5 text-sm">
             {customer?.company && (
-              <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+              <li className="flex items-center gap-2.5 text-brand-700">
                 <Building2 size={15} className="text-brand-400 shrink-0" />
                 <span className="truncate">{customer.company}</span>
               </li>
             )}
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+            <li className="flex items-center gap-2.5 text-brand-700">
               <Mail size={15} className="text-brand-400 shrink-0" />
               <span className="truncate">{customer?.email || "—"}</span>
             </li>
-            <li className="flex items-center gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+            <li className="flex items-center gap-2.5 text-brand-700">
               <Phone size={15} className="text-brand-400 shrink-0" />
               <span className="truncate">{customer?.phone || "—"}</span>
             </li>
-            <li className="flex items-start gap-2.5 text-brand-700 dark:text-[#DDE0E4]">
+            <li className="flex items-start gap-2.5 text-brand-700">
               <MapPin size={15} className="text-brand-400 shrink-0 mt-0.5" />
               <span>{customer?.address || "—"}</span>
             </li>

@@ -1593,7 +1593,7 @@ function FieldControl({
           type="color"
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-white p-0.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]"
+          className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-white p-0.5"
         />
         <input
           className="input flex-1"
@@ -1629,7 +1629,7 @@ function FieldControl({
         type="button"
         onClick={() => onChange(on ? "no" : "yes")}
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          on ? "bg-primary-500" : "bg-brand-300 dark:bg-[#2C2C2E]"
+          on ? "bg-primary-500" : "bg-brand-300"
         }`}
         aria-pressed={on}
       >

@@ -149,7 +149,7 @@ export default function RedactStudio({
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5">
         <span className="flex items-center gap-1 text-xs font-medium text-brand-500">
           <Eraser size={13} /> Drag to cover · {boxes.length} box
           {boxes.length === 1 ? "" : "es"}
@@ -198,7 +198,7 @@ export default function RedactStudio({
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]"
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white"
         style={{
           aspectRatio: aspect ? `${aspect.w} / ${aspect.h}` : undefined,
           touchAction: "none",

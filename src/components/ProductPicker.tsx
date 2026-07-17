@@ -82,7 +82,7 @@ export default function ProductPicker({
               key={p.id}
               className={cn(
                 "group flex items-center justify-between gap-3",
-                "p-3 rounded-lg bg-white border border-brand-200 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]",
+                "p-3 rounded-lg bg-white border border-brand-200",
                 "hover:border-primary-300 transition-colors duration-200"
               )}
             >
@@ -97,7 +97,7 @@ export default function ProductPicker({
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-medium text-ink truncate">{p.name}</h3>
                     {p.category && (
-                      <span className="pill bg-brand-100 text-brand-600 dark:bg-white/12 dark:text-[#DDE0E4]">
+                      <span className="pill bg-brand-100 text-brand-600 dark:bg-white/12">
                         {p.category}
                       </span>
                     )}
@@ -130,7 +130,7 @@ export default function ProductPicker({
       </div>
 
       {/* Cart */}
-      <div className="w-full lg:w-72 shrink-0 flex flex-col rounded-3xl bg-white border border-brand-200 p-4 dark:bg-[#1C1C1E] dark:border-[#2C2C2E]">
+      <div className="w-full lg:w-72 shrink-0 flex flex-col rounded-3xl bg-white border border-brand-200 p-4">
         <div className="flex items-center gap-2 mb-3">
           <ShoppingCart size={16} className="text-brand-500" />
           <p className="text-sm font-medium text-ink">Cart ({totalItems})</p>
@@ -155,7 +155,7 @@ export default function ProductPicker({
                   <button
                     onClick={() => remove(item.id)}
                     aria-label={`Remove ${item.name}`}
-                    className="p-1 rounded-3xl text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                    className="p-1 rounded-3xl text-brand-400 hover:bg-white hover:text-ink dark:hover:bg-white/10 transition-colors cursor-pointer"
                   >
                     <X size={12} />
                   </button>
@@ -165,7 +165,7 @@ export default function ProductPicker({
                     <button
                       onClick={() => update(item.id, -1)}
                       aria-label="Decrease quantity"
-                      className="p-1 rounded-3xl text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="p-1 rounded-3xl text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 transition-colors cursor-pointer"
                     >
                       <Minus size={12} />
                     </button>
@@ -175,7 +175,7 @@ export default function ProductPicker({
                     <button
                       onClick={() => update(item.id, 1)}
                       aria-label="Increase quantity"
-                      className="p-1 rounded-3xl text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="p-1 rounded-3xl text-brand-500 hover:bg-white hover:text-ink dark:hover:bg-white/10 transition-colors cursor-pointer"
                     >
                       <Plus size={12} />
                     </button>
@@ -189,7 +189,7 @@ export default function ProductPicker({
           ))}
         </div>
 
-        <div className="pt-3 mt-3 border-t border-brand-100 dark:border-[#2C2C2E]">
+        <div className="pt-3 mt-3 border-t border-brand-100">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium text-ink">Total</span>
             <span className="text-base font-medium text-ink tabular-nums">

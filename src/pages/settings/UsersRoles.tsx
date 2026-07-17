@@ -297,7 +297,7 @@ export default function UsersRoles() {
               return (
                 <div
                   key={m.id}
-                  className="flex items-center justify-between gap-3 border-b border-brand-100 dark:border-[#2C2C2E] py-3 last:border-0"
+                  className="flex items-center justify-between gap-3 border-b border-brand-100 py-3 last:border-0"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-100 text-ink text-sm font-medium dark:bg-primary-400/15 dark:text-primary-300">

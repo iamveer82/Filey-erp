@@ -7,11 +7,11 @@ export default function FileyLoader() {
     <div
       role="status"
       aria-label="Loading Filey"
-      className="grid h-full min-h-full place-items-center bg-canvas dark:bg-[#15161A]"
+      className="grid h-full min-h-full place-items-center bg-canvas"
     >
       <div className="flex flex-col items-center gap-4">
         {/* wordmark — single h1, the entire boot surface is type. */}
-        <h1 className="text-2xl font-bold tracking-tight text-ink dark:text-[#F4F5F6] font-display">
+        <h1 className="text-2xl font-bold tracking-tight text-ink font-display">
           Filey
         </h1>
         {/* spinner — single rotating arc, 1s linear (built-in). */}

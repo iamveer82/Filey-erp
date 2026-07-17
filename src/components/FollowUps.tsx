@@ -106,7 +106,7 @@ export default function FollowUps({
   const Row = (f: FollowUp, tone?: "overdue" | "today") => (
     <li
       key={f.id}
-      className="flex items-center gap-3 border-b border-brand-100 dark:border-[#2C2C2E] py-2.5 last:border-0"
+      className="flex items-center gap-3 border-b border-brand-100 py-2.5 last:border-0"
     >
       <input
         type="checkbox"

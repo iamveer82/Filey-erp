@@ -28,10 +28,7 @@ import { Card as CardPrimitive } from "./Card";
 export function Skeleton({ className }: { className?: string }) {
   return (
     <div
-      className={cn(
-        "rounded-xl bg-brand-100 dark:bg-white/10",
-        className
-      )}
+      className={cn("rounded-lg bg-muted animate-pulse", className)}
     />
   );
 }
@@ -39,7 +36,7 @@ export function Skeleton({ className }: { className?: string }) {
 /** Centered spinner for loading panels. */
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-10 text-brand-400">
+    <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
       <Loader2 size={18} className="animate-spin" />
       {label && <span className="text-sm">{label}</span>}
     </div>
@@ -77,7 +74,7 @@ export function ShareToggle({
         "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors",
         shared
           ? "bg-info/15 text-info hover:bg-info/25"
-          : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/10 dark:text-[#B6BAC1] dark:hover:bg-white/15"
+          : "bg-muted text-muted-foreground hover:bg-hover"
       )}
     >
       {shared ? <Users size={12} /> : <Lock size={12} />}
@@ -97,12 +94,12 @@ export function PageHeader({
 }) {
   const t = useT();
   return (
-    <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
+    <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
       <div>
-        <h1 className="text-[28px] leading-9 font-semibold text-ink">{t(title)}</h1>
-        {subtitle && <p className="text-sm text-brand-500 mt-1">{t(subtitle)}</p>}
+        <h1 className="text-[22px] font-semibold text-foreground tracking-tight">{t(title)}</h1>
+        {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{t(subtitle)}</p>}
       </div>
-      {action}
+      {action && <div className="flex items-center gap-2">{action}</div>}
     </div>
   );
 }
@@ -143,7 +140,7 @@ export function Delta({
       )}
     >
       {up ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-      {Math.abs(value)}%<span className="text-brand-400 font-medium">{suffix}</span>
+      {Math.abs(value)}%<span className="text-muted-foreground font-medium">{suffix}</span>
     </span>
   );
 }
@@ -180,7 +177,7 @@ export function MetricCard({
   value,
   delta,
   icon,
-  iconClass = "bg-primary-100 text-ink",
+  iconClass = "bg-muted text-foreground",
   rawValue,
   formatValue,
   change,
@@ -207,25 +204,23 @@ export function MetricCard({
         ? "text-warning"
         : "text-success";
   return (
-    <CardPrimitive
-      className="p-4 h-full transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-[3px] hover:shadow-lg active:scale-[0.98]"
-    >
+    <CardPrimitive className="p-4 h-full transition-[border-color] duration-200 hover:border-muted-foreground/40">
       <div className="flex items-start gap-3 h-full min-h-0">
         {icon && (
           <div
-            className={cn("rounded-xl p-1.5 shrink-0", iconClass)}
+            className={cn("rounded-lg p-1.5 shrink-0", iconClass)}
             style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             {icon}
           </div>
         )}
         <div className="min-w-0 flex-1 flex flex-col justify-center h-full overflow-hidden">
-          <p className="text-[11px] font-medium text-brand-500 leading-4 truncate tracking-tight">
+          <p className="text-[12px] text-muted-foreground leading-4 truncate">
             {label}
           </p>
           <p
             ref={numRef}
-            className="text-[22px] leading-tight font-bold text-ink mt-0.5 tabular-nums tracking-tight whitespace-nowrap overflow-hidden"
+            className="text-[22px] leading-tight font-semibold text-foreground mt-0.5 tabular-nums tracking-tight whitespace-nowrap overflow-hidden"
           >
             {display}
           </p>
@@ -307,11 +302,11 @@ export function Badge({
   tone?: "neutral" | "success" | "warn" | "danger" | "info";
 }) {
   const tones = {
-    neutral: "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#DDE0E4]",
-    success: "bg-success/15 text-success",
-    warn: "bg-warning/15 text-warning",
-    danger: "bg-danger/15 text-danger",
-    info: "bg-info/15 text-info",
+    neutral: "bg-muted text-muted-foreground ring-border",
+    success: "bg-success/10 text-success ring-success/30",
+    warn: "bg-warning/10 text-warning ring-warning/30",
+    danger: "bg-danger/10 text-danger ring-danger/30",
+    info: "bg-info/10 text-info ring-info/30",
   };
   return <span className={cn("pill", tones[tone])}>{children}</span>;
 }
@@ -423,8 +418,8 @@ export function DataTable<T>({
   return (
     <div className="card overflow-hidden p-0">
       {selectable && sel.size > 0 && (
-        <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-brand-50 border-b border-brand-200 dark:bg-white/5 dark:border-[#3A3D45]">
-          <span className="text-sm font-semibold text-ink">{sel.size} selected</span>
+        <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-muted/60 border-b border-border">
+          <span className="text-[13px] font-semibold text-foreground">{sel.size} selected</span>
           <div className="flex items-center gap-1.5 flex-wrap">
             {bulkActions!.map((a) => (
               <button
@@ -435,7 +430,7 @@ export function DataTable<T>({
                   "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium cursor-pointer transition-colors",
                   a.danger
                     ? "text-danger hover:bg-danger/10"
-                    : "text-brand-700 hover:bg-white dark:hover:bg-white/10"
+                    : "text-foreground hover:bg-hover"
                 )}
               >
                 {a.icon}
@@ -445,7 +440,7 @@ export function DataTable<T>({
           </div>
           <button
             onClick={() => setSel(new Set())}
-            className="ml-auto text-xs font-semibold text-brand-500 hover:text-ink cursor-pointer"
+            className="ml-auto text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
           >
             Clear
           </button>
@@ -458,7 +453,7 @@ export function DataTable<T>({
         )}
       >
         <table className="w-full">
-          <thead className="sticky top-0 z-10 bg-white dark:bg-[#1A1B1E]">
+          <thead className="sticky top-0 z-10 bg-card">
             <tr>
               {selectable && (
                 <th className="th w-10">
@@ -476,15 +471,15 @@ export function DataTable<T>({
                   <th key={c.key} className="th">
                     <button
                       onClick={() => toggleSort(c.key)}
-                      className="inline-flex items-center gap-1 cursor-pointer hover:text-ink"
+                      className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground"
                     >
                       {c.label}
                       <span
                         className={cn(
                           "text-xs transition-all duration-200 inline-block",
                           sort?.key === c.key
-                            ? "text-ink dark:text-[#F4F5F6]"
-                            : "text-brand-400",
+                            ? "text-foreground"
+                            : "text-muted-foreground",
                           sort?.key === c.key && sort.dir === -1 && "rotate-180"
                         )}
                       >
@@ -515,14 +510,14 @@ export function DataTable<T>({
               <tr>
                 <td className="td py-14" colSpan={colCount}>
                   <div className="flex flex-col items-center gap-3 text-center px-4">
-                    <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5">
-                      <Inbox size={24} className="text-brand-300 dark:text-brand-500" />
+                    <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
+                      <Inbox size={24} className="text-muted-foreground" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-brand-600">
+                      <p className="text-sm font-medium text-foreground">
                         {empty ?? "Nothing here yet"}
                       </p>
-                      <p className="text-xs text-brand-400 mt-1 max-w-xs">
+                      <p className="text-[12.5px] text-muted-foreground mt-1 max-w-xs">
                         When you have records, they'll show up right here.
                       </p>
                     </div>
@@ -606,7 +601,7 @@ export function DataTable<T>({
                             <span
                               onClick={startEdit}
                               title="Click to edit"
-                              className="-mx-1 block cursor-text rounded px-1 hover:bg-brand-100/70 dark:hover:bg-white/5"
+                              className="-mx-1 block cursor-text rounded px-1 hover:bg-hover"
                             >
                               {c.render(row)}
                             </span>
@@ -690,7 +685,7 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div
-      className="materialize-scrim fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+      className="materialize-scrim fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
@@ -700,17 +695,17 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "materialize-surface flex max-h-[90vh] w-full flex-col rounded-2xl bg-white dark:bg-[#24262C] shadow-bento-hover outline-none",
+          "materialize-surface flex max-h-[90vh] w-full flex-col rounded-xl bg-card border border-border shadow-lg outline-none",
           widthClass
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-brand-100 dark:border-[#2A2C33]">
-          <h2 className="text-lg font-bold text-ink">{title}</h2>
+        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border">
+          <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] cursor-pointer transition-colors duration-200"
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground cursor-pointer transition-colors duration-200"
           >
             <X size={18} />
           </button>
@@ -820,7 +815,7 @@ export function StockBreakdownCard({
             </li>
           ))}
         </ul>
-        <div className="grid place-items-center rounded-2xl bg-brand-50 text-ink w-16 h-16 shrink-0 dark:bg-white/5">
+        <div className="grid place-items-center rounded-xl bg-muted text-foreground w-16 h-16 shrink-0">
           <span className="text-2xl font-bold tabular-nums">{total}</span>
         </div>
       </div>
@@ -846,13 +841,13 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
       {Icon && (
-        <div className="mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-brand-50 dark:bg-white/5">
-          <Icon size={32} className="text-brand-300 dark:text-brand-500" />
+        <div className="mb-5 grid h-16 w-16 place-items-center rounded-xl bg-muted">
+          <Icon size={32} className="text-muted-foreground" />
         </div>
       )}
-      <h3 className="text-base font-bold text-ink mb-1.5">{title}</h3>
+      <h3 className="text-[14px] font-semibold text-foreground mb-1.5">{title}</h3>
       {description && (
-        <p className="text-sm text-brand-400 max-w-sm leading-relaxed">{description}</p>
+        <p className="text-[12.5px] text-muted-foreground max-w-sm leading-relaxed">{description}</p>
       )}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -923,8 +918,7 @@ export function TimelineItem({
     done: "bg-success text-white border-success",
     current: "bg-primary-500 text-white border-primary-500 ring-4 ring-primary-500/15",
     error: "bg-danger text-white border-danger",
-    default:
-      "bg-white text-brand-500 border-brand-200 dark:border-white/10 dark:bg-[#24262C]",
+    default: "bg-card text-muted-foreground border-border",
   };
   return (
     <li className="relative flex gap-3 pb-4">
@@ -942,11 +936,11 @@ export function TimelineItem({
               <CircleIcon size={6} className="fill-current" />
             ))}
         </div>
-        {!last && <div className="w-px flex-1 bg-brand-200 dark:bg-white/10 mt-1" />}
+        {!last && <div className="w-px flex-1 bg-border mt-1" />}
       </div>
       <div className="min-w-0 flex-1 pt-0.5">
-        <p className="text-sm text-ink leading-snug">{title}</p>
-        {subtitle && <p className="text-[11px] text-brand-400 mt-0.5">{subtitle}</p>}
+        <p className="text-[13px] text-foreground leading-snug">{title}</p>
+        {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
         {meta && <div className="mt-1.5">{meta}</div>}
       </div>
     </li>
@@ -969,8 +963,8 @@ export function FilterChip({
 }) {
   const tones: Record<string, string> = {
     neutral: active
-      ? "bg-ink text-white border-ink dark:bg-white dark:text-ink"
-      : "bg-white text-brand-600 border-brand-200 hover:bg-brand-50 dark:bg-[#24262C] dark:border-white/10 dark:text-[#B6BAC1] dark:hover:bg-white/5",
+      ? "bg-foreground text-background border-foreground"
+      : "bg-card text-muted-foreground border-border hover:bg-hover",
     success: active
       ? "bg-success text-white border-success"
       : "bg-success/10 text-success border-success/20 hover:bg-success/20",
@@ -989,7 +983,7 @@ export function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors cursor-pointer",
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
         tones[tone]
       )}
     >
@@ -998,9 +992,7 @@ export function FilterChip({
         <span
           className={cn(
             "inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold",
-            active
-              ? "bg-white/20 text-white"
-              : "bg-brand-100 text-brand-600 dark:bg-white/10 dark:text-[#B6BAC1]"
+            active ? "bg-background/20 text-background" : "bg-muted text-muted-foreground"
           )}
         >
           {count}
@@ -1026,20 +1018,20 @@ export function SearchInput({
     <div className={cn("relative", className)}>
       <Search
         size={14}
-        className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-400 pointer-events-none"
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
       />
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-brand-200 bg-white pl-9 pr-9 py-2 text-sm text-ink placeholder:text-brand-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-colors dark:bg-[#24262C] dark:border-white/10"
+        className="w-full h-9 rounded-md border border-border bg-background pl-9 pr-9 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-muted-foreground transition-[border-color]"
       />
       {value && (
         <button
           type="button"
           onClick={() => onChange("")}
-          className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-5 w-5 rounded-full bg-brand-100 text-brand-500 hover:bg-brand-200 hover:text-ink transition-colors cursor-pointer dark:bg-white/10 dark:hover:bg-white/20"
+          className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer"
           aria-label="Clear"
         >
           <X size={11} />

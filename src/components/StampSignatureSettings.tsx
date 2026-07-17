@@ -105,7 +105,7 @@ function UploadCard({
   const previewUrl = (value as any)?._previewUrl || value?.data;
 
   return (
-    <div className="rounded-3xl border border-brand-200 p-4 dark:border-[#2C2C2E]">
+    <div className="rounded-3xl border border-brand-200 p-4">
       <div className="flex items-center gap-2 text-ink font-medium text-sm">
         {icon} {label}
       </div>

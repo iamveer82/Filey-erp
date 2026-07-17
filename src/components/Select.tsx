@@ -19,7 +19,7 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-9 w-full items-center justify-between rounded-lg border border-brand-200 bg-white dark:border-[#2C2C2E] dark:bg-[#1C1C1E] px-3 py-2 text-sm font-medium text-ink outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-400/30 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-brand-400 [&>span]:line-clamp-1 transition-colors",
+      "flex h-9 w-full items-center justify-between rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-medium text-ink outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-400/30 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-brand-400 [&>span]:line-clamp-1 transition-colors",
       className
     )}
     {...props}
@@ -68,7 +68,7 @@ export const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-lg border border-brand-200 bg-white dark:border-[#2C2C2E] dark:bg-[#1C1C1E] text-ink data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-lg border border-brand-200 bg-white text-ink data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className

@@ -72,11 +72,11 @@ export default function DealDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`Deal: ${opp.title}`}
-        className="flex h-full w-full max-w-md flex-col bg-white dark:bg-[#1C1C1E] animate-fade-up"
+        className="flex h-full w-full max-w-md flex-col bg-white animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-brand-200 p-4 dark:border-[#2C2C2E]">
+        <div className="flex items-start justify-between gap-3 border-b border-brand-200 p-4">
           <div className="min-w-0">
             <p className="truncate text-base font-medium text-ink">{opp.title}</p>
             <p className="mt-0.5 flex items-center gap-1 text-xs text-brand-500">
@@ -93,7 +93,7 @@ export default function DealDrawer({
         </div>
 
         {/* Summary */}
-        <div className="grid grid-cols-2 gap-3 border-b border-brand-200 p-4 dark:border-[#2C2C2E]">
+        <div className="grid grid-cols-2 gap-3 border-b border-brand-200 p-4">
           <Field label="Value" value={aed(opp.value)} />
           <Field label="Probability" value={`${opp.probability}%`} />
           {opp.expected_close && (
@@ -103,7 +103,7 @@ export default function DealDrawer({
         </div>
 
         {/* Stage mover */}
-        <div className="border-b border-brand-200 p-4 dark:border-[#2C2C2E]">
+        <div className="border-b border-brand-200 p-4">
           <p className="mb-2 text-[11px] font-medium text-brand-400">Stage</p>
           <div className="flex flex-wrap gap-1.5">
             {STAGES.map((s) => (
@@ -113,7 +113,7 @@ export default function DealDrawer({
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                   s.id === opp.stage
                     ? "bg-primary-500 text-[#0A0A0A]"
-                    : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/8 dark:text-[#C9CDD3] dark:hover:bg-white/10"
+                    : "bg-brand-100 text-brand-500 hover:bg-brand-200 dark:bg-white/8 dark:hover:bg-white/10"
                 }`}
               >
                 {s.label}
@@ -129,7 +129,7 @@ export default function DealDrawer({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-brand-200 p-3 dark:border-[#2C2C2E]">
+        <div className="border-t border-brand-200 p-3">
           <button onClick={del} className="btn-ghost w-full text-danger">
             <Trash2 size={14} /> Delete deal
           </button>

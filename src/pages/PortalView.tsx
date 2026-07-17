@@ -70,14 +70,14 @@ export default function PortalView() {
 
   if (state === "loading")
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] dark:bg-[#1C1C1E] text-sm font-medium text-brand-500">
+      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] text-sm font-medium text-brand-500">
         Loading document…
       </div>
     );
 
   if (state === "error" || !shared)
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] dark:bg-[#1C1C1E] px-6 text-center">
+      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] px-6 text-center">
         <div>
           <p className="text-lg font-medium text-ink">Document not available</p>
           <p className="mt-1 text-sm text-brand-500">
@@ -133,15 +133,15 @@ export default function PortalView() {
   const status = String(d.status || "draft");
 
   return (
-    <div className="min-h-screen bg-[#F7F3EA] dark:bg-[#1C1C1E] px-4 py-10">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-brand-200 dark:border-[#2C2C2E] bg-white dark:bg-[#1C1C1E] p-8 text-ink dark:text-[#F4F5F6]">
+    <div className="min-h-screen bg-[#F7F3EA] px-4 py-10">
+      <div className="mx-auto max-w-3xl rounded-2xl border border-brand-200 bg-white p-8 text-ink">
         {(paid || status === "paid") && (
           <div className="mb-4 rounded-2xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
             Payment received — thank you!
           </div>
         )}
 
-        <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]">
+        <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]">
           <DocView form={form} labels={labels} />
         </div>
 

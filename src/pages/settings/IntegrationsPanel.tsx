@@ -156,7 +156,7 @@ function ComposioCard() {
           return (
             <div
               key={tk.slug}
-              className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3 dark:border-[#3A3D45]"
+              className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3"
             >
               <span className="rounded-2xl bg-primary-100 text-ink p-2 dark:bg-white/10">
                 <BrandIcon name={tk.slug} className="h-5 w-5" />
@@ -227,7 +227,7 @@ function ServicesCard() {
         {rows.map((r) => (
           <div
             key={r.n}
-            className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3 dark:border-[#3A3D45]"
+            className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3"
           >
             <span className="rounded-2xl bg-primary-100 text-ink p-2 dark:bg-white/10">
               {r.icon}

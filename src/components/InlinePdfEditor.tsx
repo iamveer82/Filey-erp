@@ -463,14 +463,14 @@ export default function InlinePdfEditor({
       type="color"
       value={v}
       onChange={(e) => on(e.target.value)}
-      className="h-7 w-7 cursor-pointer rounded border border-brand-200 dark:border-[#2C2C2E]"
+      className="h-7 w-7 cursor-pointer rounded border border-brand-200"
     />
   );
 
   return (
     <div>
       {/* ── Horizontal toolbar ─────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-3xl border border-brand-200 bg-white px-2 py-1.5">
         <Tbtn id="select" label="Select" Icon={MousePointer2} />
         <Tbtn id="text" label="Text" Icon={TypeIcon} />
         <Tbtn id="highlight" label="Highlight" Icon={Highlighter} />
@@ -480,7 +480,7 @@ export default function InlinePdfEditor({
 
         {/* contextual options */}
         {tool !== "select" && (
-          <span className="mx-1 h-5 w-px bg-brand-200 dark:bg-[#2C2C2E]" />
+          <span className="mx-1 h-5 w-px bg-brand-200" />
         )}
         {tool === "text" && (
           <div className="flex items-center gap-1.5">
@@ -614,7 +614,7 @@ export default function InlinePdfEditor({
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerLeave={onUp}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]"
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white"
         style={{
           aspectRatio: ptSize[page] ? `${ptSize[page].w} / ${ptSize[page].h}` : undefined,
           cursor,

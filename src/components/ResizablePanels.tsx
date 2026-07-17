@@ -80,7 +80,7 @@ export function ResizablePanels({
         {/* Drag handle */}
         <button
           onMouseDown={onMouseDown}
-          className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 hidden xl:grid place-items-center w-5 h-12 rounded-full border border-brand-200 bg-white dark:bg-[#1C1C1E] text-brand-400 hover:text-ink hover:border-brand-400 cursor-col-resize shadow-sm"
+          className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 hidden xl:grid place-items-center w-5 h-12 rounded-full border border-brand-200 bg-white text-brand-400 hover:text-ink hover:border-brand-400 cursor-col-resize shadow-sm"
           title="Drag to resize preview"
         >
           <GripVertical size={12} />
@@ -89,7 +89,7 @@ export function ResizablePanels({
         {/* Collapse / expand toggle */}
         <button
           onClick={toggle}
-          className="absolute top-2 right-2 z-20 grid place-items-center w-7 h-7 rounded-full border border-brand-200 bg-white dark:bg-[#1C1C1E] text-brand-500 hover:text-ink hover:border-brand-400 transition-colors"
+          className="absolute top-2 right-2 z-20 grid place-items-center w-7 h-7 rounded-full border border-brand-200 bg-white text-brand-500 hover:text-ink hover:border-brand-400 transition-colors"
           title={collapsed ? "Expand preview" : "Minimize preview"}
         >
           {collapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}

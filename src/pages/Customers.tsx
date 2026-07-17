@@ -441,7 +441,7 @@ export default function Customers() {
                       value ? (
                         <div
                           key={label}
-                          className="flex justify-between py-1 border-b border-brand-200/50 last:border-0 dark:border-[#2C2C2E]/50"
+                          className="flex justify-between py-1 border-b border-brand-200/50 last:border-0"
                         >
                           <dt className="text-[11px] text-brand-500">{label}</dt>
                           <dd className={cn("text-sm text-ink", mono && "tabular-nums")}>
@@ -473,7 +473,7 @@ export default function Customers() {
           </TabsContent>
         </Tabs>
 
-        <div className="flex justify-end gap-2 pt-4 border-t border-brand-200 dark:border-[#2C2C2E]">
+        <div className="flex justify-end gap-2 pt-4 border-t border-brand-200">
           <button
             onClick={() => detail && nav(`/customers/${detail.id}`)}
             className="btn-ghost"
@@ -747,7 +747,7 @@ function CustomerModal({
       {/* User-defined custom fields (Odoo Studio). Only renders
       when at least one field is defined. */}
       {customDefs.length > 0 && (
-        <div className="mt-4 border-t border-brand-200 dark:border-[#2C2C2E] pt-3">
+        <div className="mt-4 border-t border-brand-200 pt-3">
           <p className="text-[11px] font-medium text-brand-500 mb-2">Custom fields</p>
           <div className="grid grid-cols-2 gap-3">
             {customDefs

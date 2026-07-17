@@ -221,7 +221,7 @@ export default function OrganizeStudio({
         </div>
 
         {/* Page preview */}
-        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]">
+        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-200 bg-white">
           {fullFor(i) ? (
             <img
               src={fullFor(i)}
@@ -245,7 +245,7 @@ export default function OrganizeStudio({
         </div>
 
         {/* Navigation bar */}
-        <div className="mx-auto flex items-center gap-3 rounded-3xl border border-brand-200 bg-white px-4 py-2.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+        <div className="mx-auto flex items-center gap-3 rounded-3xl border border-brand-200 bg-white px-4 py-2.5">
           <button
             onClick={() => navTo(-1)}
             disabled={!canPrev}
@@ -331,7 +331,7 @@ export default function OrganizeStudio({
                     else if (action === "organize") setFocusPage(i);
                   }}
                   className={cn(
-                    "group relative w-full overflow-hidden rounded-lg border bg-white p-1 dark:bg-[#1C1C1E] transition-all duration-150",
+                    "group relative w-full overflow-hidden rounded-lg border bg-white p-1 transition-all duration-150",
                     action === "organize"
                       ? "cursor-pointer hover:ring-2 hover:ring-primary-400/40"
                       : "",
@@ -340,7 +340,7 @@ export default function OrganizeStudio({
                     isSel ? "border-primary-500 ring-2 ring-primary-500/50" : "",
                     isDel
                       ? "opacity-40 ring-2 ring-danger/30"
-                      : "border-brand-200 dark:border-[#2C2C2E]"
+                      : "border-brand-200"
                   )}
                 >
                   <span

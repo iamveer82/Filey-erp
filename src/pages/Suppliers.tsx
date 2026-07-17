@@ -252,7 +252,7 @@ export default function Suppliers() {
                 {g.skus} SKU{g.skus === 1 ? "" : "s"} sourced
               </p>
             </div>
-            <div className="mt-auto pt-3 border-t border-brand-200 dark:border-[#3A3D45] flex items-center justify-between">
+            <div className="mt-auto pt-3 border-t border-brand-200 flex items-center justify-between">
               <span className="text-xs font-medium text-brand-500">Sourcing value</span>
               <span className="text-sm font-semibold text-ink">{aed(g.value)}</span>
             </div>

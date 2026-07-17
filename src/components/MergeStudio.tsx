@@ -159,10 +159,10 @@ export default function MergeStudio({
               dragId.current = null;
               setOverId(null);
             }}
-            className={`group relative cursor-grab rounded-xl border bg-white p-2 active:cursor-grabbing dark:bg-[#1C1C1E] ${
+            className={`group relative cursor-grab rounded-xl border bg-white p-2 active:cursor-grabbing ${
               overId === it.id
                 ? "border-primary-400 ring-2 ring-primary-400/40"
-                : "border-brand-200 dark:border-[#2C2C2E]"
+                : "border-brand-200"
             }`}
           >
             <span className="absolute left-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-primary-500 text-[11px] font-medium text-[#0A0A0A]">
@@ -190,7 +190,7 @@ export default function MergeStudio({
             <div className="mt-1.5 flex items-center gap-1">
               <GripVertical size={12} className="shrink-0 text-brand-400" />
               <span
-                className="truncate text-[11px] text-brand-600 dark:text-[#C9CDD3]"
+                className="truncate text-[11px] text-brand-600"
                 title={it.file.name}
               >
                 {it.file.name}
@@ -200,7 +200,7 @@ export default function MergeStudio({
           </div>
         ))}
         {!items.length && (
-          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 text-sm text-brand-400 dark:border-[#2C2C2E]">
+          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 text-sm text-brand-400">
             <span>
               <Upload size={18} className="mx-auto mb-1" /> Add PDFs to merge
             </span>

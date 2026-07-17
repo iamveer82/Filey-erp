@@ -29,7 +29,7 @@ export default function SetupNotice() {
   };
 
   return (
-    <div className="min-h-full grid place-items-center bg-canvas dark:bg-[#0F1011] p-6">
+    <div className="min-h-full grid place-items-center bg-canvas p-6">
       <div
         style={{ "--materialize-origin": "center" } as CSSProperties}
         className="materialize-surface w-full max-w-md"
@@ -51,7 +51,7 @@ export default function SetupNotice() {
             <button
               onClick={() => choose("cloud")}
               className="group w-full text-left rounded-3xl border border-brand-200 dark:border-white/12
-                         bg-white dark:bg-[#1A1B1E] p-5 shadow-bento
+                         bg-white p-5 shadow-bento
                          transition-[box-shadow,border-color,transform] duration-200
                          hover:shadow-bento-hover hover:border-brand-300 dark:hover:border-white/20
                          active:scale-[0.99] cursor-pointer
@@ -77,7 +77,7 @@ export default function SetupNotice() {
                       "Synced and backed up across devices",
                       "Invite your team and share records",
                     ].map((line) => (
-                      <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600 dark:text-[#B6BAC1]">
+                      <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600">
                         <Check size={14} className="shrink-0 text-success" />
                         {line}
                       </li>
@@ -139,7 +139,7 @@ export default function SetupNotice() {
             <button
               onClick={() => void chooseLocal()}
               className="mb-4 w-full text-left rounded-2xl border border-brand-200 dark:border-white/10
-                         bg-white dark:bg-[#1A1B1E] p-4 shadow-bento transition-colors duration-200
+                         bg-white p-4 shadow-bento transition-colors duration-200
                          hover:border-brand-300 dark:hover:border-white/20 active:scale-[0.99] cursor-pointer
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >

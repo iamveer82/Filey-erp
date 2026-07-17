@@ -155,11 +155,11 @@ export default function PreviewModal({
   return createPortal(
     <div className="fixed inset-0 z-50 bg-ink/40 flex justify-end" onClick={onClose}>
       <div
-        className="w-full max-w-3xl h-full bg-white dark:bg-[#1C1C1E] flex flex-col"
+        className="w-full max-w-3xl h-full bg-white flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 dark:border-[#2C2C2E] shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-brand-100 shrink-0">
           <div className="min-w-0">
             <p className="font-medium text-ink truncate">{name || title || "Preview"}</p>
             <p className="text-xs text-brand-400">
@@ -198,7 +198,7 @@ export default function PreviewModal({
 
         {/* multi-file tabs */}
         {paths.length > 1 && (
-          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 dark:border-[#2C2C2E] overflow-x-auto shrink-0">
+          <div className="flex gap-1 px-5 py-2 border-b border-brand-100 overflow-x-auto shrink-0">
             {paths.map((p) => (
               <button
                 key={p}
@@ -216,7 +216,7 @@ export default function PreviewModal({
         )}
 
         {/* body */}
-        <div className="flex-1 overflow-auto bg-brand-50 dark:bg-[#1C1C1E] p-5">
+        <div className="flex-1 overflow-auto bg-brand-50 p-5">
           {busy && (
             <div className="h-full grid place-items-center text-brand-400">
               <Loader2 size={28} className="animate-spin" />
@@ -254,7 +254,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white dark:bg-[#1C1C1E] rounded-3xl border border-brand-200 dark:border-[#2C2C2E] p-4 text-brand-700 dark:text-[#DDE0E4]">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white rounded-3xl border border-brand-200 p-4 text-brand-700">
               {text}
             </pre>
           )}

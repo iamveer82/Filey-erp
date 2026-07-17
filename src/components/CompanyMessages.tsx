@@ -233,7 +233,7 @@ export default function CompanyMessages() {
                   onDelete={remove}
                 />
                 {(replies.length > 0 || replyTo === m.id) && (
-                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 dark:border-[#2C2C2E] pl-3">
+                  <div className="ml-6 mt-2 space-y-2 border-l-2 border-brand-100 pl-3">
                     {replies.map((r) => (
                       <MessageRow
                         key={r.id}

@@ -271,7 +271,7 @@ export default function PipelineBoard({
                 "w-72 shrink-0 rounded-md border bg-brand-50/60 dark:bg-white/[0.03] p-3 transition-colors " +
                 (isOver
                   ? "border-primary-500 bg-primary-100/40"
-                  : "border-brand-200 dark:border-[#2C2C2E]")
+                  : "border-brand-200")
               }
             >
               <div className="flex items-center justify-between px-1 mb-3">
@@ -324,7 +324,7 @@ export default function PipelineBoard({
                       setAddStage(s.id);
                       setAddTitle("");
                     }}
-                    className="flex w-full items-center justify-center gap-1 rounded-3xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600 dark:border-[#2C2C2E]"
+                    className="flex w-full items-center justify-center gap-1 rounded-3xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600"
                   >
                     <Plus size={13} /> Add deal
                   </button>

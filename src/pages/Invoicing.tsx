@@ -1302,7 +1302,7 @@ function PaymentsModal({
           {rows.map((p) => (
             <li
               key={p.id}
-              className="flex items-center justify-between rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm dark:bg-[#1A1B1E] dark:border-[#2A2C33]"
+              className="flex items-center justify-between rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm"
             >
               <span className="tabular-nums font-medium text-ink">
                 {money(Number(p.amount), ccy)}
@@ -3357,10 +3357,10 @@ function Editor({
           onClick={() => setViewOpen(false)}
         >
           <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white dark:bg-[#24262C] outline-none shadow-bento-hover"
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white outline-none shadow-bento-hover"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-brand-100 dark:border-[#2A2C33] px-6 py-4">
+            <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-ink">
                   {form.number || "Invoice preview"}
@@ -3406,7 +3406,7 @@ function Editor({
             <div className="flex-1 overflow-auto p-6">
               <div className="mx-auto max-w-5xl">
                 <div
-                  className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:border-[#3A3D45] dark:bg-white min-h-[1123px]"
+                  className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
                 >
                   <div style={{ position: "relative", minHeight: 1059 }}>
                     <StampSignatureLayer

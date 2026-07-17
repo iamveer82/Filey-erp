@@ -290,7 +290,7 @@ export default function AgentChat() {
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary-400 bg-canvas/85 backdrop-blur-sm dark:bg-[#0F1011]/85">
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary-400 bg-canvas/85 backdrop-blur-sm dark:bg-background/85">
           <div className="flex flex-col items-center gap-2 text-primary-600">
             <Paperclip size={28} />
             <p className="text-sm font-semibold text-ink">Drop a PDF or image to attach</p>
@@ -309,7 +309,7 @@ export default function AgentChat() {
             onClick={() => setCapsOpen(true)}
             title="Capabilities — what the agent may do"
             aria-label="Capabilities"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:border-[#3A3D45] dark:text-[#B6BAC1] dark:hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
           >
             <SlidersHorizontal size={15} />
           </button>
@@ -318,7 +318,7 @@ export default function AgentChat() {
             onClick={() => setSkillsOpen(true)}
             title="Skills — reusable procedures"
             aria-label="Skills"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:border-[#3A3D45] dark:text-[#B6BAC1] dark:hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
           >
             <BookOpen size={15} />
           </button>
@@ -327,7 +327,7 @@ export default function AgentChat() {
             onClick={() => setAutoOpen(true)}
             title="Automations — scheduled tasks"
             aria-label="Automations"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:border-[#3A3D45] dark:text-[#B6BAC1] dark:hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
           >
             <CalendarClock size={15} />
           </button>
@@ -336,7 +336,7 @@ export default function AgentChat() {
             onClick={openHistory}
             title="Chat history"
             aria-label="Chat history"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:border-[#3A3D45] dark:text-[#B6BAC1] dark:hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
           >
             <History size={15} />
           </button>
@@ -345,7 +345,7 @@ export default function AgentChat() {
             onClick={openMemory}
             title="Memory — what the agent has learned"
             aria-label="Memory"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:border-[#3A3D45] dark:text-[#B6BAC1] dark:hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
           >
             <Brain size={15} />
           </button>
@@ -356,8 +356,8 @@ export default function AgentChat() {
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
               auto
-                ? "border-primary-400 bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]"
-                : "border-brand-200 bg-white text-brand-600 hover:bg-brand-50 dark:bg-white/5 dark:border-[#3A3D45] dark:text-[#DDE0E4] dark:hover:bg-white/10"
+                ? "border-primary-400 bg-primary-100 text-ink dark:bg-primary-400/15"
+                : "border-brand-200 bg-white text-brand-600 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
             )}
           >
             <Zap size={13} className={auto ? "text-primary-600" : ""} />
@@ -384,7 +384,7 @@ export default function AgentChat() {
                   key={s}
                   type="button"
                   onClick={() => send(s)}
-                  className="rounded-xl border border-brand-200 bg-white px-3.5 py-2.5 text-left text-sm text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:border-[#3A3D45] dark:text-[#DDE0E4] dark:hover:bg-white/10"
+                  className="rounded-xl border border-brand-200 bg-white px-3.5 py-2.5 text-left text-sm text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
                 >
                   {s}
                 </button>
@@ -412,7 +412,7 @@ export default function AgentChat() {
       </div>
 
       {/* Composer */}
-      <div className="sticky bottom-0 -mx-1 bg-canvas/80 px-1 pb-4 pt-2 backdrop-blur dark:bg-[#0F1011]/80">
+      <div className="sticky bottom-0 -mx-1 bg-canvas/80 px-1 pb-4 pt-2 backdrop-blur dark:bg-background/80">
         {outputs.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-brand-400">Generated:</span>
@@ -421,7 +421,7 @@ export default function AgentChat() {
                 key={i}
                 href={o.url}
                 download={o.name}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:border-[#3A3D45] dark:text-[#DDE0E4] dark:hover:bg-white/10"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
               >
                 <Download size={12} />
                 <span className="max-w-[180px] truncate">{o.name}</span>
@@ -429,11 +429,11 @@ export default function AgentChat() {
             ))}
           </div>
         )}
-        <div className="rounded-2xl border border-brand-200 bg-white p-2.5 shadow-bento transition-shadow focus-within:border-primary-400 focus-within:shadow-bento-hover dark:bg-[#1A1B1E] dark:border-[#3A3D45]">
+        <div className="rounded-2xl border border-brand-200 bg-white p-2.5 shadow-bento transition-shadow focus-within:border-primary-400 focus-within:shadow-bento-hover">
           {/* Attachment preview card */}
           {file && (
             <div className="mb-2 flex">
-              <div className="group relative h-20 w-44 overflow-hidden rounded-xl border border-brand-200 bg-brand-50 dark:border-[#3A3D45] dark:bg-white/5">
+              <div className="group relative h-20 w-44 overflow-hidden rounded-xl border border-brand-200 bg-brand-50 dark:bg-white/5">
                 {filePreview ? (
                   <img
                     src={filePreview}
@@ -442,7 +442,7 @@ export default function AgentChat() {
                   />
                 ) : (
                   <div className="flex h-full flex-col justify-between p-2.5">
-                    <span className="inline-flex w-fit items-center gap-1 rounded bg-brand-200/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:bg-white/10 dark:text-[#DDE0E4]">
+                    <span className="inline-flex w-fit items-center gap-1 rounded bg-brand-200/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:bg-white/10">
                       <FileText size={10} /> {file.name.split(".").pop()}
                     </span>
                     <div className="min-w-0">
@@ -541,18 +541,18 @@ export default function AgentChat() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-bento dark:bg-[#24262C]">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-bento">
             <div className="flex items-center gap-2">
               <ShieldAlert size={18} className="text-warning" />
               <p className="font-semibold text-ink">Approve action</p>
             </div>
-            <p className="mt-2 text-sm text-brand-600 dark:text-[#DDE0E4]">
+            <p className="mt-2 text-sm text-brand-600">
               The assistant wants to run{" "}
               <b className="text-ink">{pendingConfirm.name}</b>. This can change data
               or send something out.
             </p>
             {Object.keys(pendingConfirm.args).length > 0 && (
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-brand-50 p-2.5 text-[11px] text-brand-600 dark:bg-white/5 dark:text-[#DDE0E4]">
+              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-brand-50 p-2.5 text-[11px] text-brand-600 dark:bg-white/5">
                 {JSON.stringify(pendingConfirm.args, null, 2)}
               </pre>
             )}
@@ -589,7 +589,7 @@ export default function AgentChat() {
           onClick={() => setMemOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-bento dark:bg-[#24262C]"
+            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-bento"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -615,11 +615,11 @@ export default function AgentChat() {
                 {mems.map((m) => (
                   <div
                     key={m.id}
-                    className="flex items-start gap-2 rounded-lg border border-brand-200 px-3 py-2 dark:border-[#3A3D45]"
+                    className="flex items-start gap-2 rounded-lg border border-brand-200 px-3 py-2"
                   >
                     <div className="min-w-0 flex-1">
                       {m.tag && (
-                        <span className="mr-1.5 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand-600 dark:bg-white/10 dark:text-[#DDE0E4]">
+                        <span className="mr-1.5 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand-600 dark:bg-white/10">
                           {m.tag}
                         </span>
                       )}
@@ -658,10 +658,10 @@ export default function AgentChat() {
           onClick={() => setHistOpen(false)}
         >
           <div
-            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-bento dark:bg-[#1A1B1E]"
+            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-bento"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3 dark:border-[#3A3D45]">
+            <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
               <p className="font-semibold text-ink">Chats</p>
               <button
                 onClick={() => setHistOpen(false)}
@@ -676,7 +676,7 @@ export default function AgentChat() {
                 startNew();
                 setHistOpen(false);
               }}
-              className="m-3 inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 transition-colors hover:bg-brand-50 dark:border-[#3A3D45] dark:text-[#DDE0E4] dark:hover:bg-white/10"
+              className="m-3 inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 transition-colors hover:bg-brand-50 dark:hover:bg-white/10"
             >
               <Plus size={15} /> New chat
             </button>
@@ -728,7 +728,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary-100 px-4 py-2.5 text-sm text-ink dark:bg-primary-400/15 dark:text-[#F4F5F6]">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary-100 px-4 py-2.5 text-sm text-ink dark:bg-primary-400/15">
           {turn.text}
         </div>
       </div>

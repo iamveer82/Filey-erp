@@ -24,7 +24,7 @@ export default function MultiDatePicker({
         mode="multiple"
         selected={value}
         onSelect={(dates) => onChange(dates ?? [])}
-        className="rounded-3xl border border-brand-200 dark:border-[#2C2C2E]"
+        className="rounded-3xl border border-brand-200"
       />
       <div className="flex items-center justify-between">
         <p className="text-xs text-brand-500">

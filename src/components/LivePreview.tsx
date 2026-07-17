@@ -103,7 +103,7 @@ export default function LivePreview({
 
   return (
     <div>
-      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white dark:border-[#2C2C2E]">
+      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white">
         {img ? (
           <img
             src={img}
@@ -117,7 +117,7 @@ export default function LivePreview({
           </div>
         )}
         {busy && img && (
-          <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 dark:bg-[#1C1C1E]/90">
+          <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 dark:bg-card/90">
             <Loader2 size={14} className="animate-spin text-primary-500" />
           </div>
         )}

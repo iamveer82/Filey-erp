@@ -61,10 +61,10 @@ export default function SkillsDrawer({
       onClick={onClose}
     >
       <div
-        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-bento dark:bg-[#1A1B1E]"
+        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-bento"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3 dark:border-[#3A3D45]">
+        <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
           <div className="flex items-center gap-2">
             <BookOpen size={18} className="text-primary-500" />
             <p className="font-semibold text-ink">Skills</p>
@@ -75,7 +75,7 @@ export default function SkillsDrawer({
         </div>
 
         <div className="flex-1 overflow-auto p-4">
-          <div className="rounded-2xl border border-brand-200 p-3 dark:border-[#3A3D45]">
+          <div className="rounded-2xl border border-brand-200 p-3">
             <p className="label">New skill</p>
             <input
               className="input mb-2"
@@ -109,7 +109,7 @@ export default function SkillsDrawer({
               skills.map((s) => (
                 <div
                   key={s.id}
-                  className="rounded-2xl border border-brand-200 p-3 dark:border-[#3A3D45]"
+                  className="rounded-2xl border border-brand-200 p-3"
                 >
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
@@ -124,7 +124,7 @@ export default function SkillsDrawer({
                       title={s.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
                       className={cn(
                         "relative h-5 w-9 shrink-0 rounded-full transition-colors",
-                        s.enabled ? "bg-primary-400" : "bg-brand-300 dark:bg-[#3A3D45]"
+                        s.enabled ? "bg-primary-400" : "bg-brand-300"
                       )}
                     >
                       <span
@@ -153,7 +153,7 @@ export default function SkillsDrawer({
           </div>
         </div>
 
-        <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400 dark:border-[#3A3D45]">
+        <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400">
           Enabled skills appear to the agent by name; it loads the full steps
           on demand with the use_skill tool.
         </p>

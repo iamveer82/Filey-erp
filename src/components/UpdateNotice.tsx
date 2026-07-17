@@ -66,7 +66,7 @@ export default function UpdateNotice() {
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-md rounded-3xl border border-brand-200 bg-white p-7 shadow-bento dark:border-[#3A3D45] dark:bg-[#24262C]">
+      <div className="relative w-full max-w-md rounded-3xl border border-brand-200 bg-white p-7 shadow-bento">
         {!busy && (
           <button
             onClick={dismiss}
@@ -95,7 +95,7 @@ export default function UpdateNotice() {
         </div>
 
         {info.notes.trim() && (
-          <div className="mt-5 max-h-64 overflow-auto rounded-2xl border border-brand-200 p-4 text-left dark:border-[#3A3D45]">
+          <div className="mt-5 max-h-64 overflow-auto rounded-2xl border border-brand-200 p-4 text-left">
             <Notes notes={info.notes} />
           </div>
         )}
@@ -160,13 +160,13 @@ function Notes({ notes }: { notes: string }) {
           );
         if (isBullet)
           return (
-            <div key={i} className="flex gap-2 text-sm text-brand-700 dark:text-[#DDE0E4]">
+            <div key={i} className="flex gap-2 text-sm text-brand-700">
               <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-primary-400" />
               <span>{text}</span>
             </div>
           );
         return (
-          <p key={i} className="text-sm text-brand-700 dark:text-[#DDE0E4]">
+          <p key={i} className="text-sm text-brand-700">
             {text}
           </p>
         );

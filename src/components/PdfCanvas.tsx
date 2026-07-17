@@ -126,7 +126,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
       </div>
 
       {!err && (
-        <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-brand-200 bg-white/95 px-1.5 py-1 shadow-bento-hover backdrop-blur dark:border-[#2C2C2E] dark:bg-[#1C1C1E]/95">
+        <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-brand-200 bg-white/95 px-1.5 py-1 shadow-bento-hover backdrop-blur dark:bg-card/95">
           <button
             onClick={() => zoomBy(-0.25)}
             disabled={zoom <= MIN_ZOOM}

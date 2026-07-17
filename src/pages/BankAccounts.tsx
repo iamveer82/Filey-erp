@@ -314,7 +314,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const Stat = ({ n, label, tone }: { n: number; label: string; tone: string }) => (
-    <div className="rounded-xl border border-brand-200 bg-white p-3 dark:bg-[#24262C] dark:border-[#3A3D45]">
+    <div className="rounded-xl border border-brand-200 bg-white p-3">
       <p className={`text-2xl font-bold tabular-nums tracking-tight ${tone}`}>{n}</p>
       <p className="text-[11px] text-brand-500 mt-0.5 font-medium tracking-tight">{label}</p>
     </div>
@@ -417,7 +417,7 @@ function ReconList({
     <div>
       <p className="text-sm font-semibold text-ink">{title}</p>
       <p className="text-xs text-brand-500 mb-1">{hint}</p>
-      <div className="max-h-40 overflow-y-auto rounded-xl border border-brand-200 divide-y divide-brand-100 dark:border-[#3A3D45] dark:divide-[#2A2C33]">
+      <div className="max-h-40 overflow-y-auto rounded-xl border border-brand-200 divide-y divide-brand-100">
         {rows.map((r, i) => (
           <div
             key={i}

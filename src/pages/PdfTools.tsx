@@ -326,11 +326,11 @@ function PdfToolWorkspace({
 
   return (
     <div className="animate-fade-up">
-      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-brand-200 bg-white px-4 py-3 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]">
+      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-brand-200 bg-white px-4 py-3">
         <button onClick={onBack} className="btn-ghost h-9">
           <ArrowLeft size={14} /> All tools
         </button>
-        <span className="hidden h-5 w-px bg-brand-200 dark:bg-[#2C2C2E] sm:block" />
+        <span className="hidden h-5 w-px bg-brand-200 sm:block" />
         <span className="truncate text-sm font-medium text-ink">{tool.name}</span>
         {canSave && (
           <button
@@ -364,7 +364,7 @@ function PdfToolWorkspace({
               const fl = toolFlow(tool);
               return (
                 <span
-                  className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-500 dark:border-[#3A3D45] dark:bg-white/5"
+                  className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-500 dark:bg-white/5"
                   title={`${fl.from} to ${fl.to}`}
                 >
                   {fl.from}
@@ -407,7 +407,7 @@ function PdfToolWorkspace({
           )}
         </div>
       ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:hover:bg-white/5">
+        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5">
           <div>
             <Upload size={22} className="mx-auto mb-1 text-brand-300" />
             Drop or choose {tool.multi ? "files" : "a file"} to preview here
@@ -618,12 +618,12 @@ function FilePreview({ file }: { file: File }) {
       <img
         src={img}
         alt={file.name}
-        className="mx-auto max-h-[640px] rounded-2xl border border-brand-200 dark:border-[#2C2C2E]"
+        className="mx-auto max-h-[640px] rounded-2xl border border-brand-200"
       />
     );
   if (text)
     return (
-      <pre className="max-h-[640px] overflow-auto rounded-2xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:border-[#2C2C2E] dark:bg-white/8 dark:text-[#DDE0E4]">
+      <pre className="max-h-[640px] overflow-auto rounded-2xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:bg-white/8">
         {text}
       </pre>
     );

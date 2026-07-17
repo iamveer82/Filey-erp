@@ -20,7 +20,7 @@ export function QuickFilter({ options, value, onChange, className }: QuickFilter
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-1 rounded-3xl border border-brand-200 bg-surface p-0.5 dark:border-[#2C2C2E] dark:bg-[#1C1C1E]",
+        "inline-flex items-center gap-1 rounded-3xl border border-brand-200 bg-surface p-0.5",
         className
       )}
     >
@@ -33,8 +33,8 @@ export function QuickFilter({ options, value, onChange, className }: QuickFilter
             className={cn(
               "inline-flex items-center gap-1 rounded-[10px] px-2.5 py-1 text-[11px] font-medium transition-colors",
               active
-                ? "bg-brand-100 text-ink dark:bg-[#3A3A3C] dark:text-[#F4F5F6]"
-                : "text-brand-500 hover:text-ink dark:hover:text-[#F4F5F6]"
+                ? "bg-brand-100 text-ink"
+                : "text-brand-500 hover:text-ink"
             )}
           >
             {opt.icon}

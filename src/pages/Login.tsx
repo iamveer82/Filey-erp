@@ -49,7 +49,7 @@ function Segmented<T extends string>({
             className={
               "flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
               (active
-                ? "bg-white text-ink dark:bg-[#2C2C2E] dark:text-[#F4F5F6]"
+                ? "bg-white text-ink"
                 : "text-brand-500 hover:text-ink")
             }
           >
@@ -229,7 +229,7 @@ export default function Login() {
         "flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs font-medium " +
         (kind === "err"
           ? "text-danger bg-danger/10"
-          : "text-brand-700 bg-brand-100 dark:text-[#DDE0E4] dark:bg-white/12")
+          : "text-brand-700 bg-brand-100 dark:bg-white/12")
       }
     >
       {kind === "err" ? (
@@ -242,7 +242,7 @@ export default function Login() {
   );
 
   return (
-    <div className="min-h-full grid lg:grid-cols-2 bg-background dark:bg-[#1C1C1E]">
+    <div className="min-h-full grid lg:grid-cols-2 bg-background">
       {/* ── Brand panel with playful characters ── */}
       <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-ink text-white">
         <div
@@ -386,7 +386,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -418,7 +418,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showConfirm ? "Hide password" : "Show password"}
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 dark:hover:text-[#F4F5F6] transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-2xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                     >
                       {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>

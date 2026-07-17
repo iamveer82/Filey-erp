@@ -161,7 +161,7 @@ export default function Reports() {
               className={cn(
                 "px-3.5 py-1.5 text-[12px] font-semibold rounded-full transition-all flex items-center gap-1.5 whitespace-nowrap",
                 active
-                  ? "bg-white text-ink shadow-sm dark:bg-[#3A3D45]"
+                  ? "bg-white text-ink shadow-sm"
                   : "text-brand-500 hover:text-ink"
               )}
             >

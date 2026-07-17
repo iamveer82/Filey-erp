@@ -228,10 +228,10 @@ export default function CommandPalette() {
         aria-modal="true"
         aria-label="Command palette"
         style={{ "--materialize-origin": "top" } as CSSProperties}
-        className="materialize-surface w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]"
+        className="materialize-surface w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-brand-200 px-4 dark:border-[#2C2C2E]">
+        <div className="flex items-center gap-2 border-b border-brand-200 px-4">
           <Search size={16} className="text-brand-400" />
           <input
             ref={inputRef}
@@ -255,7 +255,7 @@ export default function CommandPalette() {
             placeholder="Search pages, customers, deals…"
             className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-brand-400"
           />
-          <kbd className="rounded border border-brand-200 px-1.5 py-0.5 text-[10px] text-brand-400 dark:border-[#2C2C2E]">
+          <kbd className="rounded border border-brand-200 px-1.5 py-0.5 text-[10px] text-brand-400">
             esc
           </kbd>
         </div>
@@ -299,7 +299,7 @@ export default function CommandPalette() {
                       )}
                     </span>
                     {it.badge && (
-                      <span className="rounded-full border border-brand-200 bg-surface px-2 py-0.5 text-[10px] font-medium text-brand-500 dark:border-[#2C2C2E]">
+                      <span className="rounded-full border border-brand-200 bg-surface px-2 py-0.5 text-[10px] font-medium text-brand-500">
                         {it.badge}
                       </span>
                     )}
@@ -312,21 +312,21 @@ export default function CommandPalette() {
             })
           )}
         </div>
-        <div className="flex items-center gap-4 border-t border-brand-200 px-4 py-2 text-[11px] text-brand-400 dark:border-[#2C2C2E]">
+        <div className="flex items-center gap-4 border-t border-brand-200 px-4 py-2 text-[11px] text-brand-400">
           <span className="flex items-center gap-1">
-            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px]">
               ↑↓
             </kbd>{" "}
             navigate
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px]">
               ↵
             </kbd>{" "}
             open
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px] dark:border-[#2C2C2E]">
+            <kbd className="rounded border border-brand-200 px-1 py-0 text-[10px]">
               esc
             </kbd>{" "}
             close

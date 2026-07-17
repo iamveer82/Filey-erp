@@ -64,11 +64,11 @@ export default function Breadcrumbs({ leafLabel }: BreadcrumbsProps = {}) {
   return (
     <nav
       aria-label="Breadcrumb"
-      className="flex items-center gap-1.5 px-1 pb-2 text-xs text-brand-400 dark:text-[#9AA0A8]"
+      className="flex items-center gap-1.5 px-1 pb-2 text-xs text-brand-400"
     >
       <Link
         to="/overview"
-        className="inline-flex items-center gap-1 hover:text-ink dark:hover:text-[#F4F5F6] transition-colors"
+        className="inline-flex items-center gap-1 hover:text-ink transition-colors"
         title="Home"
       >
         <Home size={13} />
@@ -79,16 +79,16 @@ export default function Breadcrumbs({ leafLabel }: BreadcrumbsProps = {}) {
           <span key={c.to} className="flex items-center gap-1.5">
             <ChevronRight
               size={11}
-              className="shrink-0 text-brand-300 dark:text-[#555963]"
+              className="shrink-0 text-brand-300"
             />
             {isLast ? (
-              <span className="font-medium text-brand-600 dark:text-[#DDE0E4] truncate max-w-[200px]">
+              <span className="font-medium text-brand-600 truncate max-w-[200px]">
                 {c.label}
               </span>
             ) : (
               <Link
                 to={c.to}
-                className="hover:text-ink dark:hover:text-[#F4F5F6] transition-colors truncate max-w-[160px]"
+                className="hover:text-ink transition-colors truncate max-w-[160px]"
               >
                 {c.label}
               </Link>
@@ -100,9 +100,9 @@ export default function Breadcrumbs({ leafLabel }: BreadcrumbsProps = {}) {
         <span className="flex items-center gap-1.5">
           <ChevronRight
             size={11}
-            className="shrink-0 text-brand-300 dark:text-[#555963]"
+            className="shrink-0 text-brand-300"
           />
-          <span className="font-medium text-brand-600 dark:text-[#DDE0E4] truncate max-w-[200px]">
+          <span className="font-medium text-brand-600 truncate max-w-[200px]">
             {leafLabel}
           </span>
         </span>

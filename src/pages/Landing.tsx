@@ -58,7 +58,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
   return (
     <div className="min-h-full overflow-y-auto bg-canvas text-ink font-sans">
       {/* ───────── Nav ───────── */}
-      <header className="sticky top-0 z-40 border-b border-brand-200/70 bg-white/80 dark:bg-[#161618]/80 dark:border-[#2C2C2E]/70">
+      <header className="sticky top-0 z-40 border-b border-brand-200/70 bg-white/80 dark:bg-background/80">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <Logo size={34} />
@@ -86,7 +86,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
       {/* ───────── Hero ───────── */}
       <section className="relative overflow-hidden">
         <div className="relative mx-auto max-w-3xl px-6 pt-20 pb-10 text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E] px-3 py-1 text-xs font-medium text-brand-500">
+          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-medium text-brand-500">
             <Sparkles size={13} className="text-primary-600" />
             AI-powered business suite
           </span>
@@ -119,7 +119,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
 
         {/* Product preview */}
         <div className="relative mx-auto -mb-10 max-w-5xl px-6">
-          <div className="overflow-hidden rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E]">
+          <div className="overflow-hidden rounded-2xl border border-brand-200 bg-white">
             <div className="flex items-center gap-1.5 border-b border-brand-100 px-4 py-2.5">
               <span className="h-2.5 w-2.5 rounded-full bg-danger" />
               <span className="h-2.5 w-2.5 rounded-full bg-warning" />
@@ -144,7 +144,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                 ].map(([label, value, delta, tone]) => (
                   <div
                     key={label}
-                    className="rounded-2xl border border-brand-100 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E] p-3"
+                    className="rounded-2xl border border-brand-100 bg-white p-3"
                   >
                     <p className="text-[10px] font-medium text-brand-400">{label}</p>
                     <p className="mt-1 text-lg tabular-nums">{value}</p>
@@ -162,7 +162,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                   </div>
                 ))}
               </div>
-              <div className="rounded-2xl border border-brand-100 bg-brand-50 dark:bg-[#1C1C1E] dark:border-[#2C2C2E] p-4">
+              <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4">
                 <p className="text-[10px] font-medium text-brand-400 mb-3">
                   Monthly Revenue
                 </p>
@@ -205,7 +205,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         </div>
 
         {/* stats */}
-        <div className="mt-10 grid grid-cols-3 gap-4 rounded-2xl border border-brand-200 bg-white dark:bg-[#1C1C1E] dark:border-[#2C2C2E] p-6 text-center">
+        <div className="mt-10 grid grid-cols-3 gap-4 rounded-2xl border border-brand-200 bg-white p-6 text-center">
           {STATS.map((s) => (
             <div key={s.label}>
               <p className="font-medium text-3xl font-medium tabular-nums">{s.value}</p>

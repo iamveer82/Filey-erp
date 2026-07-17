@@ -117,7 +117,7 @@ export default function AdvanceCard({
       )}
 
       {rows.length > 0 ? (
-        <ul className="divide-y divide-brand-100 dark:divide-[#2C2C2E] border-t border-brand-100 dark:border-[#2C2C2E] mt-3">
+        <ul className="divide-y divide-brand-100 border-t border-brand-100 mt-3">
           {rows.map((a) => (
             <li
               key={a.id}
@@ -279,11 +279,11 @@ export function CustomerAdvancesPanel() {
           {list.map((p) => (
             <li
               key={p.id}
-              className="flex items-center justify-between rounded-lg border border-brand-100 dark:border-[#2C2C2E] px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-sm"
             >
               <Link
                 to={`/customers/${p.id}`}
-                className="truncate text-brand-700 dark:text-[#DDE0E4] hover:text-ink"
+                className="truncate text-brand-700 hover:text-ink"
               >
                 {p.name}
               </Link>

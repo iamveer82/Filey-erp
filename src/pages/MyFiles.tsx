@@ -534,7 +534,7 @@ export default function MyFiles() {
       {/* Drag preview chip */}
       <DragOverlay dropAnimation={null}>
         {drag ? (
-          <div className="rounded-xl border border-primary-300 bg-white px-3 py-2 text-xs font-medium text-ink shadow-lg dark:bg-[#1B1C20]">
+          <div className="rounded-xl border border-primary-300 bg-white px-3 py-2 text-xs font-medium text-ink shadow-lg">
             {drag.type === "folder" ? (
               <Folder size={13} className="mr-1 inline" />
             ) : (
@@ -773,7 +773,7 @@ function MoveMenu({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-brand-200 bg-white p-4 shadow-xl dark:border-[#2C2C2E] dark:bg-[#1B1C20]"
+        className="w-full max-w-sm rounded-2xl border border-brand-200 bg-white p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="mb-1 text-sm font-medium text-ink">Move “{file.name}”</p>
@@ -976,7 +976,7 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-2xl border border-brand-200 bg-brand-100 dark:border-[#2C2C2E] dark:bg-[#1B1C20]">
+      <div className="flex-1 overflow-hidden rounded-2xl border border-brand-200 bg-brand-100">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>

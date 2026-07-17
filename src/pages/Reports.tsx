@@ -339,15 +339,15 @@ export default function Reports() {
             <p className="text-3xl font-medium">{aed(totalRevenue)}</p>
             <p className="text-sm font-medium text-ink/60 mt-1">Total Revenue</p>
           </div>
-          <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink dark:border-[#2C2C2E] dark:bg-[#1C1C1E] dark:text-[#F4F5F6]">
+          <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink">
             <div className="flex items-center justify-between mb-3">
-              <Receipt size={22} className="text-brand-500 dark:text-[#DDE0E4]" />
-              <span className="pill bg-brand-100 dark:bg-white/12 text-brand-500 dark:text-[#DDE0E4] text-[11px]">
+              <Receipt size={22} className="text-brand-500" />
+              <span className="pill bg-brand-100 dark:bg-white/12 text-brand-500 text-[11px]">
                 Expenses + Payroll
               </span>
             </div>
             <p className="text-3xl font-medium">{aed(totalExpenses + payrollCost)}</p>
-            <p className="text-sm font-medium text-brand-500 dark:text-[#B6BAC1] mt-1">
+            <p className="text-sm font-medium text-brand-500 mt-1">
               Total Expenses
             </p>
           </div>
