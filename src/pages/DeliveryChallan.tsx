@@ -24,7 +24,6 @@ import {
   Badge,
   statusTone,
   Field,
-  Card,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import {
@@ -975,17 +974,15 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="!p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="w-8 h-8 rounded-full bg-primary-400 text-ink font-bold text-sm grid place-items-center">
-            {n}
-          </span>
-          <h3 className="font-bold text-ink">{title}</h3>
-        </div>
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
+        <span className="w-7 h-7 rounded-full bg-foreground text-background grid place-items-center text-[13px] font-semibold shrink-0">
+          {n}
+        </span>
+        <h3 className="flex-1 min-w-0 text-[14px] font-semibold text-foreground">{title}</h3>
         {action}
       </div>
-      {children}
-    </Card>
+      <div className="p-5">{children}</div>
+    </div>
   );
 }

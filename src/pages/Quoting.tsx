@@ -2174,20 +2174,18 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <div className="card">
-      <div className="flex items-start justify-between mb-4 gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold shrink-0">
-            {n}
-          </span>
-          <div>
-            <p className="font-semibold text-ink leading-tight">{title}</p>
-            {subtitle && <p className="text-xs text-brand-500 mt-0.5">{subtitle}</p>}
-          </div>
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
+        <span className="w-7 h-7 rounded-full bg-foreground text-background grid place-items-center text-[13px] font-semibold shrink-0">
+          {n}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[14px] font-semibold text-foreground leading-tight">{title}</p>
+          {subtitle && <p className="text-[12.5px] text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
         {action}
       </div>
-      {children}
+      <div className="p-5">{children}</div>
     </div>
   );
 }

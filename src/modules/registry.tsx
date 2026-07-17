@@ -104,7 +104,7 @@ export const MODULES: AppModule[] = [
     label: "CRM",
     short: "CRM",
     desc: "Customer dashboard & pipeline",
-    icon: "customers",
+    icon: "crm",
     to: "/crm",
     Component: Crm,
   },
