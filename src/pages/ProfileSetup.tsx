@@ -44,7 +44,7 @@ export default function ProfileSetup() {
           <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center">
             <ShieldCheck size={26} />
           </div>
-          <h1 className="text-xl font-display">You're all set</h1>
+          <h1 className="text-xl font-semibold tracking-tight">You're all set</h1>
           <p className="text-sm text-brand-400">{company || "Your workspace"} is ready.</p>
           <Button onClick={() => nav("/overview-modern")}>
             Go to dashboard <ArrowRight size={16} />
@@ -62,7 +62,7 @@ export default function ProfileSetup() {
             <Building2 size={20} />
           </div>
           <div>
-            <h1 className="text-lg font-display">Set up your workspace</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Set up your workspace</h1>
             <p className="text-sm text-brand-400">Tell us a little about your business.</p>
           </div>
         </div>

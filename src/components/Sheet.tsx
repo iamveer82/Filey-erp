@@ -103,7 +103,7 @@ export const SheetTitle = forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Title
     ref={ref}
-    className={cn("text-lg font-display font-medium text-ink", className)}
+    className={cn("text-lg font-medium text-ink", className)}
     {...props}
   />
 ));

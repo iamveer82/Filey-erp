@@ -11,7 +11,7 @@ export default function FileyLoader() {
     >
       <div className="flex flex-col items-center gap-4">
         {/* wordmark — single h1, the entire boot surface is type. */}
-        <h1 className="text-2xl font-bold tracking-tight text-ink font-display">
+        <h1 className="text-2xl font-bold tracking-tight text-ink">
           Filey
         </h1>
         {/* spinner — single rotating arc, 1s linear (built-in). */}

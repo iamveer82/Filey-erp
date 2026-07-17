@@ -291,7 +291,7 @@ export default function TemplateDesigner({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-display font-medium text-ink">Create Template</p>
+          <p className="font-medium text-ink">Create Template</p>
           <p className="text-xs text-brand-400 mt-0.5">
             {step === "position"
               ? "Drag boxes to position them"

@@ -90,12 +90,9 @@ export default {
         // offline. "Inter Variable" is the variable-font family name; plain
         // "Inter" kept as a fallback.
         sans: ['"Inter Variable"', '"Inter"', "system-ui", "-apple-system", "sans-serif"],
-        // Reference design is Inter-only — display and pixel are aliases so
-        // every existing font-display/font-pixel usage renders plain Inter.
-        display: ['"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
+        // Doc-template faces (invoice/quote print) — kept self-hosted.
         mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
         serif: ['"Lora"', "Georgia", "serif"],
-        pixel: ['"Inter Variable"', '"Inter"', "system-ui", "sans-serif"],
       },
       letterSpacing: {
         tighter: "-0.04em",
