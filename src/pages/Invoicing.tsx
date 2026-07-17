@@ -875,7 +875,7 @@ const editInvoice = async (id: number) => {
       />
 
       <div
-            className={`grid grid-cols-2 ${isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"} gap-3 mb-4`}
+            className={`grid grid-cols-2 ${isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"} joined-kpis mb-4`}
           >
             <MetricCard
               label="Invoices"
@@ -1277,7 +1277,7 @@ function PaymentsModal({
   const ccy = doc.currency || "AED";
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-3 joined-kpis mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Total</p>
           <p className="font-medium font-medium text-ink tabular-nums">

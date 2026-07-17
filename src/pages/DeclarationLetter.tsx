@@ -242,7 +242,7 @@ export default function DeclarationLetter() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
           label="Letters"
           value={String(docs.length)}

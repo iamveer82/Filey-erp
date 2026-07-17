@@ -148,7 +148,7 @@ export default function EmailTemplates() {
           </button>
         }
       />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 joined-kpis mb-6">
         <MetricCard
           label="Templates"
           value={String(templates.length)}

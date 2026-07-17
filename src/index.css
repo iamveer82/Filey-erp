@@ -470,6 +470,16 @@
   .row-hover {
     @apply transition-colors duration-150 hover:bg-hover;
   }
+
+  /* Joined KPI grid (reference JoinedKpi): put on a `grid grid-cols-*`
+     wrapper of MetricCards — cells share hairlines inside one bordered box.
+     Pair with gap-px on the wrapper (replaces gap-3). */
+  .joined-kpis {
+    @apply gap-px overflow-hidden rounded-xl border border-border bg-border;
+  }
+  .joined-kpis > * {
+    @apply rounded-none border-0;
+  }
 }
 
 /* ── Dark-mode text legibility ──────────────────────────────────────────────

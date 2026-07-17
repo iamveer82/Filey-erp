@@ -563,7 +563,7 @@ export default function Reports() {
         </div>
 
         {/* ── Metric cards ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
           <MetricCard
             label="Inventory Value"
             value={aed(invValue)}
@@ -589,7 +589,7 @@ export default function Reports() {
           />
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-6">
           <MetricCard
             label="Total Expenses"
             value={aed(totalExpenses)}

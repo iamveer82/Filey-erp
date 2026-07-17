@@ -195,7 +195,7 @@ export default function Customers() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-3 joined-kpis mb-4">
         <MetricCard
           label="Customers"
           value={num(rows.length)}

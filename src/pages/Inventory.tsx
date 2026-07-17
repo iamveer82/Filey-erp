@@ -253,7 +253,7 @@ export default function Inventory() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
           label="Total SKUs"
           value={num(products.length)}
