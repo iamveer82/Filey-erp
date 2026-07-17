@@ -1314,6 +1314,288 @@ export default function DocView({
     );
   }
 
+  /* ---- Emergent-reference ports (v2.1) — additive, existing templates
+     untouched. Compose the shared Items/Totals/Footer blocks so money math,
+     custom columns and FTA fields stay correct. ---- */
+
+  if (templateId === "em-minimal") {
+    return (
+      <div className="text-neutral-900">
+        <div className="flex justify-between items-start pb-4 border-b border-neutral-300">
+          <div className="flex items-start gap-3">
+            <Logo size={48} />
+            <div>
+              <p className="text-[15px] font-semibold uppercase tracking-wider">{form.seller_name}</p>
+              <p className="text-xs text-neutral-600 whitespace-pre-line mt-1">{form.seller_address}</p>
+              {form.seller_trn && <p className="text-xs text-neutral-600 mt-0.5">TRN: {form.seller_trn}</p>}
+              <SellerContact cls="text-neutral-600" />
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[18px] font-semibold tracking-widest uppercase">{docTitle}</p>
+            <p className="text-neutral-600 mt-1 text-sm">{form.number}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-6 py-4 text-sm">
+          <div>
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{partyLabel}</p>
+            <p className="font-medium mt-1">{form.customer_name}</p>
+            <p className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-xs text-neutral-600 mt-0.5">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{issuedLabel}</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            {form.due_date && (
+              <>
+                <p className="text-neutral-500 text-[10px] uppercase tracking-wider mt-1">{dueLabel}</p>
+                <p>{fmtDate(form.due_date)}</p>
+              </>
+            )}
+          </div>
+        </div>
+        <Items />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  if (templateId === "em-uae") {
+    return (
+      <div className="text-neutral-900">
+        <div className="flex justify-between items-start">
+          <div className="flex items-start gap-3">
+            <Logo size={48} />
+            <div>
+              <p className="text-[14px] font-bold uppercase">{form.seller_name}</p>
+              <p className="text-xs text-neutral-700 whitespace-pre-line mt-0.5">{form.seller_address}</p>
+              <SellerContact cls="text-neutral-700" />
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[16px] font-bold tracking-wider uppercase">{docTitle}</p>
+            <p className="text-neutral-700 mt-1 text-sm">{form.number}</p>
+            {form.seller_trn && <p className="text-xs text-neutral-700">TRN: {form.seller_trn}</p>}
+          </div>
+        </div>
+        <div className="h-px bg-neutral-900 my-3" />
+        <div className="grid grid-cols-2 gap-4 py-2 text-sm">
+          <div>
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{partyLabel}</p>
+            <p className="font-semibold">{form.customer_name}</p>
+            <p className="text-xs text-neutral-700 whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-xs text-neutral-700">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{issuedLabel}</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            {form.due_date && (
+              <>
+                <p className="text-neutral-500 text-[10px] uppercase tracking-wider mt-0.5">{dueLabel}</p>
+                <p>{fmtDate(form.due_date)}</p>
+              </>
+            )}
+          </div>
+        </div>
+        <Items headerBg="#171717" />
+        <Totals />
+        <Footer />
+      </div>
+    );
+  }
+
+  if (templateId === "em-classic") {
+    return (
+      <div className="text-neutral-900" style={{ fontFamily: "Georgia, serif" }}>
+        <div className="text-center pb-4 border-b-2 border-neutral-900">
+          {logoSrc && (
+            <img src={logoSrc} alt="logo" style={{ height: 56 }} className="object-contain mx-auto mb-2" />
+          )}
+          <p className="text-[18px] font-bold tracking-widest uppercase">{form.seller_name}</p>
+          <p className="text-neutral-700 mt-1 text-xs whitespace-pre-line">{form.seller_address}</p>
+        </div>
+        <div className="text-center py-4">
+          <p className="text-[20px] tracking-[0.3em] uppercase font-semibold">{docTitle}</p>
+          <p className="text-neutral-600 text-sm mt-0.5">No. {form.number}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-6 py-2 text-sm">
+          <div>
+            <p className="italic text-neutral-600">{partyLabel}</p>
+            <p className="font-semibold">{form.customer_name}</p>
+            <p className="text-xs text-neutral-700 whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-xs text-neutral-700">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="italic text-neutral-600">{issuedLabel}</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            {form.due_date && (
+              <>
+                <p className="italic text-neutral-600 mt-1">{dueLabel}</p>
+                <p>{fmtDate(form.due_date)}</p>
+              </>
+            )}
+          </div>
+        </div>
+        <Items bordered />
+        <Totals />
+        <Footer />
+        <p className="text-center italic text-neutral-600 text-xs mt-8 pt-4 border-t border-neutral-300">
+          — Thank you for your patronage —
+        </p>
+      </div>
+    );
+  }
+
+  if (templateId === "em-modern") {
+    const blue = "#3b82f6";
+    return (
+      <div className="text-neutral-900">
+        <div className="flex items-start gap-4">
+          <div className="w-1.5 h-14 rounded-full shrink-0" style={{ background: blue }} />
+          <div className="flex-1">
+            <p className="text-[11px] uppercase tracking-widest font-semibold" style={{ color: "#2563eb" }}>
+              {docTitle}
+            </p>
+            <p className="text-[24px] font-bold tracking-tight">{form.number}</p>
+          </div>
+          <div className="text-right flex items-start gap-3">
+            <Logo size={48} />
+            <div>
+              <p className="text-[14px] font-semibold">{form.seller_name}</p>
+              <p className="text-neutral-500 text-xs whitespace-pre-line">{form.seller_address}</p>
+              {form.seller_trn && <p className="text-neutral-500 text-xs">TRN: {form.seller_trn}</p>}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-6 text-sm">
+          <div className="bg-neutral-50 rounded-lg p-3" style={{ borderLeft: `2px solid ${blue}` }}>
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">{partyLabel}</p>
+            <p className="font-semibold mt-0.5">{form.customer_name}</p>
+            <p className="text-neutral-600 text-xs whitespace-pre-line">{form.customer_address}</p>
+          </div>
+          <div className="bg-neutral-50 rounded-lg p-3">
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">{issuedLabel}</p>
+            <p className="font-medium mt-0.5">{fmtDate(form.issue_date)}</p>
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider mt-1">{dueLabel}</p>
+            <p className="font-medium">{fmtDate(form.due_date) || "—"}</p>
+          </div>
+          <div className="bg-neutral-50 rounded-lg p-3">
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">TRN</p>
+            <p className="font-medium mt-0.5">{form.customer_trn || "—"}</p>
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider mt-1">Amount due</p>
+            <p className="font-semibold" style={{ color: "#2563eb" }}>{m(t.total)}</p>
+          </div>
+        </div>
+        <Items headerBg={blue} />
+        <Totals />
+        <Footer />
+        <div className="mt-6 -mx-12 -mb-12 bg-neutral-50 px-12 py-4 text-neutral-600 text-xs">
+          Thank you for your business. Please contact us for any questions regarding this document.
+        </div>
+      </div>
+    );
+  }
+
+  if (templateId === "em-corporate") {
+    return (
+      <div className="text-neutral-900">
+        <div className="-mx-12 -mt-12 bg-neutral-900 text-white px-12 py-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {logoSrc && (
+              <img src={logoSrc} alt="logo" style={{ height: 48 }} className="object-contain bg-white/95 rounded p-1" />
+            )}
+            <div>
+              <p className="text-[18px] font-bold uppercase tracking-wider">{form.seller_name}</p>
+              <p className="text-neutral-300 text-xs whitespace-pre-line">{form.seller_address}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[14px] font-semibold tracking-wider uppercase">{docTitle}</p>
+            <p className="text-neutral-300 text-sm">{form.number}</p>
+          </div>
+        </div>
+        <div className="py-5 grid grid-cols-2 gap-6 text-sm">
+          <div>
+            <p className="text-[10px] uppercase text-neutral-500 tracking-wider font-semibold">{partyLabel}</p>
+            <p className="font-semibold text-[14px] mt-0.5">{form.customer_name}</p>
+            <p className="text-neutral-700 text-xs whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-neutral-700 text-xs">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] uppercase text-neutral-500 tracking-wider font-semibold">{issuedLabel}</p>
+            <p className="font-medium">{fmtDate(form.issue_date)}</p>
+            {form.due_date && (
+              <>
+                <p className="text-[10px] uppercase text-neutral-500 tracking-wider font-semibold mt-1">{dueLabel}</p>
+                <p className="font-medium">{fmtDate(form.due_date)}</p>
+              </>
+            )}
+          </div>
+        </div>
+        <Items bordered />
+        <Totals />
+        <Footer />
+        <div className="mt-6 -mx-12 -mb-12 bg-neutral-900 text-neutral-300 px-12 py-3 text-xs">
+          Thank you for your business. All payments due within 30 days.
+        </div>
+      </div>
+    );
+  }
+
+  if (templateId === "em-elegant") {
+    const amber = "#92400e";
+    return (
+      <div
+        className="-m-12 p-12 text-neutral-900"
+        style={{ background: "#fbf7f0", fontFamily: 'Georgia, "Cormorant Garamond", serif' }}
+      >
+        <div className="flex justify-between items-end pb-4" style={{ borderBottom: "1px solid rgba(146,64,14,0.4)" }}>
+          <div className="flex items-end gap-3">
+            <Logo size={56} />
+            <div>
+              <p className="text-[19px] uppercase tracking-[0.25em] font-semibold" style={{ color: amber }}>
+                {form.seller_name}
+              </p>
+              <p className="text-neutral-700 whitespace-pre-line text-xs mt-1">{form.seller_address}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[17px] tracking-[0.35em] uppercase" style={{ color: amber }}>{docTitle}</p>
+            <p className="text-neutral-700 italic mt-0.5 text-sm">No. {form.number}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-6 py-4 text-sm">
+          <div>
+            <p className="italic" style={{ color: amber }}>{partyLabel}</p>
+            <p className="font-semibold text-[14px]">{form.customer_name}</p>
+            <p className="text-neutral-700 text-xs whitespace-pre-line">{form.customer_address}</p>
+            {form.customer_trn && <p className="text-neutral-700 text-xs">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="italic" style={{ color: amber }}>{issuedLabel}</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            {form.due_date && (
+              <>
+                <p className="italic mt-1" style={{ color: amber }}>{dueLabel}</p>
+                <p>{fmtDate(form.due_date)}</p>
+              </>
+            )}
+          </div>
+        </div>
+        <Items />
+        <Totals />
+        <Footer />
+        <p
+          className="text-center italic text-xs mt-8 pt-4"
+          style={{ color: amber, borderTop: "1px solid rgba(146,64,14,0.3)" }}
+        >
+          With gratitude for your continued partnership
+        </p>
+      </div>
+    );
+  }
+
   // ---- MODERN (default) ----
   return (
     <div className="text-neutral-900">

@@ -127,6 +127,7 @@ import {
   Field,
   ShareToggle,
   SearchInput,
+  ToggleTile,
 } from "../components/ui";
 
 type CustomColumn = { key: string; label: string };
@@ -2814,62 +2815,6 @@ function Editor({
               <button className="btn-ghost text-xs" onClick={addCustomColumn}>
                 <Plus size={12} /> Add Field
               </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, show_bank: !form.show_bank })}
-                className={`btn-ghost text-xs ${form.show_bank ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show your saved bank details on this invoice"
-                disabled={!hasBankInfo(bank)}
-              >
-                <Landmark size={13} /> Bank details: {form.show_bank ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const on = !form.show_stamp;
-                  setForm({
-                    ...form,
-                    show_stamp: on,
-                    stamp:
-                      on && !form.stamp?.data && companyStampSig.stamp?.data
-                        ? { ...companyStampSig.stamp }
-                        : form.stamp,
-                  });
-                }}
-                className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show company stamp on this invoice (adjust opacity & crop below)"
-                disabled={!companyStampSig.stamp?.data}
-              >
-                <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const on = !form.show_signature;
-                  setForm({
-                    ...form,
-                    show_signature: on,
-                    signature:
-                      on && !form.signature?.data && companyStampSig.signature?.data
-                        ? { ...companyStampSig.signature }
-                        : form.signature,
-                  });
-                }}
-                className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show company signature on this invoice (adjust opacity & crop below)"
-                disabled={!companyStampSig.signature?.data}
-              >
-                <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, show_logo: !form.show_logo })}
-                className={`btn-ghost text-xs ${form.show_logo ? "!bg-brand-50 !text-ink" : ""}`}
-                title="Show your logo on this invoice"
-                disabled={!form.logo}
-              >
-                <ImageIcon size={13} /> Logo: {form.show_logo ? "On" : "Off"}
-              </button>
               <datalist id="unit-suggestions">
                 <option value="pcs" />
                 <option value="L" />
@@ -2906,30 +2851,6 @@ function Editor({
                 {showDiscount ? "Remove Discount" : "Add Discount"}
               </button>
             </div>
-            {(form.show_stamp || form.show_signature) &&
-              (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-                  {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
-                    <StampSigAdjust
-                      label="Stamp"
-                      icon={<Stamp size={13} />}
-                      value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
-                      onChange={(v) => setForm({ ...form, stamp: v })}
-                    />
-                  )}
-                  {form.show_signature &&
-                    (form.signature?.data || companyStampSig.signature?.data) && (
-                      <StampSigAdjust
-                        label="Signature"
-                        icon={<PenTool size={13} />}
-                        value={
-                          form.signature?.data ? form.signature : companyStampSig.signature!
-                        }
-                        onChange={(v) => setForm({ ...form, signature: v })}
-                      />
-                    )}
-                </div>
-              )}
             <label className="mt-3 flex items-center gap-2 text-sm text-ink cursor-pointer">
               <input
                 type="checkbox"
@@ -2951,6 +2872,114 @@ function Editor({
                 </Field>
               </div>
             )}
+          </Step>
+
+          {/* 4 · Branding & finalize */}
+          <Step
+            n={4}
+            title="Branding & finalize"
+            subtitle="Logo, bank details, stamp and signature on the printed invoice"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ToggleTile
+                icon={ImageIcon}
+                label="Logo"
+                desc={
+                  form.logo
+                    ? "Show your logo in the invoice header"
+                    : "Upload a logo in Company settings first"
+                }
+                active={!!form.show_logo}
+                onToggle={() => {
+                  if (form.logo) setForm({ ...form, show_logo: !form.show_logo });
+                }}
+              />
+              <ToggleTile
+                icon={Landmark}
+                label="Bank details"
+                desc={
+                  hasBankInfo(bank)
+                    ? "Show payment bank details"
+                    : "Add bank details in Settings first"
+                }
+                active={!!form.show_bank}
+                onToggle={() => {
+                  if (hasBankInfo(bank)) setForm({ ...form, show_bank: !form.show_bank });
+                }}
+              />
+              <ToggleTile
+                icon={Stamp}
+                label="Company stamp"
+                desc={
+                  companyStampSig.stamp?.data
+                    ? "Show official stamp — adjust below"
+                    : "Upload a stamp in Settings first"
+                }
+                active={!!form.show_stamp}
+                onToggle={() => {
+                  if (!companyStampSig.stamp?.data) return;
+                  const on = !form.show_stamp;
+                  setForm({
+                    ...form,
+                    show_stamp: on,
+                    stamp:
+                      on && !form.stamp?.data && companyStampSig.stamp?.data
+                        ? { ...companyStampSig.stamp }
+                        : form.stamp,
+                  });
+                }}
+                extra={
+                  form.show_stamp &&
+                  (form.stamp?.data || companyStampSig.stamp?.data) && (
+                    <div className="mt-2">
+                      <StampSigAdjust
+                        label="Stamp"
+                        icon={<Stamp size={13} />}
+                        value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
+                        onChange={(v) => setForm({ ...form, stamp: v })}
+                      />
+                    </div>
+                  )
+                }
+              />
+              <ToggleTile
+                icon={PenTool}
+                label="Signature"
+                desc={
+                  companyStampSig.signature?.data
+                    ? "Show signature block — adjust below"
+                    : "Upload a signature in Settings first"
+                }
+                active={!!form.show_signature}
+                onToggle={() => {
+                  if (!companyStampSig.signature?.data) return;
+                  const on = !form.show_signature;
+                  setForm({
+                    ...form,
+                    show_signature: on,
+                    signature:
+                      on && !form.signature?.data && companyStampSig.signature?.data
+                        ? { ...companyStampSig.signature }
+                        : form.signature,
+                  });
+                }}
+                extra={
+                  form.show_signature &&
+                  (form.signature?.data || companyStampSig.signature?.data) && (
+                    <div className="mt-2">
+                      <StampSigAdjust
+                        label="Signature"
+                        icon={<PenTool size={13} />}
+                        value={
+                          form.signature?.data ? form.signature : companyStampSig.signature!
+                        }
+                        onChange={(v) => setForm({ ...form, signature: v })}
+                      />
+                    </div>
+                  )
+                }
+              />
+            </div>
           </Step>
 
           {/* 5 · Additional settings */}
@@ -3479,20 +3508,18 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <div className="card">
-      <div className="flex items-start justify-between mb-4 gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold shrink-0">
-            {n}
-          </span>
-          <div>
-            <p className="font-semibold text-ink leading-tight">{title}</p>
-            {subtitle && <p className="text-xs text-brand-500 mt-0.5">{subtitle}</p>}
-          </div>
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
+        <span className="w-7 h-7 rounded-full bg-foreground text-background grid place-items-center text-[13px] font-semibold shrink-0">
+          {n}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[14px] font-semibold text-foreground leading-tight">{title}</p>
+          {subtitle && <p className="text-[12.5px] text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
         {action}
       </div>
-      {children}
+      <div className="p-5">{children}</div>
     </div>
   );
 }

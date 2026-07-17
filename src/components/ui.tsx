@@ -1002,6 +1002,97 @@ export function FilterChip({
   );
 }
 
+/** Numbered editor section (reference editor layout): round step badge,
+ *  title/subtitle header, optional action, free body. */
+export function SectionBox({
+  n,
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  n: number;
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-5 py-4 border-b border-border flex items-center gap-3">
+        <div className="h-7 w-7 shrink-0 rounded-full bg-foreground text-background text-[13px] font-semibold grid place-items-center">
+          {n}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-semibold text-foreground">{title}</div>
+          {subtitle && <div className="text-[12.5px] text-muted-foreground">{subtitle}</div>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Amber-accent toggle tile (reference "Branding & finalize" controls):
+ *  icon chip, label/desc, pill switch, optional expanded content. */
+export function ToggleTile({
+  icon: Icon,
+  label,
+  desc,
+  active,
+  onToggle,
+  extra,
+}: {
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  label: string;
+  desc?: string;
+  active: boolean;
+  onToggle: () => void;
+  extra?: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-3 transition-colors",
+        active ? "border-primary-400 bg-primary-500/5" : "border-border"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <div
+          className={cn(
+            "h-8 w-8 shrink-0 rounded-md grid place-items-center",
+            active ? "bg-primary-500/15 text-primary-600 dark:text-primary-400" : "bg-hover text-muted-foreground"
+          )}
+        >
+          <Icon className="h-4 w-4" strokeWidth={1.75} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-medium text-foreground">{label}</div>
+          {desc && <div className="text-[11.5px] text-muted-foreground">{desc}</div>}
+        </div>
+        <button
+          type="button"
+          aria-pressed={active}
+          onClick={onToggle}
+          className={cn(
+            "h-5 w-9 shrink-0 rounded-full transition-colors cursor-pointer",
+            active ? "bg-primary-400" : "bg-border"
+          )}
+        >
+          <span
+            className={cn(
+              "block h-4 w-4 rounded-full bg-white shadow transition-transform",
+              active ? "translate-x-4" : "translate-x-0.5"
+            )}
+          />
+        </button>
+      </div>
+      {extra}
+    </div>
+  );
+}
+
 /** Search input with built-in clear button. */
 export function SearchInput({
   value,

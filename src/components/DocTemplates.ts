@@ -21,6 +21,13 @@ export const DOC_TEMPLATES = [
   { id: "industrial", name: "Industrial" },
   { id: "executive", name: "Executive" },
   { id: "fresh", name: "Fresh" },
+  // Emergent-reference ports (v2.1) — additive; originals above unchanged.
+  { id: "em-minimal", name: "Minimal Pro" },
+  { id: "em-uae", name: "UAE FTA Compact" },
+  { id: "em-classic", name: "Classic Serif" },
+  { id: "em-modern", name: "Modern Blue" },
+  { id: "em-corporate", name: "Corporate Dark" },
+  { id: "em-elegant", name: "Elegant Ivory" },
 ];
 
 /**

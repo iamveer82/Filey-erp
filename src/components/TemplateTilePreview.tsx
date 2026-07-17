@@ -14,6 +14,12 @@ const ACCENTS: Record<string, string> = {
   monogram: "#0f766e",
   clean: "#2563eb",
   professional: "#1e40af",
+  "em-minimal": "#262626",
+  "em-uae": "#171717",
+  "em-classic": "#171717",
+  "em-modern": "#3b82f6",
+  "em-corporate": "#171717",
+  "em-elegant": "#92400e",
 };
 
 // ─── Miniature SVG previews for built-in templates ─────────────────────────
@@ -340,7 +346,102 @@ const BUILTIN_PREVIEWS: Record<string, React.ComponentType> = {
   monogram: MonogramPreview,
   clean: CleanPreview,
   professional: ProfessionalPreview,
+  "em-minimal": EmMinimalPreview,
+  "em-uae": EmUaePreview,
+  "em-classic": EmClassicPreview,
+  "em-modern": EmModernPreview,
+  "em-corporate": EmCorporatePreview,
+  "em-elegant": EmElegantPreview,
 };
+
+// ─── Emergent-reference ports (v2.1) ────────────────────────────────────────
+
+function EmMinimalPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      <rect x="8" y="8" width="44" height="4" fill="#262626" rx="2" />
+      <rect x="8" y="18" width="84" height="1" fill="#d4d4d4" />
+      <rect x="8" y="24" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="29" width="68" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="34" width="76" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="58" y="56" width="34" height="3" fill="#262626" rx="1.5" />
+    </svg>
+  );
+}
+
+function EmUaePreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      <rect x="8" y="8" width="34" height="3" fill="#171717" rx="1.5" />
+      <rect x="66" y="8" width="26" height="3" fill="#171717" rx="1.5" />
+      <rect x="8" y="18" width="84" height="1.5" fill="#171717" />
+      <rect x="8" y="26" width="84" height="7" fill="#171717" rx="1" />
+      <rect x="8" y="38" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="43" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="48" width="62" height="2" fill="#d4d4d4" rx="1" />
+    </svg>
+  );
+}
+
+function EmClassicPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      <rect x="25" y="8" width="50" height="4" fill="#171717" rx="2" />
+      <rect x="8" y="17" width="84" height="1.5" fill="#171717" />
+      <rect x="34" y="24" width="32" height="3" fill="#525252" rx="1.5" />
+      <rect x="8" y="34" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="39" width="70" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="30" y="58" width="40" height="2.5" fill="#171717" rx="1" />
+    </svg>
+  );
+}
+
+function EmModernPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      <rect x="8" y="8" width="2.5" height="16" fill="#3b82f6" rx="1.25" />
+      <rect x="15" y="9" width="40" height="4" fill="#3b82f6" rx="2" />
+      <rect x="15" y="17" width="26" height="2.5" fill="#a3a3a3" rx="1" />
+      <rect x="8" y="30" width="84" height="6" fill="#3b82f6" rx="1.5" />
+      <rect x="8" y="41" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="46" width="70" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="56" y="56" width="36" height="6" fill="#3b82f6" rx="2" />
+    </svg>
+  );
+}
+
+function EmCorporatePreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      <rect width="100" height="14" fill="#171717" rx="4" />
+      <rect y="10" width="100" height="4" fill="#171717" />
+      <rect x="8" y="22" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="27" width="84" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="32" width="66" height="2" fill="#d4d4d4" rx="1" />
+      <rect y="60" width="100" height="12" fill="#171717" rx="4" />
+      <rect y="60" width="100" height="4" fill="#171717" />
+    </svg>
+  );
+}
+
+function EmElegantPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fbf7f0" rx="4" />
+      <rect x="8" y="9" width="48" height="4" fill="#92400e" rx="2" />
+      <rect x="8" y="18" width="84" height="1" fill="#92400e" opacity="0.4" />
+      <rect x="8" y="26" width="84" height="2" fill="#92400e" opacity="0.25" rx="1" />
+      <rect x="8" y="31" width="70" height="2" fill="#92400e" opacity="0.25" rx="1" />
+      <rect x="8" y="36" width="78" height="2" fill="#92400e" opacity="0.25" rx="1" />
+      <rect x="52" y="56" width="40" height="3" fill="#92400e" rx="1.5" />
+    </svg>
+  );
+}
 
 // ─── Wireframe placeholder for builder-typed custom templates ───────────────
 
