@@ -851,12 +851,12 @@ function DeclarationEditor({
 
             {/* preview controls */}
             <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
+              <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
                 <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
+                  className={`rounded p-1.5 cursor-pointer transition-colors ${
                     device === "desktop"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-brand-400"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-hover"
                   }`}
                   onClick={() => setDevice("desktop")}
                   aria-label="Desktop preview"
@@ -864,10 +864,10 @@ function DeclarationEditor({
                   <Monitor size={15} />
                 </button>
                 <button
-                  className={`rounded-lg p-1.5 cursor-pointer ${
+                  className={`rounded p-1.5 cursor-pointer transition-colors ${
                     device === "mobile"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-brand-400"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-hover"
                   }`}
                   onClick={() => setDevice("mobile")}
                   aria-label="Mobile preview"
@@ -877,7 +877,7 @@ function DeclarationEditor({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  className="rounded-md border border-border p-1.5 text-muted-foreground cursor-pointer hover:bg-hover"
                   onClick={() => setZoom((z) => Math.max(50, z - 10))}
                   aria-label="Zoom out"
                 >
@@ -887,7 +887,7 @@ function DeclarationEditor({
                   {zoom}%
                 </span>
                 <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50"
+                  className="rounded-md border border-border p-1.5 text-muted-foreground cursor-pointer hover:bg-hover"
                   onClick={() => setZoom((z) => Math.min(150, z + 10))}
                   aria-label="Zoom in"
                 >

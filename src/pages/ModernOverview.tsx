@@ -269,7 +269,7 @@ export default function ModernOverview() {
   };
 
   return (
-    <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-6 pb-10">
+    <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
         title={`Welcome back, ${companyName || "your business"}`}
         subtitle="Live view of your business — driven by real data in your workspace."
