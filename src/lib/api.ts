@@ -2006,6 +2006,8 @@ export const crm = {
 };
 
 // ===== Follow-ups / reminders =====
+export type FollowUpRepeat = "none" | "daily" | "weekly" | "monthly";
+
 export interface FollowUp {
   id: number;
   customer_id?: number | null;
@@ -2013,7 +2015,26 @@ export interface FollowUp {
   title: string;
   due_date: string; // YYYY-MM-DD
   done: boolean;
+  /** Recurrence — completing a repeating item spawns the next occurrence. */
+  repeat?: FollowUpRepeat;
   created_at: string;
+}
+
+/** Next due date for a repeating follow-up (date-only math, UTC — no TZ drift). */
+export function nextFollowUpDate(due: string, repeat: FollowUpRepeat): string {
+  const [y, m, d] = due.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (repeat === "daily") dt.setUTCDate(dt.getUTCDate() + 1);
+  else if (repeat === "weekly") dt.setUTCDate(dt.getUTCDate() + 7);
+  else {
+    // Monthly clamps to the target month's length (Jan 31 → Feb 28/29).
+    const day = dt.getUTCDate();
+    dt.setUTCDate(1);
+    dt.setUTCMonth(dt.getUTCMonth() + 1);
+    const max = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+    dt.setUTCDate(Math.min(day, max));
+  }
+  return dt.toISOString().slice(0, 10);
 }
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -2049,11 +2070,24 @@ export const followups = {
     due_date: string;
     customer_id?: number | null;
     customer_name?: string;
+    repeat?: FollowUpRepeat;
   }) => {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "follow_ups", row }, () =>
       sInsert("follow_ups", row), -1
     );
+  },
+  /** Mark done; a repeating item also spawns its next occurrence. */
+  complete: async (f: FollowUp): Promise<void> => {
+    await followups.update(f.id, { done: true });
+    if (f.repeat && f.repeat !== "none")
+      await followups.create({
+        title: f.title,
+        due_date: nextFollowUpDate(f.due_date, f.repeat),
+        customer_id: f.customer_id ?? null,
+        customer_name: f.customer_name || "",
+        repeat: f.repeat,
+      });
   },
   update: (id: number, patch: Partial<FollowUp>) => {
     const row = clean(patch as Record<string, unknown>);

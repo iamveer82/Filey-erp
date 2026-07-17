@@ -11,6 +11,7 @@ create table if not exists public.follow_ups (
   title text not null,
   due_date date not null,
   done boolean not null default false,
+  repeat text not null default 'none',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
