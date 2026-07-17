@@ -162,7 +162,7 @@ export default function Purchase() {
                 render: (e) => (
                   <button
                     aria-label="Delete purchase"
-                    className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer transition-colors duration-200"
+                    className="text-danger hover:bg-danger/10 rounded-md p-1.5 cursor-pointer transition-colors duration-200"
                     onClick={async () => {
                       if (
                         !(await confirm({

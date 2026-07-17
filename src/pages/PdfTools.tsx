@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
@@ -90,7 +90,7 @@ export default function ToolsPage() {
           const paths = await uploadOutputs(runId, outputs);
           if (paths.length) await toolRuns.setPaths(runId, paths, total);
         } else {
-          toast.info("Storage quota full — output downloaded but not archived.");
+          toast.info("Storage quota full â€” output downloaded but not archived.");
         }
       }
     } catch {
@@ -105,7 +105,7 @@ export default function ToolsPage() {
   };
 
   const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
-  // Full set per tab — the grid shows the first 8 and "View all" reveals the
+  // Full set per tab â€” the grid shows the first 8 and "View all" reveals the
   // rest. (Previously capped at 11, which silently hid most of the ~50 tools.)
   const filteredTools =
     cat === "All Tools"
@@ -124,11 +124,11 @@ export default function ToolsPage() {
 
   return (
     <div className="animate-fade-up">
-      {/* ── Page header ─────────────────────────────────────────────────── */}
+      {/* â”€â”€ Page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="mb-6">
-        <h1 className="text-[28px] leading-9 font-semibold text-ink">Tools</h1>
+        <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Tools</h1>
         <p className="mt-1 text-sm text-brand-500 dark:text-brand-400">
-          Convert, merge, split &amp; edit your files — all on-device
+          Convert, merge, split &amp; edit your files â€” all on-device
         </p>
       </div>
 
@@ -157,7 +157,7 @@ export default function ToolsPage() {
         {cat === "All Tools" && (
           <ToolMiniCard
             name="E-sign PDF"
-            desc="Draw, type or upload — place & download"
+            desc="Draw, type or upload â€” place & download"
             Icon={Signature}
             badgeBg="bg-primary-400"
             badgeFg="text-white"
@@ -201,7 +201,7 @@ export default function ToolsPage() {
 
       <p className="flex items-center gap-1.5 text-[11px] text-brand-400">
         <CheckCircle2 size={12} className="text-success" />
-        All processing happens locally — files never leave this device.
+        All processing happens locally â€” files never leave this device.
       </p>
     </div>
   );
@@ -221,7 +221,7 @@ function ToolMiniCard({
   Icon: typeof Sparkles;
   badgeBg: string;
   badgeFg: string;
-  /** Input→output formats shown as a chip, e.g. { from: "DOCX", to: "PDF" }. */
+  /** Inputâ†’output formats shown as a chip, e.g. { from: "DOCX", to: "PDF" }. */
   flow?: { from: string; to: string };
   onUse: () => void;
 }) {
@@ -258,8 +258,8 @@ function ToolMiniCard({
   );
 }
 
-/* ── Per-tool workspace: sticky back nav, tool card, upload, live preview,
- options panel, run button. Minimal + professional. ───────────────────── */
+/* â”€â”€ Per-tool workspace: sticky back nav, tool card, upload, live preview,
+ options panel, run button. Minimal + professional. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function PdfToolWorkspace({
   tool,
   onBack,
@@ -315,7 +315,7 @@ function PdfToolWorkspace({
       for (const o of result) downloadFile(o);
       onComplete(tool.id, tool.name, files[0].name, result);
       toast.success(
-        `Done — ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
+        `Done â€” ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -402,7 +402,7 @@ function PdfToolWorkspace({
           />
           {!!outs.length && (
             <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Signed document downloaded.
+              âœ“ Signed document downloaded.
             </div>
           )}
         </div>
@@ -505,7 +505,7 @@ function PdfToolWorkspace({
           />
           {!!outs.length && (
             <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Stamped PDF downloaded.
+              âœ“ Stamped PDF downloaded.
             </div>
           )}
         </div>
@@ -560,7 +560,7 @@ function PdfToolWorkspace({
             </button>
             {!!outs.length && (
               <div className="rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-                ✓ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
+                âœ“ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
               </div>
             )}
             <button onClick={() => setFiles([])} className="btn-ghost w-full">
@@ -633,7 +633,7 @@ function FilePreview({ file }: { file: File }) {
         <FileText size={28} className="mx-auto text-brand-300" />
         <p className="mt-1 text-ink">{file.name}</p>
         <p className="text-xs">
-          Preview not available for this format — Run will still process it.
+          Preview not available for this format â€” Run will still process it.
         </p>
       </div>
     </div>

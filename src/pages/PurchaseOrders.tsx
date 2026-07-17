@@ -1068,7 +1068,7 @@ function Editor({
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-semibold text-ink">Create Purchase Order</h1>
+            <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Purchase Order</h1>
             <p className="text-sm text-brand-500 mt-0.5">
               Create and share purchase orders with your suppliers
             </p>
@@ -1935,7 +1935,7 @@ function Editor({
           onClick={() => setViewOpen(false)}
         >
           <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white outline-none shadow-bento-hover"
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border outline-none shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">

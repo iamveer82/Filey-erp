@@ -330,38 +330,38 @@ export default function Reports() {
       {/* ══════════ PDF PRINT SECTION ══════════ */}
       <div ref={pdfRef} className="invoice-print">
         {/* ── Summary cards ── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 no-print">
-          <div className="relative overflow-hidden rounded-2xl bg-primary-400 p-6 text-ink">
-            <div className="flex items-center justify-between mb-3">
-              <DollarSign size={22} className="text-ink/70" />
-              <span className="pill bg-ink/15 text-ink text-[11px]">Billed (all)</span>
+        <div className="grid grid-cols-1 md:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-6 no-print">
+          <div className="p-5 border-b md:border-b-0 md:border-r border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-muted-foreground">Total Revenue</span>
+              <DollarSign size={16} className="text-muted-foreground" />
             </div>
-            <p className="text-3xl font-medium">{aed(totalRevenue)}</p>
-            <p className="text-sm font-medium text-ink/60 mt-1">Total Revenue</p>
-          </div>
-          <div className="rounded-2xl border border-brand-200 bg-brand-50 p-6 text-ink">
-            <div className="flex items-center justify-between mb-3">
-              <Receipt size={22} className="text-brand-500" />
-              <span className="pill bg-brand-100 dark:bg-white/12 text-brand-500 text-[11px]">
-                Expenses + Payroll
-              </span>
-            </div>
-            <p className="text-3xl font-medium">{aed(totalExpenses + payrollCost)}</p>
-            <p className="text-sm font-medium text-brand-500 mt-1">
-              Total Expenses
+            <p className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+              {aed(totalRevenue)}
             </p>
+            <p className="text-[11.5px] text-muted-foreground mt-2">Billed (all)</p>
           </div>
-          <div
-            className={`rounded-2xl p-6 text-white ${grossProfit >= 0 ? "bg-success" : "bg-danger"}`}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <PiggyBank size={22} className="text-white/70" />
-              <span className="pill bg-white/20 text-white text-[11px]">
-                Revenue − Costs
-              </span>
+          <div className="p-5 border-b md:border-b-0 md:border-r border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-muted-foreground">Total Expenses</span>
+              <Receipt size={16} className="text-muted-foreground" />
             </div>
-            <p className="text-3xl font-medium">{aed(grossProfit)}</p>
-            <p className="text-sm font-medium text-white/60 mt-1">Net Profit</p>
+            <p className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+              {aed(totalExpenses + payrollCost)}
+            </p>
+            <p className="text-[11.5px] text-muted-foreground mt-2">Expenses + Payroll</p>
+          </div>
+          <div className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-muted-foreground">Net Profit</span>
+              <PiggyBank size={16} className="text-muted-foreground" />
+            </div>
+            <p
+              className={`mt-3 text-[26px] font-semibold leading-tight tracking-tight tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}
+            >
+              {aed(grossProfit)}
+            </p>
+            <p className="text-[11.5px] text-muted-foreground mt-2">Revenue − Costs</p>
           </div>
         </div>
 
@@ -662,7 +662,7 @@ export default function Reports() {
               <span className="tabular-nums">{aed(payrollCost)}</span>
             </div>
 
-            <div className="flex justify-between py-3 mt-1 rounded-2xl bg-brand-50 px-3">
+            <div className="flex justify-between py-3 mt-1 rounded-lg bg-muted px-3">
               <span className="font-medium text-ink text-base">Net Profit / (Loss)</span>
               <span
                 className={`font-medium text-base tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}

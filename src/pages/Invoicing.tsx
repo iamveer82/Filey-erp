@@ -1847,7 +1847,7 @@ function Editor({
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-[28px] leading-9 font-semibold text-ink">Create Invoice</h1>
+            <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Invoice</h1>
             <p className="text-sm text-brand-500 mt-0.5">
               Create and send professional invoices to your customers
             </p>
@@ -1983,7 +1983,7 @@ function Editor({
                   <button
                       key={tpl.id}
                       onClick={() => set("template", tpl.id)}
-                      className={`group relative shrink-0 w-32 rounded-2xl border-2 p-2 text-left transition-all cursor-pointer ${
+                      className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
                         active
                           ? "border-primary-400 bg-primary-50 "
                           : "border-brand-100 bg-white hover:border-primary-300"
@@ -2956,7 +2956,7 @@ function Editor({
           {/* 5 · Additional settings */}
           <Step n={5} title="Additional Settings">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-2xl border border-brand-200 p-4">
+              <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Settings size={15} /> Invoice Settings
                 </div>
@@ -2983,7 +2983,7 @@ function Editor({
                             }
                             className={`flex-1 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
                               active
-                                ? "bg-white text-ink shadow-bento"
+                                ? "bg-background text-foreground shadow-sm"
                                 : "text-brand-500 hover:text-ink"
                             }`}
                           >
@@ -3026,7 +3026,7 @@ function Editor({
                   </div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-brand-200 p-4">
+              <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <StickyNote size={15} /> Notes
                 </div>
@@ -3045,7 +3045,7 @@ function Editor({
                   onChange={(e) => set("terms", e.target.value)}
                 />
               </div>
-              <div className="rounded-2xl border border-brand-200 p-4">
+              <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Paperclip size={15} /> Logo / Attachment
                 </div>
@@ -3357,7 +3357,7 @@ function Editor({
           onClick={() => setViewOpen(false)}
         >
           <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white outline-none shadow-bento-hover"
+            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border outline-none shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">

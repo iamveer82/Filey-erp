@@ -403,7 +403,7 @@ export default function Inventory() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {lowStock.slice(0, 6).map((p) => (
-              <Card key={p.id} className="p-3 flex items-center justify-between gap-3 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-[3px] hover:shadow-lg active:scale-[0.98]" hover>
+              <Card key={p.id} className="p-3 flex items-center justify-between gap-3 transition-[border-color] duration-200 hover:border-muted-foreground/40" hover>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-ink truncate tracking-tight">
                     {p.name}

@@ -763,7 +763,7 @@ export default function Quoting() {
                 <ArrowLeft size={18} />
               </button>
               <div>
-                <h1 className="text-[28px] leading-9 font-semibold text-ink">Create Quotation</h1>
+                <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Quotation</h1>
                 <p className="text-sm text-brand-500 mt-0.5">
                   Build quotations with per-line discount/tax and convert them to invoices
                 </p>
@@ -1404,7 +1404,7 @@ export default function Quoting() {
                 {/* 4 · Settings */}
                 <Step n={4} title="Additional Settings" subtitle="Notes, terms, logo and accent">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="rounded-2xl border border-brand-200 p-4">
+                    <div className="rounded-xl border border-border p-4">
                       <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                         <Settings size={15} /> Quotation Settings
                       </div>
@@ -1419,7 +1419,7 @@ export default function Quoting() {
                         </div>
                       </div>
                     </div>
-                    <div className="rounded-2xl border border-brand-200 p-4">
+                    <div className="rounded-xl border border-border p-4">
                       <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                         <StickyNote size={15} /> Notes & Terms
                       </div>
@@ -1438,7 +1438,7 @@ export default function Quoting() {
                         onChange={(e) => set("terms", e.target.value)}
                       />
                     </div>
-                    <div className="rounded-2xl border border-brand-200 p-4">
+                    <div className="rounded-xl border border-border p-4">
                       <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                         <Paperclip size={15} /> Logo / Attachment
                       </div>
@@ -1770,7 +1770,7 @@ export default function Quoting() {
               onClick={() => setViewOpen(false)}
             >
               <div
-                className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-2xl bg-white shadow-bento-hover outline-none"
+                className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border shadow-lg outline-none"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">

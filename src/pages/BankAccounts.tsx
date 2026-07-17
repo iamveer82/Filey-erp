@@ -314,9 +314,9 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const Stat = ({ n, label, tone }: { n: number; label: string; tone: string }) => (
-    <div className="rounded-xl border border-brand-200 bg-white p-3">
-      <p className={`text-2xl font-bold tabular-nums tracking-tight ${tone}`}>{n}</p>
-      <p className="text-[11px] text-brand-500 mt-0.5 font-medium tracking-tight">{label}</p>
+    <div className="rounded-xl border border-border bg-card p-3">
+      <p className={`text-[22px] font-semibold tabular-nums tracking-tight ${tone}`}>{n}</p>
+      <p className="text-[11px] text-muted-foreground mt-0.5 font-medium">{label}</p>
     </div>
   );
 

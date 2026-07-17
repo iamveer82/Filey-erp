@@ -109,10 +109,10 @@ export default function Reports() {
       {/* ── Header ── */}
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-[28px] leading-9 font-semibold text-ink tracking-tight">
+          <h1 className="text-[22px] font-semibold text-foreground tracking-tight">
             Reports
           </h1>
-          <p className="text-sm text-brand-500 mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Profit &amp; Loss, spending, transactions — print-ready PDF
           </p>
         </div>

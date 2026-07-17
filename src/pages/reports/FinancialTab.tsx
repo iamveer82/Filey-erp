@@ -125,7 +125,7 @@ export function FinancialTab({
           </div>
 
           {/* Net */}
-          <div className="flex justify-between py-3 mt-1 rounded-2xl bg-brand-50 px-3">
+          <div className="flex justify-between py-3 mt-1 rounded-lg bg-muted px-3">
             <span className="font-semibold text-ink text-base">Net Profit / (Loss)</span>
             <span
               className={cn(
