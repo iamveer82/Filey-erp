@@ -45,6 +45,14 @@ import { isConfigured } from "../lib/supabase";
 import { isLocalMode } from "../lib/dataMode";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
+import {
+  PageHeader,
+  SearchInput,
+  FilterChip,
+  EmptyState,
+  Modal,
+} from "../components/ui";
+import { cn } from "../lib/format";
 
 const fmtSize = (n: number) =>
   n < 1024
@@ -89,6 +97,7 @@ export default function MyFiles() {
   const [toolFilter, setToolFilter] = useState<string>("all");
   const [moveFor, setMoveFor] = useState<SavedFile | null>(null);
   const [drag, setDrag] = useState<{ type: string; name: string } | null>(null);
+  const [q, setQ] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const foldersById = useMemo(() => {
@@ -120,6 +129,23 @@ export default function MyFiles() {
         ? folderFilesAll
         : folderFilesAll.filter((f) => (f.tool ?? "other") === toolFilter),
     [folderFilesAll, toolFilter]
+  );
+
+  // Name search (DEMO parity) — filters folders and files in the current view.
+  const qNorm = q.trim().toLowerCase();
+  const visibleFolders = useMemo(
+    () =>
+      qNorm
+        ? subfolders.filter((f) => f.name.toLowerCase().includes(qNorm))
+        : subfolders,
+    [subfolders, qNorm]
+  );
+  const visibleFiles = useMemo(
+    () =>
+      qNorm
+        ? folderFiles.filter((f) => f.name.toLowerCase().includes(qNorm))
+        : folderFiles,
+    [folderFiles, qNorm]
   );
 
   // Breadcrumb trail from root to the current folder.
@@ -378,8 +404,11 @@ export default function MyFiles() {
   if (!isConfigured || !user) {
     return (
       <div className="animate-fade-up">
-        <Header />
-        <div className="card text-sm text-brand-500">
+        <PageHeader
+          title="My Files"
+          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+        />
+        <div className="rounded-xl border border-border bg-card p-5 text-[13px] text-muted-foreground">
           Sign in to save and access your files across devices.
         </div>
       </div>
@@ -389,9 +418,12 @@ export default function MyFiles() {
   if (loading) {
     return (
       <div className="animate-fade-up">
-        <Header />
+        <PageHeader
+          title="My Files"
+          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+        />
         <div className="grid h-60 place-items-center">
-          <Loader2 size={22} className="animate-spin text-brand-400" />
+          <Loader2 size={22} className="animate-spin text-muted-foreground" />
         </div>
       </div>
     );
@@ -422,72 +454,97 @@ export default function MyFiles() {
       onDragEnd={onDragEnd}
     >
       <div className="animate-fade-up">
-        <Header>
-          <div className="flex items-center gap-2">
-            <button className="btn-ghost" onClick={newFolder}>
-              <FolderPlus size={15} /> New folder
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              id="file-upload"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                doUpload(e.target.files);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-            />
-            <label
-              htmlFor="file-upload"
-              className="btn-primary cursor-pointer inline-flex items-center gap-2"
-            >
-              {uploading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <UploadCloud size={15} />
-              )}
-              Upload
-            </label>
-          </div>
-        </Header>
+        <PageHeader
+          title="My Files"
+          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+          action={
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost" onClick={newFolder}>
+                <FolderPlus size={14} /> New folder
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                id="file-upload"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  doUpload(e.target.files);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              />
+              <label
+                htmlFor="file-upload"
+                className="btn-primary cursor-pointer inline-flex items-center gap-2"
+              >
+                {uploading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <UploadCloud size={14} />
+                )}
+                Upload
+              </label>
+            </div>
+          }
+        />
 
         {/* Breadcrumbs (also drop targets to move items up the tree) */}
         <Breadcrumbs trail={trail} onNavigate={setCwd} />
 
-        {/* Type filter chips */}
-        {toolsPresent.length > 0 && (
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            <Chip active={toolFilter === "all"} onClick={() => setToolFilter("all")}>
-              All
-            </Chip>
-            {toolsPresent.map((d) => (
-              <Chip
-                key={d.key}
-                active={toolFilter === d.key}
-                onClick={() => setToolFilter(d.key)}
-              >
-                {d.label}
-              </Chip>
-            ))}
-          </div>
-        )}
-
         {empty ? (
-          <div className="card grid place-items-center py-16 text-center">
-            <FolderOpen size={28} className="mb-2 text-brand-300" />
-            <p className="text-sm font-medium text-ink">No saved files yet</p>
-            <p className="mt-1 text-xs text-brand-500">
-              Generate a document — a copy is filed here automatically — or create a
-              folder to organise things your way.
-            </p>
+          <div className="rounded-xl border border-border bg-card">
+            <EmptyState
+              icon={FolderOpen}
+              title="No saved files yet"
+              description="Generate a document — a copy is filed here automatically — or create a folder to organise things your way."
+              action={
+                <label
+                  htmlFor="file-upload"
+                  className="btn-primary cursor-pointer inline-flex items-center gap-2"
+                >
+                  <UploadCloud size={14} /> Upload files
+                </label>
+              }
+            />
           </div>
         ) : (
           <>
+            {/* Toolbar: search + type filters + count (DEMO parity) */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <SearchInput
+                value={q}
+                onChange={setQ}
+                placeholder="Search files"
+                className="w-[280px]"
+              />
+              {toolsPresent.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <FilterChip
+                    active={toolFilter === "all"}
+                    onClick={() => setToolFilter("all")}
+                  >
+                    All
+                  </FilterChip>
+                  {toolsPresent.map((d) => (
+                    <FilterChip
+                      key={d.key}
+                      active={toolFilter === d.key}
+                      onClick={() => setToolFilter(d.key)}
+                    >
+                      {d.label}
+                    </FilterChip>
+                  ))}
+                </div>
+              )}
+              <div className="ml-auto text-[12px] text-muted-foreground">
+                {visibleFiles.length} files
+              </div>
+            </div>
+
             {/* Subfolders */}
-            {subfolders.length > 0 && (
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {subfolders.map((f) => (
+            {visibleFolders.length > 0 && (
+              <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleFolders.map((f) => (
                   <FolderCard
                     key={f.id}
                     folder={f}
@@ -506,27 +563,36 @@ export default function MyFiles() {
               </div>
             )}
 
-            {/* Files in this folder */}
-            <div className="space-y-2">
-              {folderFiles.map((f) => (
-                <FileRow
-                  key={f.id}
-                  file={f}
-                  busy={busyId === f.id}
-                  onOpen={() => setPreview(f)}
-                  onDownload={() => download(f)}
-                  onRename={() => doRename(f)}
-                  onShare={() => share(f)}
-                  onDelete={() => del(f)}
-                  onMove={() => setMoveFor(f)}
-                />
-              ))}
-              {!subfolders.length && !folderFiles.length && (
-                <div className="card py-10 text-center text-sm text-brand-500">
+            {/* Files in this folder — quiet joined rows (DEMO parity) */}
+            {visibleFiles.length > 0 && (
+              <div className="overflow-hidden rounded-xl border border-border bg-card divide-y divide-border">
+                {visibleFiles.map((f) => (
+                  <FileRow
+                    key={f.id}
+                    file={f}
+                    busy={busyId === f.id}
+                    onOpen={() => setPreview(f)}
+                    onDownload={() => download(f)}
+                    onRename={() => doRename(f)}
+                    onShare={() => share(f)}
+                    onDelete={() => del(f)}
+                    onMove={() => setMoveFor(f)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!visibleFolders.length && !visibleFiles.length && (
+              qNorm ? (
+                <div className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card py-10 text-center text-[13px] text-muted-foreground">
+                  <FolderOpen size={15} /> No files match your search
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-card py-10 text-center text-[13px] text-muted-foreground">
                   This folder is empty. Drag files here or upload.
                 </div>
-              )}
-            </div>
+              )
+            )}
           </>
         )}
       </div>
@@ -534,7 +600,7 @@ export default function MyFiles() {
       {/* Drag preview chip */}
       <DragOverlay dropAnimation={null}>
         {drag ? (
-          <div className="rounded-xl border border-primary-300 bg-white px-3 py-2 text-xs font-medium text-ink shadow-lg">
+          <div className="rounded-lg border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground shadow-lg">
             {drag.type === "folder" ? (
               <Folder size={13} className="mr-1 inline" />
             ) : (
@@ -568,11 +634,11 @@ function Breadcrumbs({
   onNavigate: (id: string | null) => void;
 }) {
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1 text-sm">
+    <div className="mb-3 flex flex-wrap items-center gap-1 text-[13px]">
       <CrumbDrop id="root" onClick={() => onNavigate(null)} label="My Files" root />
       {trail.map((f) => (
         <span key={f.id} className="flex items-center gap-1">
-          <ChevronRight size={14} className="text-brand-300" />
+          <ChevronRight size={13} className="text-muted-foreground/60" />
           <CrumbDrop id={f.id} onClick={() => onNavigate(f.id)} label={f.name} />
         </span>
       ))}
@@ -596,9 +662,13 @@ function CrumbDrop({
     <button
       ref={setNodeRef}
       onClick={onClick}
-      className={`rounded-lg px-2 py-1 transition-colors cursor-pointer ${
-        isOver ? "bg-primary-100 text-ink" : "text-brand-500 hover:bg-brand-100"
-      } ${root ? "font-medium" : ""}`}
+      className={cn(
+        "rounded-md px-2 py-1 transition-colors cursor-pointer",
+        isOver
+          ? "bg-primary-500/15 text-primary-600 dark:text-primary-400"
+          : "text-muted-foreground hover:bg-hover hover:text-foreground",
+        root && "font-medium text-foreground"
+      )}
     >
       {label}
     </button>
@@ -637,33 +707,39 @@ function FolderCard({
   return (
     <div
       ref={ref}
-      className={`card group flex items-center gap-2 transition-all ${
-        isOver ? "border-primary-400 ring-2 ring-primary-200" : "hover:border-primary-300"
-      } ${isDragging ? "opacity-40" : ""}`}
+      className={cn(
+        "group flex items-center gap-2 rounded-xl border bg-card px-3.5 py-3 transition-colors",
+        isOver
+          ? "border-primary-400 ring-2 ring-primary-500/20"
+          : "border-border hover:bg-hover",
+        isDragging && "opacity-40"
+      )}
     >
       <span
         {...attributes}
         {...listeners}
-        className="cursor-grab text-brand-300 hover:text-brand-500 active:cursor-grabbing"
+        className="cursor-grab text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
         title="Drag to move"
       >
-        <GripVertical size={16} />
+        <GripVertical size={14} />
       </span>
       <button
         onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left cursor-pointer"
       >
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
-          <Folder size={20} />
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <Folder size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink">{folder.name}</p>
-          <p className="text-xs text-brand-400">
+          <p className="truncate text-[13px] font-medium text-foreground">
+            {folder.name}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
             {count} item{count === 1 ? "" : "s"}
           </p>
         </div>
       </button>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100 transition-opacity">
         <RowAction title="Rename" onClick={onRename}>
           <Pencil size={14} />
         </RowAction>
@@ -704,50 +780,54 @@ function FileRow({
   return (
     <div
       ref={setNodeRef}
-      className={`card group flex items-center gap-3 py-3 transition-colors hover:border-primary-300 ${
-        isDragging ? "opacity-40" : ""
-      }`}
+      className={cn(
+        "group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover",
+        isDragging && "opacity-40"
+      )}
     >
       <span
         {...attributes}
         {...listeners}
-        className="cursor-grab text-brand-300 hover:text-brand-500 active:cursor-grabbing"
+        className="cursor-grab text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
         title="Drag to a folder"
       >
-        <GripVertical size={16} />
+        <GripVertical size={14} />
       </span>
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
       >
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-500 dark:bg-white/8">
-          <FileIcon name={file.name} className="h-[18px] w-[18px]" />
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <FileIcon name={file.name} className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink" title={file.name}>
+          <p
+            className="truncate text-[13px] font-medium text-foreground"
+            title={file.name}
+          >
             {file.name}
           </p>
-          <p className="text-xs text-brand-400">
+          <p className="text-[11.5px] text-muted-foreground">
             {label ? `${label} · ` : ""}
             {fmtSize(file.size)} · {fmtDate(file.createdAt)}
           </p>
         </div>
       </button>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100 transition-opacity">
         <RowAction title="Move to…" onClick={onMove}>
-          <FolderInput size={15} />
+          <FolderInput size={14} />
         </RowAction>
         <RowAction title="Download" onClick={onDownload} busy={busy}>
-          <Download size={15} />
+          <Download size={14} />
         </RowAction>
         <RowAction title="Rename" onClick={onRename}>
-          <Pencil size={15} />
+          <Pencil size={14} />
         </RowAction>
         <RowAction title="Share link" onClick={onShare}>
-          <Share2 size={15} />
+          <Share2 size={14} />
         </RowAction>
         <RowAction title="Delete" tone="danger" onClick={onDelete}>
-          <Trash2 size={15} />
+          <Trash2 size={14} />
         </RowAction>
       </div>
     </div>
@@ -768,94 +848,35 @@ function MoveMenu({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm rounded-xl border border-brand-200 bg-white p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <p className="mb-1 text-sm font-medium text-ink">Move “{file.name}”</p>
-        <p className="mb-3 text-xs text-brand-400">Pick a destination folder.</p>
-        <div className="max-h-72 overflow-auto">
+    <Modal open onClose={onClose} title={`Move “${file.name}”`}>
+      <p className="mb-3 text-[12.5px] text-muted-foreground">
+        Pick a destination folder.
+      </p>
+      <div className="max-h-72 overflow-auto">
+        <button
+          onClick={() => onPick(null)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-hover text-foreground disabled:text-muted-foreground/60 disabled:hover:bg-transparent"
+          disabled={file.folderId === null}
+        >
+          <FolderOpen size={14} className="text-muted-foreground" /> My Files (root)
+        </button>
+        {folders.map((f) => (
           <button
-            onClick={() => onPick(null)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-brand-100 ${
-              file.folderId === null ? "text-brand-300" : "text-ink"
-            }`}
-            disabled={file.folderId === null}
+            key={f.id}
+            onClick={() => onPick(f.id)}
+            disabled={file.folderId === f.id}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-hover text-foreground disabled:text-muted-foreground/60 disabled:hover:bg-transparent"
+            style={{ paddingLeft: 8 + f.depth * 16 }}
           >
-            <FolderOpen size={15} className="text-brand-400" /> My Files (root)
+            <Folder size={14} className="text-muted-foreground" /> {f.name}
           </button>
-          {folders.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => onPick(f.id)}
-              disabled={file.folderId === f.id}
-              className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-brand-100 ${
-                file.folderId === f.id ? "text-brand-300" : "text-ink"
-              }`}
-              style={{ paddingLeft: 8 + f.depth * 16 }}
-            >
-              <Folder size={15} className="text-primary-400" /> {f.name}
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 flex justify-end">
-          <button className="btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-        </div>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
 /* ---------------- shared bits ---------------- */
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
-        active
-          ? "bg-primary-400 text-ink"
-          : "bg-brand-100 text-brand-500 hover:text-ink dark:bg-white/5"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Header({ children }: { children?: React.ReactNode }) {
-  return (
-    <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-3">
-        <span className="grid h-11 w-11 place-items-center rounded-full bg-primary-100 text-ink dark:bg-primary-400/15 dark:text-primary-300">
-          <FolderOpen size={20} />
-        </span>
-        <div>
-          <p className="text-[10px] font-medium text-brand-400">Files</p>
-          <h1 className="text-lg font-medium text-ink">My Files</h1>
-          <p className="text-xs text-brand-500">
-            Organise documents into folders — drag, drop, and arrange your way
-          </p>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
 
 function RowAction({
   children,
@@ -876,13 +897,14 @@ function RowAction({
       aria-label={title}
       disabled={busy}
       onClick={onClick}
-      className={`rounded-lg p-1.5 cursor-pointer transition-colors duration-200 ${
+      className={cn(
+        "h-7 w-7 grid place-items-center rounded-md border border-transparent transition-colors cursor-pointer",
         tone === "danger"
           ? "text-danger hover:bg-danger/10"
-          : "text-brand-500 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/5"
-      }`}
+          : "text-muted-foreground hover:text-foreground hover:bg-hover hover:border-border"
+      )}
     >
-      {busy ? <Loader2 size={15} className="animate-spin" /> : children}
+      {busy ? <Loader2 size={14} className="animate-spin" /> : children}
     </button>
   );
 }
@@ -941,17 +963,20 @@ function FilePreviewPage({
     <div className="animate-fade-up flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
-          className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+          className="rounded-md p-2 text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer"
           onClick={onBack}
           aria-label="Back"
         >
           <ArrowLeft size={18} />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-medium text-ink" title={file.name}>
+          <h1
+            className="truncate text-[15px] font-medium text-foreground"
+            title={file.name}
+          >
             {file.name}
           </h1>
-          <p className="text-xs text-brand-400">
+          <p className="text-[11.5px] text-muted-foreground">
             {fmtSize(file.size)} · {fmtDate(file.createdAt)}
           </p>
         </div>
@@ -976,13 +1001,15 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-xl border border-brand-200 bg-brand-100">
+      <div className="flex-1 overflow-hidden rounded-xl border border-border bg-muted">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>
               <X size={26} className="mx-auto mb-2 text-danger" />
-              <p className="text-sm font-medium text-ink">Could not load a preview</p>
-              <p className="mt-1 text-xs text-brand-500 max-w-sm">{err}</p>
+              <p className="text-sm font-medium text-foreground">
+                Could not load a preview
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground max-w-sm">{err}</p>
               <button className="btn-ghost mt-3" onClick={onDownload}>
                 <Download size={15} /> Download instead
               </button>
@@ -990,7 +1017,7 @@ function FilePreviewPage({
           </div>
         ) : !url ? (
           <div className="grid h-full place-items-center">
-            <Loader2 size={22} className="animate-spin text-brand-400" />
+            <Loader2 size={22} className="animate-spin text-muted-foreground" />
           </div>
         ) : isImage ? (
           <div className="grid h-full place-items-center overflow-auto p-4">
@@ -1007,9 +1034,9 @@ function FilePreviewPage({
             <div>
               <FileIcon
                 name={file.name}
-                className="mx-auto mb-2 h-7 w-7 text-brand-400"
+                className="mx-auto mb-2 h-7 w-7 text-muted-foreground"
               />
-              <p className="text-sm font-medium text-ink">
+              <p className="text-sm font-medium text-foreground">
                 Preview not available for this file type
               </p>
               <button className="btn-ghost mt-3" onClick={onDownload}>

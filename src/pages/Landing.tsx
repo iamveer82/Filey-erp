@@ -58,7 +58,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
   return (
     <div className="min-h-full overflow-y-auto bg-canvas text-ink font-sans">
       {/* ───────── Nav ───────── */}
-      <header className="sticky top-0 z-40 border-b border-brand-200/70 bg-white/80 dark:bg-background/80">
+      <header className="sticky top-0 z-40 border-b border-border bg-background">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <Logo size={34} />
@@ -68,14 +68,14 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             <button
               aria-label="Sign in"
               onClick={onGetStarted}
-              className="btn-ghost hidden h-9 sm:inline-flex"
+              className="btn-ghost hidden sm:inline-flex"
             >
               Sign in
             </button>
             <button
               aria-label="Get started"
               onClick={onGetStarted}
-              className="btn-primary h-9"
+              className="btn-primary"
             >
               Get started
             </button>
@@ -86,12 +86,12 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
       {/* ───────── Hero ───────── */}
       <section className="relative overflow-hidden">
         <div className="relative mx-auto max-w-3xl px-6 pt-20 pb-10 text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-medium text-brand-500">
-            <Sparkles size={13} className="text-primary-600" />
+          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+            <Sparkles size={13} className="text-primary-600 dark:text-primary-400" />
             AI-powered business suite
           </span>
 
-          <h1 className="mt-5 font-medium text-4xl font-medium leading-[1.08] text-ink sm:text-6xl">
+          <h1 className="mt-5 text-4xl font-medium leading-[1.08] text-ink sm:text-6xl">
             Run your whole business
             <br className="hidden sm:block" /> in{" "}
             <span className="text-primary-700 dark:text-primary-300">one place</span>
@@ -103,10 +103,10 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           </p>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <button onClick={onGetStarted} className="btn-primary h-11 px-5 text-[15px]">
-              Get started free <ArrowRight size={16} />
+            <button onClick={onGetStarted} className="btn-primary px-4">
+              Get started free <ArrowRight size={15} />
             </button>
-            <button onClick={onGetStarted} className="btn-ghost h-11 px-5 text-[15px]">
+            <button onClick={onGetStarted} className="btn-ghost px-4">
               Sign in
             </button>
           </div>
@@ -119,11 +119,11 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
 
         {/* Product preview */}
         <div className="relative mx-auto -mb-10 max-w-5xl px-6">
-          <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
-            <div className="flex items-center gap-1.5 border-b border-brand-100 px-4 py-2.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-danger" />
-              <span className="h-2.5 w-2.5 rounded-full bg-warning" />
-              <span className="h-2.5 w-2.5 rounded-full bg-success" />
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-1.5 border-b border-border px-4 py-2.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
+              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
+              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
               <span className="ml-2 text-[11px] font-medium text-brand-400">
                 app.filey — Dashboard
               </span>
@@ -144,7 +144,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                 ].map(([label, value, delta, tone]) => (
                   <div
                     key={label}
-                    className="rounded-xl border border-brand-100 bg-white p-3"
+                    className="rounded-xl border border-border bg-card p-3"
                   >
                     <p className="text-[10px] font-medium text-brand-400">{label}</p>
                     <p className="mt-1 text-lg tabular-nums">{value}</p>
@@ -162,7 +162,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
+              <div className="rounded-xl border border-border bg-muted p-4">
                 <p className="text-[10px] font-medium text-brand-400 mb-3">
                   Monthly Revenue
                 </p>
@@ -171,7 +171,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                     <div
                       key={i}
                       className="flex-1 rounded-full bg-primary-400"
-                      style={{ height: `${h * 0.22}%` }}
+                      style={{ height: `${h}%` }}
                     />
                   ))}
                 </div>
@@ -184,7 +184,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
       {/* ───────── Features ───────── */}
       <section className="mx-auto max-w-6xl px-6 pt-24 pb-16">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="font-medium text-3xl font-medium sm:text-4xl">
+          <h2 className="text-3xl font-medium sm:text-4xl">
             Everything your business runs on
           </h2>
           <p className="mt-3 text-brand-500">
@@ -195,20 +195,20 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <div key={f.title} className="card card-hover">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-100 text-primary-700">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-400/15 text-primary-600 dark:text-primary-400">
                 <f.icon size={20} />
               </span>
-              <h3 className="mt-4 font-medium text-lg font-medium">{f.title}</h3>
+              <h3 className="mt-4 text-lg font-medium">{f.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-brand-500">{f.desc}</p>
             </div>
           ))}
         </div>
 
         {/* stats */}
-        <div className="mt-10 grid grid-cols-3 gap-4 rounded-xl border border-brand-200 bg-white p-6 text-center">
+        <div className="mt-10 grid grid-cols-3 gap-4 rounded-xl border border-border bg-card p-6 text-center">
           {STATS.map((s) => (
             <div key={s.label}>
-              <p className="font-medium text-3xl font-medium tabular-nums">{s.value}</p>
+              <p className="text-3xl font-medium tabular-nums">{s.value}</p>
               <p className="mt-1 text-xs font-medium text-brand-400">{s.label}</p>
             </div>
           ))}
@@ -220,25 +220,25 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="relative overflow-hidden rounded-xl bg-cta px-8 py-14 text-center text-ink">
           <div className="relative mx-auto max-w-xl">
             <ScanText size={28} className="mx-auto" />
-            <h2 className="mt-3 font-medium text-3xl font-medium sm:text-4xl">
+            <h2 className="mt-3 text-3xl font-medium sm:text-4xl">
               Start running Filey today
             </h2>
-            <p className="mx-auto mt-3 max-w-md text-ink/70">
+            <p className="mx-auto mt-3 max-w-md opacity-70">
               Bring inventory, sales, finance and documents into one place — free to
               start.
             </p>
             <button
               onClick={onGetStarted}
-              className="mt-6 inline-flex h-11 items-center gap-2 rounded-full bg-ink px-6 text-sm font-medium text-white cursor-pointer"
+              className="btn-secondary mt-6 px-4"
             >
-              Get started free <ArrowRight size={16} />
+              Get started free <ArrowRight size={15} />
             </button>
           </div>
         </div>
       </section>
 
       {/* ───────── Footer ───────── */}
-      <footer className="border-t border-brand-200">
+      <footer className="border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 py-8 text-sm text-brand-400 sm:flex-row">
           <div className="flex items-center gap-2">
             <Logo size={24} />

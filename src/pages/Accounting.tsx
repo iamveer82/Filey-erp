@@ -6,8 +6,7 @@ import {
   Receipt,
   Banknote,
   Sparkles,
-  Pencil,
-  Trash2,
+  Download,
   Wrench,
 } from "lucide-react";
 import { fin, Account, Txn, FinanceReport } from "../lib/api";
@@ -23,8 +22,17 @@ import {
   Modal,
   Field,
   ErrorBanner,
+  SearchInput,
+  FilterChip,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
+import { downloadCsv } from "../lib/csv";
 
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"];
 
@@ -40,6 +48,13 @@ export default function Accounting() {
   const [error, setError] = useState("");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editingTxn, setEditingTxn] = useState<Txn | null>(null);
+  const [dupAccount, setDupAccount] = useState<Account | null>(null);
+  const [quickView, setQuickView] = useState<
+    { kind: "txn"; txn: Txn } | { kind: "account"; account: Account } | null
+  >(null);
+  const [search, setSearch] = useState("");
+  const [txnFilter, setTxnFilter] = useState<"all" | "debit" | "credit">("all");
+  const [acctFilter, setAcctFilter] = useState<string>("all");
   const { confirm, toast } = useUI();
 
   const load = () => {
@@ -80,6 +95,139 @@ export default function Accounting() {
     }
   };
 
+  // ---- List-page filtering (DEMO parity: search + status chips) ----
+  const q = search.trim().toLowerCase();
+  const filteredTxns = useMemo(
+    () =>
+      txns.filter(
+        (t) =>
+          (txnFilter === "all" || t.txn_type === txnFilter) &&
+          (!q ||
+            (t.description ?? "").toLowerCase().includes(q) ||
+            t.account_name.toLowerCase().includes(q))
+      ),
+    [txns, txnFilter, q]
+  );
+  const filteredAccounts = useMemo(
+    () =>
+      accounts.filter(
+        (a) =>
+          (acctFilter === "all" || a.account_type === acctFilter) &&
+          (!q ||
+            a.name.toLowerCase().includes(q) ||
+            a.code.toLowerCase().includes(q))
+      ),
+    [accounts, acctFilter, q]
+  );
+  const acctTypesPresent = useMemo(
+    () => ACCOUNT_TYPES.filter((t) => accounts.some((a) => a.account_type === t)),
+    [accounts]
+  );
+
+  // ---- Row actions (DEMO parity) — all wired to real fin operations ----
+  const deleteTxn = async (t: Txn) => {
+    if (
+      !(await confirm({
+        title: "Delete journal entry",
+        message: `Delete ${t.description || "this entry"}? This will restore the account balance.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await fin.deleteTransaction(t.id);
+      load();
+      toast.success("Entry deleted");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete entry");
+    }
+  };
+
+  const duplicateTxn = async (t: Txn) => {
+    try {
+      await fin.postTransaction(
+        t.account_id,
+        t.txn_type,
+        t.amount,
+        t.description ?? null
+      );
+      load();
+      toast.success("Entry duplicated as a new posting");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to duplicate entry");
+    }
+  };
+
+  const deleteAccountRow = async (a: Account) => {
+    if (
+      !(await confirm({
+        title: "Delete account",
+        message: `Delete "${a.name}"? Any balance will be zeroed out with an offsetting entry.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await fin.deleteAccount(a.id);
+      load();
+      toast.success("Account deleted");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete account");
+    }
+  };
+
+  const shareTxn = (kind: ShareKind, t: Txn) => {
+    const text = `Journal entry #${t.id} — ${t.account_name}: ${t.txn_type} ${aed(
+      t.amount
+    )} on ${fmtDate(t.txn_date)}${t.description ? `. ${t.description}` : ""}`;
+    shareVia(kind, {
+      text,
+      url: `${location.origin}${location.pathname}#/accounting`,
+    });
+    if (kind === "copyLink") toast.success("Accounting link copied");
+  };
+
+  const exportCsv = () => {
+    if (tab === "journal") {
+      downloadCsv(
+        "journal-entries",
+        filteredTxns.map((t) => ({
+          date: t.txn_date,
+          account: t.account_name,
+          type: t.txn_type,
+          description: t.description ?? "",
+          amount: t.amount,
+        })),
+        [
+          { key: "date", label: "Date" },
+          { key: "account", label: "Account" },
+          { key: "type", label: "Type" },
+          { key: "description", label: "Description" },
+          { key: "amount", label: `Amount (${getDisplayCurrency()})` },
+        ]
+      );
+    } else {
+      downloadCsv(
+        "chart-of-accounts",
+        filteredAccounts.map((a) => ({
+          code: a.code,
+          name: a.name,
+          type: a.account_type,
+          balance: a.balance,
+        })),
+        [
+          { key: "code", label: "Code" },
+          { key: "name", label: "Account" },
+          { key: "type", label: "Type" },
+          { key: "balance", label: `Balance (${getDisplayCurrency()})` },
+        ]
+      );
+    }
+    toast.success("Exported to CSV");
+  };
+
   return (
     <div className="animate-fade-up">
       <PageHeader
@@ -87,6 +235,14 @@ export default function Accounting() {
         subtitle="Chart of accounts, journal entries & financial position"
         action={
           <div className="flex gap-2">
+            <button
+              className="btn-ghost"
+              aria-label="Export CSV"
+              title="Export the current view to CSV"
+              onClick={exportCsv}
+            >
+              <Download size={15} /> Export
+            </button>
             <button
               className="btn-ghost"
               aria-label="Scan receipt"
@@ -158,7 +314,10 @@ export default function Accounting() {
         {(["journal", "accounts"] as const).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => {
+              setTab(t);
+              setSearch("");
+            }}
             className={`chip ${tab === t ? "chip-active" : ""} capitalize`}
           >
             {t === "journal" ? "Journal" : "Chart of Accounts"}
@@ -166,11 +325,77 @@ export default function Accounting() {
         ))}
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder={
+            tab === "journal"
+              ? "Search entries by description or account…"
+              : "Search accounts by name or code…"
+          }
+          className="max-w-xs flex-1 min-w-[220px]"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {tab === "journal" ? (
+            <>
+              <FilterChip
+                active={txnFilter === "all"}
+                onClick={() => setTxnFilter("all")}
+                count={txns.length}
+              >
+                All
+              </FilterChip>
+              <FilterChip
+                active={txnFilter === "debit"}
+                onClick={() => setTxnFilter("debit")}
+                tone="info"
+                count={txns.filter((t) => t.txn_type === "debit").length}
+              >
+                Debit
+              </FilterChip>
+              <FilterChip
+                active={txnFilter === "credit"}
+                onClick={() => setTxnFilter("credit")}
+                tone="success"
+                count={txns.filter((t) => t.txn_type === "credit").length}
+              >
+                Credit
+              </FilterChip>
+            </>
+          ) : (
+            <>
+              <FilterChip
+                active={acctFilter === "all"}
+                onClick={() => setAcctFilter("all")}
+                count={accounts.length}
+              >
+                All
+              </FilterChip>
+              {acctTypesPresent.map((tp) => (
+                <FilterChip
+                  key={tp}
+                  active={acctFilter === tp}
+                  onClick={() => setAcctFilter(tp)}
+                  count={accounts.filter((a) => a.account_type === tp).length}
+                >
+                  <span className="capitalize">{tp}</span>
+                </FilterChip>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
       {tab === "journal" ? (
         <DataTable<Txn>
-          rows={txns}
+          rows={filteredTxns}
           loading={loading}
-          empty="No journal entries yet"
+          empty={
+            search || txnFilter !== "all"
+              ? "No journal entries match your filters"
+              : "No journal entries yet"
+          }
           columns={[
             {
               key: "d",
@@ -217,54 +442,33 @@ export default function Accounting() {
             },
             {
               key: "actions",
-              label: "",
+              label: "Actions",
               render: (t) => (
-                <div className="flex items-center justify-end gap-1" data-no-row-click>
-                  <button
-                    className="btn-ghost h-8 px-2.5 text-xs"
-                    title="Edit description"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingTxn(t);
-                    }}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    className="btn-danger h-8 px-2.5 text-xs"
-                    title="Delete entry"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (
-                        await confirm({
-                          title: "Delete journal entry",
-                          message: `Delete ${t.description || "this entry"}? This will restore the account balance.`,
-                          confirmLabel: "Delete",
-                          danger: true,
-                        })
-                      ) {
-                        try {
-                          await fin.deleteTransaction(t.id);
-                          load();
-                          toast.success("Entry deleted");
-                        } catch (e: any) {
-                          toast.error(e?.message || "Failed to delete entry");
-                        }
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                <RowActions
+                  onView={() => setQuickView({ kind: "txn", txn: t })}
+                  onEdit={() => setEditingTxn(t)}
+                  onCopy={() => duplicateTxn(t)}
+                  onDelete={() => deleteTxn(t)}
+                  onSend={{
+                    whatsapp: () => shareTxn("whatsapp", t),
+                    email: () => shareTxn("email", t),
+                    sms: () => shareTxn("sms", t),
+                    copyLink: () => shareTxn("copyLink", t),
+                  }}
+                />
               ),
             },
           ]}
         />
       ) : (
         <DataTable<Account>
-          rows={accounts}
+          rows={filteredAccounts}
           loading={loading}
-          empty="No accounts — add your first chart-of-accounts entry"
+          empty={
+            search || acctFilter !== "all"
+              ? "No accounts match your filters"
+              : "No accounts — add your first chart-of-accounts entry"
+          }
           columns={[
             {
               key: "code",
@@ -308,61 +512,103 @@ export default function Accounting() {
             },
             {
               key: "actions",
-              label: "",
+              label: "Actions",
               render: (a) => (
-                <div className="flex items-center justify-end gap-1" data-no-row-click>
-                  <button
-                    className="btn-ghost h-8 px-2.5 text-xs"
-                    title="Edit account"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingAccount(a);
-                    }}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    className="btn-danger h-8 px-2.5 text-xs"
-                    title="Delete account"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (
-                        await confirm({
-                          title: "Delete account",
-                          message: `Delete "${a.name}"? Any balance will be zeroed out with an offsetting entry.`,
-                          confirmLabel: "Delete",
-                          danger: true,
-                        })
-                      ) {
-                        try {
-                          await fin.deleteAccount(a.id);
-                          load();
-                          toast.success("Account deleted");
-                        } catch (e: any) {
-                          toast.error(e?.message || "Failed to delete account");
-                        }
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                <RowActions
+                  onView={() => setQuickView({ kind: "account", account: a })}
+                  onEdit={() => setEditingAccount(a)}
+                  onCopy={() => {
+                    setDupAccount(a);
+                    setAcctOpen(true);
+                  }}
+                  onDelete={() => deleteAccountRow(a)}
+                />
               ),
             },
           ]}
         />
       )}
 
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const qv = quickView;
+                setQuickView(null);
+                if (qv.kind === "txn") setEditingTxn(qv.txn);
+                else setEditingAccount(qv.account);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? quickView.kind === "txn"
+              ? {
+                  title: `Journal entry #${quickView.txn.id}`,
+                  subtitle: quickView.txn.account_name,
+                  badge: (
+                    <Badge
+                      tone={
+                        quickView.txn.txn_type === "credit" ? "success" : "info"
+                      }
+                    >
+                      {quickView.txn.txn_type}
+                    </Badge>
+                  ),
+                  meta: [
+                    { label: "Date", value: fmtDate(quickView.txn.txn_date) },
+                    { label: "Account", value: quickView.txn.account_name },
+                    { label: "Type", value: quickView.txn.txn_type },
+                    { label: "Amount", value: aed(quickView.txn.amount) },
+                    ...(quickView.txn.reconciled_at
+                      ? [
+                          {
+                            label: "Reconciled",
+                            value: fmtDate(quickView.txn.reconciled_at),
+                          },
+                        ]
+                      : []),
+                  ],
+                  total: quickView.txn.amount,
+                  currency: getDisplayCurrency(),
+                  notes: quickView.txn.description || undefined,
+                }
+              : {
+                  title: quickView.account.name,
+                  subtitle: `Code ${quickView.account.code}`,
+                  badge: <Badge tone="neutral">{quickView.account.account_type}</Badge>,
+                  meta: [
+                    { label: "Code", value: quickView.account.code },
+                    { label: "Type", value: quickView.account.account_type },
+                    {
+                      label: "Journal entries",
+                      value: txns.filter(
+                        (t) => t.account_id === quickView.account.id
+                      ).length,
+                    },
+                  ],
+                  total: quickView.account.balance,
+                  currency: getDisplayCurrency(),
+                }
+            : null
+        }
+      />
+
       <AccountModal
         open={acctOpen}
         editing={editingAccount}
+        prefill={dupAccount}
         onClose={() => {
           setAcctOpen(false);
           setEditingAccount(null);
+          setDupAccount(null);
         }}
         onSaved={() => {
           setAcctOpen(false);
           setEditingAccount(null);
+          setDupAccount(null);
           load();
         }}
       />
@@ -387,11 +633,14 @@ export default function Accounting() {
 function AccountModal({
   open,
   editing,
+  prefill,
   onClose,
   onSaved,
 }: {
   open: boolean;
   editing?: Account | null;
+  /** Duplicate source — pre-fills the new-account form (fresh code/balance). */
+  prefill?: Account | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -413,17 +662,24 @@ function AccountModal({
           account_type: editing.account_type,
           balance: editing.balance,
         });
+      } else if (prefill) {
+        setF({
+          code: "",
+          name: `${prefill.name} (copy)`,
+          account_type: prefill.account_type,
+          balance: 0,
+        });
       } else {
         setF({ code: "", name: "", account_type: "asset", balance: 0 });
       }
       setTouched(false);
     }
-  }, [open, editing]);
+  }, [open, editing, prefill]);
   const codeErr = !f.code.trim();
   const nameErr = !f.name.trim();
   const valid = !codeErr && !nameErr;
   return (
-    <Modal open={open} onClose={onClose} title={isEdit ? "Edit Account" : "New Account"}>
+    <Modal open={open} onClose={onClose} title={isEdit ? "Edit Account" : prefill ? "Duplicate Account" : "New Account"}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Code *">

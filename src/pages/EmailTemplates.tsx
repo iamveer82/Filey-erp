@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Copy, Mail, Tags } from "lucide-react";
+import { Plus, Mail, Tags } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
+import { RowActions } from "../components/RowActions";
 import { tools } from "../lib/api";
 
 const TMPL_KEY = "filey_email_templates";
@@ -96,10 +97,13 @@ function seedDefaults(existing: EmailTemplate[]) {
 export default function EmailTemplates() {
   const { toast, confirm } = useUI();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<EmailTemplate | null>(null);
   useEffect(() => {
-    syncEmailTemplates().then((t) => setTemplates(seedDefaults(t)));
+    syncEmailTemplates()
+      .then((t) => setTemplates(seedDefaults(t)))
+      .finally(() => setLoading(false));
   }, []);
 
   const del = async (t: EmailTemplate) => {
@@ -158,11 +162,12 @@ export default function EmailTemplates() {
           label="Categories"
           value={String(categories)}
           icon={<Tags size={20} />}
-          iconClass="bg-secondary/20 text-ink"
+          iconClass="bg-secondary-400/20 text-secondary-600"
         />
       </div>
       <DataTable<EmailTemplate>
         rows={templates}
+        loading={loading}
         empty="No templates yet"
         columns={[
           {
@@ -181,31 +186,23 @@ export default function EmailTemplates() {
             key: "subj",
             label: "Subject",
             render: (t) => (
-              <span className="text-sm text-brand-500 truncate max-w-[300px] block">
+              <span className="text-brand-500 truncate max-w-[300px] block">
                 {t.subject}
               </span>
             ),
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (t) => (
-              <div className="flex items-center gap-1">
-                <button
-                  aria-label={`Duplicate ${t.name}`}
-                  className="text-brand-500 hover:bg-brand-100 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => duplicate(t)}
-                >
-                  <Copy size={15} />
-                </button>
-                <button
-                  aria-label={`Delete ${t.name}`}
-                  className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => del(t)}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
+              <RowActions
+                onEdit={() => {
+                  setEdit(t);
+                  setOpen(true);
+                }}
+                onCopy={() => duplicate(t)}
+                onDelete={() => del(t)}
+              />
             ),
           },
         ]}

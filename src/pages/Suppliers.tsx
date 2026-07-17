@@ -6,8 +6,6 @@ import {
   AlertTriangle,
   Package,
   Plus,
-  Trash2,
-  Pencil,
   Sliders,
 } from "lucide-react";
 import {
@@ -22,6 +20,13 @@ import { useUI } from "../lib/ui";
 import { aed, num } from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { Button, Card, Field, Badge, DataTable, Modal, MetricCard, PageHeader, ShareToggle, ErrorBanner } from "../components/primitives";
+import { SearchInput } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type QuickViewData,
+} from "../components/RowActions";
 
 interface CategoryGroup {
   name: string;
@@ -38,6 +43,8 @@ export default function Suppliers() {
   const [loading, setLoading] = useState(true);
   const [manageOpen, setManageOpen] = useState(false);
   const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [quickView, setQuickView] = useState<Supplier | null>(null);
   const { confirm, toast } = useUI();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -81,6 +88,29 @@ export default function Suppliers() {
 
   const totalValue = groups.reduce((s, g) => s + g.value, 0);
   const totalLow = groups.reduce((s, g) => s + g.low, 0);
+
+  // DEMO parity: client-side search across the visible supplier fields.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return suppliers;
+    return suppliers.filter((s) =>
+      [s.name, s.contact_person, s.email, s.phone]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(needle))
+    );
+  }, [suppliers, q]);
+
+  // DEMO parity: duplicate a supplier via the real create endpoint.
+  const duplicate = async (s: Supplier) => {
+    try {
+      const { id: _id, created_at: _ca, shared: _sh, ...rest } = s;
+      await suppliersApi.create({ ...rest, name: `${s.name} (copy)` });
+      toast.success("Supplier duplicated.");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="animate-fade-up">
@@ -146,8 +176,18 @@ export default function Suppliers() {
         />
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          placeholder="Search supplier, contact, email…"
+          className="w-full max-w-xs"
+        />
+        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">{filtered.length} shown</span>
+      </div>
+
       <DataTable<Supplier>
-        rows={suppliers}
+        rows={filtered}
         loading={loading}
         empty="No suppliers yet — add your first one"
         onRowClick={(s) => nav(`/suppliers/${s.id}`)}
@@ -198,35 +238,58 @@ export default function Suppliers() {
             key: "act",
             label: "",
             render: (s) => (
-              <div className="flex gap-1">
-                <button
-                  aria-label="Edit"
-                  className="text-brand-700 hover:bg-brand-50 dark:hover:bg-white/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => {
-                    setEdit(s);
-                    setOpen(true);
-                  }}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  aria-label="Delete"
-                  className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: "Delete supplier",
-                      message: `Delete supplier "${s.name}"?`,
-                      confirmLabel: "Delete",
-                      danger: true,
+              <RowActions
+                onView={() => setQuickView(s)}
+                onEdit={() => {
+                  setEdit(s);
+                  setOpen(true);
+                }}
+                onCopy={() => duplicate(s)}
+                onSend={{
+                  ...(s.phone
+                    ? {
+                        whatsapp: () =>
+                          shareVia("whatsapp", {
+                            phone: s.phone,
+                            text: `Hello ${s.name},`,
+                          }),
+                        sms: () =>
+                          shareVia("sms", {
+                            phone: s.phone,
+                            text: `Hello ${s.name},`,
+                          }),
+                      }
+                    : {}),
+                  ...(s.email
+                    ? {
+                        email: () =>
+                          shareVia("email", {
+                            email: s.email,
+                            url: s.name,
+                            text: `Hello ${s.name},`,
+                          }),
+                      }
+                    : {}),
+                  copyLink: () => {
+                    shareVia("copyLink", {
+                      url: `${window.location.origin}/suppliers/${s.id}`,
                     });
-                    if (!ok) return;
-                    await suppliersApi.remove(s.id);
-                    load();
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+                    toast.success("Supplier link copied.");
+                  },
+                }}
+                onDelete={async () => {
+                  const ok = await confirm({
+                    title: "Delete supplier",
+                    message: `Delete supplier "${s.name}"?`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                  await suppliersApi.remove(s.id);
+                  load();
+                  toast.success("Supplier deleted.");
+                }}
+              />
             ),
           },
         ]}
@@ -275,8 +338,74 @@ export default function Suppliers() {
           load();
         }}
       />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        data={
+          quickView
+            ? supplierQuickView(quickView, () => {
+                nav(`/suppliers/${quickView.id}`);
+                setQuickView(null);
+              })
+            : null
+        }
+        onEdit={
+          quickView
+            ? () => {
+                setEdit(quickView);
+                setOpen(true);
+                setQuickView(null);
+              }
+            : undefined
+        }
+      />
     </div>
   );
+}
+
+/** DEMO parity: map a supplier record onto the shared QuickViewModal shape. */
+function supplierQuickView(s: Supplier, onFullPage: () => void): QuickViewData {
+  const bank = s.bank_details ?? {};
+  const meta = [
+    { label: "Contact person", value: s.contact_person },
+    { label: "Email", value: s.email },
+    { label: "Phone", value: s.phone },
+    { label: "Tax ID / TRN", value: s.tax_id },
+    { label: "Address", value: s.address },
+    { label: "Bank", value: bank.bank_name },
+    {
+      label: "IBAN / Account",
+      value: bank.iban || bank.account_number,
+    },
+    {
+      label: "Created",
+      value: s.created_at
+        ? new Date(s.created_at).toLocaleDateString()
+        : undefined,
+    },
+  ].filter((m) => m.value != null && m.value !== "");
+  return {
+    title: s.name,
+    subtitle: s.contact_person ? `Contact: ${s.contact_person}` : undefined,
+    badge: s.shared ? (
+      <Badge tone="info">Shared</Badge>
+    ) : (
+      <Badge tone="neutral">Private</Badge>
+    ),
+    meta,
+    notes: s.notes || undefined,
+    footer: (
+      <div className="mt-4 flex justify-end border-t border-border pt-3">
+        <button
+          onClick={onFullPage}
+          className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+        >
+          Open full page
+        </button>
+      </div>
+    ),
+  };
 }
 
 function SupplierModal({

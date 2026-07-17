@@ -11,6 +11,8 @@ interface ModulesValue {
   isEnabled: (id: string) => boolean;
   enabledModules: () => AppModule[];
   toggle: (id: string) => void;
+  /** Re-enable every non-core module at once (clears the disabled list). */
+  enableAll: () => void;
 }
 
 const Ctx = createContext<ModulesValue | null>(null);
@@ -85,12 +87,15 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
     persist(disabled.includes(id) ? disabled.filter((x) => x !== id) : [...disabled, id]);
   };
 
+  const enableAll = () => persist([]);
+
   const value: ModulesValue = {
     loading,
     modules: MODULES,
     isEnabled,
     enabledModules: () => MODULES.filter((m) => isEnabled(m.id)),
     toggle,
+    enableAll,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -102,6 +107,7 @@ const defaultValue: ModulesValue = {
   isEnabled: () => true,
   enabledModules: () => MODULES,
   toggle: () => {},
+  enableAll: () => {},
 };
 
 export function useModules(): ModulesValue {

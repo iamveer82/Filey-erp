@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -111,11 +111,17 @@ export default function PipelineBoard({
   setOpps,
   reload,
   onOpen,
+  quickAddNonce,
+  onQuickAddHandled,
 }: {
   opps: Deal[];
   setOpps: React.Dispatch<React.SetStateAction<Deal[]>>;
   reload: () => void;
   onOpen: (d: Deal) => void;
+  /** Bump to open the quick-add input on the first stage (header "Add Deal"). */
+  quickAddNonce?: number;
+  /** Called after the quick-add request above is consumed. */
+  onQuickAddHandled?: () => void;
 }) {
   const { toast } = useUI();
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -129,6 +135,14 @@ export default function PipelineBoard({
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // External "Add Deal" request: open the quick-add input on the first stage.
+  useEffect(() => {
+    if (!quickAddNonce) return;
+    setAddStage(STAGES[0].id);
+    setAddTitle("");
+    onQuickAddHandled?.();
+  }, [quickAddNonce, onQuickAddHandled]);
 
   const byStage = useMemo(() => {
     const m: Record<string, Deal[]> = {};

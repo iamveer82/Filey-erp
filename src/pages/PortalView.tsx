@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { FileWarning } from "lucide-react";
 import { supabase, invokeFn } from "../lib/supabase";
 import { money } from "../lib/format";
 import DocView, { type DocViewForm, type DocViewLabels } from "../components/DocView";
-import { splitItemMeta } from "../lib/docItems";
+import { splitItemMeta, docTotals } from "../lib/docItems";
+import { applyRoundOff } from "../lib/money";
+import { Spinner, EmptyState } from "../components/ui";
 
 
 /* Public, unauthenticated document viewer for shared links.
@@ -70,20 +73,19 @@ export default function PortalView() {
 
   if (state === "loading")
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] text-sm font-medium text-brand-500">
-        Loading document…
+      <div className="grid min-h-screen place-items-center bg-muted">
+        <Spinner label="Loading document…" />
       </div>
     );
 
   if (state === "error" || !shared)
     return (
-      <div className="grid min-h-screen place-items-center bg-[#F7F3EA] px-6 text-center">
-        <div>
-          <p className="text-lg font-medium text-ink">Document not available</p>
-          <p className="mt-1 text-sm text-brand-500">
-            This link is invalid or the document is no longer shared.
-          </p>
-        </div>
+      <div className="grid min-h-screen place-items-center bg-muted px-6">
+        <EmptyState
+          icon={FileWarning}
+          title="Document not available"
+          description="This link is invalid or the document is no longer shared."
+        />
       </div>
     );
 
@@ -131,17 +133,24 @@ export default function PortalView() {
 
   const labels: DocViewLabels = labelsFor(shared.doc_type);
   const status = String(d.status || "draft");
+  // Same total DocView renders (net of discounts, with VAT, round-off when
+  // enabled) — the Pay label must match the document's Total, not the gross
+  // pre-tax subtotal.
+  const totals = applyRoundOff(
+    docTotals(form.items, form.discount || 0, form.tax_rate || 0),
+    !!form.round_off
+  );
 
   return (
-    <div className="min-h-screen bg-[#F7F3EA] px-4 py-10">
-      <div className="mx-auto max-w-3xl rounded-xl border border-brand-200 bg-white p-8 text-ink">
+    <div className="min-h-screen bg-muted px-4 py-10">
+      <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-8 text-foreground">
         {(paid || status === "paid") && (
-          <div className="mb-4 rounded-xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
+          <div className="mb-4 rounded-xl bg-success/10 px-4 py-2.5 text-sm font-medium text-success">
             Payment received — thank you!
           </div>
         )}
 
-        <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]">
+        <div className="paper-texture rounded-xl border border-border p-8 shadow-sm min-h-[1123px]">
           <DocView form={form} labels={labels} />
         </div>
 
@@ -153,7 +162,7 @@ export default function PortalView() {
               disabled={paying}
               onClick={pay}
             >
-              {paying ? "Preparing payment…" : `Pay ${money(form.items.reduce((s, i) => s + i.qty * i.unit_price, 0), ccy)}`}
+              {paying ? "Preparing payment…" : `Pay ${money(totals.total, ccy)}`}
             </button>
           </div>
         )}

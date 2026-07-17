@@ -3,11 +3,8 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { EMIRATES, normalizeEmirate } from "../lib/einvoice";
 import {
   Plus,
-  Trash2,
-  Pencil,
   Mail,
   BadgeCheck,
-  ArrowRight,
   AlarmClock,
   Download,
   Sliders,
@@ -41,6 +38,12 @@ import {
   TabsTrigger,
   TabsContent,
 } from "../components/Tabs";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type QuickViewData,
+} from "../components/RowActions";
 import { Users } from "lucide-react";
 
 // Local re-export so the form doesn't need a separate import.
@@ -128,6 +131,19 @@ export default function Customers() {
 
   const withTrn = rows.filter((c) => c.trn).length;
   const [manageOpen, setManageOpen] = useState(false);
+  const [quickView, setQuickView] = useState<CrmCustomer | null>(null);
+
+  // DEMO parity: duplicate a customer via the real create endpoint.
+  const duplicate = async (c: CrmCustomer) => {
+    try {
+      const { id: _id, created_at: _ca, ...rest } = c;
+      await crm.createCustomer({ ...rest, name: `${c.name} (copy)` });
+      toast.success("Customer duplicated.");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="animate-fade-up">
@@ -337,42 +353,58 @@ export default function Customers() {
             key: "act",
             label: "",
             render: (c) => (
-              <div className="flex items-center justify-end gap-1">
-                <button
-                  aria-label="Edit"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
-                  onClick={() => {
-                    setEdit(c);
-                    setOpen(true);
-                  }}
-                >
-                  <Pencil size={13} />
-                </button>
-                <button
-                  aria-label="Delete"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: "Delete customer",
-                      message: `Delete "${c.company || c.name}"?`,
-                      confirmLabel: "Delete",
-                      danger: true,
+              <RowActions
+                onView={() => setQuickView(c)}
+                onEdit={() => {
+                  setEdit(c);
+                  setOpen(true);
+                }}
+                onCopy={() => duplicate(c)}
+                onSend={{
+                  ...(c.phone_e164 || c.phone
+                    ? {
+                        whatsapp: () =>
+                          shareVia("whatsapp", {
+                            phone: c.phone_e164 || c.phone,
+                            text: `Hello ${c.name},`,
+                          }),
+                        sms: () =>
+                          shareVia("sms", {
+                            phone: c.phone_e164 || c.phone,
+                            text: `Hello ${c.name},`,
+                          }),
+                      }
+                    : {}),
+                  ...(c.email
+                    ? {
+                        email: () =>
+                          shareVia("email", {
+                            email: c.email,
+                            url: c.company || c.name,
+                            text: `Hello ${c.name},`,
+                          }),
+                      }
+                    : {}),
+                  copyLink: () => {
+                    shareVia("copyLink", {
+                      url: `${window.location.origin}/customers/${c.id}`,
                     });
-                    if (!ok) return;
-                    await crm.deleteCustomer(c.id);
-                    load();
-                    toast.success("Customer deleted.");
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-                <button
-                  onClick={() => setDetail(c)}
-                  className="ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 dark:text-brand-300 dark:hover:bg-white/10 cursor-pointer transition-colors duration-200"
-                >
-                  View <ArrowRight size={11} />
-                </button>
-              </div>
+                    toast.success("Customer link copied.");
+                  },
+                }}
+                onDelete={async () => {
+                  const ok = await confirm({
+                    title: "Delete customer",
+                    message: `Delete "${c.company || c.name}"?`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                  await crm.deleteCustomer(c.id);
+                  load();
+                  toast.success("Customer deleted.");
+                }}
+              />
             ),
           },
         ]}
@@ -493,8 +525,80 @@ export default function Customers() {
           </button>
         </div>
       </Modal>
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        data={
+          quickView
+            ? customerQuickView(quickView, () => {
+                nav(`/customers/${quickView.id}`);
+                setQuickView(null);
+              })
+            : null
+        }
+        onEdit={
+          quickView
+            ? () => {
+                setEdit(quickView);
+                setOpen(true);
+                setQuickView(null);
+              }
+            : undefined
+        }
+      />
     </div>
   );
+}
+
+/** DEMO parity: map a customer record onto the shared QuickViewModal shape. */
+function customerQuickView(
+  c: CrmCustomer,
+  onFullPage: () => void
+): QuickViewData {
+  const emirate = EMIRATES.find(
+    (e) => e.code === normalizeEmirate(c.country_subdivision)
+  )?.label;
+  const meta = [
+    { label: "TRN", value: c.trn },
+    { label: "Email", value: c.email },
+    { label: "Phone", value: c.phone },
+    { label: "Phone (E.164)", value: c.phone_e164 },
+    { label: "Address", value: c.address },
+    { label: "City", value: c.city },
+    { label: "Emirate", value: emirate },
+    { label: "Country", value: c.country_code },
+    {
+      label: "Credit limit (AED)",
+      value: c.credit_limit != null ? num(c.credit_limit) : undefined,
+    },
+    {
+      label: "Opening balance (AED)",
+      value: c.opening_balance != null ? num(c.opening_balance) : undefined,
+    },
+    {
+      label: "Created",
+      value: c.created_at
+        ? new Date(c.created_at).toLocaleDateString()
+        : undefined,
+    },
+  ].filter((m) => m.value != null && m.value !== "");
+  return {
+    title: c.company || c.name,
+    subtitle: c.company ? c.name : undefined,
+    badge: c.segment ? <Badge tone="info">{c.segment}</Badge> : undefined,
+    meta,
+    footer: (
+      <div className="mt-4 flex justify-end border-t border-border pt-3">
+        <button
+          onClick={onFullPage}
+          className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+        >
+          Open full page
+        </button>
+      </div>
+    ),
+  };
 }
 
 function CustomerModal({

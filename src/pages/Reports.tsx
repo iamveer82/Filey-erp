@@ -5,31 +5,22 @@ import {
   Boxes,
   Download,
   FileText,
-  DollarSign,
   Receipt,
-  PiggyBank,
   ShoppingCart,
 } from "lucide-react";
 import {
   BarChart,
+  Bar,
   PieChart,
   Pie,
   Cell,
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-  ChartBar,
-  type ChartConfig,
-} from "../components/ui/chart";
 import {
   erp,
   fin,
@@ -52,15 +43,20 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
 import { aed, num, getDisplayCurrency, fmtDate, localYmd } from "../lib/format";
-import { PageHeader, MetricCard, InfoCard, Spinner, ErrorBanner } from "../components/ui";
+import {
+  PageHeader,
+  MetricCard,
+  Badge,
+  Spinner,
+  ErrorBanner,
+} from "../components/ui";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { DateRangePicker } from "../components/DatePicker";
+import { useChartColors } from "../lib/accent";
 import { Calendar } from "lucide-react";
 
-const PIE = ["#FFD600", "#E0AE00", "#B88C00", "#FFBA3D", "#F6C954"];
-const CHART_GRID = "#DEDBD2";
-
 export default function Reports() {
+  const c = useChartColors();
   const [products, setProducts] = useState<Product[]>([]);
   const [report, setReport] = useState<FinanceReport | null>(null);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
@@ -189,10 +185,15 @@ export default function Reports() {
     return buckets.map(({ name, sales, expense }) => ({ name, sales, expense }));
   }, [invoices, expenses]);
 
-  const chartConfig = {
-    sales: { label: "Sales", color: "#FFD600" },
-    expense: { label: "Expenses", color: "#B88C00" },
-  } satisfies ChartConfig;
+  /* ── Accent-driven chart palette (DEMO useChartColors) ── */
+  const pieColors = [c.accent, c.primary, "#10b981", "#f43f5e", c.accentSoft, "#6366f1"];
+  const tooltipStyle = {
+    borderRadius: 8,
+    fontSize: 12,
+    background: c.tooltipBg,
+    border: `1px solid ${c.tooltipBorder}`,
+    color: c.tooltipFg,
+  };
 
   /* ── Transaction tables for PDF ── */
   const invoiceTxns = useMemo(
@@ -295,8 +296,8 @@ export default function Reports() {
         }
       />
       <div className="mb-4 card !p-3 flex items-center gap-3 no-print">
-        <Calendar size={15} className="text-brand-400" />
-        <span className="text-xs font-medium text-brand-500">Period</span>
+        <Calendar size={15} className="text-muted-foreground" />
+        <span className="text-xs font-medium text-muted-foreground">Period</span>
         <DateRangePicker
           from={dateFrom}
           to={dateTo}
@@ -305,7 +306,7 @@ export default function Reports() {
         />
         {(dateFrom || dateTo) && (
           <button
-            className="text-xs text-brand-500 hover:text-ink cursor-pointer"
+            className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={() => {
               setDateFrom(undefined);
               setDateTo(undefined);
@@ -329,91 +330,100 @@ export default function Reports() {
 
       {/* ══════════ PDF PRINT SECTION ══════════ */}
       <div ref={pdfRef} className="invoice-print">
-        {/* ── Summary cards ── */}
+        {/* ── Summary strip (DEMO joined KPIs) ── */}
         <div className="grid grid-cols-1 md:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-6 no-print">
           <div className="p-5 border-b md:border-b-0 md:border-r border-border">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-muted-foreground">Total Revenue</span>
-              <DollarSign size={16} className="text-muted-foreground" />
-            </div>
-            <p className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+            <div className="text-[13px] text-muted-foreground">Total Revenue</div>
+            <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
               {aed(totalRevenue)}
-            </p>
-            <p className="text-[11.5px] text-muted-foreground mt-2">Billed (all)</p>
+            </div>
+            <div className="mt-2 text-[11.5px] text-muted-foreground">Billed (all)</div>
           </div>
           <div className="p-5 border-b md:border-b-0 md:border-r border-border">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-muted-foreground">Total Expenses</span>
-              <Receipt size={16} className="text-muted-foreground" />
-            </div>
-            <p className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+            <div className="text-[13px] text-muted-foreground">Total Expenses</div>
+            <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
               {aed(totalExpenses + payrollCost)}
-            </p>
-            <p className="text-[11.5px] text-muted-foreground mt-2">Expenses + Payroll</p>
+            </div>
+            <div className="mt-2 text-[11.5px] text-muted-foreground">
+              Expenses + Payroll
+            </div>
           </div>
           <div className="p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-muted-foreground">Net Profit</span>
-              <PiggyBank size={16} className="text-muted-foreground" />
-            </div>
-            <p
+            <div className="text-[13px] text-muted-foreground">Net Profit</div>
+            <div
               className={`mt-3 text-[26px] font-semibold leading-tight tracking-tight tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}
             >
               {aed(grossProfit)}
-            </p>
-            <p className="text-[11.5px] text-muted-foreground mt-2">Revenue − Costs</p>
+            </div>
+            <div className="mt-2 text-[11.5px] text-muted-foreground">Revenue − Costs</div>
           </div>
         </div>
 
         {/* ── VAT 201 (FTA) ── */}
-        <div className="card mb-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="card mb-4 !p-0 overflow-hidden">
+          <div className="flex items-center justify-between flex-wrap gap-2 px-5 py-4 border-b border-border">
             <div className="flex items-center gap-2">
-              <Receipt size={16} className="text-brand-500" />
-              <h3 className="font-semibold text-ink">VAT Return (FTA 201)</h3>
+              <Receipt size={16} className="text-muted-foreground" />
+              <h3 className="text-[14px] font-semibold text-foreground">
+                VAT Return (FTA 201)
+              </h3>
             </div>
-            <span className="text-xs text-brand-500">
+            <span className="text-xs text-muted-foreground">
               {vat.from || "start"} → {vat.to || "today"} · standard rate {vat.rate}%
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-xs text-brand-500 border-b border-brand-200">
-                  <th className="py-1.5 pr-2 font-medium">Box</th>
-                  <th className="py-1.5 pr-2 font-medium">Description</th>
-                  <th className="py-1.5 pr-2 font-medium text-right">Amount (AED)</th>
-                  <th className="py-1.5 font-medium text-right">VAT (AED)</th>
+                <tr className="text-left border-b border-border">
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Box
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Description
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                    Amount (AED)
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                    VAT (AED)
+                  </th>
                 </tr>
               </thead>
               <tbody className="tabular-nums">
-                <tr className="border-b border-brand-100">
-                  <td className="py-1.5 pr-2 text-brand-500">1</td>
-                  <td className="py-1.5 pr-2">Standard-rated supplies</td>
-                  <td className="py-1.5 pr-2 text-right">{aed(vat.standardSupplyNet)}</td>
-                  <td className="py-1.5 text-right">{aed(vat.outputVat)}</td>
+                <tr className="border-b border-border hover:bg-hover">
+                  <td className="px-5 py-3 text-[13px] text-muted-foreground">1</td>
+                  <td className="px-5 py-3 text-[13px]">Standard-rated supplies</td>
+                  <td className="px-5 py-3 text-[13px] text-right">
+                    {aed(vat.standardSupplyNet)}
+                  </td>
+                  <td className="px-5 py-3 text-[13px] text-right">{aed(vat.outputVat)}</td>
                 </tr>
-                <tr className="border-b border-brand-100">
-                  <td className="py-1.5 pr-2 text-brand-500">9</td>
-                  <td className="py-1.5 pr-2">Standard-rated expenses</td>
-                  <td className="py-1.5 pr-2 text-right">{aed(vat.standardExpenseNet)}</td>
-                  <td className="py-1.5 text-right">{aed(vat.inputVat)}</td>
+                <tr className="border-b border-border hover:bg-hover">
+                  <td className="px-5 py-3 text-[13px] text-muted-foreground">9</td>
+                  <td className="px-5 py-3 text-[13px]">Standard-rated expenses</td>
+                  <td className="px-5 py-3 text-[13px] text-right">
+                    {aed(vat.standardExpenseNet)}
+                  </td>
+                  <td className="px-5 py-3 text-[13px] text-right">{aed(vat.inputVat)}</td>
                 </tr>
-                <tr className="font-semibold text-ink">
-                  <td className="py-1.5 pr-2 text-brand-500">14</td>
-                  <td className="py-1.5 pr-2">
+                <tr className="font-semibold text-foreground">
+                  <td className="px-5 py-3 text-[13px] text-muted-foreground">14</td>
+                  <td className="px-5 py-3 text-[13px]">
                     Net VAT due{" "}
-                    <span className="font-normal text-brand-500">
+                    <span className="font-normal text-muted-foreground">
                       ({vat.netVatDue >= 0 ? "payable" : "refundable"})
                     </span>
                   </td>
-                  <td className="py-1.5 pr-2" />
-                  <td className="py-1.5 text-right">{aed(Math.abs(vat.netVatDue))}</td>
+                  <td className="px-5 py-3 text-[13px]" />
+                  <td className="px-5 py-3 text-[13px] text-right">
+                    {aed(Math.abs(vat.netVatDue))}
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-brand-400 mt-2">
+          <p className="text-[11px] text-muted-foreground px-5 py-3 border-t border-border">
             Standard-rated figures derived from posted Output/Input VAT for the
             selected period. Zero-rated &amp; exempt supplies (boxes 4–5) and the
             per-emirate split are not yet itemised — set a Period above to file a
@@ -426,18 +436,12 @@ export default function Reports() {
           {/* Balance Sheet */}
           <div className="card">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-ink">Balance Sheet</h3>
-              <span
-                className={`pill text-[11px] ${
-                  balanceSheet.balanced
-                    ? "bg-brand-100 text-brand-500"
-                    : "bg-danger/15 text-danger"
-                }`}
-              >
+              <h3 className="text-[14px] font-semibold text-foreground">Balance Sheet</h3>
+              <Badge tone={balanceSheet.balanced ? "success" : "danger"}>
                 {balanceSheet.balanced ? "Balanced" : "Out of balance"}
-              </span>
+              </Badge>
             </div>
-            <div className="space-y-3 text-sm tabular-nums">
+            <div className="space-y-3 text-[13px] tabular-nums">
               {[
                 { t: "Assets", lines: balanceSheet.assets, total: balanceSheet.totalAssets },
                 {
@@ -448,25 +452,25 @@ export default function Reports() {
                 { t: "Equity", lines: balanceSheet.equity, total: balanceSheet.totalEquity },
               ].map((sec) => (
                 <div key={sec.t}>
-                  <p className="text-xs font-semibold text-brand-500 uppercase tracking-wide mb-1">
+                  <p className="text-[12px] font-medium tracking-wide uppercase text-muted-foreground mb-1">
                     {sec.t}
                   </p>
                   {sec.lines.length === 0 && (
-                    <p className="text-brand-400 text-xs">No accounts</p>
+                    <p className="text-muted-foreground text-xs">No accounts</p>
                   )}
                   {sec.lines.map((l, i) => (
-                    <div key={(l.code || l.name) + i} className="flex justify-between py-0.5">
-                      <span className="text-ink/80">{l.name}</span>
-                      <span>{aed(l.amount)}</span>
+                    <div key={(l.code || l.name) + i} className="flex justify-between py-1">
+                      <span className="text-muted-foreground">{l.name}</span>
+                      <span className="text-foreground">{aed(l.amount)}</span>
                     </div>
                   ))}
-                  <div className="flex justify-between border-t border-brand-100 mt-1 pt-1 font-semibold text-ink">
+                  <div className="flex justify-between border-t border-border mt-1 pt-1.5 font-semibold text-foreground">
                     <span>Total {sec.t}</span>
                     <span>{aed(sec.total)}</span>
                   </div>
                 </div>
               ))}
-              <div className="flex justify-between border-t border-brand-200 pt-2 font-semibold text-ink">
+              <div className="flex justify-between border-t border-border pt-2 font-semibold text-foreground">
                 <span>Liabilities + Equity</span>
                 <span>{aed(balanceSheet.totalLiabilities + balanceSheet.totalEquity)}</span>
               </div>
@@ -474,51 +478,64 @@ export default function Reports() {
           </div>
 
           {/* Trial Balance */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-ink">Trial Balance</h3>
-              <span
-                className={`pill text-[11px] ${
-                  trialBalance.balanced
-                    ? "bg-brand-100 text-brand-500"
-                    : "bg-danger/15 text-danger"
-                }`}
-              >
+          <div className="card !p-0 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="text-[14px] font-semibold text-foreground">Trial Balance</h3>
+              <Badge tone={trialBalance.balanced ? "success" : "danger"}>
                 {trialBalance.balanced
                   ? "Balanced"
                   : `Off by ${aed(Math.abs(trialBalance.totalDebit - trialBalance.totalCredit))}`}
-              </span>
+              </Badge>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm tabular-nums">
+              <table className="w-full tabular-nums">
                 <thead>
-                  <tr className="text-left text-xs text-brand-500 border-b border-brand-200">
-                    <th className="py-1.5 pr-2 font-medium">Account</th>
-                    <th className="py-1.5 pr-2 font-medium text-right">Debit</th>
-                    <th className="py-1.5 font-medium text-right">Credit</th>
+                  <tr className="text-left border-b border-border">
+                    <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                      Account
+                    </th>
+                    <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                      Debit
+                    </th>
+                    <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                      Credit
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {trialBalance.rows.map((r) => (
-                    <tr key={r.code} className="border-b border-brand-100">
-                      <td className="py-1 pr-2 text-ink/80">{r.name}</td>
-                      <td className="py-1 pr-2 text-right">{r.debit ? aed(r.debit) : "—"}</td>
-                      <td className="py-1 text-right">{r.credit ? aed(r.credit) : "—"}</td>
+                    <tr key={r.code} className="border-b border-border hover:bg-hover">
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {r.name}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-right">
+                        {r.debit ? aed(r.debit) : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-right">
+                        {r.credit ? aed(r.credit) : "—"}
+                      </td>
                     </tr>
                   ))}
                   {trialBalance.rows.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="py-3 text-center text-brand-400 text-xs">
+                      <td
+                        colSpan={3}
+                        className="px-5 py-8 text-center text-[13px] text-muted-foreground"
+                      >
                         No account balances yet
                       </td>
                     </tr>
                   )}
                 </tbody>
                 <tfoot>
-                  <tr className="font-semibold text-ink border-t border-brand-200">
-                    <td className="py-1.5 pr-2">Total</td>
-                    <td className="py-1.5 pr-2 text-right">{aed(trialBalance.totalDebit)}</td>
-                    <td className="py-1.5 text-right">{aed(trialBalance.totalCredit)}</td>
+                  <tr className="font-semibold text-foreground bg-muted/50">
+                    <td className="px-5 py-3 text-[13px]">Total</td>
+                    <td className="px-5 py-3 text-[13px] text-right">
+                      {aed(trialBalance.totalDebit)}
+                    </td>
+                    <td className="px-5 py-3 text-[13px] text-right">
+                      {aed(trialBalance.totalCredit)}
+                    </td>
                   </tr>
                 </tfoot>
               </table>
@@ -528,35 +545,35 @@ export default function Reports() {
 
         {/* ── Cash flow (summary) ── */}
         <div className="card mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-ink flex items-center gap-2">
-              <Wallet size={16} className="text-brand-500" /> Cash Flow (summary)
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[14px] font-semibold text-foreground flex items-center gap-2">
+              <Wallet size={16} className="text-muted-foreground" /> Cash Flow (summary)
             </h3>
-            <span className="text-xs text-brand-500">
+            <span className="text-xs text-muted-foreground">
               {vat.from || "start"} → {vat.to || "today"}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
-              <p className="text-xs text-brand-500">Cash in</p>
-              <p className="text-lg font-semibold text-success tabular-nums">
+              <p className="text-[12px] text-muted-foreground">Cash in</p>
+              <p className="text-lg font-semibold text-success tabular-nums mt-1">
                 {aed(cashSummary.inflow)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-brand-500">Cash out</p>
-              <p className="text-lg font-semibold text-danger tabular-nums">
+              <p className="text-[12px] text-muted-foreground">Cash out</p>
+              <p className="text-lg font-semibold text-danger tabular-nums mt-1">
                 {aed(cashSummary.outflow)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-brand-500">Net change</p>
-              <p className="text-lg font-semibold text-ink tabular-nums">
+              <p className="text-[12px] text-muted-foreground">Net change</p>
+              <p className="text-lg font-semibold text-foreground tabular-nums mt-1">
                 {aed(cashSummary.net)}
               </p>
             </div>
           </div>
-          <p className="text-[11px] text-brand-400 mt-2">
+          <p className="text-[11px] text-muted-foreground mt-3">
             Direct cash movement on cash/bank accounts for the period. Not the
             categorised operating/investing/financing statement.
           </p>
@@ -615,55 +632,58 @@ export default function Reports() {
 
         {/* ── Profit & Loss Statement ── */}
         <div className="card p-6 mb-6">
-          <h2 className="text-lg font-medium text-ink mb-4">
+          <h2 className="text-[14px] font-semibold text-foreground mb-4">
             Profit &amp; Loss Statement
           </h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-500">Revenue</span>
+          <div className="space-y-2 text-[13px]">
+            <div className="flex justify-between py-2 border-b border-border">
+              <span className="font-medium text-foreground">Revenue</span>
               <span className="font-medium tabular-nums">{aed(totalRevenue)}</span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Collected</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">Collected</span>
               <span className="tabular-nums">{aed(invoiceRevenue)}</span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Outstanding (AR)</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">Outstanding (AR)</span>
               <span className="tabular-nums">{aed(accountsReceivable)}</span>
             </div>
 
-            <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-500">
-                Purchase commitments (POs) <span className="text-brand-400 font-normal">· informational</span>
+            <div className="flex justify-between py-2 border-b border-border">
+              <span className="font-medium text-foreground">
+                Purchase commitments (POs){" "}
+                <span className="text-muted-foreground font-normal">· informational</span>
               </span>
               <span className="font-medium tabular-nums">{aed(poValue)}</span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Purchase Orders (non-cancelled)</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">Purchase Orders (non-cancelled)</span>
               <span className="tabular-nums">{aed(poValue)}</span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Received into stock</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">Received into stock</span>
               <span className="tabular-nums">{aed(poReceived)}</span>
             </div>
 
-            <div className="flex justify-between py-2 border-b border-brand-100">
-              <span className="font-medium text-brand-500">Operating Expenses</span>
+            <div className="flex justify-between py-2 border-b border-border">
+              <span className="font-medium text-foreground">Operating Expenses</span>
               <span className="font-medium tabular-nums">
                 ({aed(totalExpenses + payrollCost)})
               </span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">General expenses</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">General expenses</span>
               <span className="tabular-nums">{aed(totalExpenses)}</span>
             </div>
-            <div className="flex justify-between py-2 border-b border-brand-100 pl-4">
-              <span className="text-brand-500">Payroll</span>
+            <div className="flex justify-between py-2 border-b border-border pl-4">
+              <span className="text-muted-foreground">Payroll</span>
               <span className="tabular-nums">{aed(payrollCost)}</span>
             </div>
 
             <div className="flex justify-between py-3 mt-1 rounded-lg bg-muted px-3">
-              <span className="font-medium text-ink text-base">Net Profit / (Loss)</span>
+              <span className="font-medium text-foreground text-base">
+                Net Profit / (Loss)
+              </span>
               <span
                 className={`font-medium text-base tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}
               >
@@ -673,69 +693,118 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* ── Charts (no-print) ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6 no-print">
-          <InfoCard title="Sales vs expenses — last 6 months" className="lg:col-span-2">
-            <ChartContainer config={chartConfig} className="h-72 w-full aspect-auto">
-              <BarChart data={monthly}>
-                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID} vertical={false} />
-                <XAxis
-                  dataKey="name"
-                  tick={{ fontSize: 12, fill: "#A39B8C" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: "#A39B8C" }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={70}
-                />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <ChartBar
-                  dataKey="sales"
-                  fill="var(--color-sales)"
-                  radius={[4, 4, 0, 0]}
-                  seriesIndex={0}
-                />
-                <ChartBar
-                  dataKey="expense"
-                  fill="var(--color-expense)"
-                  radius={[4, 4, 0, 0]}
-                  seriesIndex={1}
-                />
-              </BarChart>
-            </ChartContainer>
-          </InfoCard>
-
-          <InfoCard title="Spending by category">
-            <div className="h-72">
-              {expenseByCat.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={expenseByCat}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={55}
-                      outerRadius={85}
-                      paddingAngle={3}
-                    >
-                      {expenseByCat.map((_, i) => (
-                        <Cell key={i} fill={PIE[i % PIE.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => aed(Number(v))} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-brand-400">
-                  No expenses recorded
-                </div>
-              )}
+        {/* ── Charts (no-print) — DEMO joined chart card ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-6 no-print">
+          <div className="lg:col-span-2 p-5 border-b lg:border-b-0 lg:border-r border-border">
+            <div className="text-[14px] font-semibold text-foreground">
+              Sales vs expenses
             </div>
-          </InfoCard>
+            <div className="text-[12.5px] text-muted-foreground mt-0.5">
+              Last 6 months — collected vs spent
+            </div>
+            <div className="h-[280px] mt-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthly} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="repSales" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
+                      <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    stroke={c.axis}
+                    tick={{ fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke={c.axis}
+                    tick={{ fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    cursor={{ fill: "currentColor", fillOpacity: 0.04 }}
+                    formatter={(v) => aed(Number(v) || 0)}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
+                  <Bar
+                    dataKey="sales"
+                    name="Sales"
+                    fill="url(#repSales)"
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="expense"
+                    name="Expenses"
+                    fill={c.primary}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <div className="text-[14px] font-semibold text-foreground">
+              Spending by category
+            </div>
+            <div className="text-[12.5px] text-muted-foreground mt-0.5">
+              All recorded expenses
+            </div>
+            {expenseByCat.length > 0 ? (
+              <>
+                <div className="h-[220px] mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={expenseByCat}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={2}
+                      >
+                        {expenseByCat.map((_, i) => (
+                          <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={tooltipStyle}
+                        formatter={(v) => aed(Number(v) || 0)}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="space-y-1.5 mt-2">
+                  {expenseByCat.map((s, i) => (
+                    <div
+                      key={s.name}
+                      className="flex items-center justify-between text-[12.5px]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: pieColors[i % pieColors.length] }}
+                        />
+                        <span className="text-foreground">{s.name}</span>
+                      </div>
+                      <span className="text-muted-foreground tabular-nums">
+                        {aed(s.value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-[220px] text-[13px] text-muted-foreground">
+                No expenses recorded
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ══════════ TRANSACTION TABLES (print visible) ══════════ */}
@@ -782,65 +851,79 @@ export default function Reports() {
 
         {/* Invoice transactions */}
         <div className="card p-0 overflow-hidden mb-6">
-          <div className="p-4 border-b border-brand-100">
-            <h2 className="font-medium text-ink">Sales Invoices</h2>
-            <p className="text-xs text-brand-400">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-[14px] font-semibold text-foreground">Sales Invoices</h2>
+            <p className="text-[12.5px] text-muted-foreground mt-0.5">
               {invoiceTxns.length} invoices · {aed(invoiceRevenue)} collected
             </p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-xs font-medium text-brand-400 border-b border-brand-100">
-                  <th className="py-2.5 px-4 w-8">SL</th>
-                  <th className="py-2.5 px-2">Date</th>
-                  <th className="py-2.5 px-2">Customer</th>
-                  <th className="py-2.5 px-2">Description</th>
-                  <th className="py-2.5 px-2 w-28 text-right">Amount</th>
-                  <th className="py-2.5 px-2 w-16 text-center">Status</th>
+                <tr className="text-left border-b border-border">
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-8">
+                    SL
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Date
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Customer
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Description
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-28 text-right">
+                    Amount
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-16 text-center">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {invoiceTxns.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-sm text-brand-400">
+                    <td
+                      colSpan={6}
+                      className="px-5 py-8 text-center text-[13px] text-muted-foreground"
+                    >
                       No invoice transactions
                     </td>
                   </tr>
                 ) : (
                   invoiceTxns.map((inv, i) => (
-                    <tr
-                      key={inv.id}
-                      className="border-b border-brand-50 hover:bg-brand-50/50"
-                    >
-                      <td className="py-2.5 px-4 text-brand-400">{i + 1}</td>
-                      <td className="py-2.5 px-2 tabular-nums text-xs">
+                    <tr key={inv.id} className="border-b border-border hover:bg-hover">
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] tabular-nums text-muted-foreground">
                         {fmtDate(inv.issue_date)}
                       </td>
-                      <td className="py-2.5 px-2 font-medium">
+                      <td className="px-5 py-3 text-[13px] font-medium">
                         {inv.customer_name || "—"}
                       </td>
-                      <td className="py-2.5 px-2 text-xs">{inv.number}</td>
-                      <td className="py-2.5 px-2 text-right font-medium tabular-nums">
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {inv.number}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-right font-medium tabular-nums">
                         {aed(inv.total)}
                       </td>
-                      <td className="py-2.5 px-2 text-center">
-                        <span
-                          className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${inv.balance === 0 ? "bg-success/10 text-success" : "bg-secondary-100 text-secondary-600"}`}
-                        >
+                      <td className="px-5 py-3 text-[13px] text-center">
+                        <Badge tone={inv.balance === 0 ? "success" : "warn"}>
                           {inv.balance === 0 ? "Paid" : "Open"}
-                        </span>
+                        </Badge>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
               <tfoot>
-                <tr className="bg-brand-50 font-medium">
-                  <td colSpan={4} className="py-2.5 px-4 text-right text-sm">
+                <tr className="bg-muted/50 font-semibold text-foreground">
+                  <td colSpan={4} className="px-5 py-3 text-[13px] text-right">
                     Grand Total
                   </td>
-                  <td className="py-2.5 px-2 text-right tabular-nums">
+                  <td className="px-5 py-3 text-[13px] text-right tabular-nums">
                     {aed(invoiceTxns.reduce((s, i) => s + i.total, 0))}
                   </td>
                   <td></td>
@@ -852,63 +935,89 @@ export default function Reports() {
 
         {/* Purchase Order transactions */}
         <div className="card p-0 overflow-hidden mb-6">
-          <div className="p-4 border-b border-brand-100">
-            <h2 className="font-medium text-ink">Purchase Orders</h2>
-            <p className="text-xs text-brand-400">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-[14px] font-semibold text-foreground">Purchase Orders</h2>
+            <p className="text-[12.5px] text-muted-foreground mt-0.5">
               {poTxns.length} POs · {aed(poValue)} total value
             </p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-xs font-medium text-brand-400 border-b border-brand-100">
-                  <th className="py-2.5 px-4 w-8">SL</th>
-                  <th className="py-2.5 px-2">Date</th>
-                  <th className="py-2.5 px-2">Supplier</th>
-                  <th className="py-2.5 px-2">Description</th>
-                  <th className="py-2.5 px-2 w-28 text-right">Amount</th>
-                  <th className="py-2.5 px-2 w-16 text-center">Status</th>
+                <tr className="text-left border-b border-border">
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-8">
+                    SL
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Date
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Supplier
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Description
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-28 text-right">
+                    Amount
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-16 text-center">
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {poTxns.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-sm text-brand-400">
+                    <td
+                      colSpan={6}
+                      className="px-5 py-8 text-center text-[13px] text-muted-foreground"
+                    >
                       No purchase orders
                     </td>
                   </tr>
                 ) : (
                   poTxns.map((po, i) => (
-                    <tr
-                      key={po.id}
-                      className="border-b border-brand-50 hover:bg-brand-50/50"
-                    >
-                      <td className="py-2.5 px-4 text-brand-400">{i + 1}</td>
-                      <td className="py-2.5 px-2 tabular-nums text-xs">
+                    <tr key={po.id} className="border-b border-border hover:bg-hover">
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] tabular-nums text-muted-foreground">
                         {fmtDate(po.order_date)}
                       </td>
-                      <td className="py-2.5 px-2 font-medium">{po.supplier_name}</td>
-                      <td className="py-2.5 px-2 text-xs">{po.po_number}</td>
-                      <td className="py-2.5 px-2 text-right font-medium tabular-nums">
+                      <td className="px-5 py-3 text-[13px] font-medium">
+                        {po.supplier_name}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {po.po_number}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-right font-medium tabular-nums">
                         {aed(po.total)}
                       </td>
-                      <td className="py-2.5 px-2 text-center">
-                        <span
-                          className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${po.status === "received" ? "bg-success/10 text-success" : po.status === "cancelled" ? "bg-danger/10 text-danger" : "bg-secondary-100 text-secondary-600"}`}
+                      <td className="px-5 py-3 text-[13px] text-center">
+                        <Badge
+                          tone={
+                            po.status === "received"
+                              ? "success"
+                              : po.status === "cancelled"
+                                ? "danger"
+                                : "info"
+                          }
                         >
                           {po.status}
-                        </span>
+                        </Badge>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
               <tfoot>
-                <tr className="bg-brand-50 font-medium">
-                  <td colSpan={4} className="py-2.5 px-4 text-right text-sm">
+                <tr className="bg-muted/50 font-semibold text-foreground">
+                  <td colSpan={4} className="px-5 py-3 text-[13px] text-right">
                     PO Total (non-cancelled)
                   </td>
-                  <td className="py-2.5 px-2 text-right tabular-nums">{aed(poValue)}</td>
+                  <td className="px-5 py-3 text-[13px] text-right tabular-nums">
+                    {aed(poValue)}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -918,43 +1027,59 @@ export default function Reports() {
 
         {/* Expense transactions */}
         <div className="card p-0 overflow-hidden mb-6">
-          <div className="p-4 border-b border-brand-100">
-            <h2 className="font-medium text-ink">Expenses</h2>
-            <p className="text-xs text-brand-400">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-[14px] font-semibold text-foreground">Expenses</h2>
+            <p className="text-[12.5px] text-muted-foreground mt-0.5">
               {expenseTxns.length} expenses · {aed(totalExpenses)} total
             </p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-xs font-medium text-brand-400 border-b border-brand-100">
-                  <th className="py-2.5 px-4 w-8">SL</th>
-                  <th className="py-2.5 px-2">Date</th>
-                  <th className="py-2.5 px-2">Category</th>
-                  <th className="py-2.5 px-2">Description</th>
-                  <th className="py-2.5 px-2 w-28 text-right">Amount</th>
+                <tr className="text-left border-b border-border">
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-8">
+                    SL
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Date
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Category
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                    Description
+                  </th>
+                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground w-28 text-right">
+                    Amount
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {expenseTxns.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-sm text-brand-400">
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center text-[13px] text-muted-foreground"
+                    >
                       No expenses recorded
                     </td>
                   </tr>
                 ) : (
                   expenseTxns.map((e, i) => (
-                    <tr
-                      key={e.id}
-                      className="border-b border-brand-50 hover:bg-brand-50/50"
-                    >
-                      <td className="py-2.5 px-4 text-brand-400">{i + 1}</td>
-                      <td className="py-2.5 px-2 tabular-nums text-xs">
+                    <tr key={e.id} className="border-b border-border hover:bg-hover">
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] tabular-nums text-muted-foreground">
                         {fmtDate(e.expense_date)}
                       </td>
-                      <td className="py-2.5 px-2 font-medium">{e.category || "—"}</td>
-                      <td className="py-2.5 px-2 text-xs">{e.description || "—"}</td>
-                      <td className="py-2.5 px-2 text-right font-medium tabular-nums">
+                      <td className="px-5 py-3 text-[13px] font-medium">
+                        {e.category || "—"}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-muted-foreground">
+                        {e.description || "—"}
+                      </td>
+                      <td className="px-5 py-3 text-[13px] text-right font-medium tabular-nums">
                         {aed(e.amount)}
                       </td>
                     </tr>
@@ -962,11 +1087,11 @@ export default function Reports() {
                 )}
               </tbody>
               <tfoot>
-                <tr className="bg-brand-50 font-medium">
-                  <td colSpan={4} className="py-2.5 px-4 text-right text-sm">
+                <tr className="bg-muted/50 font-semibold text-foreground">
+                  <td colSpan={4} className="px-5 py-3 text-[13px] text-right">
                     Total Expenses
                   </td>
-                  <td className="py-2.5 px-2 text-right tabular-nums">
+                  <td className="px-5 py-3 text-[13px] text-right tabular-nums">
                     {aed(totalExpenses)}
                   </td>
                 </tr>
@@ -976,7 +1101,7 @@ export default function Reports() {
         </div>
       </div>
 
-      <p className="text-xs text-brand-400 mt-3 no-print">
+      <p className="text-xs text-muted-foreground mt-3 no-print">
         {num(products.length)} products · {num(invoiceTxns.length)} invoices ·{" "}
         {num(poTxns.length)} POs · {num(expenseTxns.length)} expenses · figures in{" "}
         {getDisplayCurrency()}

@@ -10,7 +10,6 @@ import {
   Upload,
   X,
   Pencil,
-  Copy,
   Check,
   CheckCircle2,
   Send,
@@ -127,8 +126,16 @@ import {
   Field,
   ShareToggle,
   SearchInput,
+  FilterChip,
   ToggleTile,
 } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type QuickViewData,
+  type ShareKind,
+} from "../components/RowActions";
 
 type CustomColumn = { key: string; label: string };
 type Item = {
@@ -344,6 +351,16 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
   const [search, setSearch] = useState("");
+  // DEMO parity: status filter chips (All/Draft/Sent/Paid/Overdue).
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "draft" | "sent" | "paid" | "overdue"
+  >("all");
+  // DEMO parity: quick-view modal payload (+ doc id for its Edit action).
+  const [quickView, setQuickView] = useState<{
+    id: number;
+    data: QuickViewData;
+  } | null>(null);
+  const [reminding, setReminding] = useState(false);
   const [advancesTotal, setAdvancesTotal] = useState(0);
   const loadDocs = () =>
     billing
@@ -836,19 +853,198 @@ const editInvoice = async (id: number) => {
       d.status !== "paid"
   ).length;
   const statCcy = company?.currency || "AED";
-  const filteredDocs = search
-    ? docs.filter(
-        (d) =>
-          d.number.toLowerCase().includes(search.toLowerCase()) ||
-          d.customer_name.toLowerCase().includes(search.toLowerCase())
-      )
-    : docs;
+  // Overdue = unpaid balance past the due date — same predicate as the Status
+  // column and the Overdue KPI card.
+  const isOverdueDoc = (d: InvoiceDocSummary) =>
+    (d.balance ?? 0) > 0 &&
+    !!d.due_date &&
+    d.due_date < statToday &&
+    d.status !== "paid";
+  const filteredDocs = docs.filter((d) => {
+    if (statusFilter === "overdue") {
+      if (!isOverdueDoc(d)) return false;
+    } else if (statusFilter !== "all" && d.status !== statusFilter) {
+      return false;
+    }
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      d.number.toLowerCase().includes(q) ||
+      d.customer_name.toLowerCase().includes(q)
+    );
+  });
 
   // Totals for the current search/filter — shown on top when filtering so the
   // user sees a customer's invoiced / collected / outstanding at a glance.
   const fPaid = filteredDocs.reduce((s, d) => s + (d.paid ?? 0), 0);
   const fOutstanding = filteredDocs.reduce((s, d) => s + (d.balance ?? 0), 0);
   const fInvoiced = fPaid + fOutstanding;
+
+  // ----- DEMO parity: quick view, per-row send/share, reminders -----
+
+  // Fetch the full doc (cached) and show the DEMO-style quick-view modal:
+  // meta grid + line items + total + notes.
+  const openQuickView = async (d: InvoiceDocSummary) => {
+    try {
+      const doc = await billing.getDoc(d.id);
+      const overdue = isOverdueDoc(d);
+      const status = overdue ? "overdue" : d.status;
+      const ccy = d.currency || doc.currency || "AED";
+      setQuickView({
+        id: d.id,
+        data: {
+          title: `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`,
+          subtitle: isPurchase
+            ? `From ${doc.customer_name}`
+            : `Issued to ${doc.customer_name}`,
+          badge: (
+            <Badge tone={overdue ? "danger" : statusTone(status)}>{status}</Badge>
+          ),
+          meta: [
+            { label: partyLabel, value: doc.customer_name },
+            {
+              label: "Issue date",
+              value: doc.issue_date ? fmtDate(doc.issue_date) : "—",
+            },
+            {
+              label: "Due date",
+              value: doc.due_date ? fmtDate(doc.due_date) : "—",
+            },
+            { label: "Currency", value: ccy },
+            { label: "Status", value: status },
+            { label: "Balance", value: money(d.balance ?? 0, ccy) },
+          ],
+          items: doc.items.map((i) => ({
+            desc: i.description,
+            qty: i.qty,
+            price: i.unit_price,
+          })),
+          total: d.total,
+          currency: ccy,
+          notes: doc.notes,
+        },
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  // Share one invoice via WhatsApp / email / SMS, or copy its public portal
+  // link (same real link as the bulk "Copy public link" action).
+  const sendDoc = async (kind: ShareKind, d: InvoiceDocSummary) => {
+    try {
+      if (kind === "copyLink") {
+        const token = await billing.publicLink(d.id);
+        const url = `${location.origin}${location.pathname}#/portal/${token}`;
+        await navigator.clipboard.writeText(url);
+        toast.success("Public invoice link copied");
+        return;
+      }
+      const doc = await billing.getDoc(d.id);
+      // WhatsApp/SMS need a phone: look it up in CRM by id, then by name.
+      let phone = "";
+      try {
+        const custs = await crm.customers();
+        const cust =
+          custs.find((c) => c.id === doc.customer_id) ??
+          custs.find((c) => (c.company || c.name) === d.customer_name);
+        phone = cust?.phone_e164 || cust?.phone || "";
+      } catch {
+        /* phone is optional */
+      }
+      const ccy = d.currency || doc.currency || "AED";
+      const text = `Hi ${doc.customer_name || "there"},\n\n${
+        isPurchase ? "Purchase invoice" : "Invoice"
+      } ${doc.number} for ${money(d.total, ccy)} is available. Thank you!`;
+      shareVia(kind, {
+        phone,
+        email: doc.customer_email || "",
+        text,
+        // shareVia uses `url` as the mail subject for email shares.
+        url: `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  // Email a payment reminder for every overdue invoice that has a customer
+  // email — same sendEmail/emailShell path as the editor's Save & Send.
+  const sendReminders = async () => {
+    if (reminding) return;
+    const overdueDocs = docs.filter(isOverdueDoc);
+    if (!overdueDocs.length) {
+      toast.info("No overdue invoices right now.");
+      return;
+    }
+    const ok = await confirm({
+      title: "Send payment reminders",
+      message: `Email payment reminders for ${overdueDocs.length} overdue invoice${overdueDocs.length > 1 ? "s" : ""}?`,
+      confirmLabel: "Send reminders",
+    });
+    if (!ok) return;
+    setReminding(true);
+    let sent = 0;
+    let skipped = 0;
+    try {
+      for (const d of overdueDocs) {
+        try {
+          const doc = await billing.getDoc(d.id);
+          if (!doc.customer_email) {
+            skipped++;
+            continue;
+          }
+          let portalUrl = "";
+          try {
+            const token = await billing.publicLink(d.id);
+            portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+          } catch {
+            /* link optional */
+          }
+          const ccy = d.currency || doc.currency || "AED";
+          await sendEmail({
+            to: doc.customer_email,
+            subject: `Payment reminder — Invoice ${doc.number}`,
+            html: emailShell(
+              `Payment reminder — ${doc.number}`,
+              `<p>Dear ${esc(doc.customer_name || "customer")},</p>
+               <p>This is a friendly reminder that invoice <b>${esc(doc.number)}</b> for <b>${money(
+                d.balance ?? d.total,
+                ccy
+              )}</b> ${
+                doc.due_date
+                  ? `was due on <b>${esc(fmtDate(doc.due_date))}</b>`
+                  : "is now overdue"
+              }.</p>
+               ${
+                 portalUrl
+                   ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>`
+                   : ""
+               }
+               <p>If you have already paid, please ignore this message.</p>`
+            ),
+          });
+          sent++;
+        } catch {
+          skipped++;
+        }
+      }
+      if (sent)
+        toast.success(
+          `Sent ${sent} reminder${sent > 1 ? "s" : ""}${
+            skipped ? ` — ${skipped} skipped (no email)` : ""
+          }.`
+        );
+      else
+        toast.info(
+          skipped
+            ? "No overdue invoices have a customer email."
+            : "Nothing sent."
+        );
+    } finally {
+      setReminding(false);
+    }
+  };
 
   return (
     <div>
@@ -867,9 +1063,27 @@ const editInvoice = async (id: number) => {
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
               <Sparkles size={16} /> Scan with AI
             </button>
-            <button className="btn-primary" onClick={newInvoice}>
-              <Plus size={16} /> {isPurchase ? "New Purchase Invoice" : "New Invoice"}
-            </button>
+            {!isPurchase && (
+              <button
+                className="btn-ghost"
+                onClick={sendReminders}
+                disabled={reminding}
+              >
+                <Send size={16} /> {reminding ? "Sending…" : "Send reminders"}
+              </button>
+            )}
+            {isPurchase ? (
+              <button className="btn-primary" onClick={newInvoice}>
+                <Plus size={16} /> New Purchase Invoice
+              </button>
+            ) : (
+              <button
+                onClick={newInvoice}
+                className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60 transition-colors"
+              >
+                <Plus size={16} /> New Invoice
+              </button>
+            )}
           </div>
         }
       />
@@ -968,13 +1182,52 @@ const editInvoice = async (id: number) => {
 
       <CustomerAdvancesPanel />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search invoices by number or customer…"
-          className="max-w-xs"
+          className="max-w-xs flex-1 min-w-[220px]"
         />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+            count={docs.length}
+          >
+            All
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "draft"}
+            onClick={() => setStatusFilter("draft")}
+            count={docs.filter((d) => d.status === "draft").length}
+          >
+            Draft
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "sent"}
+            onClick={() => setStatusFilter("sent")}
+            count={docs.filter((d) => d.status === "sent").length}
+          >
+            Sent
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "paid"}
+            onClick={() => setStatusFilter("paid")}
+            tone="success"
+            count={docs.filter((d) => d.status === "paid").length}
+          >
+            Paid
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "overdue"}
+            onClick={() => setStatusFilter("overdue")}
+            tone="danger"
+            count={docs.filter(isOverdueDoc).length}
+          >
+            Overdue
+          </FilterChip>
+        </div>
       </div>
 
       {search && filteredDocs.length > 0 && (
@@ -1012,8 +1265,8 @@ const editInvoice = async (id: number) => {
       <DataTable<InvoiceDocSummary>
         rows={filteredDocs}
         empty={
-          search
-            ? "No invoices match your search"
+          search || statusFilter !== "all"
+            ? "No invoices match your filter"
             : "No invoices yet — create your first one"
         }
         rowKey={(d) => d.id}
@@ -1153,9 +1406,9 @@ const editInvoice = async (id: number) => {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (d) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center justify-end gap-1">
                 <button
                   aria-label="Payments"
                   title="Record payment"
@@ -1164,24 +1417,17 @@ const editInvoice = async (id: number) => {
                 >
                   <CreditCard size={15} />
                 </button>
-                <button
-                  aria-label="Edit"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
-                  onClick={() => editInvoice(d.id)}
-                >
-                  <Pencil size={15} />
-                </button>
-                <button
-                  aria-label="Duplicate"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
-                  onClick={() => duplicateInvoice(d.id)}
-                >
-                  <Copy size={15} />
-                </button>
-                <button
-                  aria-label="Delete"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
-                  onClick={async () => {
+                <RowActions
+                  onView={() => openQuickView(d)}
+                  onEdit={() => editInvoice(d.id)}
+                  onCopy={() => duplicateInvoice(d.id)}
+                  onSend={{
+                    whatsapp: () => sendDoc("whatsapp", d),
+                    email: () => sendDoc("email", d),
+                    sms: () => sendDoc("sms", d),
+                    copyLink: () => sendDoc("copyLink", d),
+                  }}
+                  onDelete={async () => {
                     if (
                       !(await confirm({
                         title: "Delete invoice",
@@ -1193,9 +1439,7 @@ const editInvoice = async (id: number) => {
                     loadDocs();
                     toast.success(`Deleted ${d.number}`);
                   }}
-                >
-                  <Trash2 size={15} />
-                </button>
+                />
               </div>
             ),
           },
@@ -1205,6 +1449,21 @@ const editInvoice = async (id: number) => {
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
 
       <PaymentsModal doc={payFor} onClose={() => setPayFor(null)} onSaved={loadDocs} />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const id = quickView.id;
+                setQuickView(null);
+                editInvoice(id);
+              }
+            : undefined
+        }
+        data={quickView?.data ?? null}
+      />
     </div>
   );
 }

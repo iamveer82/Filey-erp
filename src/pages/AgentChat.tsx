@@ -4,7 +4,6 @@ import {
   Loader2,
   Zap,
   Sparkles,
-  AlertTriangle,
   Paperclip,
   X,
   Download,
@@ -17,7 +16,9 @@ import {
   CalendarClock,
   BookOpen,
   SlidersHorizontal,
+  User,
 } from "lucide-react";
+import { ErrorBanner, PageHeader } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
@@ -290,106 +291,100 @@ export default function AgentChat() {
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-primary-400 bg-canvas/85 backdrop-blur-sm dark:bg-background/85">
-          <div className="flex flex-col items-center gap-2 text-primary-600">
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-primary-400 bg-background/85 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 text-primary-600 dark:text-primary-400">
             <Paperclip size={28} />
-            <p className="text-sm font-semibold text-ink">Drop a PDF or image to attach</p>
+            <p className="text-sm font-semibold text-foreground">Drop a PDF or image to attach</p>
           </div>
         </div>
       )}
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 pb-2">
-        <div className="flex items-center gap-2">
-          <Sparkles size={18} className="text-primary-500" />
-          <h1 className="text-lg font-semibold text-ink">Filey AI</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setCapsOpen(true)}
-            title="Capabilities — what the agent may do"
-            aria-label="Capabilities"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
-          >
-            <SlidersHorizontal size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setSkillsOpen(true)}
-            title="Skills — reusable procedures"
-            aria-label="Skills"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
-          >
-            <BookOpen size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setAutoOpen(true)}
-            title="Automations — scheduled tasks"
-            aria-label="Automations"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
-          >
-            <CalendarClock size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={openHistory}
-            title="Chat history"
-            aria-label="Chat history"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
-          >
-            <History size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={openMemory}
-            title="Memory — what the agent has learned"
-            aria-label="Memory"
-            className="grid h-9 w-9 place-items-center rounded-full border border-brand-200 text-brand-500 transition-colors hover:bg-brand-50 hover:text-ink dark:hover:bg-white/10"
-          >
-            <Brain size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setAuto((v) => !v)}
-            title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
-              auto
-                ? "border-primary-400 bg-primary-100 text-ink dark:bg-primary-400/15"
-                : "border-brand-200 bg-white text-brand-600 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
-            )}
-          >
-            <Zap size={13} className={auto ? "text-primary-600" : ""} />
-            {auto ? "Autonomous" : "Chat"}
-          </button>
-          <button type="button" onClick={startNew} className="btn-ghost h-9 px-3 text-xs">
-            <Plus size={14} /> New
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Filey AI"
+        subtitle="Your business assistant — ask about revenue, invoices, customers and more."
+        action={
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCapsOpen(true)}
+              title="Capabilities — what the agent may do"
+              aria-label="Capabilities"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <SlidersHorizontal size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSkillsOpen(true)}
+              title="Skills — reusable procedures"
+              aria-label="Skills"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <BookOpen size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAutoOpen(true)}
+              title="Automations — scheduled tasks"
+              aria-label="Automations"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <CalendarClock size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={openHistory}
+              title="Chat history"
+              aria-label="Chat history"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <History size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={openMemory}
+              title="Memory — what the agent has learned"
+              aria-label="Memory"
+              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              <Brain size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuto((v) => !v)}
+              title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium transition-colors",
+                auto
+                  ? "border-primary-400 bg-primary-400/15 text-foreground"
+                  : "border-border bg-card text-muted-foreground hover:bg-hover hover:text-foreground"
+              )}
+            >
+              <Zap
+                size={13}
+                className={auto ? "text-primary-600 dark:text-primary-400" : ""}
+              />
+              {auto ? "Autonomous" : "Chat"}
+            </button>
+            <button type="button" onClick={startNew} className="btn-ghost">
+              <Plus size={14} /> New
+            </button>
+          </div>
+        }
+      />
 
       {/* Messages */}
       <div className="flex-1 space-y-6 pb-40 pt-2">
         {empty && !busy ? (
           <div className="mx-auto mt-10 max-w-xl text-center">
+            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-primary-500/15">
+              <Sparkles size={22} className="text-primary-600 dark:text-primary-400" />
+            </div>
             <p className="text-[22px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
             <p className="mt-2 text-[13px] text-muted-foreground">
               Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
               act across invoices, customers, inventory, accounting and more.
             </p>
-            <div className="mt-6 grid gap-2 sm:grid-cols-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  className="rounded-xl border border-brand-200 bg-white px-3.5 py-2.5 text-left text-sm text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
           chat.turns.map((t, i) => <Bubble key={i} turn={t} />)
@@ -402,26 +397,22 @@ export default function AgentChat() {
           />
         )}
 
-        {err && (
-          <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm font-medium text-danger">
-            <AlertTriangle size={15} className="mt-0.5 shrink-0" /> {err}
-          </div>
-        )}
+        {err && <ErrorBanner message={err} />}
 
         <div ref={endRef} />
       </div>
 
       {/* Composer */}
-      <div className="sticky bottom-0 -mx-1 bg-canvas/80 px-1 pb-4 pt-2 backdrop-blur dark:bg-background/80">
+      <div className="sticky bottom-0 -mx-1 bg-background/80 px-1 pb-4 pt-2 backdrop-blur">
         {outputs.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-brand-400">Generated:</span>
+            <span className="text-xs font-medium text-muted-foreground">Generated:</span>
             {outputs.map((o, i) => (
               <a
                 key={i}
                 href={o.url}
                 download={o.name}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 transition-colors hover:border-primary-300 hover:bg-brand-50 dark:bg-white/5 dark:hover:bg-white/10"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
               >
                 <Download size={12} />
                 <span className="max-w-[180px] truncate">{o.name}</span>
@@ -429,11 +420,24 @@ export default function AgentChat() {
             ))}
           </div>
         )}
-        <div className="rounded-xl border border-brand-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-primary-400 focus-within:shadow-lg">
+        {/* Suggestion chips — quiet pills, always one click away */}
+        <div className="mb-2 flex flex-wrap gap-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => void send(s)}
+              className="rounded-full border border-border px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="rounded-xl border border-border bg-card p-2.5 shadow-sm transition-shadow focus-within:border-primary-400 focus-within:shadow-md">
           {/* Attachment preview card */}
           {file && (
             <div className="mb-2 flex">
-              <div className="group relative h-20 w-44 overflow-hidden rounded-xl border border-brand-200 bg-brand-50 dark:bg-white/5">
+              <div className="group relative h-20 w-44 overflow-hidden rounded-xl border border-border bg-muted">
                 {filePreview ? (
                   <img
                     src={filePreview}
@@ -442,14 +446,14 @@ export default function AgentChat() {
                   />
                 ) : (
                   <div className="flex h-full flex-col justify-between p-2.5">
-                    <span className="inline-flex w-fit items-center gap-1 rounded bg-brand-200/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-600 dark:bg-white/10">
+                    <span className="inline-flex w-fit items-center gap-1 rounded bg-hover px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
                       <FileText size={10} /> {file.name.split(".").pop()}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-medium text-ink" title={file.name}>
+                      <p className="truncate text-xs font-medium text-foreground" title={file.name}>
                         {file.name}
                       </p>
-                      <p className="text-[10px] text-brand-400">
+                      <p className="text-[10px] text-muted-foreground">
                         {Math.max(1, Math.ceil(file.size / 1024))} KB
                       </p>
                     </div>
@@ -481,7 +485,7 @@ export default function AgentChat() {
                 void send(input);
               }
             }}
-            className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-brand-400"
+            className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
             autoFocus
           />
 
@@ -493,7 +497,7 @@ export default function AgentChat() {
               disabled={busy}
               aria-label="Attach a document"
               title="Attach a PDF or image to edit/convert with tools"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-brand-400 transition-colors hover:bg-brand-50 hover:text-ink disabled:opacity-40 dark:hover:bg-white/10"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-40"
             >
               <Plus size={18} />
             </button>
@@ -509,7 +513,7 @@ export default function AgentChat() {
             />
             {model && (
               <span
-                className="hidden items-center rounded-lg px-2 py-1 text-[11px] font-medium text-brand-400 sm:inline-flex"
+                className="hidden items-center rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex"
                 title="Model is configured in Settings → AI Assistant"
               >
                 {model}
@@ -521,13 +525,13 @@ export default function AgentChat() {
               onClick={() => void send(input)}
               disabled={busy || (!input.trim() && !file)}
               aria-label="Send"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary-400 text-ink transition-colors hover:bg-primary-500 disabled:opacity-40"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-400 text-ink transition-colors hover:bg-primary-500 disabled:opacity-40"
             >
               {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={16} />}
             </button>
           </div>
         </div>
-        <p className="mt-1.5 px-2 text-[11px] text-brand-400">
+        <p className="mt-1.5 px-2 text-[11px] text-muted-foreground">
           {auto
             ? "Autonomous: the agent runs multiple steps on its own. Money/outbound actions still ask first."
             : "Tip: turn on Autonomous to delegate a whole task. Enter to send · Shift+Enter for a new line."}
@@ -541,24 +545,24 @@ export default function AgentChat() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-sm">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg">
             <div className="flex items-center gap-2">
               <ShieldAlert size={18} className="text-warning" />
-              <p className="font-semibold text-ink">Approve action</p>
+              <p className="font-semibold text-foreground">Approve action</p>
             </div>
-            <p className="mt-2 text-sm text-brand-600">
+            <p className="mt-2 text-sm text-muted-foreground">
               The assistant wants to run{" "}
-              <b className="text-ink">{pendingConfirm.name}</b>. This can change data
+              <b className="text-foreground">{pendingConfirm.name}</b>. This can change data
               or send something out.
             </p>
             {Object.keys(pendingConfirm.args).length > 0 && (
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-brand-50 p-2.5 text-[11px] text-brand-600 dark:bg-white/5">
+              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-[11px] text-muted-foreground">
                 {JSON.stringify(pendingConfirm.args, null, 2)}
               </pre>
             )}
             <div className="mt-4 flex justify-end gap-2">
               <button
-                className="btn-ghost h-9 px-4 text-sm"
+                className="btn-ghost"
                 onClick={() => {
                   pendingConfirm.resolve(false);
                   setPendingConfirm(null);
@@ -567,7 +571,7 @@ export default function AgentChat() {
                 Deny
               </button>
               <button
-                className="btn-primary h-9 px-4 text-sm"
+                className="btn-primary"
                 onClick={() => {
                   pendingConfirm.resolve(true);
                   setPendingConfirm(null);
@@ -589,24 +593,24 @@ export default function AgentChat() {
           onClick={() => setMemOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-xl bg-white p-5 shadow-sm"
+            className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Brain size={18} className="text-primary-500" />
-                <p className="font-semibold text-ink">Agent memory</p>
+                <p className="font-semibold text-foreground">Agent memory</p>
               </div>
               <button
                 onClick={() => setMemOpen(false)}
                 aria-label="Close"
-                className="text-brand-400 hover:text-ink"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <X size={16} />
               </button>
             </div>
             {mems.length === 0 ? (
-              <p className="py-6 text-center text-sm text-brand-500">
+              <p className="py-6 text-center text-sm text-muted-foreground">
                 Nothing learned yet. The agent saves durable facts and preferences
                 here as you chat.
               </p>
@@ -615,20 +619,20 @@ export default function AgentChat() {
                 {mems.map((m) => (
                   <div
                     key={m.id}
-                    className="flex items-start gap-2 rounded-lg border border-brand-200 px-3 py-2"
+                    className="flex items-start gap-2 rounded-lg border border-border px-3 py-2"
                   >
                     <div className="min-w-0 flex-1">
                       {m.tag && (
-                        <span className="mr-1.5 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand-600 dark:bg-white/10">
+                        <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
                           {m.tag}
                         </span>
                       )}
-                      <span className="text-sm text-ink">{m.text}</span>
+                      <span className="text-sm text-foreground">{m.text}</span>
                     </div>
                     <button
                       onClick={() => removeMem(m.id)}
                       aria-label="Forget"
-                      className="shrink-0 text-brand-400 hover:text-danger"
+                      className="shrink-0 text-muted-foreground hover:text-danger"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -639,7 +643,7 @@ export default function AgentChat() {
             {mems.length > 0 && (
               <div className="mt-4 flex justify-end">
                 <button
-                  className="btn-ghost h-9 px-4 text-sm text-danger"
+                  className="btn-ghost text-danger"
                   onClick={wipeMem}
                 >
                   Clear all memory
@@ -658,15 +662,15 @@ export default function AgentChat() {
           onClick={() => setHistOpen(false)}
         >
           <div
-            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-sm"
+            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col border-r border-border bg-card shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
-              <p className="font-semibold text-ink">Chats</p>
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <p className="font-semibold text-foreground">Chats</p>
               <button
                 onClick={() => setHistOpen(false)}
                 aria-label="Close"
-                className="text-brand-400 hover:text-ink"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <X size={16} />
               </button>
@@ -676,13 +680,13 @@ export default function AgentChat() {
                 startNew();
                 setHistOpen(false);
               }}
-              className="m-3 inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 transition-colors hover:bg-brand-50 dark:hover:bg-white/10"
+              className="m-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-hover"
             >
               <Plus size={15} /> New chat
             </button>
             <div className="flex-1 space-y-1 overflow-auto px-2 pb-3">
               {chatList.length === 0 ? (
-                <p className="px-2 py-6 text-center text-sm text-brand-500">
+                <p className="px-2 py-6 text-center text-sm text-muted-foreground">
                   No chats yet.
                 </p>
               ) : (
@@ -691,13 +695,13 @@ export default function AgentChat() {
                     key={c.id}
                     onClick={() => switchChat(c)}
                     className={cn(
-                      "group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 transition-colors",
+                      "group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 transition-colors",
                       c.id === chat.id
-                        ? "bg-primary-100 dark:bg-primary-400/15"
-                        : "hover:bg-brand-50 dark:hover:bg-white/5"
+                        ? "bg-primary-400/15"
+                        : "hover:bg-hover"
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                       {c.title || "New chat"}
                     </span>
                     <button
@@ -706,7 +710,7 @@ export default function AgentChat() {
                         deleteChat(c.id);
                       }}
                       aria-label="Delete chat"
-                      className="shrink-0 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -727,22 +731,25 @@ export default function AgentChat() {
 function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-md bg-primary-100 px-4 py-2.5 text-sm text-ink dark:bg-primary-400/15">
+      <div className="flex justify-end gap-3">
+        <div className="max-w-[75%] whitespace-pre-wrap rounded-lg bg-foreground px-3.5 py-2.5 text-[13px] leading-relaxed text-background">
           {turn.text}
+        </div>
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <User size={15} />
         </div>
       </div>
     );
   }
   return (
     <div className="flex gap-3">
-      <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-ink text-white">
-        <Sparkles size={14} />
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-500/15">
+        <Sparkles size={15} className="text-primary-600 dark:text-primary-400" />
       </div>
       <div
         className={cn(
-          "min-w-0 flex-1 whitespace-pre-wrap pt-1 text-sm leading-relaxed text-ink",
-          pending && "text-brand-500"
+          "min-w-0 max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
+          pending && "text-muted-foreground"
         )}
       >
         {turn.text}

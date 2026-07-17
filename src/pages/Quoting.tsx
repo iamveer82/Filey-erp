@@ -9,7 +9,6 @@ import {
   Building2,
   Upload,
   X,
-  Pencil,
   Copy,
   Check,
   Send,
@@ -25,6 +24,7 @@ import {
   SeparatorHorizontal,
   Maximize2,
   FileText,
+  FileSignature,
   PackageSearch,
 } from "lucide-react";
 import {
@@ -33,6 +33,7 @@ import {
   erp,
   quotes,
   QuotationSummary,
+  QuotationDoc,
   QuotationInput,
   QuotationItem,
   CompanyProfile,
@@ -72,6 +73,12 @@ import {
   SearchInput,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import DocView, { type DocViewItem } from "../components/DocView";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import { ResizablePanels } from "../components/ResizablePanels";
@@ -184,6 +191,10 @@ export default function Quoting() {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [quickView, setQuickView] = useState<{
+    d: QuotationSummary;
+    doc: QuotationDoc | null;
+  } | null>(null);
 
   const [companyOpen, setCompanyOpen] = useState(false);
   const [custModal, setCustModal] = useState(false);
@@ -395,6 +406,66 @@ export default function Quoting() {
   const totalValue = docs.reduce((s, d) => s + (d.total || 0), 0);
   const sentCount = docs.filter((d) => d.status === "sent").length;
   const acceptedCount = docs.filter((d) => d.status === "accepted").length;
+
+  // ---- List-row actions (DEMO parity) ----
+  const openQuickView = (d: QuotationSummary) => {
+    setQuickView({ d, doc: null });
+    quotes
+      .getDoc(d.id)
+      .then((doc) =>
+        setQuickView((qv) => (qv && qv.d.id === d.id ? { d, doc } : qv))
+      )
+      .catch(() => toast.error("Failed to load quotation details"));
+  };
+
+  const findCustomer = (name: string) =>
+    customers.find((c) => (c.company || c.name) === name);
+
+  const shareQuote = async (kind: ShareKind, d: QuotationSummary) => {
+    const cust = findCustomer(d.customer_name);
+    let url = `${location.origin}${location.pathname}#/quoting`;
+    try {
+      const token = await quotes.publicLink(d.id);
+      url = `${location.origin}${location.pathname}#/portal/${token}`;
+    } catch {
+      /* fall back to the app link */
+    }
+    const text = `Hi ${d.customer_name || "there"},\n\nQuote ${d.number} for ${money(
+      d.total || 0,
+      statCcy
+    )} is ready. Please review: ${url}`;
+    shareVia(kind, {
+      phone: cust?.phone || "",
+      email: cust?.email || "",
+      text,
+      url,
+    });
+    if (kind === "copyLink") toast.success("Public quotation link copied");
+  };
+
+  const convertRow = async (d: QuotationSummary) => {
+    try {
+      await quotes.convertToInvoice(d.id);
+      toast.success("Invoice created from quotation.");
+      navigate("/invoicing");
+    } catch (e) {
+      toast.error(`Could not convert: ${errMsg(e)}`);
+    }
+  };
+
+  const deleteRow = async (d: QuotationSummary) => {
+    if (
+      !(await confirm({
+        title: "Delete quotation",
+        message: `Delete ${d.number}? This cannot be undone.`,
+        danger: true,
+      }))
+    )
+      return;
+    await quotes.deleteDoc(d.id);
+    loadDocs();
+    toast.success(`Deleted ${d.number}`);
+  };
 
   // Editor-only state/effects, hoisted to the component top level so these
   // hooks run unconditionally on every render (React rules-of-hooks) instead of
@@ -1906,8 +1977,11 @@ export default function Quoting() {
             <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
               <Building2 size={16} /> Company
             </button>
-            <button className="btn-primary" onClick={newQuote}>
-              <Plus size={16} /> New Quote
+            <button
+              onClick={newQuote}
+              className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
+            >
+              <Plus size={14} /> New Quote
             </button>
           </div>
         }
@@ -2071,74 +2145,31 @@ export default function Quoting() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (d) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center justify-end gap-2">
                 <button
-                  aria-label="Edit"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors"
-                  onClick={() => editQuote(d.id)}
-                >
-                  <Pencil size={15} />
-                </button>
-                <button
-                  aria-label="Duplicate"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors"
-                  onClick={() => duplicateQuote(d.id)}
-                >
-                  <Copy size={15} />
-                </button>
-                <button
-                  aria-label="Copy public link"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors"
-                  onClick={async () => {
-                    try {
-                      const token = await quotes.publicLink(d.id);
-                      const url = `${location.origin}${location.pathname}#/portal/${token}`;
-                      await navigator.clipboard.writeText(url);
-                      loadDocs();
-                      toast.success("Public link copied");
-                    } catch (e) {
-                      toast.error(errMsg(e));
-                    }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    convertRow(d);
                   }}
+                  className="text-[12px] px-2 h-7 rounded-md border border-border hover:bg-background text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+                  title="Convert to invoice"
                 >
-                  <Send size={15} />
+                  <FileSignature size={13} /> Convert
                 </button>
-                <button
-                  aria-label="Convert to invoice"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors"
-                  onClick={async () => {
-                    try {
-                      await quotes.convertToInvoice(d.id);
-                      toast.success("Invoice created from quotation.");
-                      navigate("/invoicing");
-                    } catch (e) {
-                      toast.error(`Could not convert: ${errMsg(e)}`);
-                    }
+                <RowActions
+                  onView={() => openQuickView(d)}
+                  onEdit={() => editQuote(d.id)}
+                  onCopy={() => duplicateQuote(d.id)}
+                  onDelete={() => deleteRow(d)}
+                  onSend={{
+                    whatsapp: () => shareQuote("whatsapp", d),
+                    email: () => shareQuote("email", d),
+                    sms: () => shareQuote("sms", d),
+                    copyLink: () => shareQuote("copyLink", d),
                   }}
-                >
-                  <FileText size={15} />
-                </button>
-                <button
-                  aria-label="Delete"
-                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
-                  onClick={async () => {
-                    if (
-                      !(await confirm({
-                        title: "Delete quotation",
-                        message: `Delete ${d.number}? This cannot be undone.`,
-                        danger: true,
-                      }))
-                    )
-                      return;
-                    await quotes.deleteDoc(d.id);
-                    loadDocs();
-                    toast.success(`Deleted ${d.number}`);
-                  }}
-                >
-                  <Trash2 size={15} />
-                </button>
+                />
               </div>
             ),
           },
@@ -2156,6 +2187,48 @@ export default function Quoting() {
           }}
         />
       )}
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const id = quickView.d.id;
+                setQuickView(null);
+                editQuote(id);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title: `Quote ${quickView.d.number}`,
+                subtitle: `For ${quickView.d.customer_name}`,
+                badge: (
+                  <Badge tone={statusTone(quickView.doc?.status || quickView.d.status)}>
+                    {quickView.doc?.status || quickView.d.status}
+                  </Badge>
+                ),
+                meta: [
+                  { label: "Customer", value: quickView.d.customer_name },
+                  { label: "Quote date", value: fmtDate(quickView.d.quote_date) },
+                  { label: "Valid until", value: fmtDate(quickView.d.valid_until) },
+                  { label: "Currency", value: quickView.doc?.currency || statCcy },
+                  ...(quickView.doc?.sales_person
+                    ? [{ label: "Sales person", value: quickView.doc.sales_person }]
+                    : []),
+                ],
+                items: quickView.doc?.items
+                  .filter((i) => i.product.trim())
+                  .map((i) => ({ desc: i.product, qty: i.qty, price: i.rate })),
+                total: quickView.d.total,
+                currency: quickView.doc?.currency || statCcy,
+                notes: quickView.doc?.notes || undefined,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

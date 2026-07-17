@@ -33,7 +33,7 @@ function Segmented<T extends string>({
 }) {
   return (
     <div
-      className="flex rounded-xl bg-brand-100 dark:bg-white/8 p-1 gap-1"
+      className="flex rounded-lg bg-muted p-1 gap-1"
       role="tablist"
     >
       {options.map((o) => {
@@ -47,10 +47,10 @@ function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(o.v)}
             className={
-              "flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
+              "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
               (active
-                ? "bg-white text-ink"
-                : "text-brand-500 hover:text-ink")
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground")
             }
           >
             {o.label}
@@ -229,7 +229,7 @@ export default function Login() {
         "flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs font-medium " +
         (kind === "err"
           ? "text-danger bg-danger/10"
-          : "text-brand-700 bg-brand-100 dark:bg-white/12")
+          : "text-foreground bg-muted")
       }
     >
       {kind === "err" ? (
@@ -243,8 +243,9 @@ export default function Login() {
 
   return (
     <div className="min-h-full grid lg:grid-cols-2 bg-background">
-      {/* ── Brand panel with playful characters ── */}
-      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-ink text-white">
+      {/* ── Brand panel with playful characters — pinned dark in both themes
+          (the characters + white type are designed for a dark backdrop). ── */}
+      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-neutral-900 text-white">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.05]"
@@ -283,7 +284,7 @@ export default function Login() {
       <div className="flex items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-sm">
           <div className="flex lg:hidden flex-col items-center mb-8">
-            <Logo size={104} />
+            <Logo size={64} />
             <h1 className="text-2xl font-semibold tracking-tight leading-none text-foreground mt-3">Filey</h1>
           </div>
 
@@ -386,7 +387,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -418,7 +419,7 @@ export default function Login() {
                       tabIndex={-1}
                       aria-label={showConfirm ? "Hide password" : "Show password"}
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl p-1.5 text-brand-400 hover:text-ink hover:bg-brand-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                     >
                       {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -460,7 +461,7 @@ export default function Login() {
                 <button
                   type="button"
                   disabled={busy}
-                  className="w-full rounded-xl border border-brand-200 px-4 py-2.5 text-sm font-medium text-ink hover:bg-brand-50 transition flex items-center justify-center gap-2 cursor-pointer dark:border-white/15 dark:hover:bg-white/5"
+                  className="btn-ghost w-full"
                   onClick={async () => {
                     setErr(null);
                     try {

@@ -23,6 +23,7 @@ const Accounting = lazy(() => import("../pages/Accounting"));
 const ToolsPage = lazy(() => import("../pages/PdfTools"));
 const MyFilesPage = lazy(() => import("../pages/MyFiles"));
 const Settings = lazy(() => import("../pages/Tools"));
+const Integrations = lazy(() => import("../pages/Integrations"));
 const DeliveryChallan = lazy(() => import("../pages/DeliveryChallan"));
 const PaymentReceipt = lazy(() => import("../pages/PaymentReceipt"));
 const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
@@ -216,6 +217,15 @@ export const MODULES: AppModule[] = [
     to: "/settings",
     Component: Settings,
     core: true,
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    short: "Integrations",
+    desc: "Connect Filey with the tools you already use",
+    icon: "integrations",
+    to: "/integrations",
+    Component: Integrations,
   },
   {
     id: "delivery-challans",

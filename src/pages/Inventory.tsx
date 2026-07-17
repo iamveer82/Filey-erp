@@ -6,7 +6,6 @@ import {
   Boxes,
   AlertTriangle,
   Layers,
-  MoreHorizontal,
   Download,
   Upload,
   Users,
@@ -22,11 +21,11 @@ import {
   Loader2,
 } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../components/DropdownMenu";
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -72,6 +71,7 @@ export default function Inventory() {
   const [batchFilter, setBatchFilter] = useState("");
   const [draftingPo, setDraftingPo] = useState(false);
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [quickView, setQuickView] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [params, setParams] = useSearchParams();
@@ -113,6 +113,67 @@ export default function Inventory() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  // ---- Row actions (DEMO parity) ----
+  const editProduct = (p: Product) => {
+    setEditing(p);
+    setOpen(true);
+  };
+
+  const deleteProduct = async (p: Product) => {
+    if (
+      !(await confirm({
+        title: "Delete product",
+        message: `Delete ${p.name}? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await erp.deleteProduct(p.id);
+      toast.success(`Deleted ${p.name}`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete product"
+      );
+    }
+    load();
+  };
+
+  // Duplicates the product definition only — batch/expiry/barcode are
+  // lot-specific and stock starts at 0 so the ledger stays consistent.
+  const duplicateProduct = async (p: Product) => {
+    try {
+      await erp.createProduct({
+        sku: `${p.sku}-COPY`,
+        name: `${p.name} (Copy)`,
+        description: p.description ?? "",
+        category: p.category,
+        unit_price: p.unit_price,
+        cost_price: p.cost_price,
+        quantity: 0,
+        reorder_level: p.reorder_level,
+        unit: p.unit,
+        warehouse: p.warehouse,
+        is_serialized: p.is_serialized,
+        custom_fields: p.custom_fields,
+      } as Omit<Product, "id" | "created_at">);
+      toast.success(`Duplicated ${p.name} — stock starts at 0.`);
+      load();
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to duplicate product"
+      );
+    }
+  };
+
+  const shareProduct = (kind: ShareKind, p: Product) => {
+    const url = `${location.origin}${location.pathname}#/inventory`;
+    const text = `${p.name} (${p.sku}) — In stock: ${p.quantity}, Unit price: ${aed(p.unit_price)}`;
+    shareVia(kind, { text, url });
+    if (kind === "copyLink") toast.success("Inventory link copied");
   };
 
   const load = () => {
@@ -581,53 +642,33 @@ export default function Inventory() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (p) => (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    aria-label={`Actions for ${p.name}`}
-                    className="rounded-full p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink dark:hover:bg-white/5 cursor-pointer transition-colors duration-200"
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setIssueFor(p);
-                    }}
-                  >
-                    <PackageMinus size={14} /> Stock entry
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setEditing(p);
-                      setOpen(true);
-                    }}
-                  >
-                    <Pencil size={14} /> Edit product
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-danger"
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      if (!(await confirm({ title: "Delete product", message: `Delete ${p.name}? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
-                      try {
-                        await erp.deleteProduct(p.id);
-                        toast.success(`Deleted ${p.name}`);
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : "Failed to delete product");
-                      }
-                      load();
-                    }}
-                  >
-                    <Trash2 size={14} /> Delete product
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex items-center justify-end gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIssueFor(p);
+                  }}
+                  className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors"
+                  title="Stock entry"
+                  aria-label={`Stock entry for ${p.name}`}
+                >
+                  <PackageMinus className="h-3.5 w-3.5" />
+                </button>
+                <RowActions
+                  onView={() => setQuickView(p)}
+                  onEdit={() => editProduct(p)}
+                  onCopy={() => duplicateProduct(p)}
+                  onDelete={() => deleteProduct(p)}
+                  onSend={{
+                    whatsapp: () => shareProduct("whatsapp", p),
+                    email: () => shareProduct("email", p),
+                    sms: () => shareProduct("sms", p),
+                    copyLink: () => shareProduct("copyLink", p),
+                  }}
+                />
+              </div>
             ),
           },
         ]}
@@ -641,6 +682,70 @@ export default function Inventory() {
           setEditing(null);
         }}
         onSaved={load}
+      />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const p = quickView;
+                setQuickView(null);
+                editProduct(p);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title: quickView.name,
+                subtitle: `SKU ${quickView.sku}`,
+                badge:
+                  quickView.quantity === 0 ? (
+                    <Badge tone="danger">Out of stock</Badge>
+                  ) : quickView.quantity <= quickView.reorder_level ? (
+                    <Badge tone="warn">Low stock</Badge>
+                  ) : (
+                    <Badge tone="success">In stock</Badge>
+                  ),
+                meta: [
+                  { label: "Category", value: quickView.category },
+                  { label: "In stock", value: num(quickView.quantity) },
+                  { label: "Reorder at", value: num(quickView.reorder_level) },
+                  {
+                    label: "Issued out",
+                    value: issuedTotal(quickView) || undefined,
+                  },
+                  { label: "Unit price", value: aed(quickView.unit_price) },
+                  { label: "Cost price", value: aed(quickView.cost_price) },
+                  {
+                    label: "Stock value (cost)",
+                    value: aed(
+                      (Number(quickView.quantity) || 0) *
+                        (Number(quickView.cost_price) || 0)
+                    ),
+                  },
+                  { label: "Batch / lot", value: quickView.batch_number },
+                  {
+                    label: "Expiry date",
+                    value: quickView.expiry_date
+                      ? fmtDate(quickView.expiry_date)
+                      : undefined,
+                  },
+                  { label: "Barcode", value: quickView.barcode },
+                  { label: "Warehouse", value: quickView.warehouse },
+                  {
+                    label: "Added",
+                    value: quickView.created_at
+                      ? fmtDate(quickView.created_at)
+                      : undefined,
+                  },
+                ],
+                notes: quickView.description || undefined,
+              }
+            : null
+        }
       />
 
       <IssueStockModal

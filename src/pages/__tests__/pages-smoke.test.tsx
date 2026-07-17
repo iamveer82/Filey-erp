@@ -87,6 +87,7 @@ import People from "../People";
 import Accounting from "../Accounting";
 import Reports from "../Reports";
 import EmailTemplates from "../EmailTemplates";
+import Integrations from "../Integrations";
 import DeliveryChallan from "../DeliveryChallan";
 import PaymentReceipt from "../PaymentReceipt";
 import DeclarationLetter from "../DeclarationLetter";
@@ -118,6 +119,7 @@ const pages: [string, () => ReactElement][] = [
   ["Accounting", () => <Accounting />],
   ["Reports", () => <Reports />],
   ["EmailTemplates", () => <EmailTemplates />],
+  ["Integrations", () => <Integrations />],
   ["DeliveryChallan", () => <DeliveryChallan />],
   ["PaymentReceipt", () => <PaymentReceipt />],
   ["DeclarationLetter", () => <DeclarationLetter />],

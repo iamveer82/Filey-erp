@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Users,
   UserCheck,
   CalendarOff,
   Wallet,
-  MoreHorizontal,
   Sliders,
   FileText,
 } from "lucide-react";
@@ -25,24 +24,28 @@ import {
   Modal,
   Field,
   ErrorBanner,
+  FilterChip,
+  SearchInput,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../components/DropdownMenu";
+  RowActions,
+  QuickViewModal,
+  shareVia,
+} from "../components/RowActions";
 import MultiDatePicker from "../components/MultiDatePicker";
 
 export default function People() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [emps, setEmps] = useState<Employee[]>([]);
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
   const [payslipFor, setPayslipFor] = useState<Employee | null>(null);
+  const [quickViewFor, setQuickViewFor] = useState<Employee | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -63,6 +66,72 @@ export default function People() {
     load();
   }, []);
   useLiveSync(load);
+
+  const statuses = useMemo(
+    () =>
+      Array.from(new Set(emps.map((e) => e.status || "active"))).sort(),
+    [emps]
+  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return emps.filter((e) => {
+      if (statusFilter !== "all" && (e.status || "active") !== statusFilter)
+        return false;
+      if (!q) return true;
+      return [e.name, e.employee_code, e.email, e.phone, e.department, e.position]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q));
+    });
+  }, [emps, search, statusFilter]);
+
+  const duplicateEmployee = async (e: Employee) => {
+    try {
+      await hr.createEmployee({
+        employee_code: e.employee_code ? `${e.employee_code}-COPY` : "",
+        name: `${e.name} (copy)`,
+        email: e.email || undefined,
+        phone: e.phone || undefined,
+        department: e.department || undefined,
+        position: e.position || undefined,
+        salary: e.salary,
+        hire_date: e.hire_date || undefined,
+      } as Omit<Employee, "id" | "status">);
+      toast.success(`Duplicated ${e.name}.`);
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to duplicate employee");
+    }
+  };
+
+  const deleteEmployee = async (e: Employee) => {
+    const ok = await confirm({
+      title: "Delete employee",
+      message: `Delete ${e.name}? This cannot be undone.`,
+      danger: true,
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    try {
+      await hr.deleteEmployee(e.id);
+      toast.success(`Deleted ${e.name}.`);
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete employee");
+    }
+  };
+
+  const shareEmployee = (kind: "whatsapp" | "email" | "sms", e: Employee) => {
+    const text = [
+      `${e.name}${e.position ? ` — ${e.position}` : ""}${
+        e.department ? `, ${e.department}` : ""
+      }`,
+      e.email ? `Email: ${e.email}` : "",
+      e.phone ? `Phone: ${e.phone}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    shareVia(kind, { phone: e.phone, email: e.email, text, url: e.name });
+  };
 
   return (
     <div className="animate-fade-up">
@@ -192,10 +261,45 @@ export default function People() {
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search people by name, code, email…"
+          className="w-full sm:max-w-xs"
+        />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <FilterChip
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+            count={emps.length}
+          >
+            All
+          </FilterChip>
+          {statuses.map((s) => (
+            <FilterChip
+              key={s}
+              active={statusFilter === s}
+              tone={statusTone(s)}
+              onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
+              count={emps.filter((e) => (e.status || "active") === s).length}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </FilterChip>
+          ))}
+        </div>
+      </div>
+
       <DataTable<Employee>
-        rows={emps}
+        rows={filtered}
         loading={loading}
-        empty="No employees yet"
+        empty={
+          emps.length === 0
+            ? "No employees yet"
+            : "No people match your search or filters"
+        }
+        rowKey={(e) => e.id}
+        onRowClick={(e) => setQuickViewFor(e)}
         columns={[
           {
             key: "code",
@@ -210,9 +314,18 @@ export default function People() {
             label: "Name",
             sortValue: (e) => e.name,
             render: (e) => (
-              <div>
-                <p className="font-medium text-ink">{e.name}</p>
-                <p className="text-[11px] text-brand-400">{e.email ?? "—"}</p>
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 shrink-0 rounded-full bg-hover border border-border grid place-items-center text-[11px] font-semibold text-foreground">
+                  {e.name
+                    .split(" ")
+                    .map((x) => x[0])
+                    .slice(0, 2)
+                    .join("")}
+                </div>
+                <div>
+                  <p className="font-medium text-ink">{e.name}</p>
+                  <p className="text-[11px] text-brand-400">{e.email ?? "—"}</p>
+                </div>
               </div>
             ),
           },
@@ -266,26 +379,28 @@ export default function People() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (e) => (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    aria-label={`Actions for ${e.name}`}
-                    className="rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground cursor-pointer transition-colors duration-200"
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => setLeaveFor(e)}>
-                    <CalendarOff size={14} /> Mark leave days
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setPayslipFor(e)}>
-                    <FileText size={14} /> Payslip
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <RowActions
+                onView={() => setQuickViewFor(e)}
+                onCopy={() => duplicateEmployee(e)}
+                onSend={
+                  e.phone || e.email
+                    ? {
+                        ...(e.phone
+                          ? {
+                              whatsapp: () => shareEmployee("whatsapp", e),
+                              sms: () => shareEmployee("sms", e),
+                            }
+                          : {}),
+                        ...(e.email
+                          ? { email: () => shareEmployee("email", e) }
+                          : {}),
+                      }
+                    : undefined
+                }
+                onDelete={() => deleteEmployee(e)}
+              />
             ),
           },
         ]}
@@ -313,6 +428,68 @@ export default function People() {
         employee={payslipFor}
         company={company}
         onClose={() => setPayslipFor(null)}
+      />
+
+      <QuickViewModal
+        open={!!quickViewFor}
+        onClose={() => setQuickViewFor(null)}
+        data={
+          quickViewFor
+            ? {
+                title: quickViewFor.name,
+                subtitle:
+                  [quickViewFor.position, quickViewFor.department]
+                    .filter(Boolean)
+                    .join(" · ") || "Employee",
+                badge: (
+                  <Badge tone={statusTone(quickViewFor.status)}>
+                    {quickViewFor.status}
+                  </Badge>
+                ),
+                meta: [
+                  {
+                    label: "Employee code",
+                    value: quickViewFor.employee_code || "—",
+                  },
+                  { label: "Email", value: quickViewFor.email || "—" },
+                  { label: "Phone", value: quickViewFor.phone || "—" },
+                  { label: "Department", value: quickViewFor.department || "—" },
+                  { label: "Position", value: quickViewFor.position || "—" },
+                  { label: "Salary", value: aed(quickViewFor.salary) },
+                  {
+                    label: "Hire date",
+                    value: quickViewFor.hire_date
+                      ? fmtDate(quickViewFor.hire_date)
+                      : "—",
+                  },
+                ],
+                footer: (
+                  <div className="mt-4 pt-4 border-t border-border flex flex-wrap justify-end gap-2">
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        const emp = quickViewFor;
+                        setQuickViewFor(null);
+                        setLeaveFor(emp);
+                      }}
+                    >
+                      <CalendarOff size={14} /> Mark leave days
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        const emp = quickViewFor;
+                        setQuickViewFor(null);
+                        setPayslipFor(emp);
+                      }}
+                    >
+                      <FileText size={14} /> Payslip
+                    </button>
+                  </div>
+                ),
+              }
+            : null
+        }
       />
     </div>
   );

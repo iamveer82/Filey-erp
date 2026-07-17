@@ -7,12 +7,10 @@ import {
   Clock,
   Wallet,
   ShoppingCart,
-  Pencil,
-  Trash2,
   Search,
   X,
 } from "lucide-react";
-import { erp, Order, Product } from "../lib/api";
+import { erp, crm, CrmCustomer, Order, OrderItem, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, num, cn, getDisplayCurrency } from "../lib/format";
@@ -31,6 +29,12 @@ import {
   SearchInput,
 } from "../components/ui";
 import ProductPicker, { type CartLine } from "../components/ProductPicker";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
@@ -42,9 +46,11 @@ const nextOrderNumber = (existing: Order[]) =>
 export default function Orders() {
   const { toast, confirm } = useUI();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [open, setOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
+  const [quickView, setQuickView] = useState<Order | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -59,7 +65,11 @@ export default function Orders() {
 
   const load = () => {
     setError("");
-    return Promise.all([erp.orders().then(setOrders), erp.products().then(setProducts)])
+    return Promise.all([
+      erp.orders().then(setOrders),
+      erp.products().then(setProducts),
+      crm.customers().then(setCustomers),
+    ])
       .catch((e) =>
         setError(`Could not load orders: ${e instanceof Error ? e.message : e}`)
       )
@@ -104,6 +114,65 @@ export default function Orders() {
       return ["returned", "cancelled"].includes(st);
     });
   }, [orders, statusFilter, q]);
+
+  const doDelete = async (o: Order) => {
+    const ok = await confirm({
+      title: "Delete order",
+      message: `Delete ${o.order_number}? Any stock it reserved is returned. This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await erp.deleteOrder(o.id);
+      load();
+      toast.success(`Deleted ${o.order_number}`);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete order");
+    }
+  };
+
+  /** Duplicate via the real create flow — line items reserve stock again,
+   *  just like building the same order a second time. */
+  const doDuplicate = async (o: Order) => {
+    const orderNumber = nextOrderNumber(orders);
+    try {
+      const detail = await erp.getOrder(o.id);
+      const lines = (detail.items ?? [])
+        .filter((it) => it.product_id != null)
+        .map((it) => ({
+          product_id: it.product_id as number,
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+        }));
+      if (lines.length) {
+        await erp.createOrderWithItems(orderNumber, o.customer_name, lines, o.total);
+      } else {
+        await erp.createOrder(orderNumber, o.customer_name, o.total);
+      }
+      load();
+      toast.success(`Duplicated as ${orderNumber}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const findCustomer = (o: Order) =>
+    customers.find((c) => c.id === o.customer_id) ??
+    customers.find(
+      (c) => c.name === o.customer_name || c.company === o.customer_name
+    );
+
+  const doShare = (kind: ShareKind, o: Order) => {
+    const cust = findCustomer(o);
+    shareVia(kind, {
+      phone: cust?.phone_e164 || cust?.phone || "",
+      email: cust?.email || "",
+      text: `Order ${o.order_number} for ${o.customer_name} — total ${aed(o.total)}. Status: ${o.status}.`,
+      url: `${window.location.origin}/orders?id=${o.id}`,
+    });
+    if (kind === "copyLink") toast.success("Link copied.");
+  };
 
   return (
     <div>
@@ -273,14 +342,14 @@ export default function Orders() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (o) => {
               const idx = FLOW.indexOf((o.status || "").toLowerCase());
               // No forward transition from "cancelled" or unknown statuses —
               // wrapping back to "draft" silently regressed orders.
               const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
               return (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center justify-end gap-1">
                   {next && (
                     <button
                       className="btn-ghost text-xs"
@@ -311,35 +380,18 @@ export default function Orders() {
                       → {next}
                     </button>
                   )}
-                  <button
-                    aria-label="Edit order"
-                    className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
-                    onClick={() => setEditId(o.id)}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    aria-label="Delete order"
-                    className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: "Delete order",
-                        message: `Delete ${o.order_number}? Any stock it reserved is returned. This cannot be undone.`,
-                        confirmLabel: "Delete",
-                        danger: true,
-                      });
-                      if (!ok) return;
-                      try {
-                        await erp.deleteOrder(o.id);
-                        load();
-                        toast.success(`Deleted ${o.order_number}`);
-                      } catch (e: any) {
-                        toast.error(e?.message || "Failed to delete order");
-                      }
+                  <RowActions
+                    onView={() => setQuickView(o)}
+                    onEdit={() => setEditId(o.id)}
+                    onCopy={() => doDuplicate(o)}
+                    onSend={{
+                      whatsapp: () => doShare("whatsapp", o),
+                      email: () => doShare("email", o),
+                      sms: () => doShare("sms", o),
+                      copyLink: () => doShare("copyLink", o),
                     }}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                    onDelete={() => doDelete(o)}
+                  />
                 </div>
               );
             },
@@ -374,7 +426,85 @@ export default function Orders() {
           load();
         }}
       />
+
+      <QuickViewOrder
+        order={quickView}
+        products={products}
+        onClose={() => setQuickView(null)}
+        onEdit={(id) => {
+          setQuickView(null);
+          setEditId(id);
+        }}
+      />
     </div>
+  );
+}
+
+/** DEMO-parity quick view: header + status badge + meta grid, with the real
+ *  line items fetched on open (the list endpoint doesn't carry them). */
+function QuickViewOrder({
+  order,
+  products,
+  onClose,
+  onEdit,
+}: {
+  order: Order | null;
+  products: Product[];
+  onClose: () => void;
+  onEdit: (id: number) => void;
+}) {
+  const [items, setItems] = useState<OrderItem[]>([]);
+
+  useEffect(() => {
+    setItems([]);
+    if (order == null) return;
+    let alive = true;
+    erp
+      .getOrder(order.id)
+      .then((d) => {
+        if (alive) setItems(d.items ?? []);
+      })
+      .catch(() => {
+        /* header meta still renders without line items */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [order]);
+
+  const lines = items.map((it) => ({
+    desc:
+      products.find((p) => p.id === it.product_id)?.name ??
+      (it.product_id ? `Product #${it.product_id}` : "Item"),
+    qty: it.quantity,
+    price: it.unit_price,
+  }));
+
+  return (
+    <QuickViewModal
+      open={order != null}
+      onClose={onClose}
+      onEdit={order ? () => onEdit(order.id) : undefined}
+      data={
+        order
+          ? {
+              title: `Order ${order.order_number}`,
+              subtitle: `For ${order.customer_name}`,
+              badge: <Badge tone={statusTone(order.status)}>{order.status}</Badge>,
+              meta: [
+                { label: "Customer", value: order.customer_name },
+                { label: "Items", value: lines.length ? num(lines.length) : "—" },
+                { label: "Total", value: aed(order.total) },
+                { label: "Date", value: fmtDate(order.created_at) },
+                { label: "Status", value: order.status },
+              ],
+              items: lines.length ? lines : undefined,
+              total: order.total,
+              currency: getDisplayCurrency(),
+            }
+          : null
+      }
+    />
   );
 }
 

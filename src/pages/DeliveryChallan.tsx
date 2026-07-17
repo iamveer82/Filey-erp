@@ -24,7 +24,15 @@ import {
   Badge,
   statusTone,
   Field,
+  SearchInput,
+  FilterChip,
 } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 import {
   loadCompanyStampSig,
@@ -42,7 +50,7 @@ import TemplateDesigner, {
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { tools, billing } from "../lib/api";
+import { tools, billing, crm, type CrmCustomer } from "../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -88,6 +96,13 @@ const DC_TYPES = [
   { id: "return", label: "Return Challan" },
 ];
 
+/** Short labels + chip tones for the list type filters (DEMO parity). */
+const TYPE_CHIPS: { id: string; label: string; tone: "info" | "success" | "warn" }[] = [
+  { id: "delivery", label: "Delivery", tone: "info" },
+  { id: "goods_received", label: "Goods Received", tone: "success" },
+  { id: "return", label: "Return", tone: "warn" },
+];
+
 function blankDc(existing: string[] = []): DcForm {
   return {
     number: dcNumber(existing),
@@ -130,6 +145,27 @@ interface DcRecord {
   show_stamp?: boolean;
   show_signature?: boolean;
   created_at: string;
+  /** Full editor payload — present on records saved after edit/quick-view
+   *  support; older records only carry the summary fields above. */
+  form?: DcForm;
+}
+
+/** Rebuild an editor form from a stored record — full payload when available,
+ *  otherwise prefill the summary fields so old records stay editable. */
+function formFromRecord(r: DcRecord, existing: string[]): DcForm {
+  const base = blankDc(existing);
+  if (r.form) return { ...base, ...r.form, number: r.number };
+  return {
+    ...base,
+    number: r.number,
+    dc_type: DC_TYPES.some((t) => t.id === r.dc_type)
+      ? (r.dc_type as DcForm["dc_type"])
+      : "delivery",
+    party_name: r.party_name,
+    issue_date: r.issue_date || base.issue_date,
+    show_stamp: r.show_stamp,
+    show_signature: r.show_signature,
+  };
 }
 
 function loadDcs(): DcRecord[] {
@@ -171,12 +207,21 @@ export default function DeliveryChallan() {
   const [records, setRecords] = useState<DcRecord[]>([]);
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [quickView, setQuickView] = useState<DcRecord | null>(null);
+  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
 
   useEffect(() => {
     syncDcs().then((r) => {
       setRecords(r);
       setLoading(false);
     });
+    // CRM lookup only feeds the share actions' phone/email — stay silent on failure.
+    crm
+      .customers()
+      .then(setCustomers)
+      .catch(() => {});
   }, []);
   useLiveSync(() => setRecords(loadDcs()));
 
@@ -192,6 +237,35 @@ export default function DeliveryChallan() {
     setRecords(next);
     saveDcs(next);
     toast.success("Deleted.");
+  };
+
+  // ---- List-row actions (DEMO parity) ----
+  const typeLabel = (t: string) => DC_TYPES.find((x) => x.id === t)?.label || t;
+
+  const editRecord = (r: DcRecord) =>
+    setForm(formFromRecord(r, records.map((x) => x.number)));
+
+  const duplicateRecord = (r: DcRecord) => {
+    const existing = records.map((x) => x.number);
+    setForm({
+      ...formFromRecord(r, existing),
+      number: dcNumber(existing),
+      issue_date: today(),
+    });
+  };
+
+  const shareDc = (kind: ShareKind, r: DcRecord) => {
+    const cust = customers.find((c) => (c.company || c.name) === r.party_name);
+    const text = `Hi ${r.party_name || "there"},\n\n${typeLabel(r.dc_type)} ${
+      r.number
+    } dated ${fmtDate(r.issue_date)} (${r.item_count} item(s)) is ready.`;
+    // shareVia reuses `url` as the email subject.
+    shareVia(kind, {
+      phone: cust?.phone || "",
+      email: cust?.email || "",
+      text,
+      url: `${typeLabel(r.dc_type)} ${r.number}`,
+    });
   };
 
   if (form) {
@@ -216,6 +290,7 @@ export default function DeliveryChallan() {
             show_stamp: form.show_stamp,
             show_signature: form.show_signature,
             created_at: new Date().toISOString(),
+            form,
           };
           if (existing >= 0) next[existing] = record;
           else next.push(record);
@@ -226,9 +301,17 @@ export default function DeliveryChallan() {
     );
   }
 
-  const typeLabel = (t: string) => DC_TYPES.find((x) => x.id === t)?.label || t;
   const totalItems = records.reduce((s, r) => s + r.item_count, 0);
   const parties = new Set(records.map((r) => r.party_name).filter(Boolean)).size;
+
+  const q = search.trim().toLowerCase();
+  const filtered = records.filter(
+    (r) =>
+      (typeFilter === "all" || r.dc_type === typeFilter) &&
+      (!q ||
+        r.number.toLowerCase().includes(q) ||
+        (r.party_name || "").toLowerCase().includes(q))
+  );
 
   return (
     <div className="animate-fade-up">
@@ -263,10 +346,43 @@ export default function DeliveryChallan() {
           iconClass="bg-info/15 text-info"
         />
       </div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search challans by number or party…"
+          className="max-w-xs flex-1 min-w-[220px]"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip
+            active={typeFilter === "all"}
+            onClick={() => setTypeFilter("all")}
+            count={records.length}
+          >
+            All
+          </FilterChip>
+          {TYPE_CHIPS.map((t) => (
+            <FilterChip
+              key={t.id}
+              active={typeFilter === t.id}
+              onClick={() => setTypeFilter(t.id)}
+              tone={t.tone}
+              count={records.filter((r) => r.dc_type === t.id).length}
+            >
+              {t.label}
+            </FilterChip>
+          ))}
+        </div>
+      </div>
       <DataTable<DcRecord>
-        rows={records}
+        rows={filtered}
         loading={loading}
-        empty="No delivery challans yet — create your first one"
+        empty={
+          search || typeFilter !== "all"
+            ? "No challans match your filters"
+            : "No delivery challans yet — create your first one"
+        }
+        onRowClick={(r) => setQuickView(r)}
         columns={[
           {
             key: "no",
@@ -310,18 +426,108 @@ export default function DeliveryChallan() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (r) => (
-              <button
-                aria-label={`Delete challan ${r.number}`}
-                className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                onClick={() => del(r)}
-              >
-                <Trash2 size={15} />
-              </button>
+              <RowActions
+                onView={() => setQuickView(r)}
+                onEdit={() => editRecord(r)}
+                onCopy={() => duplicateRecord(r)}
+                onDelete={() => del(r)}
+                onSend={{
+                  whatsapp: () => shareDc("whatsapp", r),
+                  email: () => shareDc("email", r),
+                  sms: () => shareDc("sms", r),
+                }}
+              />
             ),
           },
         ]}
+      />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const r = quickView;
+                setQuickView(null);
+                editRecord(r);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title: quickView.number,
+                subtitle: quickView.party_name || undefined,
+                badge: (
+                  <Badge tone={statusTone(quickView.dc_type)}>
+                    {typeLabel(quickView.dc_type)}
+                  </Badge>
+                ),
+                meta: [
+                  { label: "Party", value: quickView.party_name || "—" },
+                  { label: "Date", value: fmtDate(quickView.issue_date) },
+                  { label: "Items", value: String(quickView.item_count) },
+                  { label: "Created", value: fmtDate(quickView.created_at) },
+                  ...(quickView.form?.ref_number
+                    ? [{ label: "Reference #", value: quickView.form.ref_number }]
+                    : []),
+                  ...(quickView.form?.vehicle_number
+                    ? [{ label: "Vehicle", value: quickView.form.vehicle_number }]
+                    : []),
+                  ...(quickView.form?.driver_name
+                    ? [{ label: "Driver", value: quickView.form.driver_name }]
+                    : []),
+                ],
+                notes: quickView.form?.notes || undefined,
+                // Challans carry quantities, not prices — render a qty-only
+                // items table instead of the modal's priced one.
+                footer:
+                  quickView.form &&
+                  quickView.form.items.some((i) => i.description.trim()) ? (
+                    <div className="mt-4 rounded-lg border border-border overflow-hidden">
+                      <table className="w-full text-[13px]">
+                        <thead>
+                          <tr className="text-left text-muted-foreground border-b border-border bg-hover/30">
+                            <th className="px-4 py-2 font-medium text-[11.5px] w-10">
+                              #
+                            </th>
+                            <th className="px-4 py-2 font-medium text-[11.5px]">
+                              Description
+                            </th>
+                            <th className="px-4 py-2 font-medium text-[11.5px] w-20 text-right">
+                              Qty
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quickView.form.items
+                            .filter((i) => i.description.trim())
+                            .map((it, i) => (
+                              <tr
+                                key={i}
+                                className="border-b border-border last:border-0"
+                              >
+                                <td className="px-4 py-2 text-muted-foreground">
+                                  {i + 1}
+                                </td>
+                                <td className="px-4 py-2 text-foreground">
+                                  {it.description}
+                                </td>
+                                <td className="px-4 py-2 text-right text-foreground tabular-nums">
+                                  {it.qty}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : undefined,
+              }
+            : null
+        }
       />
     </div>
   );

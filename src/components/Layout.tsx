@@ -53,7 +53,7 @@ const MODULE_GROUPS: { title: string; ids: string[] }[] = [
   { title: "Inventory", ids: ["inventory"] },
   { title: "Accounting", ids: ["people", "accounting", "bank-accounts", "cheques", "payment-receipts", "declaration"] },
   { title: "Tools", ids: ["tools", "files", "email-templates", "delivery-challans"] },
-  { title: "System", ids: ["settings"] },
+  { title: "System", ids: ["settings", "integrations"] },
 ];
 
 /** Quick-action commands for the search dropdown. `?new=1` deep-links a

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Building2, Wallet, Coins, FileCheck2 } from "lucide-react";
+import { Plus, Building2, Wallet, Coins, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { aed, numInput } from "../lib/format";
+import { aed, fmtDate, money, numInput } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -11,7 +11,14 @@ import {
   Badge,
   Spinner,
   ErrorBanner,
+  SearchInput,
 } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { fin, tools } from "../lib/api";
 import {
   parseStatementCsv,
@@ -76,9 +83,14 @@ export default function BankAccounts() {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<BankAccount | null>(null);
   const [reconOpen, setReconOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [quickView, setQuickView] = useState<BankAccount | null>(null);
+  const [syncing, setSyncing] = useState(true);
   useEffect(() => {
     setAccounts(load()); // instant paint from the local cache…
-    syncBankAccounts().then(setAccounts); // …then reconcile with other devices
+    syncBankAccounts()
+      .then(setAccounts) // …then reconcile with other devices
+      .finally(() => setSyncing(false));
   }, []);
 
   const del = async (a: BankAccount) => {
@@ -94,6 +106,50 @@ export default function BankAccounts() {
     save(next);
     toast.success("Deleted.");
   };
+
+  const dup = (a: BankAccount) => {
+    const next = [
+      ...accounts,
+      {
+        ...a,
+        id: Date.now(),
+        account_name: `${a.account_name} copy`,
+        created_at: new Date().toISOString(),
+      },
+    ];
+    setAccounts(next);
+    save(next);
+    toast.success("Duplicated.");
+  };
+
+  const openEdit = (a: BankAccount) => {
+    setEdit(a);
+    setOpen(true);
+  };
+
+  // Bank details are meant to be shared (customers pay into these accounts);
+  // shareVia just opens the channel with the details prefilled.
+  const shareAccount = (kind: ShareKind, a: BankAccount) => {
+    const text = [
+      `Bank details — ${a.bank_name}`,
+      `Account: ${a.account_name}`,
+      a.account_number ? `Account #: ${a.account_number}` : null,
+      a.iban ? `IBAN: ${a.iban}` : null,
+      `Currency: ${a.currency}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    shareVia(kind, { text, url: `Bank details — ${a.bank_name}` });
+  };
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? accounts.filter((a) =>
+        [a.bank_name, a.account_name, a.account_number, a.iban].some((v) =>
+          v.toLowerCase().includes(q)
+        )
+      )
+    : accounts;
 
   const total = accounts.reduce((s, a) => s + a.current_balance, 0);
   const currencies = new Set(accounts.map((a) => a.currency)).size;
@@ -146,9 +202,23 @@ export default function BankAccounts() {
           changeTone="up"
         />
       </div>
+      <div className="mb-4">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search by bank, account, number or IBAN…"
+          className="max-w-xs"
+        />
+      </div>
       <DataTable<BankAccount>
-        rows={accounts}
-        empty="No bank accounts added yet"
+        rows={filtered}
+        loading={syncing}
+        onRowClick={setQuickView}
+        empty={
+          search
+            ? "No bank accounts match your search"
+            : "No bank accounts added yet"
+        }
         columns={[
           {
             key: "bank",
@@ -196,15 +266,19 @@ export default function BankAccounts() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (a) => (
-              <button
-                aria-label={`Delete ${a.bank_name} account`}
-                className="rounded-xl p-1.5 text-brand-500 hover:bg-danger/10 hover:text-danger active:scale-95 cursor-pointer transition-colors duration-200"
-                onClick={() => del(a)}
-              >
-                <Trash2 size={15} />
-              </button>
+              <RowActions
+                onView={() => setQuickView(a)}
+                onEdit={() => openEdit(a)}
+                onCopy={() => dup(a)}
+                onDelete={() => del(a)}
+                onSend={{
+                  whatsapp: () => shareAccount("whatsapp", a),
+                  email: () => shareAccount("email", a),
+                  sms: () => shareAccount("sms", a),
+                }}
+              />
             ),
           },
         ]}
@@ -231,6 +305,43 @@ export default function BankAccounts() {
       {reconOpen && (
         <ReconcileModal open={reconOpen} onClose={() => setReconOpen(false)} />
       )}
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const a = quickView;
+                setQuickView(null);
+                openEdit(a);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title: `${quickView.bank_name} — ${quickView.account_name}`,
+                subtitle: "Company bank account",
+                badge: <Badge tone="info">{quickView.currency}</Badge>,
+                meta: [
+                  {
+                    label: "Account number",
+                    value: quickView.account_number || "—",
+                  },
+                  { label: "IBAN", value: quickView.iban || "—" },
+                  { label: "Currency", value: quickView.currency },
+                  {
+                    label: "Opening balance",
+                    value: money(quickView.opening_balance, quickView.currency),
+                  },
+                  { label: "Added", value: fmtDate(quickView.created_at) },
+                ],
+                total: quickView.current_balance,
+                currency: quickView.currency,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Trash2, ShoppingCart, Wallet, Receipt } from "lucide-react";
+import { Plus, ShoppingCart, Wallet, Receipt } from "lucide-react";
 import { fin, Expense, Account } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
@@ -14,7 +14,15 @@ import {
   Modal,
   Field,
   ErrorBanner,
+  SearchInput,
+  FilterChip,
 } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 
 export default function Purchase() {
@@ -52,9 +60,81 @@ export default function Purchase() {
     for (const e of expenses) m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
   }, [expenses]);
+  const catCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of expenses) m.set(e.category, (m.get(e.category) ?? 0) + 1);
+    return m;
+  }, [expenses]);
   const thisMonth = expenses
     .filter((e) => new Date(e.expense_date).getMonth() === new Date().getMonth())
     .reduce((s, e) => s + e.amount, 0);
+
+  // ---- List filters (DEMO parity: search + category chips) ----
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState<string>("all");
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return expenses.filter((e) => {
+      if (catFilter !== "all" && e.category !== catFilter) return false;
+      if (!q) return true;
+      return (
+        e.category.toLowerCase().includes(q) ||
+        (e.description ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [expenses, search, catFilter]);
+
+  // ---- Row actions (DEMO parity: quick view / duplicate / send / delete) ----
+  const [quickView, setQuickView] = useState<Expense | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const openQuickView = (e: Expense) => {
+    setQuickView(e);
+    if (accounts.length === 0)
+      fin
+        .accounts()
+        .then(setAccounts)
+        .catch(() => {});
+  };
+
+  const duplicateRow = async (e: Expense) => {
+    try {
+      await fin.createExpense(
+        e.category,
+        e.description ?? null,
+        e.amount,
+        e.expense_date,
+        e.account_id ?? null
+      );
+      load();
+      toast.success("Purchase duplicated");
+    } catch (err) {
+      toast.error(
+        `Could not duplicate purchase: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+
+  const shareRow = (kind: ShareKind, e: Expense) => {
+    const url = `${location.origin}${location.pathname}#/purchase`;
+    const text = `Purchase record\nCategory: ${e.category}\n${
+      e.description ? `Description: ${e.description}\n` : ""
+    }Amount: ${aed(e.amount)}\nDate: ${fmtDate(e.expense_date)}`;
+    shareVia(kind, { text, url });
+    if (kind === "copyLink") toast.success("Purchase page link copied");
+  };
+
+  const deleteRow = async (e: Expense) => {
+    if (
+      !(await confirm({
+        title: "Delete purchase",
+        message: "Delete this purchase record? This cannot be undone.",
+      }))
+    )
+      return;
+    await fin.deleteExpense(e.id);
+    load();
+    toast.success("Purchase deleted");
+  };
 
   return (
     <div className="animate-fade-up">
@@ -100,6 +180,34 @@ export default function Purchase() {
         />
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <SearchInput
+          className="w-full max-w-xs"
+          value={search}
+          onChange={setSearch}
+          placeholder="Search purchases by category or description…"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip
+            active={catFilter === "all"}
+            onClick={() => setCatFilter("all")}
+            count={expenses.length}
+          >
+            All
+          </FilterChip>
+          {byCat.map(([c]) => (
+            <FilterChip
+              key={c}
+              active={catFilter === c}
+              onClick={() => setCatFilter(c)}
+              count={catCounts.get(c)}
+            >
+              {c}
+            </FilterChip>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <InfoCard title="Spend by category">
           <ul className="space-y-3">
@@ -128,9 +236,14 @@ export default function Purchase() {
 
         <div className="lg:col-span-2">
           <DataTable<Expense>
-            rows={expenses}
+            rows={filtered}
             loading={loading}
-            empty="No purchases recorded"
+            empty={
+              search || catFilter !== "all"
+                ? "No purchases match your filters"
+                : "No purchases recorded"
+            }
+            onRowClick={(e) => openQuickView(e)}
             columns={[
               {
                 key: "cat",
@@ -158,26 +271,19 @@ export default function Purchase() {
               },
               {
                 key: "act",
-                label: "",
+                label: "Actions",
                 render: (e) => (
-                  <button
-                    aria-label="Delete purchase"
-                    className="text-danger hover:bg-danger/10 rounded-md p-1.5 cursor-pointer transition-colors duration-200"
-                    onClick={async () => {
-                      if (
-                        !(await confirm({
-                          title: "Delete purchase",
-                          message: "Delete this purchase record? This cannot be undone.",
-                        }))
-                      )
-                        return;
-                      await fin.deleteExpense(e.id);
-                      load();
-                      toast.success("Purchase deleted");
+                  <RowActions
+                    onView={() => openQuickView(e)}
+                    onCopy={() => duplicateRow(e)}
+                    onDelete={() => deleteRow(e)}
+                    onSend={{
+                      whatsapp: () => shareRow("whatsapp", e),
+                      email: () => shareRow("email", e),
+                      sms: () => shareRow("sms", e),
+                      copyLink: () => shareRow("copyLink", e),
                     }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  />
                 ),
               },
             ]}
@@ -186,6 +292,34 @@ export default function Purchase() {
       </div>
 
       <PurchaseModal open={open} onClose={() => setOpen(false)} onSaved={load} />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        data={
+          quickView
+            ? {
+                title: quickView.description || `${quickView.category} purchase`,
+                subtitle: `Recorded ${fmtDate(quickView.expense_date)}`,
+                badge: <Badge tone="info">{quickView.category}</Badge>,
+                meta: [
+                  { label: "Date", value: fmtDate(quickView.expense_date) },
+                  { label: "Amount", value: aed(quickView.amount) },
+                  {
+                    label: "Paid from",
+                    value: quickView.account_id
+                      ? accounts.find((a) => a.id === quickView.account_id)?.name ??
+                        `Account #${quickView.account_id}`
+                      : "Not linked",
+                  },
+                  { label: "Record ID", value: `#${quickView.id}` },
+                ],
+                total: quickView.amount,
+                currency: getDisplayCurrency(),
+              }
+            : null
+        }
+      />
     </div>
   );
 }

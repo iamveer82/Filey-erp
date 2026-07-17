@@ -9,15 +9,15 @@ import {
   Check,
   Send,
   Monitor,
-  PenTool,
-  Trash2,
   FileText,
   Wallet,
 } from "lucide-react";
 import {
   receipts,
   billing,
+  crm,
   type CompanyProfile,
+  type CrmCustomer,
   type ReceiptDoc,
   type ReceiptSummary,
 } from "../lib/api";
@@ -48,8 +48,15 @@ import {
   Field,
   ShareToggle,
   SearchInput,
+  FilterChip,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -142,6 +149,7 @@ export default function PaymentReceipt() {
     confirm({ title, message, danger: true });
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [docs, setDocs] = useState<ReceiptSummary[]>([]);
+  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [view, setView] = useState<"list" | "edit">("list");
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
@@ -149,6 +157,8 @@ export default function PaymentReceipt() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates());
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [quickView, setQuickView] = useState<{ d: ReceiptSummary; doc: ReceiptDoc | null } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [zoom] = useState(100);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>({});
@@ -159,6 +169,7 @@ export default function PaymentReceipt() {
       setCompany(c);
       setDocs(d);
     });
+    crm.customers().then(setCustomers).catch(() => {});
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
     syncCustomTemplates().then(setCustomTemplates).catch(() => {});
   }, []);
@@ -329,11 +340,82 @@ export default function PaymentReceipt() {
     }
   };
 
-  const filtered = docs.filter(
-    (d) =>
-      d.number.toLowerCase().includes(search.toLowerCase()) ||
-      d.customer_name.toLowerCase().includes(search.toLowerCase())
-  );
+  // ---- List-row actions (DEMO parity) ----
+  const openQuickView = (d: ReceiptSummary) => {
+    setQuickView({ d, doc: null });
+    receipts
+      .get(d.id)
+      .then((doc) => setQuickView((qv) => (qv && qv.d.id === d.id ? { d, doc } : qv)))
+      .catch(() => toast.error("Failed to load receipt details"));
+  };
+
+  const findCustomer = (name: string) =>
+    customers.find((c) => (c.company || c.name) === name);
+
+  const shareReceipt = async (kind: ShareKind, d: ReceiptSummary) => {
+    const cust = findCustomer(d.customer_name);
+    const ccy = company?.currency || "AED";
+    let url = `${location.origin}${location.pathname}#/payment-receipts`;
+    try {
+      const token = await receipts.publicLink(d.id);
+      url = `${location.origin}${location.pathname}#/portal/${token}`;
+      refreshList(); // publicLink flips the doc's shared flag
+    } catch {
+      /* fall back to the app link (e.g. Local mode) */
+    }
+    const text = `Receipt ${d.number} for ${money(d.amount || 0, ccy)} received. Thank you! View: ${url}`;
+    shareVia(kind, {
+      phone: cust?.phone || "",
+      email: cust?.email || "",
+      text,
+      url,
+    });
+    if (kind === "copyLink") toast.success("Public receipt link copied");
+  };
+
+  const duplicateRow = async (id: number) => {
+    try {
+      const d = await receipts.get(id);
+      const numbers = docs.map((x) => x.number);
+      setForm({
+        ...blankForm(company || ({} as any), numbers),
+        ...d,
+        id: undefined,
+        number: nextDocNumber({ prefix: "REC", existing: numbers }),
+        status: "draft",
+        shared: false,
+        share_token: undefined,
+        issue_date: today(),
+        due_date: today(),
+        show_stamp: d.show_stamp || false,
+        show_signature: d.show_signature || false,
+      });
+      setView("edit");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.info("Receipt duplicated. Save to create a new copy.");
+    } catch (e) {
+      toast.error("Duplicate failed: " + errMsg(e));
+    }
+  };
+
+  /** Open the receipt in the editor and reuse the existing real PDF export. */
+  const printReceipt = async (id: number) => {
+    await loadDoc(id);
+    // allow the editor preview to mount before rasterizing
+    window.setTimeout(() => downloadPdf(), 400);
+  };
+
+  const filtered = docs.filter((d) => {
+    const q = search.toLowerCase();
+    const matchQ =
+      !q ||
+      d.number.toLowerCase().includes(q) ||
+      d.customer_name.toLowerCase().includes(q);
+    const matchS = statusFilter === "all" || (d.status || "draft") === statusFilter;
+    return matchQ && matchS;
+  });
+
+  const statuses = Array.from(new Set(docs.map((d) => d.status || "draft"))).sort();
 
   const stats = {
     total: docs.length,
@@ -344,25 +426,58 @@ export default function PaymentReceipt() {
 
   return (
     <div className="p-6">
-      <PageHeader title="Payment Receipts" />
+      <PageHeader
+        title="Payment Receipts"
+        subtitle="Payments received against invoices"
+        action={
+          <button
+            onClick={newReceipt}
+            className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
+          >
+            <Plus size={14} /> New Receipt
+          </button>
+        }
+      />
 
       {view === "list" ? (
         <>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard label="Total receipts" value={String(stats.total)} icon={<FileText size={18} />} />
-            <MetricCard label="Total received" value={money(stats.amount, company?.currency || "AED")} icon={<Wallet size={18} />} />
-            <MetricCard label="Sent" value={String(stats.sent)} icon={<Send size={18} />} />
-            <MetricCard label="Paid" value={String(stats.paid)} icon={<Check size={18} />} />
+          <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+            <MetricCard label="Total receipts" value={String(stats.total)} icon={<FileText size={20} />} />
+            <MetricCard
+              label="Total received"
+              value={money(stats.amount, company?.currency || "AED")}
+              icon={<Wallet size={20} />}
+              iconClass="bg-primary-100 text-ink"
+            />
+            <MetricCard label="Sent" value={String(stats.sent)} icon={<Send size={20} />} iconClass="bg-info/15 text-info" />
+            <MetricCard label="Paid" value={String(stats.paid)} icon={<Check size={20} />} iconClass="bg-success/15 text-success" />
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <SearchInput value={search} onChange={setSearch} placeholder="Search receipts…" />
-            <button className="btn-primary flex items-center gap-2" onClick={newReceipt}>
-              <Plus size={16} /> New Receipt
-            </button>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search receipts by number or payer…"
+              className="max-w-xs"
+            />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <FilterChip active={statusFilter === "all"} onClick={() => setStatusFilter("all")} count={docs.length}>
+                All
+              </FilterChip>
+              {statuses.map((s) => (
+                <FilterChip
+                  key={s}
+                  active={statusFilter === s}
+                  onClick={() => setStatusFilter(s)}
+                  count={docs.filter((d) => (d.status || "draft") === s).length}
+                >
+                  {s}
+                </FilterChip>
+              ))}
+            </div>
           </div>
 
-          <div className="mt-4 card">
+          <div className="card">
             <DataTable
               columns={[
                 { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
@@ -386,24 +501,91 @@ export default function PaymentReceipt() {
                 },
                 {
                   key: "actions",
-                  label: "",
+                  label: "Actions",
                   render: (d) => (
-                    <div className="flex gap-2 justify-end">
-                      <button className="btn-ghost" onClick={() => loadDoc(d.id)}>
-                        <PenTool size={14} />
-                      </button>
-                      <button className="btn-ghost text-danger" onClick={() => remove(d.id)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+                    <RowActions
+                      onView={() => openQuickView(d)}
+                      onEdit={() => loadDoc(d.id)}
+                      onCopy={() => duplicateRow(d.id)}
+                      onDelete={() => remove(d.id)}
+                      onSend={{
+                        whatsapp: () => shareReceipt("whatsapp", d),
+                        email: () => shareReceipt("email", d),
+                        sms: () => shareReceipt("sms", d),
+                        copyLink: () => shareReceipt("copyLink", d),
+                      }}
+                    />
                   ),
                 },
               ]}
               rows={filtered}
               rowKey={(d: ReceiptSummary) => d.id}
-              empty="No receipts yet."
+              onRowClick={(d) => loadDoc(d.id)}
+              empty={
+                search || statusFilter !== "all"
+                  ? "No receipts match your filters."
+                  : "No receipts yet."
+              }
             />
           </div>
+
+          <QuickViewModal
+            open={!!quickView}
+            onClose={() => setQuickView(null)}
+            onEdit={
+              quickView
+                ? () => {
+                    const id = quickView.d.id;
+                    setQuickView(null);
+                    loadDoc(id);
+                  }
+                : undefined
+            }
+            onPrint={
+              quickView
+                ? () => {
+                    const id = quickView.d.id;
+                    setQuickView(null);
+                    printReceipt(id);
+                  }
+                : undefined
+            }
+            data={
+              quickView
+                ? {
+                    title: `Receipt ${quickView.d.number}`,
+                    subtitle: `From ${quickView.d.customer_name || "—"}`,
+                    badge: (
+                      <Badge tone={statusTone(quickView.doc?.status || quickView.d.status)}>
+                        {quickView.doc?.status || quickView.d.status}
+                      </Badge>
+                    ),
+                    meta: [
+                      { label: "Payer", value: quickView.d.customer_name },
+                      { label: "Date", value: fmtDate(quickView.d.payment_date) },
+                      { label: "Method", value: quickView.doc?.payment_method || "—" },
+                      { label: "Reference", value: quickView.doc?.ref_number || "—" },
+                      {
+                        label: "Currency",
+                        value: quickView.doc?.currency || company?.currency || "AED",
+                      },
+                    ],
+                    items: [
+                      {
+                        desc:
+                          quickView.doc?.for_description ||
+                          `Payment received${quickView.doc?.payment_method ? ` (${quickView.doc.payment_method})` : ""}`,
+                        qty: 1,
+                        price: Number(quickView.doc?.amount ?? quickView.d.amount) || 0,
+                      },
+                    ],
+                    total: Number(quickView.doc?.amount ?? quickView.d.amount) || 0,
+                    currency: quickView.doc?.currency || company?.currency || "AED",
+                    notes: quickView.doc?.notes || undefined,
+                  }
+                : null
+            }
+          />
         </>
       ) : (
         <>

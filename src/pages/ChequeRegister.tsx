@@ -1,16 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
-  Trash2,
   Check,
-  Search,
   ArrowUpRight,
   ArrowDownLeft,
   CheckCircle2,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput } from "../lib/format";
-import { PageHeader, MetricCard, DataTable, Badge, Modal, Field } from "../components/ui";
+import {
+  PageHeader,
+  MetricCard,
+  DataTable,
+  Badge,
+  Modal,
+  Field,
+  SearchInput,
+  FilterChip,
+} from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 import { tools } from "../lib/api";
 
@@ -83,6 +96,8 @@ export default function ChequeRegister() {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Cheque | null>(null);
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [quickView, setQuickView] = useState<Cheque | null>(null);
 
   useEffect(() => {
     setCheques(loadCheques()); // instant paint from the local cache…
@@ -93,11 +108,12 @@ export default function ChequeRegister() {
     () =>
       cheques.filter(
         (c) =>
-          c.cheque_no.toLowerCase().includes(q.toLowerCase()) ||
-          c.party.toLowerCase().includes(q.toLowerCase()) ||
-          c.bank.toLowerCase().includes(q.toLowerCase())
+          (statusFilter === "all" || c.status === statusFilter) &&
+          (c.cheque_no.toLowerCase().includes(q.toLowerCase()) ||
+            c.party.toLowerCase().includes(q.toLowerCase()) ||
+            c.bank.toLowerCase().includes(q.toLowerCase()))
       ),
-    [cheques, q]
+    [cheques, q, statusFilter]
   );
 
   const totals = useMemo(
@@ -138,6 +154,32 @@ export default function ChequeRegister() {
     toast.success("Marked as cleared.");
   };
 
+  const editCheque = (c: Cheque) => {
+    setEdit(c);
+    setOpen(true);
+  };
+
+  const duplicate = (c: Cheque) => {
+    const copy: Cheque = {
+      ...c,
+      id: Date.now(),
+      created_at: new Date().toISOString(),
+    };
+    const next = [...cheques, copy];
+    setCheques(next);
+    saveCheques(next);
+    toast.success("Cheque duplicated.");
+  };
+
+  // Cheques are device-local records with no public link or stored contact,
+  // so sharing sends a plain-text summary (no copy-link).
+  const shareCheque = (kind: Exclude<ShareKind, "copyLink">, c: Cheque) => {
+    const text = `Cheque #${c.cheque_no} (${c.type})\nParty: ${c.party}\nBank: ${
+      c.bank || "—"
+    }\nAmount: ${aed(c.amount)}\nDue: ${fmtDate(c.due_date)}\nStatus: ${c.status}`;
+    shareVia(kind, { text, url: `Cheque #${c.cheque_no}` });
+  };
+
   return (
     <div className="animate-fade-up">
       <PageHeader
@@ -175,23 +217,39 @@ export default function ChequeRegister() {
           iconClass="bg-success/15 text-success"
         />
       </div>
-      <div className="mb-4">
-        <div className="relative w-full max-w-xs">
-          <Search
-            size={16}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-400"
-          />
-          <input
-            className="input pl-10"
-            placeholder="Search cheques…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          placeholder="Search cheques…"
+          className="w-full max-w-xs"
+        />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(["all", "pending", "cleared", "bounced", "cancelled"] as const).map(
+            (s) => (
+              <FilterChip
+                key={s}
+                active={statusFilter === s}
+                onClick={() => setStatusFilter(s)}
+                count={
+                  s === "all"
+                    ? cheques.length
+                    : cheques.filter((c) => c.status === s).length
+                }
+              >
+                {s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)}
+              </FilterChip>
+            )
+          )}
         </div>
       </div>
       <DataTable<Cheque>
         rows={filtered}
-        empty="No cheques recorded yet"
+        empty={
+          q || statusFilter !== "all"
+            ? "No cheques match your filter"
+            : "No cheques recorded yet"
+        }
         columns={[
           {
             key: "no",
@@ -253,25 +311,30 @@ export default function ChequeRegister() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (c) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center justify-end gap-1.5">
                 {c.status === "pending" && (
                   <button
                     aria-label={`Mark cheque ${c.cheque_no} cleared`}
-                    className="text-success hover:bg-success/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    title="Mark cleared"
+                    className="h-7 w-7 grid place-items-center rounded-md text-success hover:bg-success/10 cursor-pointer transition-colors duration-200"
                     onClick={() => markCleared(c)}
                   >
                     <Check size={15} />
                   </button>
                 )}
-                <button
-                  aria-label={`Delete cheque ${c.cheque_no}`}
-                  className="text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => del(c)}
-                >
-                  <Trash2 size={15} />
-                </button>
+                <RowActions
+                  onView={() => setQuickView(c)}
+                  onEdit={() => editCheque(c)}
+                  onCopy={() => duplicate(c)}
+                  onDelete={() => del(c)}
+                  onSend={{
+                    whatsapp: () => shareCheque("whatsapp", c),
+                    email: () => shareCheque("email", c),
+                    sms: () => shareCheque("sms", c),
+                  }}
+                />
               </div>
             ),
           },
@@ -296,6 +359,50 @@ export default function ChequeRegister() {
           }}
         />
       )}
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const c = quickView;
+                setQuickView(null);
+                editCheque(c);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title: `Cheque #${quickView.cheque_no}`,
+                subtitle: quickView.party,
+                badge: (
+                  <Badge tone={statusTone(quickView.status)}>
+                    {quickView.status}
+                  </Badge>
+                ),
+                meta: [
+                  {
+                    label: "Type",
+                    value:
+                      quickView.type[0].toUpperCase() + quickView.type.slice(1),
+                  },
+                  { label: "Party", value: quickView.party },
+                  { label: "Bank", value: quickView.bank || "—" },
+                  { label: "Issue date", value: fmtDate(quickView.issue_date) },
+                  { label: "Due date", value: fmtDate(quickView.due_date) },
+                  {
+                    label: "Recorded",
+                    value: fmtDate((quickView.created_at || "").slice(0, 10)),
+                  },
+                ],
+                total: quickView.amount,
+                currency: "AED",
+                notes: quickView.notes || undefined,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

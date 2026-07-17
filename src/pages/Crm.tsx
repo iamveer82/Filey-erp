@@ -53,6 +53,7 @@ export default function Crm() {
   const [acts, setActs] = useState<Activity[]>([]);
   const [taskOpen, setTaskOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [dealNonce, setDealNonce] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -82,6 +83,7 @@ export default function Crm() {
   const pipelineValue = opps
     .filter((o) => !["won", "lost"].includes(o.stage))
     .reduce((s, o) => s + o.value, 0);
+  const openDeals = opps.filter((o) => !["won", "lost"].includes(o.stage)).length;
 
   // Real trend: new customers per month over the last 6 months.
   const trend = useMemo(() => {
@@ -161,7 +163,7 @@ export default function Crm() {
     <div className="animate-fade-up">
       <PageHeader
         title="CRM"
-        subtitle="Manage relationships, track interactions and grow your business"
+        subtitle={`Deals in play: ${aed(pipelineValue)} across ${openDeals} deals`}
         action={
           <div className="flex gap-2 flex-wrap">
             <button
@@ -190,6 +192,16 @@ export default function Crm() {
               onClick={() => setImportOpen(true)}
             >
               <Upload size={15} /> Import
+            </button>
+            <button
+              className="btn-primary"
+              aria-label="Add Deal"
+              onClick={() => {
+                setView("pipeline");
+                setDealNonce((n) => n + 1);
+              }}
+            >
+              <Plus size={15} /> Add Deal
             </button>
           </div>
         }
@@ -223,6 +235,8 @@ export default function Crm() {
           setOpps={setOpps}
           reload={load}
           onOpen={setSelectedOpp}
+          quickAddNonce={dealNonce}
+          onQuickAddHandled={() => setDealNonce(0)}
         />
       ) : (
         <>

@@ -8,14 +8,20 @@ import {
   CreditCard,
   ShieldCheck,
   Bell,
-  Plug,
   DatabaseBackup,
-  History,
   Sparkles,
   HardDrive,
+  Grid3x3,
+  Palette,
+  Lock,
+  Mail,
+  Cable,
+  Activity,
+  KeyRound,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
 import { cloudConfigured } from "../../lib/supabase";
+import { cn } from "../../lib/format";
 import CompanyDetails from "./CompanyDetails";
 import AccountProfile from "./AccountProfile";
 import AiSettings from "../../components/AiSettings";
@@ -23,6 +29,7 @@ import UsersRoles from "./UsersRoles";
 import ActivityLog from "./ActivityLog";
 import SecurityPanel, { ChangePasswordModal } from "./SecurityPanel";
 import AppsManager from "./AppsManager";
+import AppearancePanel from "./AppearancePanel";
 import PreferencesPanel from "./PreferencesPanel";
 import NotificationsPanel from "./NotificationsPanel";
 import BillingPanel from "./BillingPanel";
@@ -31,7 +38,6 @@ import BackupPanel from "./BackupPanel";
 import DataModePanel from "./DataModePanel";
 import EmailPanel from "./EmailPanel";
 import LicensePanel from "./LicensePanel";
-import { KeyRound } from "lucide-react";
 // import { MessageSquare } from "lucide-react";
 
 type Section =
@@ -40,6 +46,7 @@ type Section =
   | "account-mgmt"
   | "users"
   | "apps"
+  | "appearance"
   | "preferences"
   | "billing"
   | "security"
@@ -59,18 +66,19 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "ai", label: "AI Assistant", icon: Sparkles },
   { id: "account-mgmt", label: "Account Management", icon: ShieldCheck },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
-  { id: "apps", label: "Apps & Modules", icon: SlidersHorizontal },
+  { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
+  { id: "appearance", label: "Appearance", icon: Palette },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "billing", label: "Billing & Subscription", icon: CreditCard },
   { id: "license", label: "Desktop License", icon: KeyRound },
-  { id: "security", label: "Security", icon: ShieldCheck },
+  { id: "security", label: "Security", icon: Lock },
   { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "email", label: "Email", icon: Bell },
+  { id: "email", label: "Email", icon: Mail },
   // { id: "sms", label: "SMS", icon: MessageSquare },
-  { id: "integrations", label: "Integrations", icon: Plug },
+  { id: "integrations", label: "Integrations", icon: Cable },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "datamode", label: "Data & Storage", icon: HardDrive },
-  { id: "activity", label: "Activity Log", icon: History },
+  { id: "activity", label: "Activity Log", icon: Activity },
 ];
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the
@@ -87,49 +95,63 @@ export default function Settings() {
   const [pwOpen, setPwOpen] = useState(false);
 
   return (
-    <div className="animate-fade-up">
+    <div className="animate-fade-up pb-10">
       <PageHeader
         title="Settings"
-        subtitle="Manage your company details, account preferences and system settings"
+        subtitle="Manage your workspace, company profile and preferences"
       />
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4 items-start">
-        <nav className="card !p-2 space-y-0.5">
-          {NAV.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setSection(id)}
-              className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-left leading-snug transition-colors cursor-pointer ${
-                section === id
-                  ? "bg-primary-100 text-primary-700"
-                  : "text-brand-500 hover:bg-brand-50 hover:text-ink"
-              }`}
-            >
-              <Icon size={16} className="shrink-0" />
-              <span className="flex-1 min-w-0 truncate">{label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="min-w-0">
-          {section === "company" && <CompanyDetails />}
-          {section === "account" && <AccountProfile />}
-          {section === "ai" && <AiSettings />}
-          {section === "account-mgmt" && <AccountProfile />}
-          {section === "users" && <UsersRoles />}
-          {section === "apps" && <AppsManager />}
-          {section === "activity" && <ActivityLog />}
-          {section === "security" && (
-            <SecurityPanel onChangePassword={() => setPwOpen(true)} />
-          )}
-          {section === "preferences" && <PreferencesPanel />}
-          {section === "billing" && <BillingPanel />}
-          {section === "license" && <LicensePanel />}
-          {section === "notifications" && <NotificationsPanel />}
-          {section === "email" && <EmailPanel />}
-          {/* {section === "sms" && <SmsPanel />} */}
-          {section === "integrations" && <IntegrationsPanel />}
-          {section === "backup" && <BackupPanel />}
-          {section === "datamode" && <DataModePanel />}
+
+      {/* Horizontal section tabs (reference Settings nav) */}
+      <div className="border-b border-border mb-5">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide -mb-px">
+          {NAV.map(({ id, label, icon: Icon }) => {
+            const isActive = section === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setSection(id)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-2.5 text-[13px] whitespace-nowrap border-b-2 transition-colors cursor-pointer",
+                  isActive
+                    ? "border-primary-500 text-foreground font-medium"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0",
+                    isActive && "text-primary-600 dark:text-primary-400"
+                  )}
+                  strokeWidth={1.75}
+                />
+                <span>{label}</span>
+              </button>
+            );
+          })}
         </div>
+      </div>
+
+      <div>
+        {section === "company" && <CompanyDetails />}
+        {section === "account" && <AccountProfile />}
+        {section === "ai" && <AiSettings />}
+        {section === "account-mgmt" && <AccountProfile />}
+        {section === "users" && <UsersRoles />}
+        {section === "apps" && <AppsManager />}
+        {section === "appearance" && <AppearancePanel />}
+        {section === "activity" && <ActivityLog />}
+        {section === "security" && (
+          <SecurityPanel onChangePassword={() => setPwOpen(true)} />
+        )}
+        {section === "preferences" && <PreferencesPanel />}
+        {section === "billing" && <BillingPanel />}
+        {section === "license" && <LicensePanel />}
+        {section === "notifications" && <NotificationsPanel />}
+        {section === "email" && <EmailPanel />}
+        {/* {section === "sms" && <SmsPanel />} */}
+        {section === "integrations" && <IntegrationsPanel />}
+        {section === "backup" && <BackupPanel />}
+        {section === "datamode" && <DataModePanel />}
       </div>
       <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
     </div>

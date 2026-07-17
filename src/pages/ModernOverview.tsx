@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Sparkles, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle2, Clock, User } from "lucide-react";
+import { Plus, Download, Sparkles, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle2, Clock, User } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   AreaChart,
@@ -33,6 +33,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { num, aed, cn, fmtDate } from "../lib/format";
+import { downloadCsv } from "../lib/csv";
 import { Badge, statusTone, ErrorBanner, PageHeader, Skeleton } from "../components/ui";
 import { useChartColors } from "../lib/accent";
 
@@ -146,6 +147,41 @@ export default function ModernOverview() {
     return { total, parties: parties.size };
   }, [posList, poPayments]);
 
+  // ── Real period-over-period deltas: last 30 days vs the 30 before that.
+  // Only computed where dated history exists (revenue by invoice issue date,
+  // orders by creation date). Point-in-time balances (to collect / to pay)
+  // have no prior snapshot, so they show their hint text only — no invented
+  // percentages.
+  const deltas = useMemo(() => {
+    const DAY = 86400000;
+    const now = Date.now();
+    const curStart = now - 30 * DAY;
+    const prevStart = now - 60 * DAY;
+    const pct = (cur: number, prev: number): number | null =>
+      prev > 0 ? ((cur - prev) / prev) * 100 : null;
+
+    let revCur = 0;
+    let revPrev = 0;
+    for (const i of invoices) {
+      if (i.status === "draft" || !i.issue_date) continue;
+      const t = +new Date(i.issue_date);
+      const collected = (i.total || 0) - (i.balance ?? 0);
+      if (t >= curStart) revCur += collected;
+      else if (t >= prevStart) revPrev += collected;
+    }
+
+    let ordCur = 0;
+    let ordPrev = 0;
+    for (const o of orders) {
+      if (!o.created_at) continue;
+      const t = +new Date(o.created_at);
+      if (t >= curStart) ordCur += 1;
+      else if (t >= prevStart) ordPrev += 1;
+    }
+
+    return { revenue: pct(revCur, revPrev), orders: pct(ordCur, ordPrev) };
+  }, [invoices, orders]);
+
   // ── Daily invoiced vs collected series for the selected range. Collected
   // is attributed to the invoice's issue date (payment dates aren't in the
   // summary) — a close proxy for cash-in shape. Real data only, no filler.
@@ -233,28 +269,28 @@ export default function ModernOverview() {
     {
       label: "Revenue",
       value: aed(revenue.collected),
-      up: true,
+      delta: deltas.revenue,
       hint: `${num(revenue.count)} invoices · ${aed(revenue.total)} issued`,
       to: "/invoicing",
     },
     {
       label: "Orders",
       value: num(orderStats.total),
-      up: true,
+      delta: deltas.orders,
       hint: `${orderStats.progress} active · ${orderStats.completed} done`,
       to: "/orders",
     },
     {
       label: "To collect",
       value: aed(receivable.total),
-      up: receivable.total === 0,
+      delta: null as number | null,
       hint: `${receivable.parties} ${receivable.parties === 1 ? "party" : "parties"} owe you`,
       to: "/invoicing",
     },
     {
       label: "To pay",
       value: aed(payable.total),
-      up: payable.total === 0,
+      delta: null as number | null,
       hint: `${payable.parties} ${payable.parties === 1 ? "supplier" : "suppliers"}`,
       to: "/purchase-orders",
     },
@@ -268,15 +304,39 @@ export default function ModernOverview() {
     color: c.tooltipFg,
   };
 
+  // Export the KPI snapshot currently on screen (reference Export button).
+  const onExport = () => {
+    downloadCsv(
+      "filey-overview",
+      kpis.map((k) => ({
+        metric: k.label,
+        value: k.value,
+        change_30d: k.delta != null ? `${k.delta >= 0 ? "+" : ""}${k.delta.toFixed(1)}%` : "",
+        detail: k.hint,
+      })),
+      [
+        { key: "metric", label: "Metric" },
+        { key: "value", label: "Value" },
+        { key: "change_30d", label: "Change vs prior 30d" },
+        { key: "detail", label: "Detail" },
+      ]
+    );
+  };
+
   return (
     <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
         title={`Welcome back, ${companyName || "your business"}`}
         subtitle="Live view of your business — driven by real data in your workspace."
         action={
-          <button onClick={() => nav("/invoicing?new=1")} className="btn-primary">
-            <Plus size={15} /> New invoice
-          </button>
+          <>
+            <button onClick={onExport} className="btn-ghost">
+              <Download size={15} /> Export
+            </button>
+            <button onClick={() => nav("/invoicing?new=1")} className="btn-primary">
+              <Plus size={15} /> New invoice
+            </button>
+          </>
         }
       />
 
@@ -285,7 +345,8 @@ export default function ModernOverview() {
       {/* ── KPI joined grid ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card">
         {kpis.map((k, i) => {
-          const Icon = k.up ? TrendingUp : TrendingDown;
+          const up = (k.delta ?? 0) >= 0;
+          const Icon = up ? TrendingUp : TrendingDown;
           return (
             <button
               key={k.label}
@@ -305,14 +366,19 @@ export default function ModernOverview() {
                 </div>
               )}
               <div className="mt-2 flex items-center gap-2 text-[11.5px]">
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 font-medium",
-                    k.up ? "text-success" : "text-warning"
-                  )}
-                >
-                  <Icon className="h-3 w-3" />
-                </span>
+                {k.delta != null && (
+                  <span
+                    title="vs previous 30 days"
+                    className={cn(
+                      "inline-flex items-center gap-1 font-medium",
+                      up ? "text-success" : "text-danger"
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {k.delta >= 0 ? "+" : ""}
+                    {k.delta.toFixed(1)}%
+                  </span>
+                )}
                 <span className="text-muted-foreground">{k.hint}</span>
               </div>
             </button>

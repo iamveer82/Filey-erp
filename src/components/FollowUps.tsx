@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, Trash2, AlarmClock } from "lucide-react";
-import { followups, type FollowUp } from "../lib/api";
+import { Plus, Trash2, AlarmClock, Repeat, Check } from "lucide-react";
+import {
+  followups,
+  nextFollowUpDate,
+  type FollowUp,
+  type FollowUpRepeat,
+} from "../lib/api";
+import { Badge } from "./ui";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { cn, fmtDate } from "../lib/format";
@@ -26,6 +32,7 @@ export default function FollowUps({
   const [title, setTitle] = useState("");
   const [due, setDue] = useState(todayISO());
   const [cust, setCust] = useState<number | "">("");
+  const [repeat, setRepeat] = useState<FollowUpRepeat>("none");
   const [busy, setBusy] = useState(false);
 
   const load = () =>
@@ -55,10 +62,12 @@ export default function FollowUps({
         due_date: due,
         customer_id: customerId ?? (cust === "" ? null : Number(cust)),
         customer_name: customerName ?? selected?.company ?? selected?.name ?? "",
+        repeat,
       });
       setTitle("");
       setDue(todayISO());
       setCust("");
+      setRepeat("none");
       load();
       toast.success("Reminder added — we'll surface it when it's due.");
     } catch (e) {
@@ -70,7 +79,14 @@ export default function FollowUps({
 
   const toggle = async (f: FollowUp) => {
     try {
-      await followups.update(f.id, { done: !f.done });
+      if (!f.done && f.repeat && f.repeat !== "none") {
+        await followups.complete(f);
+        toast.success(
+          `Done — next ${f.repeat} reminder on ${fmtDate(nextFollowUpDate(f.due_date, f.repeat))}.`
+        );
+      } else {
+        await followups.update(f.id, { done: !f.done });
+      }
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -103,44 +119,57 @@ export default function FollowUps({
     };
   }, [items, today]);
 
-  const Row = (f: FollowUp, tone?: "overdue" | "today") => (
+  type RowStatus = "overdue" | "today" | "upcoming" | "done";
+  const statusPill: Record<RowStatus, ReactNode> = {
+    overdue: <Badge tone="danger">Overdue</Badge>,
+    today: <Badge tone="warn">Today</Badge>,
+    upcoming: <Badge tone="neutral">Upcoming</Badge>,
+    done: <Badge tone="success">Done</Badge>,
+  };
+
+  const Row = (f: FollowUp, status: RowStatus) => (
     <li
       key={f.id}
-      className="flex items-center gap-3 border-b border-brand-100 py-2.5 last:border-0"
+      className="-mx-2 flex items-center gap-3 rounded-md border-b border-border px-2 py-3 transition-colors last:border-0 hover:bg-hover"
     >
-      <input
-        type="checkbox"
-        checked={f.done}
-        onChange={() => toggle(f)}
-        aria-label="Mark done"
-        className="cursor-pointer"
-      />
+      <button
+        onClick={() => toggle(f)}
+        aria-label={f.done ? "Mark not done" : "Mark done"}
+        className={cn(
+          "grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full border transition-colors",
+          f.done
+            ? "border-primary-400 bg-primary-400 text-neutral-900"
+            : "border-border text-transparent hover:text-muted-foreground"
+        )}
+      >
+        <Check size={12} strokeWidth={3} />
+      </button>
       <div className="min-w-0 flex-1">
         <p
           className={cn(
-            "truncate text-sm font-medium text-ink",
-            f.done && "text-brand-400 line-through"
+            "truncate text-[13.5px] text-foreground",
+            f.done && "text-muted-foreground line-through"
           )}
         >
           {f.title}
         </p>
-        <p className="text-[11px] text-brand-400">
+        <p className="text-[11.5px] text-muted-foreground">
           {f.customer_name ? `${f.customer_name} · ` : ""}
           {fmtDate(f.due_date)}
-          {tone === "overdue" && (
-            <span className="ml-1 font-medium text-danger">overdue</span>
-          )}
-          {tone === "today" && (
-            <span className="ml-1 font-medium text-primary-700">today</span>
+          {f.repeat && f.repeat !== "none" && (
+            <span className="ml-1 inline-flex items-center gap-0.5">
+              <Repeat size={10} /> {f.repeat}
+            </span>
           )}
         </p>
       </div>
+      {statusPill[status]}
       <button
         aria-label="Delete reminder"
         onClick={() => del(f)}
-        className="rounded-full p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger cursor-pointer"
+        className="grid h-8 w-8 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-danger"
       >
-        <Trash2 size={14} />
+        <Trash2 size={16} />
       </button>
     </li>
   );
@@ -183,6 +212,17 @@ export default function FollowUps({
           onChange={setDue}
           clearable={false}
         />
+        <select
+          className="select w-auto"
+          aria-label="Repeat"
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value as FollowUpRepeat)}
+        >
+          <option value="none">No repeat</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
         <button className="btn-primary" disabled={busy || !title.trim()} onClick={add}>
           <Plus size={16} /> Add
         </button>
@@ -282,10 +322,10 @@ export default function FollowUps({
         <Section label="Today">{groups.today.map((f) => Row(f, "today"))}</Section>
       )}
       {groups.upcoming.length > 0 && (
-        <Section label="Upcoming">{groups.upcoming.map((f) => Row(f))}</Section>
+        <Section label="Upcoming">{groups.upcoming.map((f) => Row(f, "upcoming"))}</Section>
       )}
       {groups.done.length > 0 && (
-        <Section label="Done">{groups.done.map((f) => Row(f))}</Section>
+        <Section label="Done">{groups.done.map((f) => Row(f, "done"))}</Section>
       )}
     </div>
   );

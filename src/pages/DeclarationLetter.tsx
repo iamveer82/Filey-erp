@@ -23,7 +23,13 @@ import {
 } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { errMsg, fmtDate } from "../lib/format";
-import { PageHeader, Field, MetricCard, DataTable, Card } from "../components/ui";
+import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type ShareKind,
+} from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
@@ -153,6 +159,15 @@ const newId = () =>
     ? crypto.randomUUID()
     : String(Date.now());
 
+/** Next sequential letter reference: DL-0001, DL-0002, … (DEMO parity). */
+const nextRef = (list: SavedDecl[]) => {
+  const nums = list.map((d) => {
+    const m = /DL-(\d+)/.exec(d.ref || "");
+    return m ? Number(m[1]) : 0;
+  });
+  return `DL-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, "0")}`;
+};
+
 const fmtAmount = (v: string) => {
   const n = Number(String(v).replace(/,/g, ""));
   return Number.isFinite(n) && n ? n.toLocaleString("en-AE") : v || "—";
@@ -196,6 +211,7 @@ export default function DeclarationLetter() {
   const [docs, setDocs] = useState<SavedDecl[]>([]);
   const [editing, setEditing] = useState<SavedDecl | null>(null);
   const [search, setSearch] = useState("");
+  const [quickView, setQuickView] = useState<SavedDecl | null>(null);
 
   const loadDocs = () =>
     listDeclarations()
@@ -204,6 +220,57 @@ export default function DeclarationLetter() {
   useEffect(() => {
     loadDocs();
   }, []);
+
+  // ---- List-row actions (DEMO parity) ----
+  const duplicateRow = async (d: SavedDecl) => {
+    const copy: SavedDecl = {
+      ...d,
+      id: newId(),
+      ref: nextRef(docs),
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      const list = await upsertDeclaration(copy);
+      setDocs(list);
+      toast.success(`Duplicated as ${copy.ref}.`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const deleteRow = async (d: SavedDecl) => {
+    if (
+      !(await confirm({
+        title: "Delete letter",
+        message: `Delete ${d.ref || d.lpo_ref || "this letter"}? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      const list = await removeDeclarations(new Set([d.id]));
+      setDocs(list);
+      toast.success("Deleted.");
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  /** Letters have no public link or recipient contact on the record, so the
+   *  send menu shares a text summary of the letter (DEMO parity). */
+  const shareRow = (kind: ShareKind, d: SavedDecl) => {
+    const text = [
+      `Declaration Letter ${d.ref || d.lpo_ref || ""}`.trim(),
+      `Recipient: ${d.recipient_name || "—"}`,
+      `LPO: ${d.lpo_ref || "—"}`,
+      `Amount: AED ${fmtAmount(d.amount)}`,
+      d.date ? `Date: ${fmtLongDate(d.date)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    shareVia(kind, { text });
+  };
 
   if (editing) {
     return (
@@ -235,7 +302,14 @@ export default function DeclarationLetter() {
         action={
           <button
             className="btn-primary"
-            onClick={() => setEditing({ ...blankDecl(), id: newId(), updated_at: "" })}
+            onClick={() =>
+              setEditing({
+                ...blankDecl(),
+                id: newId(),
+                ref: nextRef(docs),
+                updated_at: "",
+              })
+            }
           >
             <Plus size={16} /> New Letter
           </button>
@@ -251,11 +325,11 @@ export default function DeclarationLetter() {
       </div>
 
       <div className="mb-4">
-        <input
-          className="input max-w-xs"
+        <SearchInput
+          className="max-w-md"
           placeholder="Search by recipient, LPO or reference…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
         />
       </div>
 
@@ -327,7 +401,81 @@ export default function DeclarationLetter() {
             sortValue: (d) => d.updated_at,
             render: (d) => (d.updated_at ? fmtDate(d.updated_at) : "—"),
           },
+          {
+            key: "act",
+            label: "Actions",
+            render: (d) => (
+              <RowActions
+                onView={() => setQuickView(d)}
+                onEdit={() => setEditing(d)}
+                onCopy={() => duplicateRow(d)}
+                onDelete={() => deleteRow(d)}
+                onSend={{
+                  whatsapp: () => shareRow("whatsapp", d),
+                  email: () => shareRow("email", d),
+                  sms: () => shareRow("sms", d),
+                }}
+              />
+            ),
+          },
         ]}
+      />
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const d = quickView;
+                setQuickView(null);
+                setEditing(d);
+              }
+            : undefined
+        }
+        data={
+          quickView
+            ? {
+                title:
+                  quickView.ref || quickView.lpo_ref || "Declaration Letter",
+                subtitle: quickView.recipient_name
+                  ? `For ${quickView.recipient_name}`
+                  : "VAT supply declaration in the standard UAE format",
+                meta: [
+                  { label: "Recipient", value: quickView.recipient_name },
+                  { label: "Recipient TRN", value: quickView.recipient_trn },
+                  { label: "LPO #", value: quickView.lpo_ref },
+                  {
+                    label: "Quantity",
+                    value: quickView.qty
+                      ? `${quickView.qty} ${quickView.unit || ""}`.trim()
+                      : "",
+                  },
+                  { label: "Date", value: fmtLongDate(quickView.date) },
+                  {
+                    label: "Last updated",
+                    value: quickView.updated_at
+                      ? fmtDate(quickView.updated_at)
+                      : "",
+                  },
+                ],
+                total:
+                  Number(String(quickView.amount).replace(/,/g, "")) ||
+                  undefined,
+                currency: "AED",
+                footer: (
+                  <div className="mt-4 rounded-lg border border-border p-3 bg-hover/20">
+                    <div className="text-[11.5px] font-medium text-muted-foreground mb-1">
+                      Declaration text
+                    </div>
+                    <div className="text-[13px] text-foreground whitespace-pre-wrap">
+                      {resolveBody(quickView)}
+                    </div>
+                  </div>
+                ),
+              }
+            : null
+        }
       />
     </div>
   );
@@ -594,6 +742,14 @@ function DeclarationEditor({
           <Card>
             <p className="font-medium text-ink mb-3">Order Reference</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="Reference">
+                <input
+                  className="input"
+                  placeholder="DL-0001"
+                  value={form.ref}
+                  onChange={(e) => set("ref", e.target.value)}
+                />
+              </Field>
               <Field label="LPO Number">
                 <input
                   className="input"

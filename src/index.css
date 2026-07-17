@@ -116,6 +116,14 @@
   .blur {
     filter: blur(8px);
   }
+  /* Horizontal tab strips (settings nav) — scroll without a visible bar. */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer base {

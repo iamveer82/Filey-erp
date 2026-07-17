@@ -32,6 +32,7 @@ import {
   type PoSummary,
   type PoInput,
   type PoPayment,
+  type PurchaseOrder,
   type Supplier,
   type CompanyProfile,
   type Product,
@@ -78,7 +79,15 @@ import {
   Field,
   ShareToggle,
   SearchInput,
+  FilterChip,
 } from "../components/ui";
+import {
+  RowActions,
+  QuickViewModal,
+  shareVia,
+  type QuickViewData,
+  type ShareKind,
+} from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +206,14 @@ export default function PurchaseOrders() {
   const [companyOpen, setCompanyOpen] = useState(false);
   const [payFor, setPayFor] = useState<PoSummary | null>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "draft" | "sent" | "received" | "cancelled"
+  >("all");
+  // DEMO parity: quick-view modal payload (+ PO id for its Edit action).
+  const [quickView, setQuickView] = useState<{
+    id: number;
+    data: QuickViewData;
+  } | null>(null);
   const [tplRev, setTplRev] = useState(0);
 
   const loadRows = () =>
@@ -283,13 +300,97 @@ export default function PurchaseOrders() {
   const sentCount = rows.filter((r) => r.status === "sent").length;
   const receivedCount = rows.filter((r) => r.status === "received").length;
 
-  const filtered = search
-    ? rows.filter(
-        (r) =>
-          r.po_number.toLowerCase().includes(search.toLowerCase()) ||
+  const filtered = rows
+    .filter((r) => statusFilter === "all" || r.status === statusFilter)
+    .filter((r) =>
+      search
+        ? r.po_number.toLowerCase().includes(search.toLowerCase()) ||
           r.supplier_name.toLowerCase().includes(search.toLowerCase())
-      )
-    : rows;
+        : true
+    );
+
+  // ----- DEMO parity: quick view, per-row send/share, duplicate -----
+
+  // Fetch the full PO (cached) and show the DEMO-style quick-view modal:
+  // meta grid + line items + total + notes.
+  const openQuickView = async (r: PoSummary) => {
+    try {
+      const doc = await pos.get(r.id);
+      const ccy = doc.currency || r.currency || statCcy;
+      setQuickView({
+        id: r.id,
+        data: {
+          title: `${doc.doc_title || "Purchase Order"} ${doc.po_number}`,
+          subtitle: `Supplier: ${doc.supplier_name || r.supplier_name}`,
+          badge: <Badge tone={statusTone(r.status)}>{r.status}</Badge>,
+          meta: [
+            { label: "Supplier", value: doc.supplier_name || r.supplier_name },
+            { label: "Order date", value: fmtDate(r.order_date) },
+            {
+              label: "Expected",
+              value: r.expected_date ? fmtDate(r.expected_date) : "—",
+            },
+            { label: "Currency", value: ccy },
+            { label: "Items", value: num(doc.items.length) },
+            { label: "Status", value: r.status },
+          ],
+          items: doc.items.map((i) => ({
+            desc: i.description,
+            qty: i.quantity,
+            price: i.unit_cost,
+          })),
+          total: r.total,
+          currency: ccy,
+          notes: doc.notes,
+        },
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  // Share one PO via WhatsApp / email / SMS, or copy its public portal link
+  // (same real link as the bulk "Copy public link" action).
+  const sendPo = async (kind: ShareKind, r: PoSummary) => {
+    try {
+      if (kind === "copyLink") {
+        const token = await pos.publicLink(r.id);
+        const url = `${location.origin}${location.pathname}#/portal/${token}`;
+        await navigator.clipboard.writeText(url);
+        loadRows();
+        toast.success("Public PO link copied");
+        return;
+      }
+      const doc = await pos.get(r.id);
+      // WhatsApp/SMS need a phone: look the supplier up by id, then by name.
+      let phone = "";
+      let email = doc.supplier_email || "";
+      try {
+        const supps = await suppliersApi.list();
+        const sup =
+          supps.find((s) => s.id === (doc.supplier_id ?? r.supplier_id)) ??
+          supps.find((s) => s.name === r.supplier_name);
+        phone = sup?.phone || doc.supplier_phone || "";
+        email = email || sup?.email || "";
+      } catch {
+        /* contact details are optional */
+      }
+      const ccy = doc.currency || r.currency || statCcy;
+      const eta = r.expected_date ? ` ETA ${fmtDate(r.expected_date)}.` : "";
+      const text = `Purchase Order ${doc.po_number} to ${
+        doc.supplier_name || r.supplier_name
+      } — ${doc.items.length} item(s), ${money(r.total, ccy)}.${eta}`;
+      shareVia(kind, {
+        phone,
+        email,
+        text,
+        // shareVia uses `url` as the mail subject for email shares.
+        url: `Purchase Order ${doc.po_number}`,
+      });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
 
   return (
     <div>
@@ -342,21 +443,60 @@ export default function PurchaseOrders() {
         />
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search POs by number or supplier…"
-          className="max-w-xs"
+          className="max-w-xs flex-1 min-w-[220px]"
         />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+            count={rows.length}
+          >
+            All
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "draft"}
+            onClick={() => setStatusFilter("draft")}
+            count={rows.filter((r) => r.status === "draft").length}
+          >
+            Draft
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "sent"}
+            onClick={() => setStatusFilter("sent")}
+            count={rows.filter((r) => r.status === "sent").length}
+          >
+            Sent
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "received"}
+            onClick={() => setStatusFilter("received")}
+            tone="success"
+            count={rows.filter((r) => r.status === "received").length}
+          >
+            Received
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "cancelled"}
+            onClick={() => setStatusFilter("cancelled")}
+            tone="danger"
+            count={rows.filter((r) => r.status === "cancelled").length}
+          >
+            Cancelled
+          </FilterChip>
+        </div>
       </div>
 
       <DataTable<PoSummary>
         rows={filtered}
         loading={loading}
         empty={
-          search
-            ? "No purchase orders match your search"
+          search || statusFilter !== "all"
+            ? "No purchase orders match your filters"
             : "No purchase orders yet — create your first one"
         }
         rowKey={(r) => r.id}
@@ -468,9 +608,9 @@ export default function PurchaseOrders() {
           },
           {
             key: "act",
-            label: "",
+            label: "Actions",
             render: (r) => (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center justify-end gap-1">
                 <button
                   aria-label="Record payment"
                   title="Record payment"
@@ -478,14 +618,6 @@ export default function PurchaseOrders() {
                   onClick={() => setPayFor(r)}
                 >
                   <CreditCard size={15} />
-                </button>
-                <button
-                  aria-label="Edit"
-                  title="Edit PO"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => editPo(r.id, setForm, company, toast)}
-                >
-                  <Pencil size={15} />
                 </button>
                 {r.status !== "received" && (
                   <button
@@ -497,13 +629,26 @@ export default function PurchaseOrders() {
                     <PackageCheck size={15} />
                   </button>
                 )}
-                <button
-                  aria-label="Delete"
-                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
-                  onClick={() => deleteRow(r, confirm, toast, loadRows)}
-                >
-                  <Trash2 size={15} />
-                </button>
+                <RowActions
+                  onView={() => openQuickView(r)}
+                  onEdit={() => editPo(r.id, setForm, company, toast)}
+                  onCopy={() =>
+                    duplicatePo(
+                      r.id,
+                      setForm,
+                      company,
+                      rows.map((x) => x.po_number),
+                      toast
+                    )
+                  }
+                  onSend={{
+                    whatsapp: () => sendPo("whatsapp", r),
+                    email: () => sendPo("email", r),
+                    sms: () => sendPo("sms", r),
+                    copyLink: () => sendPo("copyLink", r),
+                  }}
+                  onDelete={() => deleteRow(r, confirm, toast, loadRows)}
+                />
               </div>
             ),
           },
@@ -520,6 +665,21 @@ export default function PurchaseOrders() {
       )}
 
       {payFor && <PoPaymentsModal po={payFor} onClose={() => setPayFor(null)} onSaved={loadRows} />}
+
+      <QuickViewModal
+        open={!!quickView}
+        onClose={() => setQuickView(null)}
+        onEdit={
+          quickView
+            ? () => {
+                const id = quickView.id;
+                setQuickView(null);
+                editPo(id, setForm, company, toast);
+              }
+            : undefined
+        }
+        data={quickView?.data ?? null}
+      />
     </div>
   );
 }
@@ -569,6 +729,64 @@ async function deleteRow(
   }
 }
 
+function poDocToForm(
+  po: PurchaseOrder,
+  supplier: Supplier | undefined,
+  company: CompanyProfile | null
+): Form {
+  return {
+    id: po.id,
+    po_number: po.po_number,
+    status: po.status,
+    doc_title: po.doc_title || "Purchase Order",
+    template: po.template || company?.default_template || "minimal",
+    accent: po.accent || company?.default_accent || "#222222",
+    currency: po.currency || company?.currency || "AED",
+    seller_name: po.seller_name || company?.name || "",
+    seller_address: po.seller_address || company?.address,
+    seller_trn: po.seller_trn || company?.trn,
+    seller_email: po.seller_email || company?.email,
+    seller_phone: po.seller_phone || company?.phone,
+    logo: po.logo || company?.logo,
+    supplier_id: po.supplier_id,
+    supplier_name: supplier?.name || po.supplier_name || "",
+    supplier_address: supplier?.address || po.supplier_address || "",
+    supplier_trn: supplier?.tax_id || po.supplier_trn || "",
+    supplier_email: supplier?.email || po.supplier_email || "",
+    supplier_phone: supplier?.phone || po.supplier_phone || "",
+    order_date: po.order_date || today(),
+    expected_date: po.expected_date,
+    notes: po.notes,
+    terms: po.terms,
+    tax_rate: po.tax_rate ?? 0,
+    discount: po.discount ?? 0,
+    total: po.total,
+    stamp: normStamp((po as any).stamp as Partial<StampSig> | undefined, EMPTY_STAMP_SIG.stamp),
+    signature: normStamp(
+      (po as any).signature as Partial<StampSig> | undefined,
+      EMPTY_STAMP_SIG.signature
+    ),
+    show_stamp: po.show_stamp ?? false,
+    show_signature: po.show_signature ?? false,
+    unit_price_formula: po.unit_price_formula || null,
+    items: po.items.map((i) => {
+      const { custom, pageBreakBefore } = splitPageBreak(i.custom);
+      return {
+        product_id: i.product_id,
+        description: i.description,
+        quantity: i.quantity,
+        unit_cost: i.unit_cost,
+        unit: i.unit || "",
+        custom,
+        pageBreakBefore,
+      };
+    }),
+    customColumns: sanitizeCustomColumns(po.custom_columns || []),
+    shared: po.shared,
+    share_token: po.share_token,
+  };
+}
+
 async function editPo(
   id: number,
   setForm: (f: Form) => void,
@@ -578,60 +796,39 @@ async function editPo(
   try {
     const po = await pos.get(id);
     const supps = await suppliersApi.list();
-    const supplier = supps.find((s) => s.id === po.supplier_id);
-    setForm({
-      id: po.id,
-      po_number: po.po_number,
-      status: po.status,
-      doc_title: po.doc_title || "Purchase Order",
-      template: po.template || company?.default_template || "minimal",
-      accent: po.accent || company?.default_accent || "#222222",
-      currency: po.currency || company?.currency || "AED",
-      seller_name: po.seller_name || company?.name || "",
-      seller_address: po.seller_address || company?.address,
-      seller_trn: po.seller_trn || company?.trn,
-      seller_email: po.seller_email || company?.email,
-      seller_phone: po.seller_phone || company?.phone,
-      logo: po.logo || company?.logo,
-      supplier_id: po.supplier_id,
-      supplier_name: supplier?.name || po.supplier_name || "",
-      supplier_address: supplier?.address || po.supplier_address || "",
-      supplier_trn: supplier?.tax_id || po.supplier_trn || "",
-      supplier_email: supplier?.email || po.supplier_email || "",
-      supplier_phone: supplier?.phone || po.supplier_phone || "",
-      order_date: po.order_date || today(),
-      expected_date: po.expected_date,
-      notes: po.notes,
-      terms: po.terms,
-      tax_rate: po.tax_rate ?? 0,
-      discount: po.discount ?? 0,
-      total: po.total,
-      stamp: normStamp((po as any).stamp as Partial<StampSig> | undefined, EMPTY_STAMP_SIG.stamp),
-      signature: normStamp(
-        (po as any).signature as Partial<StampSig> | undefined,
-        EMPTY_STAMP_SIG.signature
-      ),
-      show_stamp: po.show_stamp ?? false,
-      show_signature: po.show_signature ?? false,
-      unit_price_formula: po.unit_price_formula || null,
-      items: po.items.map((i) => {
-        const { custom, pageBreakBefore } = splitPageBreak(i.custom);
-        return {
-          product_id: i.product_id,
-          description: i.description,
-          quantity: i.quantity,
-          unit_cost: i.unit_cost,
-          unit: i.unit || "",
-          custom,
-          pageBreakBefore,
-        };
-      }),
-      customColumns: sanitizeCustomColumns(po.custom_columns || []),
-      shared: po.shared,
-      share_token: po.share_token,
-    });
+    setForm(
+      poDocToForm(po, supps.find((s) => s.id === po.supplier_id), company)
+    );
   } catch (e: any) {
     toast.error(e?.message || "Failed to load purchase order");
+  }
+}
+
+// DEMO parity: duplicate from the list — loads the real PO and opens it in the
+// editor as an unsaved draft with a fresh PO number (persisted via pos.save).
+async function duplicatePo(
+  id: number,
+  setForm: (f: Form) => void,
+  company: CompanyProfile | null,
+  existing: string[],
+  toast: ReturnType<typeof useUI>["toast"]
+) {
+  try {
+    const po = await pos.get(id);
+    const supps = await suppliersApi.list();
+    const f = poDocToForm(po, supps.find((s) => s.id === po.supplier_id), company);
+    setForm({
+      ...f,
+      id: undefined,
+      status: "draft",
+      po_number: nextDocNumber({ prefix: "PO", existing }),
+      order_date: today(),
+      shared: false,
+      share_token: undefined,
+    });
+    toast.success("Duplicated into a new draft PO.");
+  } catch (e: any) {
+    toast.error(e?.message || "Failed to duplicate purchase order");
   }
 }
 
