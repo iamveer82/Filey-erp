@@ -470,7 +470,7 @@ export default function InlinePdfEditor({
   return (
     <div>
       {/* ── Horizontal toolbar ─────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-3xl border border-brand-200 bg-white px-2 py-1.5">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
         <Tbtn id="select" label="Select" Icon={MousePointer2} />
         <Tbtn id="text" label="Text" Icon={TypeIcon} />
         <Tbtn id="highlight" label="Highlight" Icon={Highlighter} />
@@ -614,7 +614,7 @@ export default function InlinePdfEditor({
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerLeave={onUp}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white"
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white"
         style={{
           aspectRatio: ptSize[page] ? `${ptSize[page].w} / ${ptSize[page].h}` : undefined,
           cursor,

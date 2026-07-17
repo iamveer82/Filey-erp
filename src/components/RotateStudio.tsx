@@ -108,7 +108,7 @@ export default function RotateStudio({
       </div>
 
       <div
-        className="mx-auto grid w-full max-w-xl place-items-center overflow-hidden rounded-3xl border border-brand-200 bg-brand-50 p-4 dark:bg-black/20"
+        className="mx-auto grid w-full max-w-xl place-items-center overflow-hidden rounded-xl border border-brand-200 bg-brand-50 p-4 dark:bg-black/20"
         style={{ minHeight: 360 }}
       >
         {pageImg ? (

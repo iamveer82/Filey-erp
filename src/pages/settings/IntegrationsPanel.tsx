@@ -107,7 +107,7 @@ function ComposioCard() {
       </p>
 
       {!hasDesktop && (
-        <p className="text-xs font-medium text-warning bg-warning/10 rounded-2xl px-3 py-2 mb-4">
+        <p className="text-xs font-medium text-warning bg-warning/10 rounded-xl px-3 py-2 mb-4">
           Integrations run from the Filey desktop app only.
         </p>
       )}
@@ -156,9 +156,9 @@ function ComposioCard() {
           return (
             <div
               key={tk.slug}
-              className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3"
+              className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
             >
-              <span className="rounded-2xl bg-primary-100 text-ink p-2 dark:bg-white/10">
+              <span className="rounded-xl bg-primary-100 text-ink p-2 dark:bg-white/10">
                 <BrandIcon name={tk.slug} className="h-5 w-5" />
               </span>
               <div className="min-w-0 flex-1">
@@ -227,9 +227,9 @@ function ServicesCard() {
         {rows.map((r) => (
           <div
             key={r.n}
-            className="flex items-center gap-3 rounded-2xl border border-brand-200 px-4 py-3"
+            className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
           >
-            <span className="rounded-2xl bg-primary-100 text-ink p-2 dark:bg-white/10">
+            <span className="rounded-xl bg-primary-100 text-ink p-2 dark:bg-white/10">
               {r.icon}
             </span>
             <div className="flex-1 min-w-0">

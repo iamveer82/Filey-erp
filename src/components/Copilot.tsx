@@ -344,7 +344,7 @@ export default function Copilot() {
   return (
     <div className="no-print fixed bottom-5 right-5 z-[60] flex flex-col items-end">
       {open && (
-        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-brand-200 bg-white">
+        <div className="mb-3 flex h-[min(70vh,520px)] w-[min(92vw,380px)] flex-col overflow-hidden rounded-xl border border-brand-200 bg-white">
           {/* header */}
           <div className="flex items-center gap-2 border-b border-brand-100 px-3 py-3">
             <button
@@ -551,7 +551,7 @@ export default function Copilot() {
                         </span>
                       </button>
                       {menuFor === c.id && (
-                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-2xl border border-brand-200 bg-white py-1">
+                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-xl border border-brand-200 bg-white py-1">
                           <MenuItem
                             icon={<Pencil size={14} />}
                             label="Rename"
@@ -600,7 +600,7 @@ export default function Copilot() {
                 <div
                   key={i}
                   className={cn(
-                    "w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                    "w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm leading-relaxed",
                     bubble(t.role)
                   )}
                 >
@@ -609,7 +609,7 @@ export default function Copilot() {
               ))
             )}
             {busy && view === "chat" && (
-              <div className="mr-auto w-fit rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
+              <div className="mr-auto w-fit rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
                 Thinking…
               </div>
             )}

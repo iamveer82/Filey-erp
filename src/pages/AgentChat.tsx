@@ -290,7 +290,7 @@ export default function AgentChat() {
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary-400 bg-canvas/85 backdrop-blur-sm dark:bg-background/85">
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-primary-400 bg-canvas/85 backdrop-blur-sm dark:bg-background/85">
           <div className="flex flex-col items-center gap-2 text-primary-600">
             <Paperclip size={28} />
             <p className="text-sm font-semibold text-ink">Drop a PDF or image to attach</p>
@@ -373,8 +373,8 @@ export default function AgentChat() {
       <div className="flex-1 space-y-6 pb-40 pt-2">
         {empty && !busy ? (
           <div className="mx-auto mt-10 max-w-xl text-center">
-            <p className="text-2xl font-semibold text-ink">How can I help with your business?</p>
-            <p className="mt-2 text-sm text-brand-500">
+            <p className="text-[22px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
+            <p className="mt-2 text-[13px] text-muted-foreground">
               Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
               act across invoices, customers, inventory, accounting and more.
             </p>
@@ -429,7 +429,7 @@ export default function AgentChat() {
             ))}
           </div>
         )}
-        <div className="rounded-2xl border border-brand-200 bg-white p-2.5 shadow-bento transition-shadow focus-within:border-primary-400 focus-within:shadow-bento-hover">
+        <div className="rounded-xl border border-brand-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-primary-400 focus-within:shadow-lg">
           {/* Attachment preview card */}
           {file && (
             <div className="mb-2 flex">
@@ -541,7 +541,7 @@ export default function AgentChat() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-bento">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2">
               <ShieldAlert size={18} className="text-warning" />
               <p className="font-semibold text-ink">Approve action</p>
@@ -589,7 +589,7 @@ export default function AgentChat() {
           onClick={() => setMemOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-bento"
+            className="w-full max-w-lg rounded-xl bg-white p-5 shadow-sm"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -658,7 +658,7 @@ export default function AgentChat() {
           onClick={() => setHistOpen(false)}
         >
           <div
-            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-bento"
+            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col bg-white shadow-sm"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
@@ -728,7 +728,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary-100 px-4 py-2.5 text-sm text-ink dark:bg-primary-400/15">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-md bg-primary-100 px-4 py-2.5 text-sm text-ink dark:bg-primary-400/15">
           {turn.text}
         </div>
       </div>

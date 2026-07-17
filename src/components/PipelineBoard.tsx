@@ -324,7 +324,7 @@ export default function PipelineBoard({
                       setAddStage(s.id);
                       setAddTitle("");
                     }}
-                    className="flex w-full items-center justify-center gap-1 rounded-3xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600"
+                    className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600"
                   >
                     <Plus size={13} /> Add deal
                   </button>

@@ -96,7 +96,7 @@ export function ResizablePanels({
         </button>
 
         {collapsed ? (
-          <div className="h-full min-h-[120px] rounded-2xl border border-brand-200 bg-brand-50/30 dark:bg-white/[0.02] flex flex-col items-center justify-center gap-2 py-4">
+          <div className="h-full min-h-[120px] rounded-xl border border-brand-200 bg-brand-50/30 dark:bg-white/[0.02] flex flex-col items-center justify-center gap-2 py-4">
             <span className="text-[10px] font-medium text-brand-500 rotate-180 writing-mode-vertical">{rightTitle}</span>
           </div>
         ) : (

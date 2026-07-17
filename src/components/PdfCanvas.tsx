@@ -78,7 +78,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
         canvas.height = vp.height;
         canvas.style.width = `${base.width * scale}px`;
         canvas.style.height = `${base.height * scale}px`;
-        canvas.className = "mx-auto mb-4 rounded-lg bg-white shadow-bento";
+        canvas.className = "mx-auto mb-4 rounded-lg bg-white shadow-sm";
         const ctx = canvas.getContext("2d");
         if (ctx) await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
         if (dead) return;
@@ -126,7 +126,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
       </div>
 
       {!err && (
-        <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-brand-200 bg-white/95 px-1.5 py-1 shadow-bento-hover backdrop-blur dark:bg-card/95">
+        <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-brand-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur dark:bg-card/95">
           <button
             onClick={() => zoomBy(-0.25)}
             disabled={zoom <= MIN_ZOOM}

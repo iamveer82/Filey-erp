@@ -62,7 +62,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <Logo size={34} />
-            <span className="font-pixel text-lg leading-none">Filey</span>
+            <span className="text-lg font-semibold tracking-tight leading-none">Filey</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -119,7 +119,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
 
         {/* Product preview */}
         <div className="relative mx-auto -mb-10 max-w-5xl px-6">
-          <div className="overflow-hidden rounded-2xl border border-brand-200 bg-white">
+          <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
             <div className="flex items-center gap-1.5 border-b border-brand-100 px-4 py-2.5">
               <span className="h-2.5 w-2.5 rounded-full bg-danger" />
               <span className="h-2.5 w-2.5 rounded-full bg-warning" />
@@ -144,7 +144,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                 ].map(([label, value, delta, tone]) => (
                   <div
                     key={label}
-                    className="rounded-2xl border border-brand-100 bg-white p-3"
+                    className="rounded-xl border border-brand-100 bg-white p-3"
                   >
                     <p className="text-[10px] font-medium text-brand-400">{label}</p>
                     <p className="mt-1 text-lg tabular-nums">{value}</p>
@@ -162,7 +162,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                   </div>
                 ))}
               </div>
-              <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4">
+              <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
                 <p className="text-[10px] font-medium text-brand-400 mb-3">
                   Monthly Revenue
                 </p>
@@ -195,7 +195,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
             <div key={f.title} className="card card-hover">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-primary-100 text-primary-700">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-100 text-primary-700">
                 <f.icon size={20} />
               </span>
               <h3 className="mt-4 font-medium text-lg font-medium">{f.title}</h3>
@@ -205,7 +205,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         </div>
 
         {/* stats */}
-        <div className="mt-10 grid grid-cols-3 gap-4 rounded-2xl border border-brand-200 bg-white p-6 text-center">
+        <div className="mt-10 grid grid-cols-3 gap-4 rounded-xl border border-brand-200 bg-white p-6 text-center">
           {STATS.map((s) => (
             <div key={s.label}>
               <p className="font-medium text-3xl font-medium tabular-nums">{s.value}</p>
@@ -217,7 +217,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
 
       {/* ───────── CTA band ───────── */}
       <section className="mx-auto max-w-6xl px-6 pb-20">
-        <div className="relative overflow-hidden rounded-2xl bg-cta px-8 py-14 text-center text-ink">
+        <div className="relative overflow-hidden rounded-xl bg-cta px-8 py-14 text-center text-ink">
           <div className="relative mx-auto max-w-xl">
             <ScanText size={28} className="mx-auto" />
             <h2 className="mt-3 font-medium text-3xl font-medium sm:text-4xl">

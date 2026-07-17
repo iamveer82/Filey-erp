@@ -182,7 +182,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closeConfirm(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white p-6"
+            className="w-full max-w-sm rounded-xl bg-card border border-border p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="font-medium text-ink text-lg">{confirmState.title}</p>
@@ -211,7 +211,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           onClick={() => closePrompt(null)}
         >
           <form
-            className="w-full max-w-sm rounded-2xl bg-white p-6"
+            className="w-full max-w-sm rounded-xl bg-card border border-border p-6"
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();

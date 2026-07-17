@@ -1593,7 +1593,7 @@ function FieldControl({
           type="color"
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-white p-0.5"
+          className="h-9 w-12 cursor-pointer rounded-xl border border-brand-200 bg-white p-0.5"
         />
         <input
           className="input flex-1"

@@ -431,7 +431,7 @@ export default function StampStudio({
   return (
     <div>
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-3xl border border-brand-200 bg-white px-2 py-1.5">
+      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
         {mode === "text" ? (
           <>
             <select
@@ -568,11 +568,11 @@ export default function StampStudio({
 
       {/* ── Signature draw pad ─────────────────────────────────────────────── */}
       {padOpen && (
-        <div className="mb-2 rounded-3xl border border-brand-200 bg-white p-2">
+        <div className="mb-2 rounded-xl border border-brand-200 bg-white p-2">
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-medium text-brand-500">Signature</span>
             {/* Pen / eraser */}
-            <div className="flex overflow-hidden rounded-3xl border border-brand-200">
+            <div className="flex overflow-hidden rounded-xl border border-brand-200">
               <button
                 onClick={() => setPenMode("draw")}
                 title="Pen"
@@ -653,7 +653,7 @@ export default function StampStudio({
                 onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}
                 title={a.name}
                 aria-label="Select saved stamp"
-                className="grid h-12 w-12 place-items-center overflow-hidden rounded-3xl border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400"
+                className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-brand-200 bg-white p-1 transition-colors hover:border-primary-400"
               >
                 <img
                   src={a.dataUrl}
@@ -678,7 +678,7 @@ export default function StampStudio({
         ref={stageRef}
         onPointerMove={onMove}
         onPointerUp={endMove}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white"
+        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white"
         style={{
           aspectRatio: aspect ? `${aspect.w} / ${aspect.h}` : undefined,
           touchAction: "none",

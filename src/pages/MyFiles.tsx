@@ -720,7 +720,7 @@ function FileRow({
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
       >
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-500 dark:bg-white/8">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-500 dark:bg-white/8">
           <FileIcon name={file.name} className="h-[18px] w-[18px]" />
         </span>
         <div className="min-w-0 flex-1">
@@ -773,7 +773,7 @@ function MoveMenu({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-brand-200 bg-white p-4 shadow-xl"
+        className="w-full max-w-sm rounded-xl border border-brand-200 bg-white p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="mb-1 text-sm font-medium text-ink">Move “{file.name}”</p>
@@ -941,7 +941,7 @@ function FilePreviewPage({
     <div className="animate-fade-up flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
-          className="rounded-2xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
+          className="rounded-xl p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer"
           onClick={onBack}
           aria-label="Back"
         >
@@ -976,7 +976,7 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-2xl border border-brand-200 bg-brand-100">
+      <div className="flex-1 overflow-hidden rounded-xl border border-brand-200 bg-brand-100">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>

@@ -26,7 +26,7 @@ export function ReportKpi({
   className?: string;
 }) {
   if (loading) {
-    return <Skeleton className={cn("h-[88px] w-full rounded-2xl", className)} />;
+    return <Skeleton className={cn("h-[88px] w-full rounded-xl", className)} />;
   }
   return (
     <MetricCard

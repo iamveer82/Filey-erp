@@ -20,7 +20,7 @@ export function QuickFilter({ options, value, onChange, className }: QuickFilter
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-1 rounded-3xl border border-brand-200 bg-surface p-0.5",
+        "inline-flex items-center gap-1 rounded-xl border border-brand-200 bg-surface p-0.5",
         className
       )}
     >

@@ -124,7 +124,7 @@ export default function MentionInput({
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
       {open && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-3xl border border-brand-200 bg-white p-1.5">
+        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-brand-200 bg-white p-1.5">
           {matches.map((m, i) => (
             <button
               key={m.id}

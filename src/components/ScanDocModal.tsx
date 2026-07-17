@@ -164,7 +164,7 @@ export default function ScanDocModal({
     >
       {!data ? (
         <div className="space-y-3">
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
             {busy ? (
               <Loader2 size={28} className="animate-spin text-primary-500" />
             ) : (

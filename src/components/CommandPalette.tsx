@@ -228,7 +228,7 @@ export default function CommandPalette() {
         aria-modal="true"
         aria-label="Command palette"
         style={{ "--materialize-origin": "top" } as CSSProperties}
-        className="materialize-surface w-full max-w-lg overflow-hidden rounded-2xl border border-brand-200 bg-white"
+        className="materialize-surface w-full max-w-lg overflow-hidden rounded-xl border border-brand-200 bg-white"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-brand-200 px-4">
@@ -285,7 +285,7 @@ export default function CommandPalette() {
                         : "hover:bg-brand-50 dark:hover:bg-white/5"
                     }`}
                   >
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-500 dark:bg-white/8">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-500 dark:bg-white/8">
                       {it.icon}
                     </span>
                     <span className="min-w-0 flex-1">

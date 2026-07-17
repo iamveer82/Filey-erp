@@ -158,7 +158,7 @@ export function CustomFieldsManager({
         {/* List */}
         <div className="mt-4 flex-1 overflow-y-auto space-y-2 pr-1">
           {defs.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-brand-200 p-6 text-center text-sm text-brand-400">
+            <div className="rounded-xl border border-dashed border-brand-200 p-6 text-center text-sm text-brand-400">
               No custom fields yet. Add one below to extend the schema.
             </div>
           ) : (
@@ -173,14 +173,14 @@ export function CustomFieldsManager({
                 return (
                   <div
                     key={def.id}
-                    className="rounded-2xl border border-brand-200 p-3"
+                    className="rounded-xl border border-brand-200 p-3"
                   >
                     <div className="flex items-start gap-2">
                       <GripVertical
                         size={14}
                         className="mt-0.5 text-brand-400 shrink-0"
                       />
-                      <div className="grid h-7 w-7 place-items-center rounded-2xl bg-brand-100 text-ink dark:bg-white/12">
+                      <div className="grid h-7 w-7 place-items-center rounded-xl bg-brand-100 text-ink dark:bg-white/12">
                         <Icon size={14} />
                       </div>
                       <div className="flex-1 min-w-0 space-y-2">
@@ -234,14 +234,14 @@ export function CustomFieldsManager({
                       <div className="flex flex-col items-center gap-0.5 shrink-0">
                         <button
                           aria-label="Move up"
-                          className="rounded-2xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                          className="rounded-xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
                           onClick={() => move(def.id, -1)}
                         >
                           <ChevronUp size={13} />
                         </button>
                         <button
                           aria-label="Move down"
-                          className="rounded-2xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                          className="rounded-xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
                           onClick={() => move(def.id, 1)}
                         >
                           <ChevronDown size={13} />

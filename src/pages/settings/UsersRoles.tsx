@@ -152,7 +152,7 @@ export default function UsersRoles() {
     return (
       <div className="card">
         <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-primary-100 text-ink p-2.5">
+          <div className="rounded-xl bg-primary-100 text-ink p-2.5">
             <Cloud size={20} />
           </div>
           <div className="flex-1 min-w-0">
@@ -173,7 +173,7 @@ export default function UsersRoles() {
     <div className="space-y-4">
       <div className="card">
         <div className="flex items-start gap-3">
-          <div className="rounded-2xl bg-primary-100 text-ink p-2.5">
+          <div className="rounded-xl bg-primary-100 text-ink p-2.5">
             <Building size={20} />
           </div>
           <div className="flex-1 min-w-0">
@@ -255,7 +255,7 @@ export default function UsersRoles() {
                     </span>
                     <button
                       aria-label="Revoke invitation"
-                      className="text-danger hover:bg-danger/10 rounded-2xl p-1.5 cursor-pointer"
+                      className="text-danger hover:bg-danger/10 rounded-xl p-1.5 cursor-pointer"
                       onClick={async () => {
                         const ok = await confirm({
                           title: "Revoke invitation",

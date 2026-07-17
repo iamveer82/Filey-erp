@@ -106,9 +106,9 @@ export default function ActivityFeed() {
           return (
             <div
               key={entry.id}
-              className="flex items-start gap-3 px-3 py-2 rounded-2xl hover:bg-brand-50 transition-colors group"
+              className="flex items-start gap-3 px-3 py-2 rounded-xl hover:bg-brand-50 transition-colors group"
             >
-              <div className="w-8 h-8 rounded-2xl bg-primary-50 grid place-items-center shrink-0 mt-0.5">
+              <div className="w-8 h-8 rounded-xl bg-primary-50 grid place-items-center shrink-0 mt-0.5">
                 <Icon size={14} />
               </div>
               <div className="min-w-0 flex-1">

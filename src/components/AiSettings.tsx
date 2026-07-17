@@ -144,7 +144,7 @@ export default function AiSettings() {
         </div>
       </header>
 
-      <div className="rounded-3xl border border-brand-200 bg-brand-50 p-3.5 text-xs text-brand-700 leading-relaxed">
+      <div className="rounded-xl border border-brand-200 bg-brand-50 p-3.5 text-xs text-brand-700 leading-relaxed">
         <p className="font-medium mb-1">What this powers:</p>
         <ul className="space-y-0.5 list-disc pl-4">
           <li>

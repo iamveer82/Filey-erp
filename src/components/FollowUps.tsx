@@ -195,7 +195,7 @@ export default function FollowUps({
       )}
 
       {items.length === 0 && (
-        <div className="empty-gradient rounded-3xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="empty-gradient rounded-xl p-8 flex flex-col items-center gap-4 text-center">
           <svg
             width="100"
             height="80"

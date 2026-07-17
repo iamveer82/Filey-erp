@@ -19,9 +19,9 @@ export default function AppsManager() {
           return (
             <div
               key={m.id}
-              className="flex items-start gap-3 rounded-2xl border border-brand-200 p-4"
+              className="flex items-start gap-3 rounded-xl border border-brand-200 p-4"
             >
-              <div className="rounded-2xl bg-primary-100 text-ink p-2.5 shrink-0">
+              <div className="rounded-xl bg-primary-100 text-ink p-2.5 shrink-0">
                 <AppIcon name={m.icon} className="w-[18px] h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">

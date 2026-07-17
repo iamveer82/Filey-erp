@@ -134,9 +134,9 @@ export default function PortalView() {
 
   return (
     <div className="min-h-screen bg-[#F7F3EA] px-4 py-10">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-brand-200 bg-white p-8 text-ink">
+      <div className="mx-auto max-w-3xl rounded-xl border border-brand-200 bg-white p-8 text-ink">
         {(paid || status === "paid") && (
-          <div className="mb-4 rounded-2xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
+          <div className="mb-4 rounded-xl bg-green-50 dark:bg-green-500/15 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400">
             Payment received — thank you!
           </div>
         )}

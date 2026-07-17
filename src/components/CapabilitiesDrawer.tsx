@@ -41,7 +41,7 @@ export default function CapabilitiesDrawer({
       onClick={onClose}
     >
       <div
-        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-bento"
+        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-sm"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
@@ -60,7 +60,7 @@ export default function CapabilitiesDrawer({
             return (
               <div
                 key={c.id}
-                className="flex items-start gap-3 rounded-2xl border border-brand-200 px-4 py-3"
+                className="flex items-start gap-3 rounded-xl border border-brand-200 px-4 py-3"
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-ink">{c.name}</p>

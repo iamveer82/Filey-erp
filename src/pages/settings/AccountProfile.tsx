@@ -298,7 +298,7 @@ export default function AccountProfile() {
           ].map((a) => (
             <div
               key={a.n}
-              className="flex items-center justify-between rounded-2xl border border-brand-200 px-3 py-2.5 mb-2"
+              className="flex items-center justify-between rounded-xl border border-brand-200 px-3 py-2.5 mb-2"
             >
               <div>
                 <p className="text-sm font-medium text-ink">{a.n}</p>

@@ -191,7 +191,7 @@ function CloudSyncCard() {
               />
             </label>
             <button
-              className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
               disabled={busy || !email || !password}
               onClick={connect}
             >
@@ -376,7 +376,7 @@ export default function DataModePanel() {
       <button
         onClick={() => void switchTo(m)}
         disabled={disabled}
-        className={`w-full text-left rounded-2xl border p-4 transition ${
+        className={`w-full text-left rounded-xl border p-4 transition ${
           active
             ? "border-primary-400 bg-primary-50"
             : "border-brand-200 hover:border-brand-300"
@@ -563,7 +563,7 @@ export default function DataModePanel() {
           <button
             onClick={runImport}
             disabled={busy}
-            className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+            className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
           >
             {busy ? progress || "Working…" : "Import cloud data"}
           </button>
@@ -582,7 +582,7 @@ export default function DataModePanel() {
           <button
             onClick={runPush}
             disabled={busy}
-            className="rounded-2xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+            className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
           >
             {busy ? progress || "Working…" : "Push local data to cloud"}
           </button>

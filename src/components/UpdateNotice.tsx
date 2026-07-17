@@ -66,7 +66,7 @@ export default function UpdateNotice() {
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-md rounded-3xl border border-brand-200 bg-white p-7 shadow-bento">
+      <div className="relative w-full max-w-md rounded-xl border border-brand-200 bg-white p-7 shadow-sm">
         {!busy && (
           <button
             onClick={dismiss}
@@ -78,7 +78,7 @@ export default function UpdateNotice() {
         )}
 
         <div className="flex flex-col items-center text-center">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary-100 dark:bg-primary-400/15">
+          <span className="grid h-14 w-14 place-items-center rounded-xl bg-primary-100 dark:bg-primary-400/15">
             <img
               src="/filey-logo.svg"
               alt="Filey"
@@ -95,7 +95,7 @@ export default function UpdateNotice() {
         </div>
 
         {info.notes.trim() && (
-          <div className="mt-5 max-h-64 overflow-auto rounded-2xl border border-brand-200 p-4 text-left">
+          <div className="mt-5 max-h-64 overflow-auto rounded-xl border border-brand-200 p-4 text-left">
             <Notes notes={info.notes} />
           </div>
         )}

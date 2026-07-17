@@ -391,7 +391,7 @@ export default function ESignStudio({
       {mode === "draw-only" && (
         <div className="card space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 rounded-2xl bg-brand-100 p-1">
+            <div className="flex items-center gap-1 rounded-xl bg-brand-100 p-1">
               <button
                 onClick={() => setDrawTool("pen")}
                 className={`rounded-md p-1.5 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
@@ -415,7 +415,7 @@ export default function ESignStudio({
             <select
               value={drawWidth}
               onChange={(e) => setDrawWidth(Number(e.target.value))}
-              className="text-xs border border-brand-200 rounded-2xl px-2 py-1.5 bg-white"
+              className="text-xs border border-brand-200 rounded-xl px-2 py-1.5 bg-white"
             >
               <option value={2}>Thin</option>
               <option value={4}>Medium</option>
@@ -426,7 +426,7 @@ export default function ESignStudio({
               <RotateCcw size={14} /> Clear
             </button>
           </div>
-          <div className="rounded-2xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
+          <div className="rounded-xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
             <canvas
               ref={canvasRef}
               onMouseDown={startDraw}
@@ -458,7 +458,7 @@ export default function ESignStudio({
         <div className="card space-y-3">
           {/* Document upload */}
           {!docPages.length ? (
-            <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-brand-200 p-10 cursor-pointer hover:border-brand-400 transition-colors">
+            <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-brand-200 p-10 cursor-pointer hover:border-brand-400 transition-colors">
               <Upload size={32} className="text-brand-400" />
               <p className="text-sm font-medium text-brand-500">Upload Document</p>
               <p className="text-xs text-brand-400">PDF or image (PNG, JPG, WebP)</p>
@@ -504,7 +504,7 @@ export default function ESignStudio({
               </div>
 
               {/* Preview canvas */}
-              <div className="rounded-2xl border border-brand-200 overflow-auto bg-gray-100 p-4 flex justify-center">
+              <div className="rounded-xl border border-brand-200 overflow-auto bg-gray-100 p-4 flex justify-center">
                 <canvas
                   ref={previewRef}
                   onMouseDown={handlePreviewMouseDown}
@@ -574,7 +574,7 @@ export default function ESignStudio({
                     Draw your signature
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 rounded-2xl bg-brand-100 p-1">
+                    <div className="flex items-center gap-1 rounded-xl bg-brand-100 p-1">
                       <button
                         onClick={() => setDrawTool("pen")}
                         className={`rounded-md p-1 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
@@ -607,7 +607,7 @@ export default function ESignStudio({
                       <RotateCcw size={14} /> Clear
                     </button>
                   </div>
-                  <div className="rounded-2xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
+                  <div className="rounded-xl border-2 border-dashed border-brand-200 bg-white overflow-hidden">
                     <canvas
                       ref={canvasRef}
                       onMouseDown={startDraw}

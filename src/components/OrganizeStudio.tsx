@@ -221,7 +221,7 @@ export default function OrganizeStudio({
         </div>
 
         {/* Page preview */}
-        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-brand-200 bg-white">
+        <div className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-xl border border-brand-200 bg-white">
           {fullFor(i) ? (
             <img
               src={fullFor(i)}
@@ -245,7 +245,7 @@ export default function OrganizeStudio({
         </div>
 
         {/* Navigation bar */}
-        <div className="mx-auto flex items-center gap-3 rounded-3xl border border-brand-200 bg-white px-4 py-2.5">
+        <div className="mx-auto flex items-center gap-3 rounded-xl border border-brand-200 bg-white px-4 py-2.5">
           <button
             onClick={() => navTo(-1)}
             disabled={!canPrev}

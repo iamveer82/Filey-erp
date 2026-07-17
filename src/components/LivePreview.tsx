@@ -103,7 +103,7 @@ export default function LivePreview({
 
   return (
     <div>
-      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-brand-200 bg-white">
+      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white">
         {img ? (
           <img
             src={img}

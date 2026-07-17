@@ -112,7 +112,7 @@ export default function EmailPanel() {
           passwords) — not your normal password.
         </p>
         {!hasDesktop && (
-          <p className="text-xs font-medium text-warning bg-warning/10 rounded-2xl px-3 py-2 mb-4">
+          <p className="text-xs font-medium text-warning bg-warning/10 rounded-xl px-3 py-2 mb-4">
             You can save settings here, but email is only sent from the Filey desktop app.
           </p>
         )}

@@ -167,7 +167,7 @@ export default function CompanyDetails() {
 
       <p className="label">Company Logo</p>
       <div className="flex items-center gap-4 mb-5">
-        <div className="w-24 h-24 rounded-2xl border border-brand-200 bg-brand-50 grid place-items-center overflow-hidden">
+        <div className="w-24 h-24 rounded-xl border border-brand-200 bg-brand-50 grid place-items-center overflow-hidden">
           {c.logo ? (
             <img
               src={c.logo}

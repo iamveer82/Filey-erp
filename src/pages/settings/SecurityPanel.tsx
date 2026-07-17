@@ -21,7 +21,7 @@ function ManageRow({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 rounded-2xl border border-brand-200 px-3 py-3 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+      className="w-full flex items-center gap-3 rounded-xl border border-brand-200 px-3 py-3 text-left hover:bg-brand-50 transition-colors cursor-pointer"
     >
       <span
         className={`rounded-md p-2 ${
@@ -132,12 +132,12 @@ export function ChangePasswordModal({
           />
         </Field>
         {err && (
-          <p className="text-xs font-medium text-danger bg-danger/10 rounded-2xl px-3 py-2">
+          <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2">
             {err}
           </p>
         )}
         {ok && (
-          <p className="text-xs font-medium text-success bg-success/10 rounded-2xl px-3 py-2">
+          <p className="text-xs font-medium text-success bg-success/10 rounded-xl px-3 py-2">
             Password updated.
           </p>
         )}

@@ -107,7 +107,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
         {notes.length === 0 && (
           <div className="absolute inset-0 grid place-items-center pointer-events-none">
             <div className="flex flex-col items-center gap-2 text-center">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-100 text-brand-400">
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-100 text-brand-400">
                 <StickyNote size={20} />
               </span>
               <p className="text-sm font-semibold text-brand-500">
@@ -132,7 +132,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
               moveNote(n.id, n.x + info.offset.x, n.y + info.offset.y)
             }
             className={cn(
-              "absolute w-48 rounded-xl border shadow-bento",
+              "absolute w-48 rounded-xl border shadow-sm",
               colorClass[n.color]
             )}
           >

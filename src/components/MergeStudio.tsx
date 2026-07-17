@@ -176,7 +176,7 @@ export default function MergeStudio({
             >
               <X size={11} />
             </button>
-            <div className="grid h-32 place-items-center overflow-hidden rounded-3xl bg-brand-50 dark:bg-black/20">
+            <div className="grid h-32 place-items-center overflow-hidden rounded-xl bg-brand-50 dark:bg-black/20">
               {it.thumb ? (
                 <img
                   src={it.thumb}
@@ -200,7 +200,7 @@ export default function MergeStudio({
           </div>
         ))}
         {!items.length && (
-          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-3xl border-2 border-dashed border-brand-300 text-sm text-brand-400">
+          <label className="col-span-full grid h-40 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-brand-300 text-sm text-brand-400">
             <span>
               <Upload size={18} className="mx-auto mb-1" /> Add PDFs to merge
             </span>

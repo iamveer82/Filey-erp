@@ -78,7 +78,7 @@ export default function FitPreview({
   return (
     <div
       ref={boxRef}
-      className="fp-box bg-brand-100 rounded-2xl p-4 overflow-y-auto overflow-x-hidden max-h-[70vh]"
+      className="fp-box bg-brand-100 rounded-xl p-4 overflow-y-auto overflow-x-hidden max-h-[70vh]"
     >
       {scale <= 0.98 ? (
         /* Scale down: render at full resolution, then GPU-scale to fit.

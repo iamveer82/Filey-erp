@@ -90,7 +90,7 @@ export default function DocTemplateGallery({
             <button
               key={tpl.id}
               onClick={() => onChange(tpl.id)}
-              className={`group relative shrink-0 w-32 rounded-2xl border-2 p-2 text-left transition-all cursor-pointer ${
+              className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
                 active
                   ? "border-primary-400 bg-primary-50"
                   : "border-brand-100 bg-white hover:border-primary-300"

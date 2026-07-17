@@ -179,7 +179,7 @@ export default function PreviewModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="rounded-3xl p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
+              className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5 cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -223,7 +223,7 @@ export default function PreviewModal({
             </div>
           )}
           {!busy && err && (
-            <p className="text-sm text-danger bg-danger/10 rounded-3xl px-3 py-2">
+            <p className="text-sm text-danger bg-danger/10 rounded-xl px-3 py-2">
               {err}
             </p>
           )}
@@ -254,7 +254,7 @@ export default function PreviewModal({
             />
           )}
           {!busy && !err && loaded && kind === "text" && (
-            <pre className="text-xs whitespace-pre-wrap break-words bg-white rounded-3xl border border-brand-200 p-4 text-brand-700">
+            <pre className="text-xs whitespace-pre-wrap break-words bg-white rounded-xl border border-brand-200 p-4 text-brand-700">
               {text}
             </pre>
           )}

@@ -105,13 +105,13 @@ function UploadCard({
   const previewUrl = (value as any)?._previewUrl || value?.data;
 
   return (
-    <div className="rounded-3xl border border-brand-200 p-4">
+    <div className="rounded-xl border border-brand-200 p-4">
       <div className="flex items-center gap-2 text-ink font-medium text-sm">
         {icon} {label}
       </div>
       <div className="mt-3">
         {previewUrl ? (
-          <div className="relative flex items-center justify-center py-4 rounded-3xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
+          <div className="relative flex items-center justify-center py-4 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
             <CompanyAssetImage
               src={previewUrl}
               alt={label}
@@ -126,7 +126,7 @@ function UploadCard({
             <button
               title={`Remove ${label.toLowerCase()}`}
               aria-label={`Remove ${label.toLowerCase()}`}
-              className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-3xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
+              className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
               onClick={() => onChange(undefined)}
             >
               <X size={13} />
@@ -137,7 +137,7 @@ function UploadCard({
             type="button"
             disabled={uploading}
             onClick={() => ref.current?.click()}
-            className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-3xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all disabled:opacity-60"
+            className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all disabled:opacity-60"
           >
             <Upload size={18} className="text-brand-400" />
             <span className="text-xs font-medium text-brand-600">

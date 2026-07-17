@@ -82,7 +82,7 @@ export default function AiSummaryCard() {
   return (
     <div className="card mb-4 relative overflow-hidden">
       {/* Subtle pulse ring on the AI card to draw attention */}
-      <div className="absolute inset-0 rounded-2xl pointer-events-none" />
+      <div className="absolute inset-0 rounded-xl pointer-events-none" />
       <div className="mb-2 flex items-center gap-2 relative z-10">
         <ColorOrb dimension="22px" />
         <p className="flex-1 text-sm font-medium text-ink">AI daily briefing</p>

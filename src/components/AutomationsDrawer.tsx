@@ -98,7 +98,7 @@ export default function AutomationsDrawer({
       onClick={onClose}
     >
       <div
-        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-bento"
+        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-sm"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
@@ -113,7 +113,7 @@ export default function AutomationsDrawer({
 
         <div className="flex-1 overflow-auto p-4">
           {/* Create */}
-          <div className="rounded-2xl border border-brand-200 p-3">
+          <div className="rounded-xl border border-brand-200 p-3">
             <p className="label">New automation</p>
             <input
               className="input mb-2"
@@ -187,7 +187,7 @@ export default function AutomationsDrawer({
               tasks.map((t) => (
                 <div
                   key={t.id}
-                  className="rounded-2xl border border-brand-200 p-3"
+                  className="rounded-xl border border-brand-200 p-3"
                 >
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">

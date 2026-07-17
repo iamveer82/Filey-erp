@@ -87,7 +87,7 @@ export function StampSigCard({
   defaults: StampSig;
 }) {
   return (
-    <div className="rounded-3xl border border-brand-200 p-4">
+    <div className="rounded-xl border border-brand-200 p-4">
       <div className="flex items-center gap-2 text-ink font-medium text-sm">
         {icon} {label}
       </div>
@@ -95,7 +95,7 @@ export function StampSigCard({
         {value?.data ? (
           <div className="space-y-3">
             {/* preview with inline remove */}
-            <div className="relative flex items-center justify-center py-4 rounded-3xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
+            <div className="relative flex items-center justify-center py-4 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
               <CompanyAssetImage
                 src={value.data}
                 alt={label}
@@ -110,7 +110,7 @@ export function StampSigCard({
               <button
                 title={`Remove ${label.toLowerCase()}`}
                 aria-label={`Remove ${label.toLowerCase()}`}
-                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-3xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
+                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
                 onClick={() => onChange(undefined)}
               >
                 <X size={13} />
@@ -158,7 +158,7 @@ export function StampSigCard({
                   (k, i) => (
                     <div
                       key={k}
-                      className="flex items-center gap-1 rounded-3xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
+                      className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
                     >
                       <span className="text-[10px] font-mono font-medium text-brand-400">
                         {["T", "R", "B", "L"][i]}
@@ -186,7 +186,7 @@ export function StampSigCard({
             </p>
           </div>
         ) : (
-          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-3xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
+          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
             <Upload size={18} className="text-brand-400" />
             <span className="text-xs font-medium text-brand-600">Upload {label}</span>
             <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
@@ -227,12 +227,12 @@ export function StampSigAdjust({
 }) {
   const s = (value.scale ?? 100) / 100;
   return (
-    <div className="rounded-2xl border border-brand-200 p-3">
+    <div className="rounded-xl border border-brand-200 p-3">
       <div className="flex items-center gap-2 text-ink font-medium text-xs">
         {icon} {label}
       </div>
       {/* live preview — mirrors the on-page watermark blend */}
-      <div className="relative mt-2 flex items-center justify-center py-3 rounded-2xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[72px]">
+      <div className="relative mt-2 flex items-center justify-center py-3 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[72px]">
         <CompanyAssetImage
           src={value.data}
           alt={label}

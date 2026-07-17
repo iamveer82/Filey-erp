@@ -39,7 +39,7 @@ export default function SetupNotice() {
             §3), everything around it stays quiet. */}
         <div className="flex flex-col items-center text-center mb-8">
           <Logo size={48} />
-          <h1 className="mt-4 font-pixel text-[32px] leading-none text-ink">Filey</h1>
+          <h1 className="mt-4 text-[32px] font-semibold tracking-tight leading-none text-foreground">Filey</h1>
           <p className="mt-3 text-sm text-brand-500">
             Choose how your business data is stored.
           </p>
@@ -50,15 +50,15 @@ export default function SetupNotice() {
             {/* Primary path — cloud. The free default: account, sync, team. */}
             <button
               onClick={() => choose("cloud")}
-              className="group w-full text-left rounded-3xl border border-brand-200 dark:border-white/12
-                         bg-white p-5 shadow-bento
+              className="group w-full text-left rounded-xl border border-brand-200 dark:border-white/12
+                         bg-white p-5 shadow-sm
                          transition-[box-shadow,border-color,transform] duration-200
-                         hover:shadow-bento-hover hover:border-brand-300 dark:hover:border-white/20
+                         hover:shadow-lg hover:border-brand-300 dark:hover:border-white/20
                          active:scale-[0.99] cursor-pointer
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >
               <div className="flex items-start gap-4">
-                <div className="shrink-0 grid place-items-center h-11 w-11 rounded-2xl bg-ink text-white">
+                <div className="shrink-0 grid place-items-center h-11 w-11 rounded-xl bg-ink text-white">
                   <Cloud size={22} />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -101,7 +101,7 @@ export default function SetupNotice() {
             {/* Secondary path — offline, the licensed tier. Quiet by design. */}
             <button
               onClick={() => void chooseLocal()}
-              className="w-full text-left rounded-2xl border border-brand-200 dark:border-white/10
+              className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
                          bg-transparent p-4 transition-colors duration-200
                          hover:bg-brand-50 dark:hover:bg-white/5 active:scale-[0.99] cursor-pointer
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
@@ -138,8 +138,8 @@ export default function SetupNotice() {
             {/* No cloud in this build — offline is the only working path. */}
             <button
               onClick={() => void chooseLocal()}
-              className="mb-4 w-full text-left rounded-2xl border border-brand-200 dark:border-white/10
-                         bg-white p-4 shadow-bento transition-colors duration-200
+              className="mb-4 w-full text-left rounded-xl border border-brand-200 dark:border-white/10
+                         bg-white p-4 shadow-sm transition-colors duration-200
                          hover:border-brand-300 dark:hover:border-white/20 active:scale-[0.99] cursor-pointer
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >
@@ -161,7 +161,7 @@ export default function SetupNotice() {
                 {licenseMsg}
               </p>
             )}
-          <div className="rounded-2xl border border-brand-200 dark:border-white/10 p-4">
+          <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
             <button
               onClick={() => setShowCloudSetup((v) => !v)}
               className="flex w-full items-center gap-3 text-left cursor-pointer"
@@ -202,7 +202,7 @@ export default function SetupNotice() {
                     .env
                   </code>
                   :
-                  <pre className="mt-2 bg-ink text-white text-xs rounded-2xl p-3 overflow-x-auto">
+                  <pre className="mt-2 bg-ink text-white text-xs rounded-xl p-3 overflow-x-auto">
                     {`VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
                   </pre>

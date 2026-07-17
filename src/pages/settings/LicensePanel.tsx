@@ -98,7 +98,7 @@ export default function LicensePanel() {
       )}
 
       {/* This device */}
-      <div className="rounded-2xl border border-brand-200 dark:border-white/10 p-4">
+      <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
         <p className="font-medium text-ink flex items-center gap-2">
           <Laptop size={15} /> This device
         </p>
@@ -151,7 +151,7 @@ export default function LicensePanel() {
 
       {/* Account license + slots */}
       {cloudConfigured && (
-        <div className="rounded-2xl border border-brand-200 dark:border-white/10 p-4">
+        <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
           <p className="font-medium text-ink">Your license</p>
           {overview ? (
             <>
@@ -222,7 +222,7 @@ export default function LicensePanel() {
 
       {/* Cloud (Pro) devices — 5 per organization, shared with the team */}
       {cloudConfigured && (
-        <div className="rounded-2xl border border-brand-200 dark:border-white/10 p-4">
+        <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
           <p className="font-medium text-ink flex items-center gap-2">
             <Cloud size={15} /> Cloud devices
           </p>

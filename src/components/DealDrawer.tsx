@@ -85,7 +85,7 @@ export default function DealDrawer({
           </div>
           <button
             onClick={onClose}
-            className="rounded-2xl p-1.5 text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5"
+            className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5"
             aria-label="Close"
           >
             <X size={18} />

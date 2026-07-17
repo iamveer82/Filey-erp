@@ -232,7 +232,7 @@ function ToolMiniCard({
     >
       <div className="flex items-center justify-between gap-2">
         <span
-          className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl transition-colors ${badgeBg} ${badgeFg}`}
+          className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl transition-colors ${badgeBg} ${badgeFg}`}
         >
           <Icon size={20} />
         </span>
@@ -407,7 +407,7 @@ function PdfToolWorkspace({
           )}
         </div>
       ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-2xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5">
+        <label className="grid h-72 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-brand-300 bg-white text-center text-sm text-brand-400 hover:bg-brand-50 dark:hover:bg-white/5">
           <div>
             <Upload size={22} className="mx-auto mb-1 text-brand-300" />
             Drop or choose {tool.multi ? "files" : "a file"} to preview here
@@ -618,12 +618,12 @@ function FilePreview({ file }: { file: File }) {
       <img
         src={img}
         alt={file.name}
-        className="mx-auto max-h-[640px] rounded-2xl border border-brand-200"
+        className="mx-auto max-h-[640px] rounded-xl border border-brand-200"
       />
     );
   if (text)
     return (
-      <pre className="max-h-[640px] overflow-auto rounded-2xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:bg-white/8">
+      <pre className="max-h-[640px] overflow-auto rounded-xl border border-brand-200 bg-brand-50 p-3 text-xs text-brand-700 dark:bg-white/8">
         {text}
       </pre>
     );

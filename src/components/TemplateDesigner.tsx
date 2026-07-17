@@ -301,7 +301,7 @@ export default function TemplateDesigner({
         <button
           onClick={onClose}
           aria-label="Close"
-          className="rounded-3xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
+          className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
         >
           <X size={18} />
         </button>
@@ -333,7 +333,7 @@ export default function TemplateDesigner({
             onMouseMove={onDragMove}
             onMouseUp={onDragEnd}
             onMouseLeave={onDragEnd}
-            className="relative rounded-3xl border-2 border-dashed border-brand-200 bg-brand-50 overflow-hidden select-none cursor-crosshair mx-auto"
+            className="relative rounded-xl border-2 border-dashed border-brand-200 bg-brand-50 overflow-hidden select-none cursor-crosshair mx-auto"
             style={{
               width: paperW * previewScale,
               height: paperH * previewScale,
@@ -419,7 +419,7 @@ export default function TemplateDesigner({
                 type="color"
                 value={tpl.accent}
                 onChange={(e) => set("accent", e.target.value)}
-                className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-transparent"
+                className="h-9 w-12 cursor-pointer rounded-xl border border-brand-200 bg-transparent"
               />
               <input
                 className="input h-9 flex-1 font-mono text-xs"
@@ -445,7 +445,7 @@ export default function TemplateDesigner({
       ) : (
         <>
           {/* Tab Switcher */}
-          <div className="flex rounded-3xl bg-brand-50 p-1 gap-1">
+          <div className="flex rounded-xl bg-brand-50 p-1 gap-1">
             <button
               onClick={() => {
                 setTab("design");
@@ -516,7 +516,7 @@ export default function TemplateDesigner({
                     type="color"
                     value={tpl.accent}
                     onChange={(e) => set("accent", e.target.value)}
-                    className="h-9 w-12 cursor-pointer rounded-3xl border border-brand-200 bg-transparent"
+                    className="h-9 w-12 cursor-pointer rounded-xl border border-brand-200 bg-transparent"
                   />
                   <input
                     className="input h-9 flex-1 font-mono text-xs"
@@ -585,7 +585,7 @@ export default function TemplateDesigner({
                   ).map(([key, label]) => (
                     <label
                       key={key}
-                      className="flex items-center justify-between py-1.5 px-3 rounded-3xl hover:bg-brand-50 cursor-pointer"
+                      className="flex items-center justify-between py-1.5 px-3 rounded-xl hover:bg-brand-50 cursor-pointer"
                     >
                       <span className="text-sm text-ink">{label}</span>
                       <button
@@ -611,7 +611,7 @@ export default function TemplateDesigner({
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-brand-500">Preview</label>
                 <div
-                  className="rounded-3xl border border-brand-200 p-4 space-y-2 overflow-hidden"
+                  className="rounded-xl border border-brand-200 p-4 space-y-2 overflow-hidden"
                   style={{ fontFamily: tpl.font }}
                 >
                   <div
@@ -694,12 +694,12 @@ export default function TemplateDesigner({
                 />
                 {filePreview ? (
                   <div className="space-y-2">
-                    <div className="relative rounded-3xl border-2 border-dashed border-primary-300 bg-primary-50/30 p-3 overflow-hidden">
+                    <div className="relative rounded-xl border-2 border-dashed border-primary-300 bg-primary-50/30 p-3 overflow-hidden">
                       {file?.type?.startsWith("image/") ? (
                         <img
                           src={filePreview}
                           alt="Template preview"
-                          className="w-full max-h-48 object-contain rounded-3xl"
+                          className="w-full max-h-48 object-contain rounded-xl"
                         />
                       ) : (
                         <div className="flex items-center justify-center gap-3 py-10 text-brand-400">
@@ -725,7 +725,7 @@ export default function TemplateDesigner({
                 ) : (
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full rounded-3xl border-2 border-dashed border-brand-200 hover:border-primary-400 hover:bg-primary-50/30 py-10 flex flex-col items-center gap-2 cursor-pointer transition-all group"
+                    className="w-full rounded-xl border-2 border-dashed border-brand-200 hover:border-primary-400 hover:bg-primary-50/30 py-10 flex flex-col items-center gap-2 cursor-pointer transition-all group"
                   >
                     <div className="w-12 h-12 rounded-full bg-brand-50 group-hover:bg-primary-100 grid place-items-center transition-colors">
                       <Image

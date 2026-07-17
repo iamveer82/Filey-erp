@@ -19,7 +19,7 @@ export default function NotificationsPanel() {
         {ITEMS.map(([key, title, desc]) => (
           <div
             key={key}
-            className="flex items-center justify-between rounded-2xl border border-brand-200 px-4 py-3"
+            className="flex items-center justify-between rounded-xl border border-brand-200 px-4 py-3"
           >
             <div>
               <p className="text-sm font-medium text-ink">{title}</p>
