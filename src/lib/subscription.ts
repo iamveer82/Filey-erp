@@ -27,7 +27,7 @@ export const PLANS: PlanCard[] = [
     id: "free",
     kind: "subscription",
     name: "Free",
-    price: "$0",
+    price: "AED 0",
     blurb: "Start free with the essentials.",
     features: [
       "Core ERP & CRM — all modules",
@@ -41,7 +41,7 @@ export const PLANS: PlanCard[] = [
     id: "lite",
     kind: "license",
     name: "Offline",
-    price: "$99",
+    price: "AED 399",
     period: " one-time",
     blurb: "Own it outright — runs fully offline.",
     features: [
@@ -56,7 +56,7 @@ export const PLANS: PlanCard[] = [
     id: "pro",
     kind: "subscription",
     name: "Pro",
-    price: "$19",
+    price: "AED 29",
     period: "/month",
     blurb: "Cloud sync for growing businesses.",
     recommended: true,

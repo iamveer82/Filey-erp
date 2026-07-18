@@ -47,4 +47,10 @@ describe("planCardFor", () => {
     expect(PLANS.find((p) => p.id === "enterprise")?.kind).toBe("contact");
     expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
   });
+
+  it("carries the launch prices (AED)", () => {
+    expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 399");
+    expect(PLANS.find((p) => p.id === "pro")?.price).toBe("AED 29");
+  });
 });
