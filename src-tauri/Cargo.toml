@@ -1,6 +1,6 @@
 [package]
 name = "filey-erp"
-version = "2.2.0"
+version = "2.2.2"
 description = "Filey ERP — offline-first desktop ERP for small businesses"
 authors = ["iamveer82"]
 license = "AGPL-3.0-only"
@@ -46,4 +46,3 @@ keyring = "2"
 base64 = "0.22"
 # Desktop dir resolution for the first-run shortcut prompt (Windows).
 dirs = "6"
-
