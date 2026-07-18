@@ -162,3 +162,154 @@ describe("UAE reference-pack templates", () => {
     expect(html).toContain("Received By (Payee Signature)");
   });
 });
+
+describe("UAE reference-pack templates — wave 2", () => {
+  const ids2 = [
+    "uae-construction",
+    "uae-rental",
+    "uae-restaurant",
+    "uae-medical",
+    "uae-education",
+    "uae-logistics",
+    "uae-ecommerce",
+    "uae-hotel",
+    "uae-salon",
+    "uae-garage",
+    "uae-realestate",
+    "uae-amc",
+    "uae-event",
+    "uae-timesheet",
+    "uae-margin",
+    "uae-summary",
+    "uae-agent",
+    "uae-designated",
+    "uae-deemed",
+    "uae-commercial",
+    "uae-petty-cash",
+    "uae-advance-receipt",
+  ];
+
+  it.each(ids2)("%s is registered and resolves", (id) => {
+    expect(DOC_TEMPLATES.some((t) => t.id === id)).toBe(true);
+    expect(resolveTemplateId(id)).toBe(id);
+  });
+
+  it.each(ids2)("%s renders real document data", (id) => {
+    const html = renderToStaticMarkup(<DocView form={{ ...base, template: id }} />);
+    expect(html).toContain("Filey Trading LLC");
+    expect(html).toContain("TRN: 100234567890003");
+    expect(html).toContain("INV-2026-0001");
+  });
+
+  it("uae-construction uses the works columns and Arabic subtitle", () => {
+    const html = renderToStaticMarkup(
+      <DocView form={{ ...base, template: "uae-construction" }} />
+    );
+    expect(html).toContain("TAX INVOICE");
+    expect(html).toContain("مستخلص أعمال");
+    expect(html).toContain("Work Section");
+    expect(html).toContain("Taxable Amt");
+    expect(html).toContain("VAT @ 5%");
+  });
+
+  it("uae-hotel uses the folio columns (no qty/price)", () => {
+    const html = renderToStaticMarkup(<DocView form={{ ...base, template: "uae-hotel" }} />);
+    expect(html).toContain("فاتورة ضريبية — فندق");
+    expect(html).toContain("Folio No.");
+    expect(html).toContain("Taxable Amt");
+    expect(html).not.toContain("Unit Price");
+  });
+
+  it("uae-salon shows VAT-inclusive prices", () => {
+    const html = renderToStaticMarkup(<DocView form={{ ...base, template: "uae-salon" }} />);
+    expect(html).toContain("Price incl. VAT (AED)");
+    expect(html).toContain("525.00"); // 500 × 1.05
+    expect(html).toContain("Total Payable (AED)");
+    expect(html).toContain("6,300.00"); // standard totals block still applies
+  });
+
+  it("uae-timesheet maps qty to Hours and unit_price to Rate/hr", () => {
+    const html = renderToStaticMarkup(
+      <DocView form={{ ...base, template: "uae-timesheet" }} />
+    );
+    expect(html).toContain("Resource / Description");
+    expect(html).toContain("Hours");
+    expect(html).toContain("Rate/hr");
+    expect(html).toContain("VAT @ 5%");
+  });
+
+  it("uae-margin has no VAT columns and a net-only grand total", () => {
+    const html = renderToStaticMarkup(<DocView form={{ ...base, template: "uae-margin" }} />);
+    expect(html).toContain("نظام هامش الربح");
+    expect(html).not.toContain("VAT %");
+    expect(html).not.toContain("VAT Breakdown");
+    expect(html).not.toContain("VAT @");
+    expect(html).toContain("Total (AED)");
+    expect(html).toContain("6,000.00"); // VAT not added on a margin-scheme doc
+    expect(html).not.toContain("6,300.00");
+    expect(html).toContain("Art. 43");
+  });
+
+  it("uae-commercial has no VAT anywhere in items or totals", () => {
+    const html = renderToStaticMarkup(
+      <DocView form={{ ...base, template: "uae-commercial" }} />
+    );
+    expect(html).toContain("INVOICE");
+    expect(html).toContain("Amount (AED)");
+    expect(html).toContain("Subtotal");
+    expect(html).toContain("Total Payable (AED)");
+    expect(html).toContain("6,000.00");
+    expect(html).not.toContain("6,300.00");
+    expect(html).not.toContain("VAT @");
+    expect(html).not.toContain("VAT %");
+    expect(html).not.toContain("VAT Breakdown");
+    expect(html).not.toContain("Taxable");
+  });
+
+  it("uae-summary uses its own title", () => {
+    const html = renderToStaticMarkup(<DocView form={{ ...base, template: "uae-summary" }} />);
+    expect(html).toContain("SUMMARY TAX INVOICE");
+    expect(html).toContain("فاتورة ضريبية مجمعة");
+  });
+
+  it("uae-petty-cash renders the petty voucher rows", () => {
+    const html = renderToStaticMarkup(
+      <DocView
+        form={{
+          ...base,
+          template: "uae-petty-cash",
+          number: "PC-2026-0312",
+          notes: "Taxi — client site visit",
+          items: [{ description: "Taxi — client site visit", qty: 1, unit_price: 45, unit: "" }],
+        }}
+      />
+    );
+    expect(html).toContain("PETTY CASH VOUCHER");
+    expect(html).toContain("سند مصروفات نثرية");
+    expect(html).toContain("Paid to");
+    expect(html).toContain("For (particulars)");
+    expect(html).toContain("Taxi — client site visit");
+    expect(html).toContain("Amount (in words)");
+    expect(html).toContain("Claimed By");
+    expect(html).toContain("Approved By");
+  });
+
+  it("uae-advance-receipt renders like a receipt voucher", () => {
+    const html = renderToStaticMarkup(
+      <DocView
+        form={{
+          ...base,
+          template: "uae-advance-receipt",
+          number: "ADV-2026-0018",
+          items: [{ description: "Advance received", qty: 1, unit_price: 5250, unit: "" }],
+        }}
+      />
+    );
+    expect(html).toContain("ADVANCE PAYMENT RECEIPT");
+    expect(html).toContain("إيصال دفعة مقدمة");
+    expect(html).toContain("Receipt No.");
+    expect(html).toContain("Received with thanks from");
+    expect(html).toContain("The sum of (in words)");
+    expect(html).toContain("Amount (AED)");
+  });
+});

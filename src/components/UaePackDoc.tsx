@@ -40,6 +40,43 @@ export interface UaePackForm extends DocViewForm {
 type UaePackTable = "invoice" | "credit" | "voucher";
 type UaePackBox2 = "payment" | "originalRef" | "reason" | "plan" | "none";
 
+/** Items-table column layouts. Where the data model lacks a pack field (work
+ *  section, room nights, previously certified…), that info folds into the
+ *  description column and the standard taxable/VAT columns are kept. */
+type UaePackColumns =
+  | "default" // # | Description | Qty | Unit | Unit Price | Taxable | VAT % | VAT | Total
+  | "works" // construction: Work Section | Qty | Rate | Taxable | VAT % | VAT | Total
+  | "folio" // hotel: Description | Taxable | VAT % | VAT | Total
+  | "inclusive" // salon: Service | Qty | Price incl. VAT (VAT-inclusive display)
+  | "timesheet" // Resource / Description | Hours | Rate/hr | Taxable | VAT @ x% | Total
+  | "margin" // margin scheme: Description | Total (no VAT columns)
+  | "commercial"; // non-VAT issuer: Description | Qty | Unit Price | Amount
+
+type ColKey =
+  | "idx"
+  | "desc"
+  | "qty"
+  | "unit"
+  | "price"
+  | "priceIncl"
+  | "taxable"
+  | "vatpct"
+  | "vat"
+  | "total";
+
+const COLUMN_SETS: Record<UaePackColumns, ColKey[]> = {
+  default: ["idx", "desc", "qty", "unit", "price", "taxable", "vatpct", "vat", "total"],
+  works: ["idx", "desc", "qty", "price", "taxable", "vatpct", "vat", "total"],
+  folio: ["idx", "desc", "taxable", "vatpct", "vat", "total"],
+  inclusive: ["idx", "desc", "qty", "priceIncl"],
+  timesheet: ["idx", "desc", "qty", "price", "taxable", "vat", "total"],
+  margin: ["idx", "desc", "total"],
+  commercial: ["idx", "desc", "qty", "price", "taxable"],
+};
+
+const colAlign = (k: ColKey): string =>
+  k === "desc" ? "text-left" : k === "vatpct" ? "text-center" : "text-right";
+
 interface UaePackConfig {
   titleEn: string;
   titleAr: string;
@@ -55,6 +92,10 @@ interface UaePackConfig {
   /** credit = reduction rows; debit = normal totals with a Debit grand row. */
   creditMode?: "credit" | "debit";
   voucherMode?: "receipt" | "payment";
+  /** Voucher definition-row variant (petty cash rows instead of receipt rows). */
+  voucherRows?: "petty";
+  /** Items-table column variant (default = FTA 9-column grid). */
+  columns?: UaePackColumns;
   /** Render the AED-conversion box for foreign-currency documents. */
   fxBox?: boolean;
   sig?: [string, string];
@@ -240,6 +281,233 @@ const UAE_PACK: Record<string, UaePackConfig> = {
     dateLabel: "Date",
     sig: ["Prepared By", "Received By (Payee Signature)"],
   },
+  // ---- Wave 2: industry & special-case documents (A9–A28, D3–D4) ----
+  "uae-construction": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — مستخلص أعمال",
+    table: "invoice",
+    box2: "none",
+    columns: "works",
+    note: "VAT on retention becomes due when the retention is invoiced/certified (date of supply, Art. 25–26).",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-rental": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — إيجار",
+    table: "invoice",
+    box2: "none",
+    note: "Commercial rent is standard-rated (5%); residential rent is exempt. Continuous supply — date of supply per Art. 26.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-restaurant": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — مطعم",
+    table: "invoice",
+    box2: "none",
+    note: "Where consideration ≤ AED 10,000 this may be issued as a simplified tax invoice.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-medical": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — خدمات طبية",
+    table: "invoice",
+    box2: "none",
+    note: "Zero-rated ≠ exempt: the clinic still issues tax invoices and recovers input VAT.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-education": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — رسوم دراسية",
+    table: "invoice",
+    box2: "none",
+    note: "Tuition of qualifying institutions is zero-rated (Art. 45(13)); extras are standard-rated.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-logistics": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — شحن ولوجستيات",
+    table: "invoice",
+    box2: "none",
+    note: "Export flag (position 8) applies in the e-invoice transaction type code where relevant.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-ecommerce": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — تجارة إلكترونية",
+    table: "invoice",
+    box2: "none",
+    note: "E-commerce supplies set flag position 7 of the invoice transaction type code.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-hotel": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — فندق",
+    table: "invoice",
+    box2: "none",
+    columns: "folio",
+    note: "Accommodation and F&B are standard-rated; Tourism Dirham is a government levy outside the scope of VAT.",
+    numberLabel: "Folio No.",
+    dateLabel: "Date",
+  },
+  "uae-salon": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — صالون",
+    table: "invoice",
+    box2: "none",
+    columns: "inclusive",
+    note: "Personal care services are standard-rated; VAT-inclusive display is typical for B2C pricing.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date",
+  },
+  "uae-garage": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — صيانة مركبات",
+    table: "invoice",
+    box2: "none",
+    note: "Warranty repairs at no consideration may constitute deemed supplies.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-realestate": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — عمولة وساطة عقارية",
+    table: "invoice",
+    box2: "none",
+    note: "Brokerage commission is standard-rated at 5% even where the underlying property supply is exempt or zero-rated.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-amc": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — عقد صيانة سنوي",
+    table: "invoice",
+    box2: "none",
+    note: "Continuous supply — sets flag position 5 of the e-invoice transaction type code; date of supply per Art. 26.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-event": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — تنظيم فعاليات",
+    table: "invoice",
+    box2: "none",
+    note: "VAT on advances is due on receipt (Art. 25–26).",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-timesheet": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — خدمات تقنية",
+    table: "invoice",
+    box2: "none",
+    columns: "timesheet",
+    note: "Attach the client-approved timesheet as supporting evidence for the hours billed.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-margin": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — نظام هامش الربح",
+    table: "invoice",
+    box2: "none",
+    columns: "margin",
+    note: "Margin scheme (Art. 43): VAT is accounted for on the profit margin, not shown on the invoice. Sets flag position 3.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+  },
+  "uae-summary": {
+    titleEn: "SUMMARY TAX INVOICE",
+    titleAr: "فاتورة ضريبية مجمعة",
+    table: "invoice",
+    box2: "none",
+    note: "Summary invoice: multiple supplies to the same customer within a calendar month. Sets flag position 4.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-agent": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — وكيل معلن",
+    table: "invoice",
+    box2: "none",
+    note: "Disclosed agent billing: both principal and agent TRNs shown. Sets flag position 6.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+    sig: ["For the Agent", "Received By"],
+  },
+  "uae-designated": {
+    titleEn: "INVOICE",
+    titleAr: "فاتورة — منطقة محددة",
+    table: "invoice",
+    box2: "none",
+    note: "Free Trade Zone supplies set flag position 1 of the e-invoice transaction type code; services in designated zones follow normal mainland rules.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-deemed": {
+    titleEn: "TAX INVOICE",
+    titleAr: "فاتورة ضريبية — توريد اعتباري",
+    table: "invoice",
+    box2: "none",
+    note: "Deemed supply (self-supplies, gifts, private use — Art. 11–12). Sets flag position 2.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+  },
+  "uae-commercial": {
+    titleEn: "INVOICE",
+    titleAr: "فاتورة",
+    table: "invoice",
+    box2: "none",
+    columns: "commercial",
+    note: "Commercial e-invoice (non-VAT-registered issuer): 49 mandatory fields, TIN as participant identifier — see the MoF rules.",
+    numberLabel: "Invoice No.",
+    dateLabel: "Date of Issue",
+    dueLabel: "Payment Due",
+  },
+  "uae-petty-cash": {
+    titleEn: "PETTY CASH VOUCHER",
+    titleAr: "سند مصروفات نثرية",
+    table: "voucher",
+    voucherMode: "payment",
+    voucherRows: "petty",
+    box2: "none",
+    note: "Input VAT on petty cash is recoverable only against retained simplified tax invoices.",
+    numberLabel: "Voucher No.",
+    dateLabel: "Date",
+    sig: ["Claimed By", "Approved By"],
+  },
+  "uae-advance-receipt": {
+    titleEn: "ADVANCE PAYMENT RECEIPT",
+    titleAr: "إيصال دفعة مقدمة",
+    table: "voucher",
+    voucherMode: "receipt",
+    box2: "none",
+    note: "Advances trigger VAT on receipt: issue a tax invoice for the advance within 14 days of the date of supply.",
+    numberLabel: "Receipt No.",
+    dateLabel: "Date Received",
+    sig: ["Received By (Authorised Signatory)", "Payer's Signature"],
+  },
 };
 
 export default function UaePackDoc({
@@ -285,8 +553,13 @@ export default function UaePackDoc({
     return { cat, taxable, rate, tax: (taxable * rate) / 100 };
   });
   const vat = breakdown.reduce((s, b) => s + b.tax, 0);
-  const grandTotal = form.round_off ? Math.round(netAfterDisc + vat) : netAfterDisc + vat;
-  const roundOffAmt = grandTotal - (netAfterDisc + vat);
+  // Margin/commercial variants never show or add VAT on the document.
+  const noVat = cfg.columns === "margin" || cfg.columns === "commercial";
+  const vatInTotal = noVat ? 0 : vat;
+  const grandTotal = form.round_off
+    ? Math.round(netAfterDisc + vatInTotal)
+    : netAfterDisc + vatInTotal;
+  const roundOffAmt = grandTotal - (netAfterDisc + vatInTotal);
 
   // Per-line VAT: rate applies to standard ('S'/unset) lines only.
   const lineRate = (it: DocViewItem) =>
@@ -385,27 +658,105 @@ export default function UaePackDoc({
   const isDebit = isCredit && cfg.creditMode === "debit";
   const lastColLabel = isCredit ? `${isDebit ? "Debit" : "Credit"} (${ccy})` : `Total (${ccy})`;
 
+  // Column-variant header labels (overrides per cfg.columns).
+  const cols = COLUMN_SETS[cfg.columns || "default"];
+  const colLabelOverrides: Partial<Record<ColKey, string>> = (() => {
+    switch (cfg.columns) {
+      case "works":
+        return {
+          desc: "Work Section",
+          price: "Rate",
+          taxable: "Taxable Amt",
+          vat: `VAT (${ccy})`,
+          total: `Total (${ccy})`,
+        };
+      case "folio":
+        return { taxable: "Taxable Amt", vat: `VAT (${ccy})`, total: `Total (${ccy})` };
+      case "inclusive":
+        return { desc: "Service", priceIncl: `Price incl. VAT (${ccy})` };
+      case "timesheet":
+        return {
+          desc: "Resource / Description",
+          qty: "Hours",
+          price: "Rate/hr",
+          taxable: "Taxable Amt",
+          vat: `VAT @ ${form.tax_rate || 0}%`,
+          total: `Total (${ccy})`,
+        };
+      case "margin":
+        return { total: `Total (${ccy})` };
+      case "commercial":
+        return { taxable: `Amount (${ccy})` };
+      default:
+        return {};
+    }
+  })();
+  const colLabel = (k: ColKey): string =>
+    colLabelOverrides[k] ??
+    (
+      {
+        idx: "#",
+        desc: "Description",
+        qty: "Qty",
+        unit: "Unit",
+        price: "Unit Price",
+        priceIncl: "Unit Price",
+        taxable: "Taxable",
+        vatpct: "VAT %",
+        vat: "VAT",
+        total: lastColLabel,
+      } as Record<ColKey, string>
+    )[k];
+  const tdClass = (k: ColKey): string =>
+    `border border-[#d6dee7] py-1.5 px-2 align-top ${colAlign(k)}${
+      k === "idx" || k === "unit" || k === "vatpct" ? " text-neutral-500" : ""
+    }${k === "desc" ? "" : " whitespace-nowrap tabular-nums"}`;
+  const colValue = (
+    k: ColKey,
+    it: DocViewItem,
+    i: number,
+    taxable: number,
+    rate: number,
+    lineVat: number
+  ): React.ReactNode => {
+    switch (k) {
+      case "idx":
+        return itemStartIndex + i + 1;
+      case "desc":
+        return it.description || "—";
+      case "qty":
+        return it.qty;
+      case "unit":
+        return it.unit || "—";
+      case "price":
+        return m(it.unit_price);
+      case "priceIncl":
+        return m(it.unit_price * (1 + rate / 100));
+      case "taxable":
+        return m(taxable);
+      case "vatpct":
+        return `${rate}%`;
+      case "vat":
+        return m(lineVat);
+      case "total":
+        return m(noVat ? taxable : taxable + lineVat);
+    }
+  };
+
   const itemsTable = (
     <table className="w-full border-collapse text-[12.8px] mt-3 mb-2">
       <thead>
         <tr style={{ background: acc, color: "#fff" }}>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-8">#</th>
-          <th className="py-1.5 px-2 text-left font-semibold text-[11.5px]">Description</th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-12">Qty</th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-12">Unit</th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-24 whitespace-nowrap">
-            Unit Price
-          </th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-24 whitespace-nowrap">
-            Taxable
-          </th>
-          <th className="py-1.5 px-2 text-center font-semibold text-[11.5px] w-12">VAT %</th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-20 whitespace-nowrap">
-            VAT
-          </th>
-          <th className="py-1.5 px-2 text-right font-semibold text-[11.5px] w-24 whitespace-nowrap">
-            {lastColLabel}
-          </th>
+          {cols.map((k) => (
+            <th
+              key={k}
+              className={`py-1.5 px-2 font-semibold text-[11.5px] whitespace-nowrap ${colAlign(k)}${
+                k === "idx" ? " w-8" : ""
+              }`}
+            >
+              {colLabel(k)}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
@@ -415,33 +766,11 @@ export default function UaePackDoc({
           const lineVat = (taxable * rate) / 100;
           return (
             <tr key={i}>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right text-neutral-500 tabular-nums">
-                {itemStartIndex + i + 1}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top">
-                {it.description || "—"}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right whitespace-nowrap">
-                {it.qty}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right text-neutral-500 whitespace-nowrap">
-                {it.unit || "—"}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right whitespace-nowrap">
-                {m(it.unit_price)}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right whitespace-nowrap">
-                {m(taxable)}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-center text-neutral-500 whitespace-nowrap">
-                {rate}%
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right whitespace-nowrap">
-                {m(lineVat)}
-              </td>
-              <td className="border border-[#d6dee7] py-1.5 px-2 align-top text-right whitespace-nowrap">
-                {m(taxable + lineVat)}
-              </td>
+              {cols.map((k) => (
+                <td key={k} className={tdClass(k)}>
+                  {colValue(k, it, i, taxable, rate, lineVat)}
+                </td>
+              ))}
             </tr>
           );
         })}
@@ -449,26 +778,43 @@ export default function UaePackDoc({
     </table>
   );
 
-  const voucherRows: [string, string][] = [
-    [
-      cfg.voucherMode === "payment" ? "Paid to" : "Received with thanks from",
-      form.customer_name || "—",
-    ],
-    ["The sum of (in words)", amountInWords(grandTotal, ccy)],
-  ];
+  const voucherRows: [string, string][] =
+    cfg.voucherRows === "petty"
+      ? [
+          ["Paid to", form.customer_name || "—"],
+          [
+            "For (particulars)",
+            form.notes ||
+              itemsToRender
+                .map((it) => it.description)
+                .filter(Boolean)
+                .join("; ") ||
+              "—",
+          ],
+          ["Amount (in words)", amountInWords(grandTotal, ccy)],
+        ]
+      : [
+          [
+            cfg.voucherMode === "payment" ? "Paid to" : "Received with thanks from",
+            form.customer_name || "—",
+          ],
+          ["The sum of (in words)", amountInWords(grandTotal, ccy)],
+        ];
   const paidBy = [form.payment_method, form.ref_number ? `Ref: ${form.ref_number}` : ""]
     .filter(Boolean)
     .join(" · ");
-  if (paidBy) voucherRows.push(["By", paidBy]);
-  voucherRows.push([
-    "Being payment of",
-    form.notes ||
-      (form.original_invoice_number
-        ? `Tax Invoice ${form.original_invoice_number}${
-            form.original_invoice_date ? ` dated ${fmtDate(form.original_invoice_date)}` : ""
-          }`
-        : "—"),
-  ]);
+  if (cfg.voucherRows !== "petty") {
+    if (paidBy) voucherRows.push(["By", paidBy]);
+    voucherRows.push([
+      "Being payment of",
+      form.notes ||
+        (form.original_invoice_number
+          ? `Tax Invoice ${form.original_invoice_number}${
+              form.original_invoice_date ? ` dated ${fmtDate(form.original_invoice_date)}` : ""
+            }`
+          : "—"),
+    ]);
+  }
 
   const voucherTable = (
     <table className="w-full border-collapse text-[12.8px] mt-3 mb-2">
@@ -497,32 +843,34 @@ export default function UaePackDoc({
   const totalsBlock = showTotals && cfg.table !== "voucher" && (
     <>
       <div className="flex justify-between gap-6 mt-6">
-        <div className="text-[11px]">
-          <BoxTitle>VAT Breakdown</BoxTitle>
-          <table className="border-collapse">
-            <thead>
-              <tr className="text-neutral-400">
-                <th className="text-left pr-4 font-medium">Category</th>
-                <th className="text-right pr-4 font-medium">Taxable</th>
-                <th className="text-right pr-4 font-medium">Rate</th>
-                <th className="text-right font-medium">VAT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {breakdown.map((b) => (
-                <tr key={b.cat}>
-                  <td className="pr-4">
-                    {b.cat} · {codeLabel(TAX_CATEGORY_CODES, b.cat)}
-                  </td>
-                  <td className="text-right pr-4 tabular-nums">{m(b.taxable)}</td>
-                  <td className="text-right pr-4 tabular-nums">{b.rate}%</td>
-                  <td className="text-right tabular-nums">{m(b.tax)}</td>
+        {!noVat && (
+          <div className="text-[11px]">
+            <BoxTitle>VAT Breakdown</BoxTitle>
+            <table className="border-collapse">
+              <thead>
+                <tr className="text-neutral-400">
+                  <th className="text-left pr-4 font-medium">Category</th>
+                  <th className="text-right pr-4 font-medium">Taxable</th>
+                  <th className="text-right pr-4 font-medium">Rate</th>
+                  <th className="text-right font-medium">VAT</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <table className="border-collapse text-[13px] self-start" style={{ width: 320 }}>
+              </thead>
+              <tbody>
+                {breakdown.map((b) => (
+                  <tr key={b.cat}>
+                    <td className="pr-4">
+                      {b.cat} · {codeLabel(TAX_CATEGORY_CODES, b.cat)}
+                    </td>
+                    <td className="text-right pr-4 tabular-nums">{m(b.taxable)}</td>
+                    <td className="text-right pr-4 tabular-nums">{b.rate}%</td>
+                    <td className="text-right tabular-nums">{m(b.tax)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <table className="border-collapse text-[13px] self-start ml-auto" style={{ width: 320 }}>
           <tbody>
             {isCredit && !isDebit ? (
               <>
@@ -537,20 +885,21 @@ export default function UaePackDoc({
                   />
                 ))}
               </>
-            ) : (
+            ) : cfg.columns === "margin" ? null : (
               <>
-                <TotRow k="Subtotal (excl. VAT)" v={m(grossNet)} />
+                <TotRow k={noVat ? "Subtotal" : "Subtotal (excl. VAT)"} v={m(grossNet)} />
                 {discount > 0 && <TotRow k="Total Discount" v={`- ${m(discount)}`} />}
                 {discount > 0 && <TotRow k="Total Taxable Amount" v={m(netAfterDisc)} />}
-                {breakdown.map((b) => (
-                  <TotRow
-                    key={b.cat}
-                    k={`VAT @ ${b.rate}%${
-                      breakdown.length > 1 || b.cat !== "S" ? ` · ${b.cat}` : ""
-                    }`}
-                    v={m(b.tax)}
-                  />
-                ))}
+                {!noVat &&
+                  breakdown.map((b) => (
+                    <TotRow
+                      key={b.cat}
+                      k={`VAT @ ${b.rate}%${
+                        breakdown.length > 1 || b.cat !== "S" ? ` · ${b.cat}` : ""
+                      }`}
+                      v={m(b.tax)}
+                    />
+                  ))}
               </>
             )}
             {Math.abs(roundOffAmt) >= 0.005 && (
