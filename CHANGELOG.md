@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.2.2 — 2026-07-18
+
+### Fixes
+- **Privacy — local mode is now fully offline** (#5): the app no longer fires cloud `org_members` / `profiles` REST requests on launch when running in on-device local mode. Org-membership module restrictions are a team concept and don't apply to single-user local installs. Previously these calls 401'd against the hosted cloud on every start, contradicting local mode's "never leaves the machine" promise.
+
+### Verified
+- `tsc --noEmit` clean, `vite build` clean, **208/208** vitest, eslint 0 errors
+- Network capture in local mode: **0** outbound requests after the fix (was 4 per launch)
+
+---
+
 ## v2.2.0 — 2026-07-17
 
 ### Front-end — Filey-DEMO minimal design system
