@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -10,17 +10,27 @@ import {
   Pencil,
   Plus,
   Download,
+  Printer,
+  Copy,
+  Send,
+  FileDown,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import {
+  advances,
   crm,
   billing,
   quotes,
   erp,
+  receipts as receiptsApi,
+  type CompanyProfile,
   type CrmCustomer,
   type InvoiceDocSummary,
   type QuotationSummary,
   type Order,
   type Opportunity,
+  type ReceiptSummary,
 } from "../lib/api";
 import {
   DataTable,
@@ -38,7 +48,7 @@ import {
   type QuickViewData,
   type ShareKind,
 } from "../components/RowActions";
-import { aed, num, fmtDate, errMsg, cn } from "../lib/format";
+import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -48,6 +58,23 @@ import AdvanceCard from "../components/AdvanceCard";
 import StatementModal, {
   type StatementDocRef,
 } from "../components/statements/StatementModal";
+import FitPreview from "../components/FitPreview";
+import { downloadElementAsPdf } from "../lib/pdfTools";
+import {
+  buildStatement,
+  type StatementAdvanceEntry,
+  type StatementDocEntry,
+  type StatementPaymentEntry,
+  type StatementReceiptEntry,
+} from "../components/statements/buildStatement";
+import {
+  paginateStatementLines,
+  StatementThumb,
+  statementTemplateList,
+  statementTemplates,
+  type StatementPage,
+  type StatementTemplateKey,
+} from "../components/statements/StatementTemplates";
 
 // Local re-export so the edit form doesn't need a separate import (same
 // helper as the Customers page — keeps phone_e164 in sync for OTP/SMS).
@@ -89,21 +116,23 @@ function Info({
   );
 }
 
-/** DEMO parity: one cell of the joined KPI strip (12px label / 24px value /
- *  11.5px hint). The wrapper supplies the shared hairlines via .joined-kpis. */
+/** DEMO parity: one cell of the joined KPI grid (12px label / 24px value /
+ *  11.5px hint). Hairline dividers come via className on the wrapper. */
 function KpiCell({
   label,
   value,
   hint,
   valueClass,
+  className,
 }: {
   label: string;
   value: string;
   hint?: ReactNode;
   valueClass?: string;
+  className?: string;
 }) {
   return (
-    <div className="bg-card p-5">
+    <div className={cn("bg-card p-5", className)}>
       <div className="text-[12px] text-muted-foreground">{label}</div>
       <div
         className={cn(
@@ -133,6 +162,16 @@ export default function CustomerDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [stmtOpen, setStmtOpen] = useState(false);
   const [params, setParams] = useSearchParams();
+  // Inline statement panel (DEMO parity): template picker + live preview.
+  const [showAllLedger, setShowAllLedger] = useState(false);
+  const [tplKey, setTplKey] = useState<StatementTemplateKey>("ledger");
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [receiptRows, setReceiptRows] = useState<ReceiptSummary[]>([]);
+  const [stmtPayments, setStmtPayments] = useState<StatementPaymentEntry[]>([]);
+  const [stmtAdvances, setStmtAdvances] = useState<StatementAdvanceEntry[]>([]);
+  const [stmtExtrasLoading, setStmtExtrasLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   // Deep link: /customers/:id?statement=1 opens the Statement of Account
   // modal directly (used by the Customers list page).
@@ -151,14 +190,18 @@ export default function CustomerDetail() {
       quotes.listDocs(),
       erp.orders(),
       crm.opportunities(),
+      receiptsApi.list().catch(() => [] as ReceiptSummary[]),
+      billing.getCompany().catch(() => null),
     ])
-      .then(([cs, inv, qs, ords, op]) => {
+      .then(([cs, inv, qs, ords, op, rcs, co]) => {
         if (!alive) return;
         setCustomers(cs);
         setInvoices(inv);
         setQuotations(qs);
         setOrders(ords);
         setOpps(op);
+        setReceiptRows(rcs);
+        setCompany(co);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -176,13 +219,17 @@ export default function CustomerDetail() {
       quotes.listDocs(),
       erp.orders(),
       crm.opportunities(),
+      receiptsApi.list().catch(() => [] as ReceiptSummary[]),
+      billing.getCompany().catch(() => null),
     ])
-      .then(([cs, inv, qs, ords, op]) => {
+      .then(([cs, inv, qs, ords, op, rcs, co]) => {
         setCustomers(cs);
         setInvoices(inv);
         setQuotations(qs);
         setOrders(ords);
         setOpps(op);
+        setReceiptRows(rcs);
+        setCompany(co);
       })
       .catch(() => {});
   };
@@ -239,19 +286,222 @@ export default function CustomerDetail() {
     [myInvoices]
   );
 
-  const totalInvoiced = myInvoices.reduce((s, d) => s + d.total, 0);
-  const totalReceived = myInvoices.reduce((s, d) => s + (d.paid ?? 0), 0);
-  const paidInvoices = myInvoices.filter((d) => (d.paid ?? 0) > 0).length;
   const outstanding = myInvoices.reduce(
     (s, d) => s + (d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
     0
   );
   const opening = customer?.opening_balance || 0;
-  const outstandingTotal = outstanding + opening;
-  const openOppValue = myOpps
-    // localdb is schemaless — agent-created rows may lack stage.
-    .filter((o) => !["won", "lost"].includes((o.stage || "").toLowerCase()))
-    .reduce((s, o) => s + o.value, 0);
+
+  /** Issued invoices only are statement debits (drafts never hit the
+   *  account) — the same rule the StatementModal applies. */
+  const ledgerDocs = useMemo(
+    () => myInvoices.filter((d) => (d.status || "").toLowerCase() !== "draft"),
+    [myInvoices]
+  );
+  const docKey = ledgerDocs.map((d) => d.id).join(",");
+
+  /* Phase-2 statement data: dated invoice payments + advance deposits — the
+   *  same fetches the StatementModal performs on open, keyed by the doc set. */
+  useEffect(() => {
+    if (!customer) return;
+    let alive = true;
+    setStmtExtrasLoading(true);
+    const perDoc: Promise<StatementPaymentEntry[]> = Promise.all(
+      ledgerDocs.map((d) =>
+        billing
+          .payments(d.id)
+          .then((ps) =>
+            ps.map((p) => ({
+              date: (p.paid_at || "").slice(0, 10),
+              amount: Number(p.amount) || 0,
+              method: p.method || undefined,
+              docNumber: d.number,
+            }))
+          )
+          .catch(() => [] as StatementPaymentEntry[])
+      )
+    ).then((all) => all.flat());
+    Promise.all([
+      perDoc,
+      advances.forParty("customer", customer.id).catch(() => []),
+    ])
+      .then(([pays, advs]) => {
+        if (!alive) return;
+        setStmtPayments(pays);
+        setStmtAdvances(
+          advs
+            // Negative `applied:inv#…` rows are internal allocations, not new money.
+            .filter((a) => Number(a.amount) > 0)
+            .map((a) => ({
+              date: (a.paid_at || "").slice(0, 10),
+              amount: Number(a.amount) || 0,
+              note: a.note || undefined,
+            }))
+        );
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setStmtExtrasLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.id, docKey]);
+
+  /** Party currency: dominant across its invoices, else the company default. */
+  const currency = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const d of ledgerDocs) {
+      const c = (d.currency || "").trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return top || company?.currency || "AED";
+  }, [ledgerDocs, company]);
+
+  /** This customer's standalone payment receipts (non-draft). */
+  const stmtReceipts = useMemo<StatementReceiptEntry[]>(
+    () =>
+      receiptRows
+        .filter(
+          (r) =>
+            (r.status || "").toLowerCase() !== "draft" &&
+            names.has(r.customer_name)
+        )
+        .map((r) => ({
+          number: r.number,
+          date: (r.payment_date || "").slice(0, 10),
+          amount: Number(r.amount) || 0,
+        })),
+    [receiptRows, names]
+  );
+
+  /** The all-time statement — one derivation behind the KPI grid, the Sales
+   *  & Collections ledger, the download panel counts and the live preview. */
+  const built = useMemo(() => {
+    const docEntries: StatementDocEntry[] = ledgerDocs.map((d) => ({
+      number: d.number,
+      date: d.issue_date,
+      total: d.total,
+    }));
+    return buildStatement({
+      kind: "customer",
+      company: {
+        name: company?.name || "Company",
+        address:
+          [company?.address, company?.city].filter(Boolean).join("\n") ||
+          undefined,
+        trn: company?.trn || undefined,
+        email: company?.email || undefined,
+        phone: company?.phone || undefined,
+      },
+      party: {
+        name: display || "Customer",
+        contact:
+          customer && customer.company && customer.company !== customer.name
+            ? customer.name
+            : undefined,
+        trn: customer?.trn,
+        email: customer?.email,
+        address: customer?.address,
+        openingBalance: customer?.opening_balance ?? 0,
+      },
+      currency,
+      period: { from: null, to: localYmd(new Date()) },
+      docs: docEntries,
+      payments: stmtPayments,
+      receipts: stmtReceipts,
+      advances: stmtAdvances,
+    });
+  }, [
+    ledgerDocs,
+    company,
+    customer,
+    display,
+    currency,
+    stmtPayments,
+    stmtReceipts,
+    stmtAdvances,
+  ]);
+
+  const stmt = built.data;
+  /** + = the customer owes us, − = we hold an advance/credit for them. */
+  const netBalance = stmt.closingBalance;
+  const paymentCount = stmt.lines.filter((l) => l.credit > 0).length;
+
+  /** Period-over-period sales: last 90 days vs the prior 90 days, from real
+   *  invoice dates. Null when the prior window has no sales — the KPI then
+   *  shows a muted "No prior period" instead of an invented percentage. */
+  const salesDelta = useMemo(() => {
+    const now = new Date();
+    const d90 = new Date(now);
+    d90.setDate(d90.getDate() - 90);
+    const d180 = new Date(now);
+    d180.setDate(d180.getDate() - 180);
+    const from90 = localYmd(d90);
+    const from180 = localYmd(d180);
+    const today = localYmd(now);
+    let last = 0;
+    let prior = 0;
+    for (const d of ledgerDocs) {
+      const day = (d.issue_date || "").slice(0, 10);
+      if (!day || d.total <= 0) continue;
+      if (day >= from90 && day <= today) last += d.total;
+      else if (day >= from180 && day < from90) prior += d.total;
+    }
+    if (prior <= 0) return null;
+    return ((last - prior) / prior) * 100;
+  }, [ledgerDocs]);
+
+  const tplMeta = statementTemplates[tplKey];
+  const ActiveTpl = tplMeta.Component;
+  /** Ledger rows: the most recent 10 by default, all when toggled. */
+  const ledgerRows = showAllLedger ? stmt.lines : stmt.lines.slice(-10);
+
+  /** A4 slices for the off-screen PDF export stack (same pattern as the
+   *  StatementModal export). */
+  const exportPages = useMemo<StatementPage[]>(() => {
+    const lines = stmt.lines;
+    const slices = tplMeta.paginates ? paginateStatementLines(lines) : [lines];
+    return slices.map((slice, i) => ({
+      lines: slice,
+      page: i + 1,
+      pages: slices.length,
+      continuation: i > 0,
+      last: i === slices.length - 1,
+    }));
+  }, [stmt.lines, tplMeta.paginates]);
+
+  const copyStatementLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast.success("Link copied");
+  };
+
+  const emailStatement = () => {
+    shareVia("email", {
+      email: customer?.email,
+      text: `Statement of account for ${display} — balance ${money(netBalance, currency)}. View: ${window.location.href}`,
+      url: `Statement of account — ${display}`,
+    });
+  };
+
+  const downloadStatementPdf = async () => {
+    const el = exportRef.current;
+    if (!el) {
+      window.print();
+      return;
+    }
+    setExporting(true);
+    try {
+      await downloadElementAsPdf(
+        el,
+        `Statement-${(display || "customer").replace(/[^\w.-]+/g, "_").slice(0, 40)}-${localYmd(new Date())}`
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const subtitle = useMemo(() => {
     if (!customer) return "Customer profile & history";
@@ -436,7 +686,11 @@ export default function CustomerDetail() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setStmtOpen(true)}
+            onClick={() =>
+              document
+                .getElementById("download-panel")
+                ?.scrollIntoView({ behavior: "smooth" })
+            }
             disabled={!customer}
             className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
           >
@@ -468,11 +722,12 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {/* DEMO parity: joined KPI strip — identity + metrics share hairlines */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 joined-kpis mb-5">
-        <div className="bg-card p-5">
+      {/* DEMO parity: joined 4-cell KPI grid — identity + statement metrics
+          sharing hairline dividers; every figure derives from buildStatement. */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
+        <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
           <div className="flex items-start gap-3">
-            <div className="h-11 w-11 rounded-lg bg-primary-100 text-ink grid place-items-center shrink-0">
+            <div className="h-11 w-11 rounded-lg bg-amber-500/10 text-amber-500 grid place-items-center shrink-0">
               <Building2 className="h-5 w-5" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
@@ -487,43 +742,69 @@ export default function CustomerDetail() {
           </div>
         </div>
         <KpiCell
-          label="Total invoiced"
-          value={aed(totalInvoiced)}
-          hint={`${myInvoices.length} invoice${myInvoices.length === 1 ? "" : "s"}`}
+          className="border-b lg:border-b-0 lg:border-r border-border"
+          label="Total sales"
+          value={money(stmt.totalDebit, currency)}
+          hint={
+            salesDelta == null ? (
+              "No prior period"
+            ) : (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1",
+                  salesDelta >= 0 ? "text-emerald-500" : "text-danger"
+                )}
+              >
+                {salesDelta >= 0 ? (
+                  <TrendingUp className="h-3 w-3" />
+                ) : (
+                  <TrendingDown className="h-3 w-3" />
+                )}
+                {salesDelta >= 0 ? "+" : ""}
+                {salesDelta.toFixed(1)}% vs prior 90 days
+              </span>
+            )
+          }
         />
         <KpiCell
+          className="border-b lg:border-b-0 lg:border-r border-border"
           label="Received"
-          value={aed(totalReceived)}
+          value={money(stmt.totalCredit, currency)}
           hint={
-            paidInvoices > 0
-              ? `Across ${paidInvoices} invoice${paidInvoices === 1 ? "" : "s"}`
+            paymentCount > 0
+              ? `Across ${paymentCount} payment${paymentCount === 1 ? "" : "s"}`
               : "No payments yet"
           }
         />
         <KpiCell
-          label="Outstanding"
-          value={aed(outstandingTotal)}
-          valueClass={outstandingTotal > 0 ? "text-danger" : undefined}
-          hint={
-            customer?.credit_limit
-              ? outstandingTotal > customer.credit_limit
-                ? `OVER credit limit ${aed(customer.credit_limit)}`
-                : `Credit limit ${aed(customer.credit_limit)}`
-              : opening !== 0
-                ? `Incl. opening balance ${aed(opening)}`
-                : outstanding > 0
-                  ? "Balance due"
-                  : "All settled"
+          label="Net balance"
+          value={money(netBalance, currency)}
+          valueClass={
+            netBalance > 0.005
+              ? "text-danger"
+              : netBalance < -0.005
+                ? "text-success"
+                : undefined
           }
-        />
-        <KpiCell
-          label="Orders"
-          value={num(myOrders.length)}
-          hint={`${myQuotes.length} quote${myQuotes.length === 1 ? "" : "s"} · open ${aed(openOppValue)}`}
+          hint={
+            <span className="inline-flex items-center gap-1">
+              {netBalance > 0.005 ? (
+                <>
+                  <TrendingDown className="h-3 w-3" /> Customer owes
+                </>
+              ) : netBalance < -0.005 ? (
+                <>
+                  <TrendingUp className="h-3 w-3" /> Advance held
+                </>
+              ) : (
+                "All settled"
+              )}
+            </span>
+          }
         />
       </div>
 
-      {/* DEMO parity: joined Contact & tax + Invoices card */}
+      {/* DEMO parity: joined Contact & tax + Sales & Collections card */}
       <div className="grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="lg:col-span-1 border-b lg:border-b-0 lg:border-r border-border p-5">
           <div className="text-[14px] font-semibold text-foreground mb-3">
@@ -559,116 +840,316 @@ export default function CustomerDetail() {
           <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
             <div>
               <div className="text-[14px] font-semibold text-foreground">
-                Invoices
+                Sales & Collections
               </div>
               <div className="text-[12.5px] text-muted-foreground">
-                {num(myInvoices.length)} total · {aed(outstanding)} due
+                Period {stmt.period.from} → {stmt.period.to}
               </div>
             </div>
-            {myInvoices.length > 10 && (
+            {stmt.lines.length > 10 && (
               <button
-                onClick={() => setShowAllInv((v) => !v)}
+                onClick={() => setShowAllLedger((v) => !v)}
                 className="text-[12.5px] text-muted-foreground hover:text-foreground"
               >
-                {showAllInv ? "Show recent" : "Show all"}
+                {showAllLedger ? "Show recent" : "Show all"}
               </button>
             )}
           </div>
           <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-[12.5px]">
               <thead className="sticky top-0 bg-card z-10">
-                <tr className="text-left border-b border-border">
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
-                    Number
-                  </th>
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
-                    Issued
-                  </th>
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
-                    Total
-                  </th>
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
-                    Balance
-                  </th>
-                  <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
-                    Actions
-                  </th>
+                <tr className="text-left text-muted-foreground border-b border-border">
+                  <th className="px-5 py-2 font-medium text-[11.5px]">Date</th>
+                  <th className="px-5 py-2 font-medium text-[11.5px]">Description</th>
+                  <th className="px-5 py-2 font-medium text-[11.5px]">Ref</th>
+                  <th className="px-5 py-2 font-medium text-[11.5px] text-right">Sales</th>
+                  <th className="px-5 py-2 font-medium text-[11.5px] text-right">Received</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && myInvoices.length === 0 ? (
+                {stmtExtrasLoading && ledgerRows.length === 0 ? (
                   Array.from({ length: 3 }).map((_, r) => (
-                    <tr key={`sk${r}`} className="border-b border-border last:border-0">
-                      {Array.from({ length: 6 }).map((_, c) => (
+                    <tr key={`lsk${r}`} className="border-b border-border last:border-0">
+                      {Array.from({ length: 5 }).map((_, c) => (
                         <td key={c} className="px-5 py-3">
                           <Skeleton className="h-4 w-[70%]" />
                         </td>
                       ))}
                     </tr>
                   ))
-                ) : visibleInvoices.length === 0 ? (
+                ) : ledgerRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={5}
                       className="px-5 py-10 text-center text-[13px] text-muted-foreground"
                     >
-                      No invoices for this customer
+                      No transactions yet
                     </td>
                   </tr>
                 ) : (
-                  visibleInvoices.map((d) => {
-                    const balance =
-                      d.balance ?? Math.max(0, d.total - (d.paid ?? 0));
-                    return (
-                      <tr
-                        key={d.id}
-                        className="border-b border-border last:border-0 hover:bg-hover"
-                      >
-                        <td className="px-5 py-3 font-medium text-foreground whitespace-nowrap">
-                          {d.number}
-                        </td>
-                        <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">
-                          {fmtDate(d.issue_date)}
-                        </td>
-                        <td className="px-5 py-3">
-                          <Badge tone={statusTone(d.status)}>{d.status}</Badge>
-                        </td>
-                        <td className="px-5 py-3 text-right text-foreground tabular-nums">
-                          {aed(d.total)}
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <span
-                            className={
-                              balance > 0
-                                ? "text-foreground"
-                                : "text-muted-foreground"
-                            }
-                          >
-                            {aed(balance)}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3">
-                          <RowActions
-                            onView={() => viewInvoice(d)}
-                            onSend={{
-                              whatsapp: () => shareInvoice("whatsapp", d),
-                              email: () => shareInvoice("email", d),
-                              sms: () => shareInvoice("sms", d),
-                              copyLink: () => shareInvoice("copyLink", d),
-                            }}
-                            onDelete={() => deleteInvoice(d)}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })
+                  ledgerRows.map((l, i) => (
+                    <tr
+                      key={`${l.ref}-${i}`}
+                      className="border-b border-border last:border-0 hover:bg-hover"
+                    >
+                      <td className="px-5 py-2 text-foreground whitespace-nowrap">
+                        {l.date}
+                      </td>
+                      <td className="px-5 py-2 text-foreground truncate max-w-[280px]">
+                        {l.description}
+                      </td>
+                      <td className="px-5 py-2 text-muted-foreground">
+                        {l.ref || "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right text-foreground tabular-nums">
+                        {l.debit ? money(l.debit, currency) : "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right text-emerald-500 tabular-nums">
+                        {l.credit ? money(l.credit, currency) : "—"}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* DEMO parity: download panel — template picker + selected-template
+          summary. The header's amber button smooth-scrolls here. */}
+      <div
+        id="download-panel"
+        className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5 scroll-mt-4"
+      >
+        <div className="lg:col-span-2 rounded-xl border border-border bg-card">
+          <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-[14px] font-semibold text-foreground">
+                Download statement
+              </div>
+              <div className="text-[12.5px] text-muted-foreground">
+                Choose a template — preview updates instantly
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => window.print()}
+                className="btn-ghost h-8 inline-flex gap-1.5"
+              >
+                <Printer className="h-3.5 w-3.5" /> Print
+              </button>
+              <button
+                onClick={copyStatementLink}
+                className="btn-ghost h-8 inline-flex gap-1.5"
+              >
+                <Copy className="h-3.5 w-3.5" /> Copy link
+              </button>
+              <button
+                onClick={emailStatement}
+                disabled={!customer}
+                className="btn-ghost h-8 inline-flex gap-1.5"
+              >
+                <Send className="h-3.5 w-3.5" /> Email
+              </button>
+              <button
+                onClick={downloadStatementPdf}
+                disabled={!customer || exporting || !built.hasContent}
+                className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60 disabled:opacity-50"
+              >
+                <FileDown className="h-3.5 w-3.5" />{" "}
+                {exporting ? "Preparing…" : "Download PDF"}
+              </button>
+            </div>
+          </div>
+          <div className="p-4 overflow-x-auto">
+            <div className="flex items-stretch gap-3">
+              {statementTemplateList.map((t) => (
+                <StatementThumb
+                  key={t.key}
+                  template={t}
+                  active={tplKey === t.key}
+                  onClick={() => setTplKey(t.key)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-3 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-[12px] text-muted-foreground uppercase tracking-wider">
+              Selected template
+            </div>
+            <div className="text-[16px] font-semibold text-foreground mt-1">
+              {tplMeta.name}
+            </div>
+            <div className="text-[12.5px] text-muted-foreground mt-1 px-3">
+              {tplMeta.desc}
+            </div>
+            <div className="mt-3 text-[11.5px] text-muted-foreground">
+              Includes: {stmt.lines.length} entries · balance{" "}
+              {money(netBalance, currency)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DEMO parity: live preview of the selected statement template */}
+      <div className="rounded-xl border border-border bg-card p-4 mb-5">
+        <div className="text-[13px] text-muted-foreground mb-3">
+          Live preview — how the exported {tplMeta.name} will look
+        </div>
+        {stmtExtrasLoading && !built.hasContent ? (
+          <Skeleton className="h-[420px] w-full" />
+        ) : !built.hasContent ? (
+          <div className="py-16 text-center text-[13px] text-muted-foreground">
+            No statement activity yet — the preview appears once this customer
+            has invoices, receipts or advances on record.
+          </div>
+        ) : (
+          <FitPreview baseWidth={794} zoom={100} padding={0}>
+            <ActiveTpl data={stmt} />
+          </FitPreview>
+        )}
+      </div>
+
+      {/* Off-screen A4 stack captured for the PDF export — every slice a real
+          page (same pattern as the StatementModal export). */}
+      {built.hasContent && (
+        <div
+          ref={exportRef}
+          aria-hidden
+          className="fixed left-[-99999px] top-0 pointer-events-none"
+          style={{ width: 794, background: "#fff" }}
+        >
+          {exportPages.map((pg) => (
+            <div
+              key={pg.page}
+              className="bg-white"
+              style={{ width: 794, minHeight: 1123 }}
+            >
+              <ActiveTpl data={stmt} page={pg} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Invoices — full table in its own card (its old joined-card slot now
+          holds the Sales & Collections ledger). */}
+      <div className="border border-border rounded-xl overflow-hidden bg-card mb-5">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[14px] font-semibold text-foreground">
+              Invoices
+            </div>
+            <div className="text-[12.5px] text-muted-foreground">
+              {num(myInvoices.length)} total · {aed(outstanding)} due
+            </div>
+          </div>
+          {myInvoices.length > 10 && (
+            <button
+              onClick={() => setShowAllInv((v) => !v)}
+              className="text-[12.5px] text-muted-foreground hover:text-foreground"
+            >
+              {showAllInv ? "Show recent" : "Show all"}
+            </button>
+          )}
+        </div>
+        <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+          <table className="w-full text-[13px]">
+            <thead className="sticky top-0 bg-card z-10">
+              <tr className="text-left border-b border-border">
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                  Number
+                </th>
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                  Issued
+                </th>
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground">
+                  Status
+                </th>
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                  Total
+                </th>
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                  Balance
+                </th>
+                <th className="px-5 py-2.5 text-[12px] font-medium tracking-wide text-muted-foreground text-right">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && myInvoices.length === 0 ? (
+                Array.from({ length: 3 }).map((_, r) => (
+                  <tr key={`sk${r}`} className="border-b border-border last:border-0">
+                    {Array.from({ length: 6 }).map((_, c) => (
+                      <td key={c} className="px-5 py-3">
+                        <Skeleton className="h-4 w-[70%]" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : visibleInvoices.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-[13px] text-muted-foreground"
+                  >
+                    No invoices for this customer
+                  </td>
+                </tr>
+              ) : (
+                visibleInvoices.map((d) => {
+                  const balance =
+                    d.balance ?? Math.max(0, d.total - (d.paid ?? 0));
+                  return (
+                    <tr
+                      key={d.id}
+                      className="border-b border-border last:border-0 hover:bg-hover"
+                    >
+                      <td className="px-5 py-3 font-medium text-foreground whitespace-nowrap">
+                        {d.number}
+                      </td>
+                      <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">
+                        {fmtDate(d.issue_date)}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                      </td>
+                      <td className="px-5 py-3 text-right text-foreground tabular-nums">
+                        {aed(d.total)}
+                      </td>
+                      <td className="px-5 py-3 text-right tabular-nums">
+                        <span
+                          className={
+                            balance > 0
+                              ? "text-foreground"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {aed(balance)}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <RowActions
+                          onView={() => viewInvoice(d)}
+                          onSend={{
+                            whatsapp: () => shareInvoice("whatsapp", d),
+                            email: () => shareInvoice("email", d),
+                            sms: () => shareInvoice("sms", d),
+                            copyLink: () => shareInvoice("copyLink", d),
+                          }}
+                          onDelete={() => deleteInvoice(d)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
