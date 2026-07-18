@@ -11,6 +11,9 @@ import {
   Activity,
   FileText,
   Info,
+  Search,
+  ArrowUpDown,
+  ChevronRight,
 } from "lucide-react";
 import { crm, type CrmCustomer } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -21,15 +24,11 @@ import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { inputTypeFor, validateCustomValue, type CustomFieldDef } from "../lib/customFields";
 import {
   PageHeader,
-  MetricCard,
-  DataTable,
   Modal,
   EmptyState,
   Badge,
   Field,
   ErrorBanner,
-  FilterChip,
-  SearchInput,
   InfoCard,
 } from "../components/ui";
 import {
@@ -55,6 +54,8 @@ const toE164Local = (raw: string): string | null => {
   return null;
 };
 
+type SortKey = "company" | "trn" | "email" | "phone" | "segment";
+
 export default function Customers() {
   const { toast, confirm } = useUI();
   const nav = useNavigate();
@@ -66,6 +67,10 @@ export default function Customers() {
   const [edit, setEdit] = useState<CrmCustomer | null>(null);
   const [detail, setDetail] = useState<CrmCustomer | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [sortBy, setSortBy] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "company",
+    dir: "asc",
+  });
   const [params, setParams] = useSearchParams();
 
   useEffect(() => {
@@ -92,17 +97,16 @@ export default function Customers() {
   useLiveSync(load);
 
   // Persisted "saved view": the active filter set survives reloads.
-  const [vw, setVw] = useState<{ seg: string; email: boolean; trn: boolean }>(() => {
+  const [vw, setVw] = useState<{ email: boolean; trn: boolean }>(() => {
     try {
       return {
-        seg: "",
         email: false,
         trn: false,
         ...JSON.parse(localStorage.getItem("crm.customers.view") || "{}"),
       };
     } catch (e) {
       console.warn("Failed to load saved customer view", e);
-      return { seg: "", email: false, trn: false };
+      return { email: false, trn: false };
     }
   });
   useEffect(() => {
@@ -112,24 +116,32 @@ export default function Customers() {
     () => [...new Set(rows.map((c) => c.segment).filter(Boolean))] as string[],
     [rows]
   );
-  const hasFilter = !!vw.seg || vw.email || vw.trn;
+  const hasFilter = vw.email || vw.trn;
 
-  const filtered = useMemo(
-    () =>
-      rows.filter((c) => {
-        const text = [c.name, c.company, c.email, c.trn].some((v) =>
-          (v || "").toLowerCase().includes(q.toLowerCase())
-        );
-        if (!text) return false;
-        if (vw.seg && c.segment !== vw.seg) return false;
-        if (vw.email && !c.email) return false;
-        if (vw.trn && !c.trn) return false;
-        return true;
-      }),
-    [rows, q, vw]
-  );
+  const filtered = useMemo(() => {
+    const list = rows.filter((c) => {
+      const text = [c.name, c.company, c.email, c.trn].some((v) =>
+        (v || "").toLowerCase().includes(q.toLowerCase())
+      );
+      if (!text) return false;
+      if (vw.email && !c.email) return false;
+      if (vw.trn && !c.trn) return false;
+      return true;
+    });
+    const { key, dir } = sortBy;
+    const val = (c: CrmCustomer) =>
+      (key === "company" ? c.company || c.name || "" : (c[key] ?? "") as string).toLowerCase();
+    return [...list].sort((a, b) => {
+      const cmp = val(a).localeCompare(val(b));
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }, [rows, q, vw, sortBy]);
+
+  const toggleSort = (key: SortKey) =>
+    setSortBy((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
 
   const withTrn = rows.filter((c) => c.trn).length;
+  const withEmail = rows.filter((c) => c.email).length;
   const [manageOpen, setManageOpen] = useState(false);
   const [quickView, setQuickView] = useState<CrmCustomer | null>(null);
 
@@ -165,7 +177,7 @@ export default function Customers() {
               onClick={() =>
                 downloadCsv(
                   "filey-customers",
-                  rows as unknown as Record<string, unknown>[],
+                  filtered as unknown as Record<string, unknown>[],
                   [
                     { key: "name", label: "Contact" },
                     { key: "company", label: "Company" },
@@ -211,204 +223,189 @@ export default function Customers() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 joined-kpis mb-4">
-        <MetricCard
+      {/* ── KPI tiles (DEMO reference: icon box + value + muted hint) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-4">
+        <KpiTile
+          icon={Users}
+          accent="bg-neutral-500/10 text-neutral-500 dark:text-neutral-300"
           label="Customers"
           value={num(rows.length)}
-          icon={<Users size={20} />}
-          change={`${segments.length} segments`}
-          changeTone="up"
+          hint={`${segments.length} segments`}
+          divider
         />
-        <MetricCard
+        <KpiTile
+          icon={BadgeCheck}
+          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
           label="With TRN"
           value={num(withTrn)}
-          icon={<BadgeCheck size={20} />}
-          iconClass="bg-info/15 text-info"
-          change={`${rows.length - withTrn} without TRN`}
-          changeTone={withTrn < rows.length ? "warn" : "up"}
+          hint={`${rows.length - withTrn} without TRN`}
+          divider
         />
-        <MetricCard
+        <KpiTile
+          icon={Mail}
+          accent="bg-amber-500/10 text-amber-600 dark:text-amber-500"
           label="With Email"
-          value={num(rows.filter((c) => c.email).length)}
-          icon={<Mail size={20} />}
-          change={`${rows.filter((c) => !c.email).length} missing`}
-          changeTone={rows.some((c) => !c.email) ? "warn" : "up"}
+          value={num(withEmail)}
+          hint={`${rows.length - withEmail} missing`}
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <SearchInput
-          value={q}
-          onChange={setQ}
-          placeholder="Search name, company, TRN…"
-          className="w-full max-w-xs"
-        />
-
-        {segments.length > 0 && (
-          <select
-            className="select h-10 w-auto"
-            value={vw.seg}
-            onChange={(e) => setVw((v) => ({ ...v, seg: e.target.value }))}
+      {/* ── Table card: toolbar lives inside the card (DEMO reference) ── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name, company, TRN…"
+              className="pl-8 pr-3 h-8 rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground text-[13px] w-[300px] outline-none focus:border-muted-foreground"
+            />
+          </div>
+          <ToggleChip
+            active={vw.email}
+            onClick={() => setVw((v) => ({ ...v, email: !v.email }))}
           >
-            <option value="">All segments</option>
-            {segments.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        )}
-
-        <FilterChip
-          active={vw.email}
-          onClick={() => setVw((v) => ({ ...v, email: !v.email }))}
-        >
-          Has email
-        </FilterChip>
-        <FilterChip active={vw.trn} onClick={() => setVw((v) => ({ ...v, trn: !v.trn }))}>
-          Has TRN
-        </FilterChip>
-
-        {hasFilter && (
-          <button
-            aria-label="Clear filters"
-            onClick={() => setVw({ seg: "", email: false, trn: false })}
-            className="text-xs font-medium text-brand-500 hover:text-ink"
-          >
-            Clear filters
-          </button>
-        )}
-        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">{filtered.length} shown</span>
+            Has email
+          </ToggleChip>
+          <ToggleChip active={vw.trn} onClick={() => setVw((v) => ({ ...v, trn: !v.trn }))}>
+            Has TRN
+          </ToggleChip>
+          {hasFilter && (
+            <button
+              aria-label="Clear filters"
+              onClick={() => setVw({ email: false, trn: false })}
+              className="text-xs font-medium text-brand-500 hover:text-ink"
+            >
+              Clear filters
+            </button>
+          )}
+          <span className="ml-auto text-[12px] text-muted-foreground">
+            {filtered.length} shown
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <TH label="Customer" k="company" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="TRN" k="trn" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Email" k="email" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Phone" k="phone" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Segment" k="segment" sortBy={sortBy} onSort={toggleSort} />
+                <th className="px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading &&
+                rows.length === 0 &&
+                [0, 1, 2].map((i) => (
+                  <tr key={i} className="border-b border-border">
+                    <td colSpan={6} className="px-5 py-3">
+                      <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
+                    </td>
+                  </tr>
+                ))}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">
+                    {rows.length === 0
+                      ? "No customers yet — add your first"
+                      : "No customers match your filters."}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => setDetail(c)}
+                  className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
+                >
+                  <td className="px-5 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {c.company || c.name}
+                      </p>
+                      <p className="truncate text-[11.5px] text-muted-foreground">
+                        {c.name}
+                      </p>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-foreground">
+                    {c.trn ? <span className="tabular-nums">{c.trn}</span> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3 text-foreground">
+                    {c.email || <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3 text-foreground">
+                    {c.phone || <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3 text-muted-foreground">
+                    {c.segment || "—"}
+                  </td>
+                  <td className="px-3 py-3 text-muted-foreground">
+                    <div className="flex items-center gap-1 justify-end">
+                      <RowActions
+                        onView={() => setQuickView(c)}
+                        onEdit={() => {
+                          setEdit(c);
+                          setOpen(true);
+                        }}
+                        onCopy={() => duplicate(c)}
+                        onSend={{
+                          ...(c.phone_e164 || c.phone
+                            ? {
+                                whatsapp: () =>
+                                  shareVia("whatsapp", {
+                                    phone: c.phone_e164 || c.phone,
+                                    text: `Hello ${c.name},`,
+                                  }),
+                                sms: () =>
+                                  shareVia("sms", {
+                                    phone: c.phone_e164 || c.phone,
+                                    text: `Hello ${c.name},`,
+                                  }),
+                              }
+                            : {}),
+                          ...(c.email
+                            ? {
+                                email: () =>
+                                  shareVia("email", {
+                                    email: c.email,
+                                    url: c.company || c.name,
+                                    text: `Hello ${c.name},`,
+                                  }),
+                              }
+                            : {}),
+                          copyLink: () => {
+                            shareVia("copyLink", {
+                              url: `${window.location.origin}/customers/${c.id}`,
+                            });
+                            toast.success("Customer link copied.");
+                          },
+                        }}
+                        onDelete={async () => {
+                          const ok = await confirm({
+                            title: "Delete customer",
+                            message: `Delete "${c.company || c.name}"?`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          await crm.deleteCustomer(c.id);
+                          load();
+                          toast.success("Customer deleted.");
+                        }}
+                      />
+                      <ChevronRight className="h-4 w-4" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      <DataTable<CrmCustomer>
-        rows={filtered}
-        loading={loading}
-        empty="No customers yet — add your first"
-        onRowClick={(c) => setDetail(c)}
-        columns={[
-          {
-            key: "name",
-            label: "Customer",
-            sortValue: (c) => (c.company || c.name || "").toLowerCase(),
-            render: (c) => (
-              <div className="min-w-0">
-                <p className="truncate text-ink font-medium">{c.company || c.name}</p>
-                <p className="truncate text-[11px] text-brand-400">{c.name}</p>
-              </div>
-            ),
-          },
-          {
-            key: "trn",
-            label: "TRN",
-            sortValue: (c) => c.trn ?? "",
-            render: (c) => (c.trn ? <span className="text-xs tabular-nums">{c.trn}</span> : "—"),
-          },
-          {
-            key: "email",
-            label: "Email",
-            sortValue: (c) => c.email ?? "",
-            render: (c) => c.email ?? "—",
-            editable: {
-              value: (c) => c.email ?? "",
-              onSave: async (c, v) => {
-                try {
-                  await crm.updateCustomer(c.id, { email: v.trim() || undefined });
-                  load();
-                } catch (e: any) {
-                  toast.error(e?.message || "Failed to update email");
-                }
-              },
-            },
-          },
-          {
-            key: "phone",
-            label: "Phone",
-            sortValue: (c) => c.phone ?? "",
-            render: (c) => c.phone ?? "—",
-            editable: {
-              value: (c) => c.phone ?? "",
-              onSave: async (c, v) => {
-                try {
-                  await crm.updateCustomer(c.id, { phone: v.trim() || undefined });
-                  load();
-                } catch (e: any) {
-                  toast.error(e?.message || "Failed to update phone");
-                }
-              },
-            },
-          },
-          {
-            key: "segment",
-            label: "Segment",
-            sortValue: (c) => c.segment ?? "",
-            render: (c) =>
-              c.segment ? (
-                <Badge tone="info">{c.segment}</Badge>
-              ) : (
-                <span className="text-brand-400">—</span>
-              ),
-          },
-          {
-            key: "act",
-            label: "",
-            render: (c) => (
-              <RowActions
-                onView={() => setQuickView(c)}
-                onEdit={() => {
-                  setEdit(c);
-                  setOpen(true);
-                }}
-                onCopy={() => duplicate(c)}
-                onSend={{
-                  ...(c.phone_e164 || c.phone
-                    ? {
-                        whatsapp: () =>
-                          shareVia("whatsapp", {
-                            phone: c.phone_e164 || c.phone,
-                            text: `Hello ${c.name},`,
-                          }),
-                        sms: () =>
-                          shareVia("sms", {
-                            phone: c.phone_e164 || c.phone,
-                            text: `Hello ${c.name},`,
-                          }),
-                      }
-                    : {}),
-                  ...(c.email
-                    ? {
-                        email: () =>
-                          shareVia("email", {
-                            email: c.email,
-                            url: c.company || c.name,
-                            text: `Hello ${c.name},`,
-                          }),
-                      }
-                    : {}),
-                  copyLink: () => {
-                    shareVia("copyLink", {
-                      url: `${window.location.origin}/customers/${c.id}`,
-                    });
-                    toast.success("Customer link copied.");
-                  },
-                }}
-                onDelete={async () => {
-                  const ok = await confirm({
-                    title: "Delete customer",
-                    message: `Delete "${c.company || c.name}"?`,
-                    confirmLabel: "Delete",
-                    danger: true,
-                  });
-                  if (!ok) return;
-                  await crm.deleteCustomer(c.id);
-                  load();
-                  toast.success("Customer deleted.");
-                }}
-              />
-            ),
-          },
-        ]}
-      />
 
       <CustomerModal
         open={open}
@@ -507,6 +504,12 @@ export default function Customers() {
 
         <div className="flex justify-end gap-2 pt-4 border-t border-brand-200">
           <button
+            onClick={() => detail && nav(`/customers/${detail.id}?statement=1`)}
+            className="btn-ghost"
+          >
+            <FileText size={14} /> Statement
+          </button>
+          <button
             onClick={() => detail && nav(`/customers/${detail.id}`)}
             className="btn-ghost"
           >
@@ -548,6 +551,94 @@ export default function Customers() {
         }
       />
     </div>
+  );
+}
+
+/** DEMO reference KPI tile: tinted icon box + value + muted hint. */
+function KpiTile({
+  icon: Icon,
+  accent,
+  label,
+  value,
+  hint,
+  divider,
+}: {
+  icon: typeof Users;
+  accent: string;
+  label: string;
+  value: string;
+  hint: string;
+  divider?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "p-5 flex items-center gap-3",
+        divider && "border-b sm:border-b-0 sm:border-r border-border"
+      )}
+    >
+      <div className={cn("h-10 w-10 rounded-lg grid place-items-center", accent)}>
+        <Icon className="h-5 w-5" strokeWidth={1.75} />
+      </div>
+      <div>
+        <div className="text-[12.5px] text-muted-foreground">{label}</div>
+        <div className="text-[22px] font-semibold text-foreground leading-tight tabular-nums">
+          {value}
+        </div>
+        <div className="text-[11.5px] text-muted-foreground">{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "px-3 h-8 rounded-md text-[13px] border transition-colors inline-flex items-center gap-1.5",
+        active
+          ? "bg-foreground text-background border-foreground"
+          : "bg-card text-muted-foreground border-border hover:bg-hover hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TH({
+  label,
+  k,
+  sortBy,
+  onSort,
+}: {
+  label: string;
+  k: SortKey;
+  sortBy: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+}) {
+  const active = sortBy.key === k;
+  return (
+    <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">
+      <button
+        onClick={() => onSort(k)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          active && "text-foreground"
+        )}
+      >
+        {label} <ArrowUpDown className="h-3 w-3" />
+      </button>
+    </th>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Mail,
@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Pencil,
   Plus,
-  FileText,
+  Download,
 } from "lucide-react";
 import {
   crm,
@@ -132,6 +132,16 @@ export default function CustomerDetail() {
   const [qv, setQv] = useState<QuickViewData | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [stmtOpen, setStmtOpen] = useState(false);
+  const [params, setParams] = useSearchParams();
+
+  // Deep link: /customers/:id?statement=1 opens the Statement of Account
+  // modal directly (used by the Customers list page).
+  useEffect(() => {
+    if (params.get("statement") === "1") {
+      setStmtOpen(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
 
   useEffect(() => {
     let alive = true;
@@ -428,9 +438,9 @@ export default function CustomerDetail() {
           <button
             onClick={() => setStmtOpen(true)}
             disabled={!customer}
-            className="btn-ghost h-8 inline-flex gap-1.5"
+            className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
           >
-            <FileText className="h-3.5 w-3.5" /> Statement
+            <Download className="h-3.5 w-3.5" /> Download statement
           </button>
           <button
             onClick={() => setEditOpen(true)}
