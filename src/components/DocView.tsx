@@ -83,6 +83,15 @@ export interface DocViewForm {
   discount?: number | null;
   notes?: string | null;
   terms?: string | null;
+  /** Receipt-specific: payment method label (Cash, Card, Bank transfer…). */
+  payment_method?: string | null;
+  /** Receipt-specific: payer reference / cheque / transaction number. */
+  ref_number?: string | null;
+  /** Receipt-specific: amount in words (shown on classic-style receipts). */
+  amount_words?: string | null;
+  /** Receipt-specific: the payer note before method/ref lines are composed
+   *  into `notes` (receipt templates give those their own slots). */
+  notes_raw?: string | null;
   items: DocViewItem[];
   customColumns?: DocViewCustomColumn[];
   unit_price_formula?: { a: string; b: string } | null;
@@ -1592,6 +1601,409 @@ export default function DocView({
         >
           With gratitude for your continued partnership
         </p>
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: MODERN (DEMO port — blue accent, bold amount card) ----
+  if (templateId === "rec-modern") {
+    return (
+      <div className="bg-white text-neutral-900 text-[11px] font-sans" style={{ minHeight: 560 }}>
+        <div className="p-8 pb-4 flex items-center gap-4">
+          <div className="w-1.5 h-14 bg-blue-500 rounded-full" />
+          <div className="flex-1">
+            <p className="text-[10px] uppercase tracking-widest text-blue-600 font-semibold">{docTitle}</p>
+            <p className="text-[22px] font-bold tracking-tight">{form.number}</p>
+          </div>
+          <div className="text-right flex items-center gap-3">
+            {logoSrc && <img src={logoSrc} alt="logo" className="h-12 object-contain" />}
+            <div>
+              <p className="text-[13px] font-semibold">{form.seller_name || "Your Company"}</p>
+              <p className="text-neutral-500 text-[10px] whitespace-pre-line">{form.seller_address || ""}</p>
+              {form.seller_trn && <p className="text-neutral-500 text-[10px]">TRN: {form.seller_trn}</p>}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-8 grid grid-cols-3 gap-3">
+          <div className="bg-neutral-50 rounded-lg p-3 border-l-2 border-blue-500">
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">{partyLabel}</p>
+            <p className="font-semibold mt-0.5">{form.customer_name || "Payer"}</p>
+            <p className="text-neutral-600 text-[10px] whitespace-pre-line">{form.customer_address || ""}</p>
+          </div>
+          <div className="bg-neutral-50 rounded-lg p-3">
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">Date</p>
+            <p className="font-medium mt-0.5">{fmtDate(form.issue_date)}</p>
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider mt-1">Method</p>
+            <p className="font-medium">{form.payment_method || "Cash"}</p>
+          </div>
+          <div className="bg-neutral-50 rounded-lg p-3">
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider">Reference</p>
+            <p className="font-medium mt-0.5">{form.ref_number || "—"}</p>
+            <p className="text-[9px] uppercase text-neutral-500 tracking-wider mt-1">TRN</p>
+            <p className="font-medium">{form.customer_trn || "—"}</p>
+          </div>
+        </div>
+
+        <div className="px-8 mt-5">
+          <div className="rounded-lg bg-blue-500 text-white px-5 py-4 flex items-center justify-between">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest opacity-80">{totalLabel}</p>
+              <p className="text-[10px] opacity-80 mt-0.5">Payment successful</p>
+            </div>
+            <p className="text-[26px] font-bold tracking-tight">{m(t.total)}</p>
+          </div>
+          {form.amount_words && (
+            <p className="text-[10px] italic text-neutral-500 mt-2">Amount in words: {form.amount_words}</p>
+          )}
+        </div>
+
+        <div className="mt-6 bg-neutral-50 px-8 py-4 text-neutral-600 text-[10px]">
+          {form.notes_raw || form.notes || "Thank you for your payment."}{" "}
+          {form.terms || "This receipt confirms the transaction shown above."}
+          {freeWatermark && (
+            <p className="text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: MINIMAL (DEMO port — clean, monochrome, ample whitespace) ----
+  if (templateId === "rec-minimal") {
+    return (
+      <div className="bg-white text-neutral-900 p-10 text-[11px] font-sans" style={{ minHeight: 560 }}>
+        <div className="flex justify-between items-start pb-6 border-b border-neutral-300">
+          <div className="flex items-start gap-3">
+            {logoSrc && <img src={logoSrc} alt="logo" className="h-12 object-contain" />}
+            <div>
+              <p className="text-[13px] font-semibold uppercase tracking-wider">{form.seller_name || "Your Company"}</p>
+              <p className="text-neutral-600 whitespace-pre-line mt-1">{form.seller_address || ""}</p>
+              {form.seller_trn && <p className="text-neutral-600">TRN: {form.seller_trn}</p>}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[15px] font-semibold tracking-widest uppercase">{docTitle}</p>
+            <p className="text-neutral-600 mt-1">{form.number}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-8 py-6">
+          <div>
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{partyLabel}</p>
+            <p className="font-medium mt-1 text-[13px]">{form.customer_name || "Payer"}</p>
+            <p className="text-neutral-600 whitespace-pre-line">{form.customer_address || ""}</p>
+            {form.customer_trn && <p className="text-neutral-600">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider">Date</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            <p className="text-neutral-500 text-[10px] uppercase tracking-wider mt-2">Method · Reference</p>
+            <p>
+              {form.payment_method || "Cash"}
+              {form.ref_number ? ` · ${form.ref_number}` : ""}
+            </p>
+          </div>
+        </div>
+
+        <div className="border-t border-neutral-300 pt-6">
+          <p className="text-neutral-500 text-[10px] uppercase tracking-wider text-center">{totalLabel}</p>
+          <p className="text-[36px] font-light tracking-tight text-center mt-1">{m(t.total)}</p>
+          {form.amount_words && (
+            <p className="text-[10px] italic text-neutral-500 text-center mt-1">{form.amount_words}</p>
+          )}
+        </div>
+
+        <p className="mt-8 text-[10px] text-neutral-500 text-center">
+          {form.notes_raw || form.notes || "Thank you."}
+        </p>
+        {form.terms && <p className="mt-1 text-[9px] text-neutral-400 text-center">{form.terms}</p>}
+        {freeWatermark && (
+          <p className="mt-1 text-[9px] text-neutral-400 text-center">Made with Filey — the free plan</p>
+        )}
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: CLASSIC (DEMO port — serif, formal, centred layout) ----
+  if (templateId === "rec-classic") {
+    return (
+      <div className="bg-white text-neutral-900 p-8" style={{ fontFamily: "Georgia, serif", minHeight: 560 }}>
+        <div className="text-center pb-4 border-b-2 border-neutral-900">
+          {logoSrc && <img src={logoSrc} alt="logo" className="h-14 object-contain mx-auto mb-2" />}
+          <p className="text-[16px] font-bold tracking-widest uppercase">{form.seller_name || "Your Company"}</p>
+          <p className="text-[10.5px] text-neutral-700 mt-0.5 whitespace-pre-line">{form.seller_address || ""}</p>
+          {form.seller_trn && <p className="text-[10.5px] text-neutral-700">TRN: {form.seller_trn}</p>}
+        </div>
+
+        <div className="text-center py-5">
+          <p className="text-[20px] tracking-[0.4em] uppercase font-semibold">{docTitle}</p>
+          <p className="text-neutral-600 text-[11px] mt-1 italic">
+            No. {form.number} · {fmtDate(form.issue_date)}
+          </p>
+        </div>
+
+        <div className="border-y border-neutral-300 py-4 my-2">
+          <p className="text-center italic text-neutral-600 text-[11px]">Received with thanks from</p>
+          <p className="text-center text-[15px] font-semibold mt-1">{form.customer_name || "Payer name"}</p>
+          <p className="text-center text-[10.5px] text-neutral-700 mt-0.5 whitespace-pre-line">
+            {form.customer_address || ""}
+          </p>
+          {form.customer_trn && (
+            <p className="text-center text-[10.5px] text-neutral-700">TRN: {form.customer_trn}</p>
+          )}
+        </div>
+
+        <div className="mt-6 flex items-end justify-between">
+          <div>
+            <p className="italic text-neutral-600 text-[10.5px]">Payment method</p>
+            <p className="font-semibold">{form.payment_method || "Cash"}</p>
+            {form.ref_number && (
+              <>
+                <p className="italic text-neutral-600 text-[10.5px] mt-1">Reference</p>
+                <p>{form.ref_number}</p>
+              </>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="italic text-neutral-600 text-[10.5px]">The sum of</p>
+            <p className="text-[22px] font-bold tracking-tight">{m(t.total)}</p>
+            {form.amount_words && (
+              <p className="italic text-neutral-600 text-[10px] mt-0.5">{form.amount_words}</p>
+            )}
+          </div>
+        </div>
+
+        <p className="text-center italic text-neutral-600 text-[10px] mt-8 pt-4 border-t border-neutral-300">
+          {form.notes_raw || form.notes || "— Thank you for your patronage —"}
+        </p>
+        {form.terms && <p className="text-center text-[9px] text-neutral-400 mt-1">{form.terms}</p>}
+        {freeWatermark && (
+          <p className="text-center text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>
+        )}
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: CORPORATE (DEMO port — dark header, structured details grid) ----
+  if (templateId === "rec-corporate") {
+    return (
+      <div className="bg-white text-neutral-900 text-[11px] font-sans" style={{ minHeight: 560 }}>
+        <div className="bg-neutral-900 text-white px-8 py-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {logoSrc && <img src={logoSrc} alt="logo" className="h-12 object-contain bg-white/95 rounded p-1" />}
+            <div>
+              <p className="text-[16px] font-bold uppercase tracking-wider">{form.seller_name || "Your Company"}</p>
+              <p className="text-neutral-300 text-[10px] whitespace-pre-line">{form.seller_address || ""}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[13px] font-semibold tracking-wider uppercase">{docTitle}</p>
+            <p className="text-neutral-300 text-[10.5px]">{form.number}</p>
+          </div>
+        </div>
+
+        <div className="px-8 py-5 grid grid-cols-2 gap-6">
+          <div>
+            <p className="text-[9.5px] uppercase text-neutral-500 tracking-wider font-semibold">{partyLabel}</p>
+            <p className="font-semibold text-[13px] mt-0.5">{form.customer_name || "Payer"}</p>
+            <p className="text-neutral-700 whitespace-pre-line">{form.customer_address || ""}</p>
+            {form.customer_trn && <p className="text-neutral-700">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="text-[9.5px] uppercase text-neutral-500 tracking-wider font-semibold">Payment Date</p>
+            <p className="font-medium">{fmtDate(form.issue_date)}</p>
+            <p className="text-[9.5px] uppercase text-neutral-500 tracking-wider font-semibold mt-2">Method</p>
+            <p className="font-medium">{form.payment_method || "Cash"}</p>
+            {form.seller_trn && (
+              <>
+                <p className="text-[9.5px] uppercase text-neutral-500 tracking-wider font-semibold mt-2">TRN</p>
+                <p className="font-medium">{form.seller_trn}</p>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="px-8">
+          <table className="w-full text-left border-y-2 border-neutral-900">
+            <thead>
+              <tr>
+                <th className="py-2.5 font-semibold">Description</th>
+                <th className="py-2.5 font-semibold">Reference</th>
+                <th className="py-2.5 text-right font-semibold w-32">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itemsToRender.map((it, i) => (
+                <tr key={i}>
+                  <td className="py-3">{it.description || "Payment received"}</td>
+                  <td className="py-3">{i === 0 ? form.ref_number || "—" : ""}</td>
+                  <td className="py-3 text-right font-medium">{m(docLineAmount(it, form.unit_price_formula))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-8 mt-4 flex justify-end">
+          <div className="text-white bg-neutral-900 px-4 py-2 font-bold text-[13px] flex items-center gap-6">
+            <span>
+              {totalLabel} ({ccy})
+            </span>
+            <span>{t.total.toFixed(2)}</span>
+          </div>
+        </div>
+        {form.amount_words && (
+          <p className="px-8 mt-2 text-right text-[10px] italic text-neutral-500">
+            Amount in words: {form.amount_words}
+          </p>
+        )}
+
+        <div className="mt-6 bg-neutral-900 text-neutral-300 px-8 py-3 text-[10px]">
+          <p>{form.notes_raw || form.notes || "Thank you for your payment."}</p>
+          <p className="mt-0.5">
+            {form.terms || "This receipt acknowledges the payment stated above. Kindly retain for your records."}
+          </p>
+          {freeWatermark && <p className="text-[9px] text-neutral-500 mt-1">Made with Filey — the free plan</p>}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: THERMAL (DEMO port — POS style, narrow, mono, dashed dividers) ----
+  if (templateId === "rec-thermal") {
+    return (
+      <div className="bg-white text-neutral-900 py-8 px-4 flex justify-center" style={{ minHeight: 560 }}>
+        <div
+          className="w-[300px] text-[11.5px]"
+          style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+        >
+          <div className="text-center">
+            {logoSrc && <img src={logoSrc} alt="logo" className="h-12 object-contain mx-auto mb-1" />}
+            <p className="text-[13px] font-bold uppercase">{form.seller_name || "Your Company"}</p>
+            <p className="text-[10px] whitespace-pre-line">{form.seller_address || ""}</p>
+            {form.seller_phone && <p className="text-[10px]">Tel: {form.seller_phone}</p>}
+            {form.seller_trn && <p className="text-[10px]">TRN: {form.seller_trn}</p>}
+          </div>
+
+          <div className="my-3 border-t border-dashed border-neutral-500" />
+
+          <p className="text-center font-bold tracking-widest">CASH RECEIPT</p>
+          <p className="text-center text-[10.5px]">
+            {form.number} · {fmtDate(form.issue_date)}
+          </p>
+
+          <div className="my-3 border-t border-dashed border-neutral-500" />
+
+          <div className="space-y-0.5 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-neutral-600">Payer</span>
+              <span className="font-medium">{form.customer_name || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-neutral-600">Method</span>
+              <span className="font-medium">{form.payment_method || "Cash"}</span>
+            </div>
+            {form.ref_number && (
+              <div className="flex justify-between">
+                <span className="text-neutral-600">Ref</span>
+                <span className="font-medium">{form.ref_number}</span>
+              </div>
+            )}
+            {form.customer_trn && (
+              <div className="flex justify-between">
+                <span className="text-neutral-600">Payer TRN</span>
+                <span className="font-medium">{form.customer_trn}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="my-3 border-t border-dashed border-neutral-500" />
+
+          <div className="flex justify-between font-bold text-[14px]">
+            <span>TOTAL</span>
+            <span>{m(t.total)}</span>
+          </div>
+          {form.amount_words && <p className="text-[9.5px] text-neutral-600 mt-1">{form.amount_words}</p>}
+
+          <div className="my-3 border-t border-dashed border-neutral-500" />
+
+          <p className="text-center text-[10.5px]">{form.notes_raw || form.notes || "** Paid — Thank you **"}</p>
+          <p className="text-center text-[9.5px] text-neutral-500 mt-1">
+            {form.terms || "Please retain this receipt"}
+          </p>
+          {freeWatermark && (
+            <p className="text-center text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>
+          )}
+
+          <div className="mt-4 flex justify-center">
+            <div
+              className="h-8 w-[80%]"
+              style={{ backgroundImage: "repeating-linear-gradient(90deg, #111 0 2px, transparent 2px 4px)" }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- RECEIPT: ELEGANT (DEMO port — cream + amber accents, serif, refined) ----
+  if (templateId === "rec-elegant") {
+    return (
+      <div
+        className="bg-[#fbf7f0] text-neutral-900 p-8 text-[11px]"
+        style={{ fontFamily: 'Georgia, "Cormorant Garamond", serif', minHeight: 560 }}
+      >
+        <div className="flex justify-between items-end pb-4 border-b border-amber-800/40">
+          <div className="flex items-end gap-3">
+            {logoSrc && <img src={logoSrc} alt="logo" className="h-14 object-contain" />}
+            <div>
+              <p className="text-[18px] uppercase tracking-[0.25em] text-amber-800 font-semibold">
+                {form.seller_name || "Your Company"}
+              </p>
+              <p className="text-neutral-700 whitespace-pre-line text-[10.5px] mt-1">{form.seller_address || ""}</p>
+              {form.seller_trn && <p className="text-neutral-700 text-[10.5px]">TRN: {form.seller_trn}</p>}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[16px] tracking-[0.35em] uppercase text-amber-800">{docTitle}</p>
+            <p className="text-neutral-700 italic mt-0.5">No. {form.number}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-6 py-4">
+          <div>
+            <p className="italic text-amber-800">{partyLabel}</p>
+            <p className="font-semibold text-[13px]">{form.customer_name || "Payer"}</p>
+            <p className="text-neutral-700 whitespace-pre-line">{form.customer_address || ""}</p>
+            {form.customer_trn && <p className="text-neutral-700">TRN: {form.customer_trn}</p>}
+          </div>
+          <div className="text-right">
+            <p className="italic text-amber-800">Date of receipt</p>
+            <p>{fmtDate(form.issue_date)}</p>
+            <p className="italic text-amber-800 mt-1">Method</p>
+            <p>{form.payment_method || "Cash"}</p>
+          </div>
+        </div>
+
+        <div className="my-4 py-6 border-y border-amber-800/40 text-center">
+          <p className="italic text-amber-800 text-[11px]">The sum of</p>
+          <p className="text-[34px] tracking-tight text-amber-900 font-semibold mt-1">{m(t.total)}</p>
+          {form.amount_words && (
+            <p className="text-[11px] italic text-neutral-600 mt-1">{form.amount_words}</p>
+          )}
+          {form.ref_number && (
+            <p className="text-[11px] italic text-neutral-600 mt-1">against — {form.ref_number}</p>
+          )}
+        </div>
+
+        <p className="text-center italic text-amber-800 text-[10.5px] mt-6">
+          {form.notes_raw || form.notes || "With gratitude for your continued partnership"}
+        </p>
+        {form.terms && <p className="text-center text-[9px] text-neutral-500 mt-1">{form.terms}</p>}
+        {freeWatermark && (
+          <p className="text-center text-[9px] text-neutral-500 mt-1">Made with Filey — the free plan</p>
+        )}
       </div>
     );
   }

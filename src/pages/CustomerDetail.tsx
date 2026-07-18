@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Pencil,
   Plus,
+  FileText,
 } from "lucide-react";
 import {
   crm,
@@ -44,6 +45,9 @@ import ActivityTimeline from "../components/ActivityTimeline";
 import PartyBankDetails from "../components/PartyBankDetails";
 import FollowUps from "../components/FollowUps";
 import AdvanceCard from "../components/AdvanceCard";
+import StatementModal, {
+  type StatementDocRef,
+} from "../components/statements/StatementModal";
 
 // Local re-export so the edit form doesn't need a separate import (same
 // helper as the Customers page — keeps phone_e164 in sync for OTP/SMS).
@@ -127,6 +131,7 @@ export default function CustomerDetail() {
   const [showAllInv, setShowAllInv] = useState(false);
   const [qv, setQv] = useState<QuickViewData | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [stmtOpen, setStmtOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -207,6 +212,21 @@ export default function CustomerDetail() {
   const myOpps = useMemo(
     () => opps.filter((o) => names.has(o.customer_name)),
     [opps, names]
+  );
+
+  /** Invoice docs handed to the Statement of Account modal (it derives the
+   *  ledger: invoices as debits + dated payments/receipts/advances as credits). */
+  const stmtDocs = useMemo<StatementDocRef[]>(
+    () =>
+      myInvoices.map((d) => ({
+        id: d.id,
+        number: d.number,
+        date: d.issue_date,
+        total: d.total,
+        currency: d.currency,
+        status: d.status,
+      })),
+    [myInvoices]
   );
 
   const totalInvoiced = myInvoices.reduce((s, d) => s + d.total, 0);
@@ -405,6 +425,13 @@ export default function CustomerDetail() {
           <p className="text-[13px] text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setStmtOpen(true)}
+            disabled={!customer}
+            className="btn-ghost h-8 inline-flex gap-1.5"
+          >
+            <FileText className="h-3.5 w-3.5" /> Statement
+          </button>
           <button
             onClick={() => setEditOpen(true)}
             disabled={!customer}
@@ -795,6 +822,28 @@ export default function CustomerDetail() {
       )}
 
       <QuickViewModal open={!!qv} onClose={() => setQv(null)} data={qv} />
+
+      {customer && (
+        <StatementModal
+          open={stmtOpen}
+          onClose={() => setStmtOpen(false)}
+          partyType="customer"
+          party={{
+            id: customer.id,
+            name: display,
+            contact:
+              customer.company && customer.company !== customer.name
+                ? customer.name
+                : undefined,
+            trn: customer.trn,
+            email: customer.email,
+            address: customer.address,
+            opening_balance: customer.opening_balance,
+          }}
+          partyNames={[...names]}
+          docs={stmtDocs}
+        />
+      )}
 
       <EditCustomerModal
         customer={customer ?? null}

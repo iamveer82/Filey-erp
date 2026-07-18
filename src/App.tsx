@@ -27,6 +27,7 @@ import Notifier from "./components/Notifier";
 import UpdateNotice from "./components/UpdateNotice";
 import AgentScheduler from "./components/AgentScheduler";
 import { Toaster } from "./components/Toaster";
+import { maybePromptDesktopShortcut } from "./lib/shortcut";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
@@ -136,6 +137,13 @@ function Gate() {
   const { loading, configured, user, needsProfile, profileLoading, deviceLimitBlocked } =
     useAuth();
   const [showLogin, setShowLogin] = useState(false);
+  // Desktop app, first sign-in on this device: offer to place a Desktop
+  // shortcut (once per device; the helper self-guards and never throws).
+  useEffect(() => {
+    if (!user) return;
+    const t = setTimeout(() => void maybePromptDesktopShortcut(), 2000);
+    return () => clearTimeout(t);
+  }, [user]);
   // First run: let the user pick where data lives — local (offline) or cloud.
   // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
   // straight in so existing users aren't prompted.

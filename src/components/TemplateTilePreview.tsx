@@ -20,6 +20,12 @@ const ACCENTS: Record<string, string> = {
   "em-modern": "#3b82f6",
   "em-corporate": "#171717",
   "em-elegant": "#92400e",
+  "rec-modern": "#3b82f6",
+  "rec-minimal": "#262626",
+  "rec-classic": "#171717",
+  "rec-corporate": "#171717",
+  "rec-thermal": "#374151",
+  "rec-elegant": "#92400e",
 };
 
 // ─── Miniature SVG previews for built-in templates ─────────────────────────
@@ -352,6 +358,12 @@ const BUILTIN_PREVIEWS: Record<string, React.ComponentType> = {
   "em-modern": EmModernPreview,
   "em-corporate": EmCorporatePreview,
   "em-elegant": EmElegantPreview,
+  "rec-modern": RecModernPreview,
+  "rec-minimal": RecMinimalPreview,
+  "rec-classic": RecClassicPreview,
+  "rec-corporate": RecCorporatePreview,
+  "rec-thermal": RecThermalPreview,
+  "rec-elegant": RecElegantPreview,
 };
 
 // ─── Emergent-reference ports (v2.1) ────────────────────────────────────────
@@ -439,6 +451,134 @@ function EmElegantPreview() {
       <rect x="8" y="31" width="70" height="2" fill="#92400e" opacity="0.25" rx="1" />
       <rect x="8" y="36" width="78" height="2" fill="#92400e" opacity="0.25" rx="1" />
       <rect x="52" y="56" width="40" height="3" fill="#92400e" rx="1.5" />
+    </svg>
+  );
+}
+
+// ─── DEMO receipt-template ports (v2.2) ─────────────────────────────────────
+
+function RecModernPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      {/* left blue accent bar + title */}
+      <rect x="10" y="10" width="2.5" height="18" fill="#3b82f6" rx="1.25" />
+      <rect x="17" y="11" width="34" height="3.5" fill="#3b82f6" rx="1.75" />
+      <rect x="17" y="18" width="24" height="2.5" fill="#93c5fd" rx="1" />
+      {/* info cards */}
+      <rect x="10" y="34" width="24" height="10" fill="#f5f5f5" rx="2" />
+      <rect x="38" y="34" width="24" height="10" fill="#f5f5f5" rx="2" />
+      <rect x="66" y="34" width="24" height="10" fill="#f5f5f5" rx="2" />
+      {/* bold blue amount card */}
+      <rect x="10" y="50" width="80" height="12" fill="#3b82f6" rx="2" />
+    </svg>
+  );
+}
+
+function RecMinimalPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      {/* header + divider */}
+      <rect x="8" y="10" width="40" height="3" fill="#262626" rx="1.5" />
+      <rect x="8" y="18" width="84" height="1" fill="#d4d4d4" />
+      {/* two-column meta */}
+      <rect x="8" y="26" width="30" height="2" fill="#a3a3a3" rx="1" />
+      <rect x="62" y="26" width="30" height="2" fill="#a3a3a3" rx="1" />
+      {/* big centred amount */}
+      <rect x="30" y="42" width="40" height="7" fill="#262626" rx="1.5" opacity="0.85" />
+      <rect x="38" y="56" width="24" height="2" fill="#d4d4d4" rx="1" />
+    </svg>
+  );
+}
+
+function RecClassicPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      {/* centred company header + rule */}
+      <rect x="28" y="8" width="44" height="3.5" fill="#171717" rx="1.75" />
+      <rect x="8" y="15" width="84" height="1.5" fill="#171717" />
+      {/* centred title */}
+      <rect x="36" y="23" width="28" height="3" fill="#525252" rx="1.5" />
+      {/* centred payer band */}
+      <rect x="8" y="33" width="84" height="0.75" fill="#d4d4d4" />
+      <rect x="30" y="38" width="40" height="3" fill="#404040" rx="1.5" />
+      <rect x="8" y="45" width="84" height="0.75" fill="#d4d4d4" />
+      {/* amount bottom-right */}
+      <rect x="52" y="56" width="40" height="4" fill="#171717" rx="1" />
+    </svg>
+  );
+}
+
+function RecCorporatePreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      {/* dark header band */}
+      <rect width="100" height="14" fill="#171717" rx="4" />
+      <rect y="10" width="100" height="4" fill="#171717" />
+      {/* detail lines */}
+      <rect x="8" y="22" width="40" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="8" y="27" width="30" height="2" fill="#d4d4d4" rx="1" />
+      {/* table rules */}
+      <rect x="8" y="35" width="84" height="1.5" fill="#171717" />
+      <rect x="8" y="45" width="84" height="1.5" fill="#171717" />
+      {/* dark total chip */}
+      <rect x="56" y="51" width="36" height="6" fill="#171717" rx="1" />
+      {/* dark footer band */}
+      <rect y="62" width="100" height="10" fill="#171717" rx="4" />
+      <rect y="62" width="100" height="4" fill="#171717" />
+    </svg>
+  );
+}
+
+function RecThermalPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fff" rx="4" />
+      {/* centred company lines */}
+      <rect x="30" y="6" width="40" height="3" fill="#171717" rx="1.5" />
+      <rect x="36" y="12" width="28" height="2" fill="#6b7280" rx="1" />
+      {/* dashed dividers + rows */}
+      <line x1="24" y1="19" x2="76" y2="19" stroke="#6b7280" strokeWidth="0.75" strokeDasharray="3,3" />
+      <rect x="26" y="24" width="22" height="2" fill="#9ca3af" rx="1" />
+      <rect x="52" y="24" width="22" height="2" fill="#d4d4d4" rx="1" />
+      <rect x="26" y="30" width="26" height="2" fill="#9ca3af" rx="1" />
+      <rect x="56" y="30" width="18" height="2" fill="#d4d4d4" rx="1" />
+      <line x1="24" y1="37" x2="76" y2="37" stroke="#6b7280" strokeWidth="0.75" strokeDasharray="3,3" />
+      {/* total */}
+      <rect x="26" y="42" width="18" height="3.5" fill="#171717" rx="1" />
+      <rect x="50" y="42" width="24" height="3.5" fill="#171717" rx="1" />
+      <line x1="24" y1="51" x2="76" y2="51" stroke="#6b7280" strokeWidth="0.75" strokeDasharray="3,3" />
+      {/* barcode */}
+      <rect x="30" y="58" width="40" height="7" fill="#171717" opacity="0.85" />
+      <rect x="33" y="58" width="2" height="7" fill="#fff" />
+      <rect x="38" y="58" width="1.5" height="7" fill="#fff" />
+      <rect x="44" y="58" width="2.5" height="7" fill="#fff" />
+      <rect x="51" y="58" width="1.5" height="7" fill="#fff" />
+      <rect x="58" y="58" width="2" height="7" fill="#fff" />
+      <rect x="64" y="58" width="1.5" height="7" fill="#fff" />
+    </svg>
+  );
+}
+
+function RecElegantPreview() {
+  return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#fbf7f0" rx="4" />
+      {/* header */}
+      <rect x="8" y="10" width="44" height="4" fill="#92400e" rx="2" />
+      <rect x="8" y="18" width="84" height="1" fill="#92400e" opacity="0.4" />
+      {/* meta rows */}
+      <rect x="8" y="26" width="30" height="2" fill="#92400e" opacity="0.5" rx="1" />
+      <rect x="62" y="26" width="30" height="2" fill="#92400e" opacity="0.5" rx="1" />
+      {/* sum band */}
+      <rect x="8" y="35" width="84" height="0.75" fill="#92400e" opacity="0.4" />
+      <rect x="32" y="41" width="36" height="6" fill="#78350f" rx="1.5" opacity="0.85" />
+      <rect x="8" y="52" width="84" height="0.75" fill="#92400e" opacity="0.4" />
+      {/* closing line */}
+      <rect x="34" y="60" width="32" height="2" fill="#92400e" opacity="0.6" rx="1" />
     </svg>
   );
 }

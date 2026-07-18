@@ -1,11 +1,11 @@
 type Props = { size?: number; className?: string };
 
-/** Filey brand mark. Vector artwork at public/filey-logo.svg —
- * stays crisp at any size (sidebar, login, favicon). */
+/** Filey brand mark — the mascot artwork (public/icons/filey-mascot.png,
+ * 512px, transparent) used across sidebar, login, setup and favicon. */
 export default function Logo({ size = 72, className = "" }: Props) {
   return (
     <img
-      src="/filey-logo.svg"
+      src="/icons/filey-mascot.png"
       width={size}
       height={size}
       alt="Filey"

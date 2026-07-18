@@ -28,6 +28,13 @@ export const DOC_TEMPLATES = [
   { id: "em-modern", name: "Modern Blue" },
   { id: "em-corporate", name: "Corporate Dark" },
   { id: "em-elegant", name: "Elegant Ivory" },
+  // DEMO receipt-template ports (v2.2) — receipt-first themes; additive.
+  { id: "rec-modern", name: "Receipt Modern" },
+  { id: "rec-minimal", name: "Receipt Minimal" },
+  { id: "rec-classic", name: "Receipt Classic" },
+  { id: "rec-corporate", name: "Receipt Corporate" },
+  { id: "rec-thermal", name: "Receipt Thermal" },
+  { id: "rec-elegant", name: "Receipt Elegant" },
 ];
 
 /**

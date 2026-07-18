@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   TrendingUp,
+  TrendingDown,
   Wallet,
   Boxes,
   Download,
   FileText,
   Receipt,
   ShoppingCart,
+  Calendar,
 } from "lucide-react";
 import {
+  LineChart,
+  Line,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   PieChart,
   Pie,
   Cell,
@@ -27,6 +33,8 @@ import {
   billing,
   hr,
   pos,
+  crm,
+  receipts,
   Product,
   FinanceReport,
   InvoiceDocSummary,
@@ -35,6 +43,9 @@ import {
   PoSummary,
   Txn,
   Account,
+  Order,
+  CrmCustomer,
+  ReceiptSummary,
   computeVatReturn,
   computeTrialBalance,
   computeBalanceSheet,
@@ -42,7 +53,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { downloadCsv } from "../lib/csv";
-import { aed, num, getDisplayCurrency, fmtDate, localYmd } from "../lib/format";
+import { aed, num, cn, getDisplayCurrency, fmtDate, localYmd } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -53,13 +64,15 @@ import {
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { DateRangePicker } from "../components/DatePicker";
 import { useChartColors } from "../lib/accent";
-import { Calendar } from "lucide-react";
 
 export default function Reports() {
   const c = useChartColors();
   const [products, setProducts] = useState<Product[]>([]);
   const [report, setReport] = useState<FinanceReport | null>(null);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [receiptList, setReceiptList] = useState<ReceiptSummary[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [posList, setPosList] = useState<PoSummary[]>([]);
@@ -77,6 +90,9 @@ export default function Reports() {
       erp.products().then(setProducts),
       fin.report().then(setReport),
       billing.listDocs().then(setInvoices),
+      receipts.list().then(setReceiptList),
+      erp.orders().then(setOrders),
+      crm.customers().then(setCustomers),
       fin.expenses().then(setExpenses),
       hr.payroll().then(setPayroll),
       pos.list().then(setPosList),
@@ -141,49 +157,167 @@ export default function Reports() {
   const grossProfit = totalRevenue - totalExpenses - payrollCost;
   const invValue = products.reduce((s, p) => s + p.quantity * p.cost_price, 0);
 
-  /* ── Expense by category ── */
-  const expenseByCat = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of expenses) {
-      const cat = e.category || "Uncategorized";
-      m.set(cat, (m.get(cat) ?? 0) + e.amount);
-    }
-    return Array.from(m.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [expenses]);
+  /* ── DEMO KPI strip, real data: Revenue = sum of non-draft invoice
+     totals, Cash received = sum of receipt amounts, Customers/Orders =
+     directory counts. ── */
+  const revenueTotal = useMemo(
+    () =>
+      invoices
+        .filter((i) => i.status !== "draft")
+        .reduce((s, i) => s + (i.total || 0), 0),
+    [invoices]
+  );
+  const cashReceived = useMemo(
+    () => receiptList.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+    [receiptList]
+  );
 
-  /* ── Chart data — sales (collected) vs expenses per month, last 6 ── */
-  const monthly = useMemo(() => {
+  /* ── Real period-over-period deltas (ModernOverview pattern): last 30
+     days vs the 30 before that. Where no prior-period baseline exists the
+     delta is null → no chip, hint text only — no invented percentages. ── */
+  const deltas = useMemo(() => {
+    const DAY = 86400000;
+    const now = Date.now();
+    const curStart = now - 30 * DAY;
+    const prevStart = now - 60 * DAY;
+    const pct = (cur: number, prev: number): number | null =>
+      prev > 0 ? ((cur - prev) / prev) * 100 : null;
+
+    let revCur = 0;
+    let revPrev = 0;
+    for (const i of invoices) {
+      if (i.status === "draft" || !i.issue_date) continue;
+      const t = +new Date(i.issue_date);
+      if (t >= curStart) revCur += i.total || 0;
+      else if (t >= prevStart) revPrev += i.total || 0;
+    }
+
+    let cashCur = 0;
+    let cashPrev = 0;
+    for (const r of receiptList) {
+      if (!r.payment_date) continue;
+      const t = +new Date(r.payment_date);
+      const amt = Number(r.amount) || 0;
+      if (t >= curStart) cashCur += amt;
+      else if (t >= prevStart) cashPrev += amt;
+    }
+
+    let custCur = 0;
+    let custPrev = 0;
+    for (const cu of customers) {
+      if (!cu.created_at) continue;
+      const t = +new Date(cu.created_at);
+      if (t >= curStart) custCur += 1;
+      else if (t >= prevStart) custPrev += 1;
+    }
+
+    let ordCur = 0;
+    let ordPrev = 0;
+    for (const o of orders) {
+      if (!o.created_at) continue;
+      const t = +new Date(o.created_at);
+      if (t >= curStart) ordCur += 1;
+      else if (t >= prevStart) ordPrev += 1;
+    }
+
+    return {
+      revenue: pct(revCur, revPrev),
+      cash: pct(cashCur, cashPrev),
+      customers: pct(custCur, custPrev),
+      orders: pct(ordCur, ordPrev),
+    };
+  }, [invoices, receiptList, customers, orders]);
+
+  const kpis = [
+    {
+      label: "Revenue",
+      value: aed(revenueTotal),
+      delta: deltas.revenue,
+      hint: `${num(invoices.length)} invoices`,
+    },
+    {
+      label: "Cash received",
+      value: aed(cashReceived),
+      delta: deltas.cash,
+      hint: `${num(receiptList.length)} receipts`,
+    },
+    {
+      label: "Customers",
+      value: num(customers.length),
+      delta: deltas.customers,
+      hint: "in directory",
+    },
+    {
+      label: "Orders",
+      value: num(orders.length),
+      delta: deltas.orders,
+      hint: "total volume",
+    },
+  ];
+
+  /* ── Last 8 days (incl. today): Invoiced = non-draft invoice totals by
+     issue_date, Received = receipt amounts by payment_date. Empty days = 0
+     — real data only, no filler. ── */
+  const trend = useMemo(() => {
+    const byDay = new Map<string, { invoiced: number; received: number }>();
+    for (const i of invoices) {
+      if (i.status === "draft" || !i.issue_date) continue;
+      const key = i.issue_date.slice(0, 10);
+      const row = byDay.get(key) || { invoiced: 0, received: 0 };
+      row.invoiced += i.total || 0;
+      byDay.set(key, row);
+    }
+    for (const r of receiptList) {
+      if (!r.payment_date) continue;
+      const key = r.payment_date.slice(0, 10);
+      const row = byDay.get(key) || { invoiced: 0, received: 0 };
+      row.received += Number(r.amount) || 0;
+      byDay.set(key, row);
+    }
+    const series: { d: string; invoiced: number; received: number }[] = [];
     const now = new Date();
-    const buckets: { name: string; key: string; sales: number; expense: number }[] =
-      [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.push({
-        name: d.toLocaleString("en", { month: "short" }),
-        key: `${d.getFullYear()}-${d.getMonth()}`,
-        sales: 0,
-        expense: 0,
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const row = byDay.get(key);
+      series.push({
+        d: label,
+        invoiced: row?.invoiced || 0,
+        received: row?.received || 0,
       });
     }
-    const byKey = new Map(buckets.map((b) => [b.key, b]));
-    for (const inv of invoices) {
-      if (inv.status === "draft" || !inv.issue_date) continue;
-      const collected = (inv.total || 0) - (inv.balance ?? 0);
-      if (collected <= 0) continue;
-      const d = new Date(inv.issue_date);
-      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
-      if (b) b.sales += collected;
+    return series;
+  }, [invoices, receiptList]);
+
+  /* ── Inventory value by category: stock on hand × unit price ── */
+  const categoryBars = useMemo(() => {
+    const g = new Map<string, number>();
+    for (const p of products) {
+      const key = p.category || "Other";
+      g.set(
+        key,
+        (g.get(key) ?? 0) + (Number(p.unit_price) || 0) * (Number(p.quantity) || 0)
+      );
     }
-    for (const e of expenses) {
-      if (!e.expense_date) continue;
-      const d = new Date(e.expense_date);
-      const b = byKey.get(`${d.getFullYear()}-${d.getMonth()}`);
-      if (b) b.expense += e.amount;
+    return Array.from(g.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [products]);
+
+  /* ── Invoice status distribution (all invoices, draft included) ── */
+  const statusPie = useMemo(() => {
+    const s = new Map<string, number>();
+    for (const i of invoices) {
+      const key = i.status || "draft";
+      s.set(key, (s.get(key) ?? 0) + 1);
     }
-    return buckets.map(({ name, sales, expense }) => ({ name, sales, expense }));
-  }, [invoices, expenses]);
+    return Array.from(s.entries()).map(([name, value]) => ({
+      name: name.charAt(0).toUpperCase() + name.slice(1),
+      value,
+    }));
+  }, [invoices]);
 
   /* ── Accent-driven chart palette (DEMO useChartColors) ── */
   const pieColors = [c.accent, c.primary, "#10b981", "#f43f5e", c.accentSoft, "#6366f1"];
@@ -283,18 +417,278 @@ export default function Reports() {
     <div className="animate-fade-up">
       <PageHeader
         title="Reports"
-        subtitle="Profit &amp; Loss, spending, transactions — print-ready PDF"
+        subtitle="Live analytics driven by your invoices, receipts, orders and inventory."
         action={
           <div className="flex gap-2 flex-wrap no-print">
             <button className="btn-ghost" onClick={downloadPdf}>
               <FileText size={15} /> PDF
             </button>
-            <button className="btn-primary" onClick={exportCsv}>
+            <button className="btn-ghost" onClick={exportCsv}>
               <Download size={15} /> Export CSV
             </button>
           </div>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+        </div>
+      )}
+      {loading && products.length === 0 && invoices.length === 0 && !error && (
+        <div className="card mb-4">
+          <Spinner label="Loading reports…" />
+        </div>
+      )}
+
+      {/* ── KPI strip (DEMO joined KPIs) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card">
+        {kpis.map((k, i) => {
+          const up = (k.delta ?? 0) >= 0;
+          const Icon = up ? TrendingUp : TrendingDown;
+          return (
+            <div
+              key={k.label}
+              className={cn(
+                "p-5 border-b lg:border-b-0 border-border",
+                i < 3 && "lg:border-r",
+                i % 2 === 0 && "sm:border-r lg:border-r"
+              )}
+            >
+              <div className="text-[13px] text-muted-foreground">{k.label}</div>
+              <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+                {k.value}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11.5px]">
+                {k.delta != null && (
+                  <span
+                    title="vs previous 30 days"
+                    className={cn(
+                      "inline-flex items-center gap-1 font-medium",
+                      up ? "text-success" : "text-danger"
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {k.delta >= 0 ? "+" : ""}
+                    {k.delta.toFixed(1)}%
+                  </span>
+                )}
+                <span className="text-muted-foreground">{k.hint}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Revenue trend + inventory value (DEMO joined 2-col card) ── */}
+      <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 border border-border rounded-xl overflow-hidden bg-card">
+        <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
+          <div className="text-[14px] font-semibold text-foreground">Revenue trend</div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">
+            Last 8 days — invoices vs receipts
+          </div>
+          <div className="h-[280px] mt-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+                <XAxis
+                  dataKey="d"
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v) => aed(Number(v) || 0)}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
+                <Line
+                  type="monotone"
+                  dataKey="invoiced"
+                  name="Invoiced"
+                  stroke={c.accent}
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="received"
+                  name="Received"
+                  stroke={c.primary}
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="p-5">
+          <div className="text-[14px] font-semibold text-foreground">
+            Inventory value by category
+          </div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">
+            Stock on hand × unit price
+          </div>
+          <div className="h-[280px] mt-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={categoryBars} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="catG" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.4} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v) => aed(Number(v) || 0)}
+                />
+                <Bar dataKey="value" name="AED value" fill="url(#catG)" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Sales area + invoice status (DEMO joined 3-col card) ── */}
+      <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card">
+        <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border p-5">
+          <div className="text-[14px] font-semibold text-foreground">Sales area</div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">
+            Cumulative sales &amp; receipts
+          </div>
+          <div className="h-[280px] mt-3">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="aRep1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={c.accent} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="aRep2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={c.primary} stopOpacity={0.25} />
+                    <stop offset="100%" stopColor={c.primary} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+                <XAxis
+                  dataKey="d"
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke={c.axis}
+                  tick={{ fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v) => aed(Number(v) || 0)}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
+                <Area
+                  type="monotone"
+                  dataKey="invoiced"
+                  name="Invoiced"
+                  stroke={c.accent}
+                  fill="url(#aRep1)"
+                  strokeWidth={2}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="received"
+                  name="Received"
+                  stroke={c.primary}
+                  fill="url(#aRep2)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="p-5">
+          <div className="text-[14px] font-semibold text-foreground">Invoice status</div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">
+            Distribution across all invoices
+          </div>
+          {statusPie.length === 0 ? (
+            <div className="h-[220px] mt-2 grid place-items-center text-[12.5px] text-muted-foreground">
+              No invoices yet
+            </div>
+          ) : (
+            <>
+              <div className="h-[220px] mt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusPie}
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {statusPie.map((_, i) => (
+                        <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={tooltipStyle} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="space-y-1.5">
+                {statusPie.map((s, i) => (
+                  <div
+                    key={s.name}
+                    className="flex items-center justify-between text-[12.5px]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: pieColors[i % pieColors.length] }}
+                      />
+                      <span className="text-foreground">{s.name}</span>
+                    </div>
+                    <span className="text-muted-foreground">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Financial statements (Filey real FTA/finance reports) ── */}
+      <div className="mt-10 mb-4 no-print">
+        <h2 className="text-[14px] font-semibold text-foreground">Financial statements</h2>
+        <p className="text-[12.5px] text-muted-foreground mt-0.5">
+          VAT 201, balance sheet, trial balance, cash flow and P&amp;L — computed
+          from your ledger for the selected period.
+        </p>
+      </div>
+
       <div className="mb-4 card !p-3 flex items-center gap-3 no-print">
         <Calendar size={15} className="text-muted-foreground" />
         <span className="text-xs font-medium text-muted-foreground">Period</span>
@@ -317,48 +711,8 @@ export default function Reports() {
         )}
       </div>
 
-      {error && (
-        <div className="mb-4">
-          <ErrorBanner message={error} />
-        </div>
-      )}
-      {loading && products.length === 0 && invoices.length === 0 && !error && (
-        <div className="card mb-4">
-          <Spinner label="Loading reports…" />
-        </div>
-      )}
-
       {/* ══════════ PDF PRINT SECTION ══════════ */}
       <div ref={pdfRef} className="invoice-print">
-        {/* ── Summary strip (DEMO joined KPIs) ── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-6 no-print">
-          <div className="p-5 border-b md:border-b-0 md:border-r border-border">
-            <div className="text-[13px] text-muted-foreground">Total Revenue</div>
-            <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
-              {aed(totalRevenue)}
-            </div>
-            <div className="mt-2 text-[11.5px] text-muted-foreground">Billed (all)</div>
-          </div>
-          <div className="p-5 border-b md:border-b-0 md:border-r border-border">
-            <div className="text-[13px] text-muted-foreground">Total Expenses</div>
-            <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
-              {aed(totalExpenses + payrollCost)}
-            </div>
-            <div className="mt-2 text-[11.5px] text-muted-foreground">
-              Expenses + Payroll
-            </div>
-          </div>
-          <div className="p-5">
-            <div className="text-[13px] text-muted-foreground">Net Profit</div>
-            <div
-              className={`mt-3 text-[26px] font-semibold leading-tight tracking-tight tabular-nums ${grossProfit >= 0 ? "text-success" : "text-danger"}`}
-            >
-              {aed(grossProfit)}
-            </div>
-            <div className="mt-2 text-[11.5px] text-muted-foreground">Revenue − Costs</div>
-          </div>
-        </div>
-
         {/* ── VAT 201 (FTA) ── */}
         <div className="card mb-4 !p-0 overflow-hidden">
           <div className="flex items-center justify-between flex-wrap gap-2 px-5 py-4 border-b border-border">
@@ -690,120 +1044,6 @@ export default function Reports() {
                 {aed(grossProfit)}
               </span>
             </div>
-          </div>
-        </div>
-
-        {/* ── Charts (no-print) — DEMO joined chart card ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-6 no-print">
-          <div className="lg:col-span-2 p-5 border-b lg:border-b-0 lg:border-r border-border">
-            <div className="text-[14px] font-semibold text-foreground">
-              Sales vs expenses
-            </div>
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              Last 6 months — collected vs spent
-            </div>
-            <div className="h-[280px] mt-3">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthly} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="repSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                      <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    stroke={c.axis}
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    stroke={c.axis}
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    cursor={{ fill: "currentColor", fillOpacity: 0.04 }}
-                    formatter={(v) => aed(Number(v) || 0)}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
-                  <Bar
-                    dataKey="sales"
-                    name="Sales"
-                    fill="url(#repSales)"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="expense"
-                    name="Expenses"
-                    fill={c.primary}
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="p-5">
-            <div className="text-[14px] font-semibold text-foreground">
-              Spending by category
-            </div>
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              All recorded expenses
-            </div>
-            {expenseByCat.length > 0 ? (
-              <>
-                <div className="h-[220px] mt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={expenseByCat}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={50}
-                        outerRadius={80}
-                        paddingAngle={2}
-                      >
-                        {expenseByCat.map((_, i) => (
-                          <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        formatter={(v) => aed(Number(v) || 0)}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="space-y-1.5 mt-2">
-                  {expenseByCat.map((s, i) => (
-                    <div
-                      key={s.name}
-                      className="flex items-center justify-between text-[12.5px]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ background: pieColors[i % pieColors.length] }}
-                        />
-                        <span className="text-foreground">{s.name}</span>
-                      </div>
-                      <span className="text-muted-foreground tabular-nums">
-                        {aed(s.value)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-[220px] text-[13px] text-muted-foreground">
-                No expenses recorded
-              </div>
-            )}
           </div>
         </div>
 

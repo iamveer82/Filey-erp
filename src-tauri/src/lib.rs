@@ -56,6 +56,8 @@ pub fn run() {
             modules::storage::restore_db,
             modules::storage::backup_all,
             modules::storage::restore_all,
+            // First-run desktop shortcut (Windows)
+            modules::shortcut::create_desktop_shortcut,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

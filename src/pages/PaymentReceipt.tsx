@@ -131,6 +131,10 @@ const docViewForm = (form: Form | null): DocViewForm => {
     tax_rate: form.tax_rate ?? 0,
     discount: form.discount ?? 0,
     notes,
+    notes_raw: form.notes || null,
+    payment_method: form.payment_method || null,
+    ref_number: form.ref_number || null,
+    amount_words: form.amount_words || null,
     terms: form.terms || null,
     items: [
       {

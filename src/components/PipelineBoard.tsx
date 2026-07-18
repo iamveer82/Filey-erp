@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -19,18 +19,33 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, Trophy } from "lucide-react";
-import { Badge } from "./ui";
-import { aed } from "../lib/format";
+import { Eye, MoreHorizontal, Plus, Trash2, Trophy } from "lucide-react";
+import { aed, cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import type { Opportunity } from "../lib/api";
 
 const STAGES = [
-  { id: "qualification", label: "Qualification", tone: "info" as const },
-  { id: "proposal", label: "Proposal", tone: "info" as const },
-  { id: "negotiation", label: "Negotiation", tone: "warn" as const },
-  { id: "won", label: "Won", tone: "success" as const },
-  { id: "lost", label: "Lost", tone: "danger" as const },
+  {
+    id: "qualification",
+    label: "Qualification",
+    pill: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+  {
+    id: "proposal",
+    label: "Proposal",
+    pill: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  {
+    id: "negotiation",
+    label: "Negotiation",
+    pill: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  },
+  {
+    id: "won",
+    label: "Won",
+    pill: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+  { id: "lost", label: "Lost", pill: "bg-muted text-muted-foreground" },
 ];
 
 const STAGE_PROB: Record<string, number> = {
@@ -43,7 +58,108 @@ const STAGE_PROB: Record<string, number> = {
 
 type Deal = Opportunity;
 
-function SortableDealCard({ deal, onClick }: { deal: Deal; onClick: (d: Deal) => void }) {
+/** DEMO card body — shared by the sortable card and the drag overlay. */
+function DealCardBody({ deal }: { deal: Deal }) {
+  return (
+    <>
+      <div className="text-[13px] font-medium text-foreground truncate">
+        {deal.title}
+      </div>
+      <div className="text-[12px] text-muted-foreground mt-0.5 truncate">
+        {deal.customer_name || "No company"}
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        <span className="text-[13px] font-semibold text-foreground tabular-nums">
+          {aed(deal.value)}
+        </span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">
+          {deal.probability}%
+        </span>
+      </div>
+    </>
+  );
+}
+
+/**
+ * RowActions-style overflow for a deal card — hover-revealed, quiet. Stops
+ * pointer/click propagation so it never starts a drag or opens the drawer.
+ */
+function DealCardMenu({
+  onView,
+  onDelete,
+}: {
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      className="relative shrink-0 -mt-0.5 -mr-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label="Deal actions"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-7 z-30 w-40 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]">
+          <button
+            type="button"
+            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-hover transition-colors"
+            onClick={() => {
+              setOpen(false);
+              onView();
+            }}
+          >
+            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-foreground">View details</span>
+          </button>
+          <button
+            type="button"
+            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-hover transition-colors"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+            <span className="text-red-500">Delete</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SortableDealCard({
+  deal,
+  onOpen,
+  onDelete,
+  suppressClick,
+}: {
+  deal: Deal;
+  onOpen: (d: Deal) => void;
+  onDelete: (d: Deal) => void;
+  /** Set by the board while a real drag is in flight — swallows the trailing click. */
+  suppressClick: { current: boolean };
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: deal.id, data: { type: "deal", deal } });
 
@@ -57,30 +173,34 @@ function SortableDealCard({ deal, onClick }: { deal: Deal; onClick: (d: Deal) =>
       ref={setNodeRef}
       style={style}
       {...attributes}
-      onClick={() => onClick(deal)}
-      className={
-        "card !p-3 cursor-grab select-none hover: active:cursor-grabbing " +
-        (isDragging ? "opacity-50" : "")
-      }
+      {...listeners}
+      onClick={() => {
+        if (suppressClick.current) return;
+        onOpen(deal);
+      }}
+      className={cn(
+        "group rounded-lg bg-background border border-border p-3 select-none cursor-grab active:cursor-grabbing transition-colors hover:border-muted-foreground/40",
+        isDragging && "opacity-50"
+      )}
     >
-      <div className="flex items-start gap-2">
-        <button
-          {...listeners}
-          aria-label="Drag to reorder"
-          className="mt-0.5 text-brand-300 hover:text-brand-500 cursor-grab active:cursor-grabbing shrink-0"
-        >
-          <GripVertical size={15} />
-        </button>
+      <div className="flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-ink truncate">{deal.title}</p>
-          <p className="text-xs text-brand-500 truncate">{deal.customer_name}</p>
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-sm font-medium text-ink">{aed(deal.value)}</span>
-            <span className="text-[11px] font-medium text-brand-400">
-              {deal.probability}%
-            </span>
+          <div className="text-[13px] font-medium text-foreground truncate">
+            {deal.title}
+          </div>
+          <div className="text-[12px] text-muted-foreground mt-0.5 truncate">
+            {deal.customer_name || "No company"}
           </div>
         </div>
+        <DealCardMenu onView={() => onOpen(deal)} onDelete={() => onDelete(deal)} />
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        <span className="text-[13px] font-semibold text-foreground tabular-nums">
+          {aed(deal.value)}
+        </span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">
+          {deal.probability}%
+        </span>
       </div>
     </div>
   );
@@ -88,20 +208,8 @@ function SortableDealCard({ deal, onClick }: { deal: Deal; onClick: (d: Deal) =>
 
 function DealCardOverlay({ deal }: { deal: Deal }) {
   return (
-    <div className="card !p-3 rotate-2 w-64">
-      <div className="flex items-start gap-2">
-        <GripVertical size={15} className="text-brand-300 mt-0.5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-ink truncate">{deal.title}</p>
-          <p className="text-xs text-brand-500 truncate">{deal.customer_name}</p>
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-sm font-medium text-ink">{aed(deal.value)}</span>
-            <span className="text-[11px] font-medium text-brand-400">
-              {deal.probability}%
-            </span>
-          </div>
-        </div>
-      </div>
+    <div className="rounded-lg bg-background border border-border p-3 rotate-2 w-64 shadow-lg select-none">
+      <DealCardBody deal={deal} />
     </div>
   );
 }
@@ -123,11 +231,19 @@ export default function PipelineBoard({
   /** Called after the quick-add request above is consumed. */
   onQuickAddHandled?: () => void;
 }) {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [addStage, setAddStage] = useState<string | null>(null);
   const [addTitle, setAddTitle] = useState("");
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  // The whole card is the drag handle (DEMO look, no grip icon). A real drag
+  // can leave a trailing click on the card — this flag swallows it.
+  const suppressClick = useRef(false);
+  const clearSuppress = () => {
+    window.setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -157,6 +273,7 @@ export default function PipelineBoard({
   );
 
   const handleDragStart = (e: DragStartEvent) => {
+    suppressClick.current = true;
     setActiveId(Number(e.active.id));
     setDragOverColumn(null);
   };
@@ -207,7 +324,13 @@ export default function PipelineBoard({
     const { active, over } = e;
     setActiveId(null);
     setDragOverColumn(null);
-    if (!over) return;
+    clearSuppress();
+    if (!over) {
+      // Dropped outside any column — dragOver already moved the card
+      // optimistically, so restore server state.
+      reload();
+      return;
+    }
 
     const activeId = Number(active.id);
     const overId = over.id;
@@ -239,6 +362,14 @@ export default function PipelineBoard({
     }
   };
 
+  const handleDragCancel = () => {
+    setActiveId(null);
+    setDragOverColumn(null);
+    clearSuppress();
+    // dragOver moved the card optimistically — restore server state.
+    reload();
+  };
+
   const quickAdd = async (stage: string) => {
     const title = addTitle.trim();
     if (!title) {
@@ -264,6 +395,26 @@ export default function PipelineBoard({
     }
   };
 
+  const removeDeal = async (deal: Deal) => {
+    const ok = await confirm({
+      title: "Delete deal?",
+      message: `"${deal.title}" will be permanently removed from the pipeline.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const { crm } = await import("../lib/api");
+      await crm.deleteOpportunity(deal.id);
+      setOpps((prev) => prev.filter((o) => o.id !== deal.id));
+      toast.success("Deal deleted");
+    } catch (e) {
+      toast.error("Failed to delete deal");
+      console.error("Failed to delete deal:", e);
+      reload();
+    }
+  };
+
   return (
     <DndContext
       sensors={sensors}
@@ -271,31 +422,44 @@ export default function PipelineBoard({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
-      <div className="flex gap-4 overflow-x-auto pb-3">
-        {STAGES.map((s) => {
+      {/* Joined kanban board — columns as hairline-divided cells (DEMO look). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 rounded-xl border border-border bg-card overflow-hidden">
+        {STAGES.map((s, i) => {
           const list = byStage[s.id] ?? [];
           const total = list.reduce((a, o) => a + o.value, 0);
           const isOver = dragOverColumn === s.id;
+          const last = i === STAGES.length - 1;
           return (
             <div
               key={s.id}
               data-column={s.id}
-              className={
-                "w-72 shrink-0 rounded-md border bg-brand-50/60 dark:bg-white/[0.03] p-3 transition-colors " +
-                (isOver
-                  ? "border-primary-500 bg-primary-100/40"
-                  : "border-brand-200")
-              }
+              className={cn(
+                "min-w-0 border-border xl:border-b-0 transition-colors",
+                !last && "border-b xl:border-r",
+                !last && i % 2 === 0 && "md:border-r",
+                last && "md:col-span-2 xl:col-span-1",
+                isOver && "bg-hover/60"
+              )}
             >
-              <div className="flex items-center justify-between px-1 mb-3">
-                <div className="flex items-center gap-2">
-                  <Badge tone={s.tone}>{s.label}</Badge>
-                  <span className="inline-flex items-center justify-center min-w-[22px] h-5 rounded-full bg-white dark:bg-white/12 text-[11px] font-medium text-brand-500 px-1.5">
+              <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-2 border-b border-border">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap",
+                      s.pill
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground tabular-nums">
                     {list.length}
                   </span>
                 </div>
-                <span className="text-xs font-medium text-ink">{aed(total)}</span>
+                <span className="text-[11.5px] text-muted-foreground tabular-nums truncate">
+                  {aed(total)}
+                </span>
               </div>
 
               <SortableContext
@@ -303,57 +467,62 @@ export default function PipelineBoard({
                 strategy={verticalListSortingStrategy}
                 id={s.id}
               >
-                <div className="space-y-2 min-h-[120px]">
+                <div className="p-3 space-y-2 min-h-[240px]">
                   {list.map((o) => (
-                    <SortableDealCard key={o.id} deal={o} onClick={onOpen} />
+                    <SortableDealCard
+                      key={o.id}
+                      deal={o}
+                      onOpen={onOpen}
+                      onDelete={removeDeal}
+                      suppressClick={suppressClick}
+                    />
                   ))}
                   {list.length === 0 && (
-                    <p className="text-center text-xs text-brand-300 py-6">
+                    <p className="py-6 text-center text-[12px] text-muted-foreground/60">
                       Drop deals here
                     </p>
                   )}
+                  {addStage === s.id ? (
+                    <input
+                      autoFocus
+                      className="input h-8 w-full text-[13px]"
+                      placeholder="Deal name…"
+                      value={addTitle}
+                      onChange={(e) => setAddTitle(e.target.value)}
+                      onBlur={() => quickAdd(s.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") quickAdd(s.id);
+                        if (e.key === "Escape") {
+                          setAddStage(null);
+                          setAddTitle("");
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddStage(s.id);
+                        setAddTitle("");
+                      }}
+                      className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add deal
+                    </button>
+                  )}
                 </div>
               </SortableContext>
-
-              <div className="mt-2">
-                {addStage === s.id ? (
-                  <input
-                    autoFocus
-                    className="input h-8 w-full text-sm"
-                    placeholder="Deal name…"
-                    value={addTitle}
-                    onChange={(e) => setAddTitle(e.target.value)}
-                    onBlur={() => quickAdd(s.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") quickAdd(s.id);
-                      if (e.key === "Escape") {
-                        setAddStage(null);
-                        setAddTitle("");
-                      }
-                    }}
-                  />
-                ) : (
-                  <button
-                    onClick={() => {
-                      setAddStage(s.id);
-                      setAddTitle("");
-                    }}
-                    className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-brand-300 py-1.5 text-xs font-medium text-brand-400 transition-colors hover:border-primary-300 hover:text-primary-600"
-                  >
-                    <Plus size={13} /> Add deal
-                  </button>
-                )}
-              </div>
             </div>
           );
         })}
-        {opps.length === 0 && (
-          <div className="grid place-items-center w-full py-12 text-sm text-brand-400">
-            <Trophy size={20} className="mb-2 text-brand-300" />
-            No opportunities yet.
-          </div>
-        )}
       </div>
+
+      {opps.length === 0 && (
+        <div className="grid place-items-center py-12 text-[13px] text-muted-foreground">
+          <Trophy size={20} className="mb-2 text-muted-foreground/50" />
+          No opportunities yet.
+        </div>
+      )}
 
       <DragOverlay>
         {activeDeal ? <DealCardOverlay deal={activeDeal} /> : null}

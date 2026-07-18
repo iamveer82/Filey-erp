@@ -12,6 +12,7 @@ import {
   Plus,
   Save,
   X,
+  FileText,
 } from "lucide-react";
 import {
   suppliers as suppliersApi,
@@ -32,6 +33,9 @@ import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
 import PartyBankDetails from "../components/PartyBankDetails";
 import AdvanceCard from "../components/AdvanceCard";
+import StatementModal, {
+  type StatementDocRef,
+} from "../components/statements/StatementModal";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -102,6 +106,7 @@ export default function SupplierDetail() {
   const [showAllPos, setShowAllPos] = useState(false);
   const [qv, setQv] = useState<QuickViewData | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [stmtOpen, setStmtOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -169,6 +174,21 @@ export default function SupplierDetail() {
 
   // localdb is schemaless — older/agent-created rows may lack status.
   const st = (o: { status?: string }) => (o.status || "").toLowerCase();
+
+  /** PO docs handed to the Statement of Account modal (it derives the
+   *  ledger: POs as debits + dated payments/advances as credits). */
+  const stmtDocs = useMemo<StatementDocRef[]>(
+    () =>
+      myOrders.map((o) => ({
+        id: o.id,
+        number: o.po_number,
+        date: o.order_date,
+        total: o.total,
+        currency: o.currency,
+        status: o.status,
+      })),
+    [myOrders]
+  );
   const totalValue = myOrders.reduce((s, o) => s + o.total, 0);
   const openCount = myOrders.filter(
     (o) => !["received", "cancelled"].includes(st(o))
@@ -292,6 +312,13 @@ export default function SupplierDetail() {
           <p className="text-[13px] text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setStmtOpen(true)}
+            disabled={!supplier}
+            className="btn-ghost h-8 inline-flex gap-1.5"
+          >
+            <FileText className="h-3.5 w-3.5" /> Statement
+          </button>
           <button
             onClick={() => setEditOpen(true)}
             disabled={!supplier}
@@ -568,6 +595,23 @@ export default function SupplierDetail() {
       )}
 
       <QuickViewModal open={!!qv} onClose={() => setQv(null)} data={qv} />
+
+      {supplier && (
+        <StatementModal
+          open={stmtOpen}
+          onClose={() => setStmtOpen(false)}
+          partyType="supplier"
+          party={{
+            id: supplier.id,
+            name: supplier.name,
+            contact: supplier.contact_person,
+            trn: supplier.tax_id,
+            email: supplier.email,
+            address: supplier.address,
+          }}
+          docs={stmtDocs}
+        />
+      )}
 
       <EditSupplierModal
         supplier={supplier ?? null}
