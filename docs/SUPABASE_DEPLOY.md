@@ -85,6 +85,14 @@ supabase secrets set STRIPE_SECRET_KEY=sk_live_xxx
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_xxx
 supabase secrets set STRIPE_PRICE_PRO=price_xxx
 supabase secrets set STRIPE_PRICE_BUSINESS=price_xxx
+supabase secrets set STRIPE_PRICE_LITE=price_xxx        # one-time Offline (desktop) license price
+
+# Licensing — ECDSA P-256 PRIVATE key (PEM) used by the stripe edge function
+# to sign Offline-license tokens. Its public half is embedded in
+# src/lib/license.ts. Generate once and store ONLY here:
+#   openssl ecparam -genkey -name prime256v1 -noout -out license-signing.pem
+#   supabase secrets set LICENSE_SIGNING_KEY="$(cat license-signing.pem)"
+supabase secrets set LICENSE_SIGNING_KEY="-----BEGIN PRIVATE KEY-----..."
 
 # Email (Resend)
 supabase secrets set RESEND_API_KEY=re_xxx

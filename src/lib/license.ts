@@ -12,8 +12,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
 import { isLocalMode } from "./dataMode";
 
-/** Flip to true at launch to actually gate desktop features. */
-export const ENFORCE_LICENSING = false;
+/** Gates desktop features behind the four-tier plan model. Flipped on for the
+ *  v2.3.0 licensing launch — the matching server-side cap (supabase/
+ *  2026-07-18-free-invoice-cap.sql) is enabled separately via
+ *  platform_config.licensing_enforced. */
+export const ENFORCE_LICENSING = true;
 
 /** ECDSA P-256 public key (SPKI, base64). Verify-only — useless for forging. */
 const LICENSE_PUBLIC_KEY =
