@@ -35,6 +35,24 @@ export const DOC_TEMPLATES = [
   { id: "rec-corporate", name: "Receipt Corporate" },
   { id: "rec-thermal", name: "Receipt Thermal" },
   { id: "rec-elegant", name: "Receipt Elegant" },
+  // UAE reference-pack ports (v2.3) — rendered by UaePackDoc.tsx; additive.
+  { id: "uae-full", name: "UAE Full Tax Invoice" },
+  { id: "uae-simplified", name: "UAE Simplified Tax Invoice" },
+  { id: "uae-reverse", name: "UAE Reverse Charge" },
+  { id: "uae-foreign", name: "UAE Foreign Currency" },
+  { id: "uae-export", name: "UAE Zero-Rated Export" },
+  { id: "uae-mixed", name: "UAE Mixed Supply" },
+  { id: "uae-recurring", name: "UAE Recurring Invoice" },
+  { id: "uae-freelancer", name: "UAE Freelancer Invoice" },
+  { id: "uae-credit-note", name: "UAE Tax Credit Note" },
+  { id: "uae-debit-note", name: "UAE Tax Debit Note" },
+  { id: "uae-quotation", name: "UAE Quotation" },
+  { id: "uae-proforma", name: "UAE Proforma Invoice" },
+  { id: "uae-estimate", name: "UAE Estimate" },
+  { id: "uae-purchase-order", name: "UAE Purchase Order" },
+  { id: "uae-order-confirmation", name: "UAE Order Confirmation" },
+  { id: "uae-receipt-voucher", name: "UAE Receipt Voucher" },
+  { id: "uae-payment-voucher", name: "UAE Payment Voucher" },
 ];
 
 /**

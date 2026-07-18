@@ -5,6 +5,7 @@ import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import { applyRoundOff, type CalcMode } from "../lib/money";
 import { loadCustomTemplates } from "./TemplateDesigner";
 import { resolveTemplateId } from "./DocTemplates";
+import UaePackDoc from "./UaePackDoc";
 import {
   INVOICE_TYPE_CODES,
   PAYMENT_MEANS_CODES,
@@ -141,6 +142,22 @@ export default function DocView({
     ? loadCustomTemplates().find((ct) => ct.id === form.template)
     : null;
   const templateId = customTemplate?.type === "file" ? "file" : baseLayout;
+
+  // UAE reference-pack templates render through their own parameterized
+  // renderer. "uae" / "em-uae" don't match the "uae-" prefix and fall through
+  // to their own branches below.
+  if (templateId.startsWith("uae-")) {
+    return (
+      <UaePackDoc
+        form={form}
+        pageItems={pageItems}
+        itemStartIndex={itemStartIndex}
+        showTotals={showTotals}
+        showFooter={showFooter}
+        labels={labels}
+      />
+    );
+  }
 
   const resolvedAccent = customTemplate?.accent || form.accent || "#222222";
   const a = resolvedAccent;
