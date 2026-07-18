@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  Users,
+  Building2,
   Boxes,
   AlertTriangle,
   Package,
@@ -9,21 +9,24 @@ import {
   Sliders,
   AlarmClock,
   Download,
+  Search,
+  ArrowUpDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   erp,
+  pos,
   suppliers as suppliersApi,
-  shareRecord,
   Product,
+  PoSummary,
   Supplier,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num } from "../lib/format";
+import { aed, num, money, cn } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
-import { Button, Card, Field, Badge, DataTable, Modal, MetricCard, PageHeader, ShareToggle, ErrorBanner } from "../components/primitives";
-import { SearchInput } from "../components/ui";
+import { Button, Card, Field, Badge, Modal, PageHeader, ErrorBanner } from "../components/primitives";
 import {
   RowActions,
   QuickViewModal,
@@ -38,9 +41,16 @@ interface CategoryGroup {
   low: number;
 }
 
+type SortKey = "name" | "category" | "contact" | "balance";
+
+/** Contact column: prefer the contact person, fall back to email. */
+const contactOf = (s: Supplier) => s.contact_person || s.email || "";
+
 export default function Suppliers() {
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [orders, setOrders] = useState<PoSummary[]>([]);
+  const [poPayments, setPoPayments] = useState<{ po_id: number; amount: number }[]>([]);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,6 +58,10 @@ export default function Suppliers() {
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [quickView, setQuickView] = useState<Supplier | null>(null);
+  const [sortBy, setSortBy] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "name",
+    dir: "asc",
+  });
   const { confirm, toast } = useUI();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -64,6 +78,8 @@ export default function Suppliers() {
     return Promise.all([
       erp.products().then(setProducts),
       suppliersApi.list().then(setSuppliers),
+      pos.list().then(setOrders),
+      pos.allPayments().then(setPoPayments),
     ])
       .catch((e) =>
         setError(`Could not load suppliers: ${e instanceof Error ? e.message : e}`)
@@ -92,16 +108,80 @@ export default function Suppliers() {
   const totalValue = groups.reduce((s, g) => s + g.value, 0);
   const totalLow = groups.reduce((s, g) => s + g.low, 0);
 
-  // DEMO parity: client-side search across the visible supplier fields.
+  // Category column: the dominant (most frequent) product category among a
+  // supplier's own products; empty when the supplier has none.
+  const categoryBySupplier = useMemo(() => {
+    const counts = new Map<number, Map<string, number>>();
+    for (const p of products) {
+      if (p.supplier_id == null || !p.category) continue;
+      const m = counts.get(p.supplier_id) ?? new Map<string, number>();
+      m.set(p.category, (m.get(p.category) ?? 0) + 1);
+      counts.set(p.supplier_id, m);
+    }
+    const out = new Map<number, string>();
+    for (const [sid, m] of counts) {
+      let best = "";
+      let bestN = 0;
+      for (const [cat, n] of m) {
+        if (n > bestN) {
+          best = cat;
+          bestN = n;
+        }
+      }
+      out.set(sid, best);
+    }
+    return out;
+  }, [products]);
+
+  // Open balance per supplier: PO totals (excluding cancelled POs) minus
+  // recorded payments — same derivation as the supplier detail page.
+  const balanceBySupplier = useMemo(() => {
+    const paidByPo = new Map<number, number>();
+    for (const p of poPayments) {
+      paidByPo.set(p.po_id, (paidByPo.get(p.po_id) ?? 0) + (Number(p.amount) || 0));
+    }
+    const out = new Map<number, number>();
+    for (const o of orders) {
+      if (o.supplier_id == null) continue;
+      if ((o.status || "").toLowerCase() === "cancelled") continue;
+      const open = (Number(o.total) || 0) - (paidByPo.get(o.id) ?? 0);
+      out.set(o.supplier_id, (out.get(o.supplier_id) ?? 0) + open);
+    }
+    return out;
+  }, [orders, poPayments]);
+
+  // DEMO parity: client-side search across the visible supplier fields, then
+  // client-side sort on the DEMO column keys.
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return suppliers;
-    return suppliers.filter((s) =>
-      [s.name, s.contact_person, s.email, s.phone]
+    const list = suppliers.filter((s) => {
+      if (!needle) return true;
+      return [s.name, categoryBySupplier.get(s.id), contactOf(s), s.email]
         .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(needle))
-    );
-  }, [suppliers, q]);
+        .some((v) => String(v).toLowerCase().includes(needle));
+    });
+    const { key, dir } = sortBy;
+    const val = (s: Supplier): string | number =>
+      key === "name"
+        ? s.name.toLowerCase()
+        : key === "category"
+          ? (categoryBySupplier.get(s.id) ?? "").toLowerCase()
+          : key === "contact"
+            ? contactOf(s).toLowerCase()
+            : (balanceBySupplier.get(s.id) ?? 0);
+    return [...list].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      const cmp =
+        typeof va === "number" && typeof vb === "number"
+          ? va - vb
+          : String(va).localeCompare(String(vb));
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }, [suppliers, q, sortBy, categoryBySupplier, balanceBySupplier]);
+
+  const toggleSort = (key: SortKey) =>
+    setSortBy((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
 
   // DEMO parity: duplicate a supplier via the real create endpoint.
   const duplicate = async (s: Supplier) => {
@@ -179,156 +259,175 @@ export default function Suppliers() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
-        <MetricCard
+      {/* ── KPI tiles (DEMO reference: icon box + value + muted hint) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-4">
+        <KpiTile
+          icon={Building2}
+          accent="bg-neutral-500/10 text-neutral-500 dark:text-neutral-300"
           label="Suppliers"
           value={num(suppliers.length)}
-          icon={<Users size={20} />}
-          iconClass="bg-primary-100 text-ink"
+          hint="Vendors registered"
+          divider="border-b sm:border-b-0 sm:border-r"
         />
-        <MetricCard
+        <KpiTile
+          icon={Boxes}
+          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
           label="Sourced SKUs"
           value={num(products.length)}
-          icon={<Boxes size={20} />}
-          iconClass="bg-primary-100 text-ink"
+          hint={`Across ${groups.length} categories`}
+          divider="border-b sm:border-b-0 lg:border-r"
         />
-        <MetricCard
+        <KpiTile
+          icon={Package}
+          accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           label="Sourcing Value"
           value={aed(totalValue)}
-          icon={<Package size={20} />}
-          iconClass="bg-primary-100 text-ink"
+          hint="Stock on hand at cost"
+          divider="border-b sm:border-b-0 sm:border-r"
         />
-        <MetricCard
+        <KpiTile
+          icon={AlertTriangle}
+          accent="bg-amber-500/10 text-amber-600 dark:text-amber-500"
           label="At Reorder"
           value={num(totalLow)}
-          icon={<AlertTriangle size={20} />}
-          iconClass="bg-danger/15 text-danger"
+          hint="SKUs at/below reorder level"
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <SearchInput
-          value={q}
-          onChange={setQ}
-          placeholder="Search supplier, contact, email…"
-          className="w-full max-w-xs"
-        />
-        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">{filtered.length} shown</span>
+      {/* ── Table card: toolbar lives inside the card (DEMO reference) ── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search supplier or category…"
+              className="pl-8 pr-3 h-8 rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground text-[13px] w-[300px] outline-none focus:border-muted-foreground"
+            />
+          </div>
+          <span className="ml-auto text-[12px] text-muted-foreground">
+            {filtered.length} shown
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <TH label="Supplier" k="name" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Category" k="category" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Contact" k="contact" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Open balance" k="balance" sortBy={sortBy} onSort={toggleSort} right />
+                <th className="px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading &&
+                suppliers.length === 0 &&
+                [0, 1, 2].map((i) => (
+                  <tr key={i} className="border-b border-border">
+                    <td colSpan={5} className="px-5 py-3">
+                      <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
+                    </td>
+                  </tr>
+                ))}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
+                    {suppliers.length === 0
+                      ? "No suppliers yet — add your first one"
+                      : "No suppliers match your search."}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((s) => (
+                <tr
+                  key={s.id}
+                  onClick={() => nav(`/suppliers/${s.id}`)}
+                  className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
+                >
+                  <td className="px-5 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">{s.name}</p>
+                      <p className="truncate text-[11.5px] text-muted-foreground font-mono">
+                        SUP-{s.id}
+                      </p>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-foreground">
+                    {categoryBySupplier.get(s.id) || (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-foreground">
+                    {contactOf(s) || <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3 text-right text-foreground tabular-nums">
+                    {money(balanceBySupplier.get(s.id) ?? 0)}
+                  </td>
+                  <td className="px-3 py-3 text-muted-foreground">
+                    <div className="flex items-center gap-1 justify-end">
+                      <RowActions
+                        onView={() => setQuickView(s)}
+                        onEdit={() => {
+                          setEdit(s);
+                          setOpen(true);
+                        }}
+                        onCopy={() => duplicate(s)}
+                        onSend={{
+                          ...(s.phone
+                            ? {
+                                whatsapp: () =>
+                                  shareVia("whatsapp", {
+                                    phone: s.phone,
+                                    text: `Hello ${s.name},`,
+                                  }),
+                                sms: () =>
+                                  shareVia("sms", {
+                                    phone: s.phone,
+                                    text: `Hello ${s.name},`,
+                                  }),
+                              }
+                            : {}),
+                          ...(s.email
+                            ? {
+                                email: () =>
+                                  shareVia("email", {
+                                    email: s.email,
+                                    url: s.name,
+                                    text: `Hello ${s.name},`,
+                                  }),
+                              }
+                            : {}),
+                          copyLink: () => {
+                            shareVia("copyLink", {
+                              url: `${window.location.origin}/suppliers/${s.id}`,
+                            });
+                            toast.success("Supplier link copied.");
+                          },
+                        }}
+                        onDelete={async () => {
+                          const ok = await confirm({
+                            title: "Delete supplier",
+                            message: `Delete supplier "${s.name}"?`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          await suppliersApi.remove(s.id);
+                          load();
+                          toast.success("Supplier deleted.");
+                        }}
+                      />
+                      <ChevronRight className="h-4 w-4" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      <DataTable<Supplier>
-        rows={filtered}
-        loading={loading}
-        empty="No suppliers yet — add your first one"
-        onRowClick={(s) => nav(`/suppliers/${s.id}`)}
-        columns={[
-          {
-            key: "name",
-            label: "Supplier",
-            sortValue: (s) => s.name,
-            render: (s) => (
-              <div className="min-w-0">
-                <p className="truncate text-ink font-medium">{s.name}</p>
-                <p className="truncate text-[11px] text-brand-400 font-mono">SUP-{s.id}</p>
-              </div>
-            ),
-          },
-          {
-            key: "contact",
-            label: "Contact",
-            sortValue: (s) => s.contact_person ?? "",
-            render: (s) => s.contact_person ?? "—",
-          },
-          {
-            key: "email",
-            label: "Email",
-            sortValue: (s) => s.email ?? "",
-            render: (s) => s.email ?? "—",
-          },
-          {
-            key: "phone",
-            label: "Phone",
-            sortValue: (s) => s.phone ?? "",
-            render: (s) => s.phone ?? "—",
-          },
-          {
-            key: "share",
-            label: "Sharing",
-            render: (s) => (
-              <ShareToggle
-                shared={s.shared}
-                onToggle={async (next) => {
-                  try {
-                    await shareRecord("suppliers", s.id, next);
-                    load();
-                    toast.success(next ? "Shared with team." : "Set to private.");
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : String(e));
-                  }
-                }}
-              />
-            ),
-          },
-          {
-            key: "act",
-            label: "",
-            render: (s) => (
-              <RowActions
-                onView={() => setQuickView(s)}
-                onEdit={() => {
-                  setEdit(s);
-                  setOpen(true);
-                }}
-                onCopy={() => duplicate(s)}
-                onSend={{
-                  ...(s.phone
-                    ? {
-                        whatsapp: () =>
-                          shareVia("whatsapp", {
-                            phone: s.phone,
-                            text: `Hello ${s.name},`,
-                          }),
-                        sms: () =>
-                          shareVia("sms", {
-                            phone: s.phone,
-                            text: `Hello ${s.name},`,
-                          }),
-                      }
-                    : {}),
-                  ...(s.email
-                    ? {
-                        email: () =>
-                          shareVia("email", {
-                            email: s.email,
-                            url: s.name,
-                            text: `Hello ${s.name},`,
-                          }),
-                      }
-                    : {}),
-                  copyLink: () => {
-                    shareVia("copyLink", {
-                      url: `${window.location.origin}/suppliers/${s.id}`,
-                    });
-                    toast.success("Supplier link copied.");
-                  },
-                }}
-                onDelete={async () => {
-                  const ok = await confirm({
-                    title: "Delete supplier",
-                    message: `Delete supplier "${s.name}"?`,
-                    confirmLabel: "Delete",
-                    danger: true,
-                  });
-                  if (!ok) return;
-                  await suppliersApi.remove(s.id);
-                  load();
-                  toast.success("Supplier deleted.");
-                }}
-              />
-            ),
-          },
-        ]}
-      />
 
       <p className="mt-8 mb-3 text-xs font-medium text-brand-500">By product category</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -396,6 +495,72 @@ export default function Suppliers() {
         }
       />
     </div>
+  );
+}
+
+/** DEMO reference KPI tile: tinted icon box + value + muted hint. */
+function KpiTile({
+  icon: Icon,
+  accent,
+  label,
+  value,
+  hint,
+  divider,
+}: {
+  icon: typeof Building2;
+  accent: string;
+  label: string;
+  value: string;
+  hint: string;
+  divider?: string;
+}) {
+  return (
+    <div className={cn("p-5 flex items-center gap-3", divider)}>
+      <div className={cn("h-10 w-10 rounded-lg grid place-items-center", accent)}>
+        <Icon className="h-5 w-5" strokeWidth={1.75} />
+      </div>
+      <div>
+        <div className="text-[12.5px] text-muted-foreground">{label}</div>
+        <div className="text-[22px] font-semibold text-foreground leading-tight tabular-nums">
+          {value}
+        </div>
+        <div className="text-[11.5px] text-muted-foreground">{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+function TH({
+  label,
+  k,
+  sortBy,
+  onSort,
+  right,
+}: {
+  label: string;
+  k: SortKey;
+  sortBy: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+  right?: boolean;
+}) {
+  const active = sortBy.key === k;
+  return (
+    <th
+      className={cn(
+        "px-5 py-2.5 font-medium text-[12px] tracking-wide",
+        right && "text-right"
+      )}
+    >
+      <button
+        onClick={() => onSort(k)}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          active && "text-foreground"
+        )}
+      >
+        {label} <ArrowUpDown className="h-3 w-3" />
+      </button>
+    </th>
   );
 }
 

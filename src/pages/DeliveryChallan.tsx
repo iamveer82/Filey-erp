@@ -8,7 +8,7 @@ import {
   Check,
   Truck,
   Calendar,
-  Boxes,
+  MapPin,
   Users,
   Maximize2,
   X,
@@ -68,6 +68,8 @@ const dcNumber = (existing: string[] = []) =>
 const today = () => new Date().toISOString().slice(0, 10);
 
 type DcItem = { description: string; qty: number };
+/** Shipment lifecycle for the list's status pills / filters (DEMO parity). */
+type DcStatus = "preparing" | "in_transit" | "delivered" | "failed";
 type DcForm = {
   number: string;
   template: string;
@@ -83,6 +85,9 @@ type DcForm = {
   issue_date: string;
   vehicle_number: string;
   driver_name: string;
+  status: DcStatus;
+  destination: string;
+  eta: string;
   notes: string;
   font: string;
   items: DcItem[];
@@ -96,12 +101,20 @@ const DC_TYPES = [
   { id: "return", label: "Return Challan" },
 ];
 
-/** Short labels + chip tones for the list type filters (DEMO parity). */
-const TYPE_CHIPS: { id: string; label: string; tone: "info" | "success" | "warn" }[] = [
-  { id: "delivery", label: "Delivery", tone: "info" },
-  { id: "goods_received", label: "Goods Received", tone: "success" },
-  { id: "return", label: "Return", tone: "warn" },
+/** Status labels + Badge/FilterChip tones — one source for the list pills,
+ *  filter chips and the editor's status select (DEMO parity). */
+const DC_STATUSES: {
+  id: DcStatus;
+  label: string;
+  tone: "info" | "warn" | "success" | "danger";
+}[] = [
+  { id: "preparing", label: "Preparing", tone: "info" },
+  { id: "in_transit", label: "In Transit", tone: "warn" },
+  { id: "delivered", label: "Delivered", tone: "success" },
+  { id: "failed", label: "Failed", tone: "danger" },
 ];
+const dcStatusMeta = (s: DcStatus) =>
+  DC_STATUSES.find((x) => x.id === s) ?? DC_STATUSES[0];
 
 function blankDc(existing: string[] = []): DcForm {
   return {
@@ -119,6 +132,9 @@ function blankDc(existing: string[] = []): DcForm {
     issue_date: today(),
     vehicle_number: "",
     driver_name: "",
+    status: "preparing",
+    destination: "",
+    eta: today(),
     notes: "",
     font: "'Plus Jakarta Sans', system-ui, sans-serif",
     show_stamp: false,
@@ -144,11 +160,24 @@ interface DcRecord {
   item_count: number;
   show_stamp?: boolean;
   show_signature?: boolean;
+  /** Shipment tracking — optional so records saved before it existed still render. */
+  status?: DcStatus;
+  destination?: string;
+  eta?: string;
   created_at: string;
   /** Full editor payload — present on records saved after edit/quick-view
    *  support; older records only carry the summary fields above. */
   form?: DcForm;
 }
+
+/** Shipment fields: prefer the record summary, fall back to the form payload,
+ *  then to "preparing" / "" so records saved before tracking existed stay readable. */
+const dcStatus = (r: DcRecord): DcStatus =>
+  r.status ?? r.form?.status ?? "preparing";
+const dcDestination = (r: DcRecord) => r.destination ?? r.form?.destination ?? "";
+const dcEta = (r: DcRecord) => r.eta ?? r.form?.eta ?? "";
+const dcDriver = (r: DcRecord) => r.form?.driver_name ?? "";
+const dcOrder = (r: DcRecord) => r.form?.ref_number ?? "";
 
 /** Rebuild an editor form from a stored record — full payload when available,
  *  otherwise prefill the summary fields so old records stay editable. */
@@ -163,6 +192,9 @@ function formFromRecord(r: DcRecord, existing: string[]): DcForm {
       : "delivery",
     party_name: r.party_name,
     issue_date: r.issue_date || base.issue_date,
+    status: r.status ?? base.status,
+    destination: r.destination ?? "",
+    eta: r.eta ?? base.eta,
     show_stamp: r.show_stamp,
     show_signature: r.show_signature,
   };
@@ -208,7 +240,7 @@ export default function DeliveryChallan() {
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [quickView, setQuickView] = useState<DcRecord | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
 
@@ -289,6 +321,9 @@ export default function DeliveryChallan() {
             item_count: form.items.filter((i) => i.description.trim()).length,
             show_stamp: form.show_stamp,
             show_signature: form.show_signature,
+            status: form.status,
+            destination: form.destination,
+            eta: form.eta,
             created_at: new Date().toISOString(),
             form,
           };
@@ -301,13 +336,13 @@ export default function DeliveryChallan() {
     );
   }
 
-  const totalItems = records.reduce((s, r) => s + r.item_count, 0);
-  const parties = new Set(records.map((r) => r.party_name).filter(Boolean)).size;
+  const inTransit = records.filter((r) => dcStatus(r) === "in_transit").length;
+  const delivered = records.filter((r) => dcStatus(r) === "delivered").length;
 
   const q = search.trim().toLowerCase();
   const filtered = records.filter(
     (r) =>
-      (typeFilter === "all" || r.dc_type === typeFilter) &&
+      (statusFilter === "all" || dcStatus(r) === statusFilter) &&
       (!q ||
         r.number.toLowerCase().includes(q) ||
         (r.party_name || "").toLowerCase().includes(q))
@@ -317,13 +352,13 @@ export default function DeliveryChallan() {
     <div className="animate-fade-up">
       <PageHeader
         title="Delivery"
-        subtitle="Track delivery orders, goods received notes & returns"
+        subtitle="Track shipments and driver assignments"
         action={
           <button
             className="btn-primary"
             onClick={() => setForm(blankDc(records.map((r) => r.number)))}
           >
-            <Plus size={16} /> New Challan
+            <Plus size={16} /> Assign Driver
           </button>
         }
       />
@@ -334,16 +369,16 @@ export default function DeliveryChallan() {
           icon={<Truck size={20} />}
         />
         <MetricCard
-          label="Items Shipped"
-          value={String(totalItems)}
-          icon={<Boxes size={20} />}
-          iconClass="bg-secondary/20 text-ink"
+          label="In Transit"
+          value={String(inTransit)}
+          icon={<MapPin size={20} />}
+          iconClass="bg-warning/15 text-warning"
         />
         <MetricCard
-          label="Parties"
-          value={String(parties)}
-          icon={<Users size={20} />}
-          iconClass="bg-info/15 text-info"
+          label="Delivered"
+          value={String(delivered)}
+          icon={<Check size={20} />}
+          iconClass="bg-success/15 text-success"
         />
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -355,21 +390,21 @@ export default function DeliveryChallan() {
         />
         <div className="flex flex-wrap items-center gap-1.5">
           <FilterChip
-            active={typeFilter === "all"}
-            onClick={() => setTypeFilter("all")}
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
             count={records.length}
           >
             All
           </FilterChip>
-          {TYPE_CHIPS.map((t) => (
+          {DC_STATUSES.map((s) => (
             <FilterChip
-              key={t.id}
-              active={typeFilter === t.id}
-              onClick={() => setTypeFilter(t.id)}
-              tone={t.tone}
-              count={records.filter((r) => r.dc_type === t.id).length}
+              key={s.id}
+              active={statusFilter === s.id}
+              onClick={() => setStatusFilter(s.id)}
+              tone={s.tone}
+              count={records.filter((r) => dcStatus(r) === s.id).length}
             >
-              {t.label}
+              {s.label}
             </FilterChip>
           ))}
         </div>
@@ -378,50 +413,64 @@ export default function DeliveryChallan() {
         rows={filtered}
         loading={loading}
         empty={
-          search || typeFilter !== "all"
-            ? "No challans match your filters"
-            : "No delivery challans yet — create your first one"
+          search || statusFilter !== "all"
+            ? "No shipments match your filters"
+            : "No deliveries yet — assign your first driver"
         }
         onRowClick={(r) => setQuickView(r)}
         columns={[
           {
-            key: "no",
-            label: "Challan #",
+            key: "delivery",
+            label: "Delivery",
             sortValue: (r) => r.number,
             render: (r) => (
               <span className="font-mono text-xs font-medium">{r.number}</span>
             ),
           },
           {
-            key: "type",
-            label: "Type",
-            sortValue: (r) => r.dc_type,
+            key: "order",
+            label: "Order",
+            sortValue: (r) => dcOrder(r),
             render: (r) => (
-              <Badge tone={statusTone(r.dc_type)}>{typeLabel(r.dc_type)}</Badge>
+              <span className="text-brand-500">{dcOrder(r) || "—"}</span>
             ),
           },
           {
-            key: "party",
-            label: "Party",
-            sortValue: (r) => r.party_name,
+            key: "driver",
+            label: "Driver",
+            sortValue: (r) => dcDriver(r),
             render: (r) => (
-              <span className="font-medium text-ink">{r.party_name || "—"}</span>
+              <span className="font-medium text-ink">{dcDriver(r) || "—"}</span>
             ),
           },
           {
-            key: "items",
-            label: "Items",
-            sortValue: (r) => r.item_count,
+            key: "destination",
+            label: "Destination",
+            sortValue: (r) => dcDestination(r),
             render: (r) => (
-              <span className="tabular-nums text-brand-500">{r.item_count}</span>
+              <span className="inline-flex items-center gap-1.5 text-ink">
+                <MapPin size={13} className="text-brand-400" />
+                {dcDestination(r) || "—"}
+              </span>
             ),
           },
           {
-            key: "date",
-            label: "Date",
-            sortValue: (r) => r.issue_date,
+            key: "status",
+            label: "Status",
+            sortValue: (r) => dcStatus(r),
+            render: (r) => {
+              const meta = dcStatusMeta(dcStatus(r));
+              return <Badge tone={meta.tone}>{meta.label}</Badge>;
+            },
+          },
+          {
+            key: "eta",
+            label: "ETA",
+            sortValue: (r) => dcEta(r),
             render: (r) => (
-              <span className="text-brand-500">{fmtDate(r.issue_date)}</span>
+              <span className="text-brand-500">
+                {dcEta(r) ? fmtDate(dcEta(r)) : "—"}
+              </span>
             ),
           },
           {
@@ -467,7 +516,24 @@ export default function DeliveryChallan() {
                   </Badge>
                 ),
                 meta: [
+                  {
+                    label: "Status",
+                    value: (
+                      <Badge tone={dcStatusMeta(dcStatus(quickView)).tone}>
+                        {dcStatusMeta(dcStatus(quickView)).label}
+                      </Badge>
+                    ),
+                  },
                   { label: "Party", value: quickView.party_name || "—" },
+                  { label: "Driver", value: dcDriver(quickView) || "—" },
+                  {
+                    label: "Destination",
+                    value: dcDestination(quickView) || "—",
+                  },
+                  {
+                    label: "ETA",
+                    value: dcEta(quickView) ? fmtDate(dcEta(quickView)) : "—",
+                  },
                   { label: "Date", value: fmtDate(quickView.issue_date) },
                   { label: "Items", value: String(quickView.item_count) },
                   { label: "Created", value: fmtDate(quickView.created_at) },
@@ -476,9 +542,6 @@ export default function DeliveryChallan() {
                     : []),
                   ...(quickView.form?.vehicle_number
                     ? [{ label: "Vehicle", value: quickView.form.vehicle_number }]
-                    : []),
-                  ...(quickView.form?.driver_name
-                    ? [{ label: "Driver", value: quickView.form.driver_name }]
                     : []),
                 ],
                 notes: quickView.form?.notes || undefined,
@@ -852,6 +915,35 @@ function DcEditor({
                     onChange={(e) => set("driver_name", e.target.value)}
                   />
                 </Field>
+                <Field label="Destination">
+                  <input
+                    className="input"
+                    placeholder="City, Country"
+                    value={form.destination}
+                    onChange={(e) => set("destination", e.target.value)}
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Status">
+                    <select
+                      className="select"
+                      value={form.status}
+                      onChange={(e) => set("status", e.target.value as DcStatus)}
+                    >
+                      {DC_STATUSES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="ETA">
+                    <DateField
+                      value={form.eta}
+                      onChange={(v) => set("eta", v)}
+                    />
+                  </Field>
+                </div>
               </div>
             </div>
           </Step>

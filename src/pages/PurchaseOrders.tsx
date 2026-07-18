@@ -396,7 +396,7 @@ export default function PurchaseOrders() {
     <div>
       <PageHeader
         title="Purchase Orders"
-        subtitle="Create purchase orders for suppliers, share them, and receive stock"
+        subtitle="Manage POs end-to-end"
         action={
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
@@ -553,7 +553,9 @@ export default function PurchaseOrders() {
             label: "PO #",
             sortValue: (r) => r.po_number,
             render: (r) => (
-              <span className="font-mono text-xs font-medium">{r.po_number}</span>
+              <span className="font-mono text-xs font-medium text-primary-700 dark:text-primary-300">
+                {r.po_number}
+              </span>
             ),
           },
           {
@@ -563,16 +565,10 @@ export default function PurchaseOrders() {
             render: (r) => <span className="font-medium">{r.supplier_name}</span>,
           },
           {
-            key: "order_date",
-            label: "Order Date",
-            sortValue: (r) => r.order_date,
-            render: (r) => fmtDate(r.order_date),
-          },
-          {
-            key: "expected",
-            label: "Expected",
-            sortValue: (r) => r.expected_date ?? "",
-            render: (r) => (r.expected_date ? fmtDate(r.expected_date) : "—"),
+            key: "items",
+            label: "Items",
+            sortValue: (r) => r.items_count,
+            render: (r) => <span className="tabular-nums">{num(r.items_count)}</span>,
           },
           {
             key: "total",
@@ -587,6 +583,18 @@ export default function PurchaseOrders() {
             label: "Status",
             sortValue: (r) => r.status,
             render: (r) => <Badge tone={statusTone(r.status)}>{r.status}</Badge>,
+          },
+          {
+            key: "expected",
+            label: "ETA",
+            sortValue: (r) => r.expected_date ?? "",
+            render: (r) => (r.expected_date ? fmtDate(r.expected_date) : "—"),
+          },
+          {
+            key: "order_date",
+            label: "Order Date",
+            sortValue: (r) => r.order_date,
+            render: (r) => fmtDate(r.order_date),
           },
           {
             key: "share",

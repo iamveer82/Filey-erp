@@ -1,52 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Plus, ShoppingCart, Wallet, Receipt } from "lucide-react";
-import { fin, Expense, Account } from "../lib/api";
+import { useNavigate } from "react-router-dom";
+import { Plus, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  pos,
+  suppliers as suppliersApi,
+  type PoSummary,
+  type Supplier,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { useUI } from "../lib/ui";
-import { aed, fmtDate, num, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { aed, fmtDate, money, num, cn, errMsg } from "../lib/format";
 import {
   PageHeader,
-  MetricCard,
-  DataTable,
-  InfoCard,
   Badge,
-  Modal,
-  Field,
+  statusTone,
   ErrorBanner,
-  SearchInput,
-  FilterChip,
 } from "../components/ui";
-import {
-  RowActions,
-  QuickViewModal,
-  shareVia,
-  type ShareKind,
-} from "../components/RowActions";
-import { DateField } from "../components/DatePicker";
 
 export default function Purchase() {
-  const { confirm, toast } = useUI();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [open, setOpen] = useState(false);
+  const nav = useNavigate();
+  const [orders, setOrders] = useState<PoSummary[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [params, setParams] = useSearchParams();
-  useEffect(() => {
-    if (params.get("new") === "1") {
-      setOpen(true);
-      setParams({}, { replace: true });
-    }
-  }, [params, setParams]);
 
   const load = () => {
     setError("");
-    return fin
-      .expenses()
-      .then(setExpenses)
-      .catch((e) =>
-        setError(`Could not load purchases: ${e instanceof Error ? e.message : e}`)
-      )
+    return Promise.all([pos.list(), suppliersApi.list()])
+      .then(([poList, supList]) => {
+        setOrders(poList);
+        setSuppliers(supList);
+      })
+      .catch((e) => setError(`Could not load purchases: ${errMsg(e)}`))
       .finally(() => setLoading(false));
   };
   useEffect(() => {
@@ -54,96 +38,133 @@ export default function Purchase() {
   }, []);
   useLiveSync(load);
 
-  const total = expenses.reduce((s, e) => s + e.amount, 0);
-  const byCat = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of expenses) m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
-    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
-  }, [expenses]);
-  const catCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of expenses) m.set(e.category, (m.get(e.category) ?? 0) + 1);
-    return m;
-  }, [expenses]);
-  const thisMonth = expenses
-    .filter((e) => new Date(e.expense_date).getMonth() === new Date().getMonth())
-    .reduce((s, e) => s + e.amount, 0);
+  /* ── KPI strip, real data (DEMO parity): Total spend = sum of
+     non-cancelled PO totals, Open = draft+sent, Received = received count,
+     Avg. lead time = mean(expected − order_date) where both dates exist. ── */
+  const active = useMemo(
+    () => orders.filter((p) => p.status !== "cancelled"),
+    [orders]
+  );
+  const totalSpend = active.reduce((s, p) => s + p.total, 0);
+  const openCount = orders.filter(
+    (p) => p.status === "draft" || p.status === "sent"
+  ).length;
+  const received = useMemo(
+    () => orders.filter((p) => p.status === "received"),
+    [orders]
+  );
+  const receivedThisMonth = received.filter((p) => {
+    const d = new Date(p.updated_at);
+    const now = new Date();
+    return (
+      !isNaN(d.getTime()) &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear()
+    );
+  }).length;
 
-  // ---- List filters (DEMO parity: search + category chips) ----
-  const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState<string>("all");
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return expenses.filter((e) => {
-      if (catFilter !== "all" && e.category !== catFilter) return false;
-      if (!q) return true;
-      return (
-        e.category.toLowerCase().includes(q) ||
-        (e.description ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [expenses, search, catFilter]);
-
-  // ---- Row actions (DEMO parity: quick view / duplicate / send / delete) ----
-  const [quickView, setQuickView] = useState<Expense | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const openQuickView = (e: Expense) => {
-    setQuickView(e);
-    if (accounts.length === 0)
-      fin
-        .accounts()
-        .then(setAccounts)
-        .catch(() => {});
-  };
-
-  const duplicateRow = async (e: Expense) => {
-    try {
-      await fin.createExpense(
-        e.category,
-        e.description ?? null,
-        e.amount,
-        e.expense_date,
-        e.account_id ?? null
-      );
-      load();
-      toast.success("Purchase duplicated");
-    } catch (err) {
-      toast.error(
-        `Could not duplicate purchase: ${err instanceof Error ? err.message : String(err)}`
-      );
+  const leadTime = useMemo(() => {
+    const days: number[] = [];
+    for (const p of orders) {
+      if (!p.order_date || !p.expected_date) continue;
+      const d = (+new Date(p.expected_date) - +new Date(p.order_date)) / 86400000;
+      if (Number.isFinite(d)) days.push(d);
     }
-  };
+    if (!days.length) return null;
+    return days.reduce((s, d) => s + d, 0) / days.length;
+  }, [orders]);
 
-  const shareRow = (kind: ShareKind, e: Expense) => {
-    const url = `${location.origin}${location.pathname}#/purchase`;
-    const text = `Purchase record\nCategory: ${e.category}\n${
-      e.description ? `Description: ${e.description}\n` : ""
-    }Amount: ${aed(e.amount)}\nDate: ${fmtDate(e.expense_date)}`;
-    shareVia(kind, { text, url });
-    if (kind === "copyLink") toast.success("Purchase page link copied");
-  };
+  /* ── Real period-over-period deltas (Reports pattern): last 30 days vs
+     the 30 before that, keyed on order_date (received uses updated_at —
+     the only receipt timestamp on a summary row). Where no prior-period
+     baseline exists the delta is null → no chip, hint text only. ── */
+  const deltas = useMemo(() => {
+    const DAY = 86400000;
+    const now = Date.now();
+    const curStart = now - 30 * DAY;
+    const prevStart = now - 60 * DAY;
+    const pct = (cur: number, prev: number): number | null =>
+      prev > 0 ? ((cur - prev) / prev) * 100 : null;
 
-  const deleteRow = async (e: Expense) => {
-    if (
-      !(await confirm({
-        title: "Delete purchase",
-        message: "Delete this purchase record? This cannot be undone.",
-      }))
-    )
-      return;
-    await fin.deleteExpense(e.id);
-    load();
-    toast.success("Purchase deleted");
-  };
+    let spendCur = 0;
+    let spendPrev = 0;
+    let poCur = 0;
+    let poPrev = 0;
+    let rcvCur = 0;
+    let rcvPrev = 0;
+    const leadCur: number[] = [];
+    const leadPrev: number[] = [];
+    for (const p of orders) {
+      const t = +new Date(p.order_date);
+      const cur = t >= curStart;
+      const prev = !cur && t >= prevStart;
+      if (p.status !== "cancelled") {
+        if (cur) spendCur += p.total;
+        else if (prev) spendPrev += p.total;
+      }
+      if (cur) poCur += 1;
+      else if (prev) poPrev += 1;
+      if (p.status === "received") {
+        const rt = +new Date(p.updated_at);
+        if (rt >= curStart) rcvCur += 1;
+        else if (rt >= prevStart) rcvPrev += 1;
+      }
+      if (p.order_date && p.expected_date) {
+        const d = (+new Date(p.expected_date) - t) / DAY;
+        if (Number.isFinite(d)) {
+          if (cur) leadCur.push(d);
+          else if (prev) leadPrev.push(d);
+        }
+      }
+    }
+    const avg = (xs: number[]) =>
+      xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+    return {
+      spend: pct(spendCur, spendPrev),
+      open: pct(poCur, poPrev),
+      received: pct(rcvCur, rcvPrev),
+      lead: leadPrev.length ? pct(avg(leadCur), avg(leadPrev)) : null,
+    };
+  }, [orders]);
+
+  const kpis = [
+    {
+      label: "Total spend",
+      value: aed(totalSpend),
+      delta: deltas.spend,
+      hint: `across ${num(suppliers.length)} suppliers`,
+    },
+    {
+      label: "Open POs",
+      value: num(openCount),
+      delta: deltas.open,
+      hint: "awaiting delivery",
+    },
+    {
+      label: "Received",
+      value: num(receivedThisMonth > 0 ? receivedThisMonth : received.length),
+      delta: deltas.received,
+      hint: receivedThisMonth > 0 ? "this month" : "all time",
+    },
+    {
+      label: "Avg. lead time",
+      value: leadTime == null ? "—" : `${leadTime.toFixed(1)} d`,
+      delta: deltas.lead,
+      hint: "order → expected",
+    },
+  ];
+
+  // pos.list() is already ordered by order_date desc, id desc → first 8 = recent.
+  const recent = orders.slice(0, 8);
 
   return (
     <div className="animate-fade-up">
       <PageHeader
         title="Purchase"
-        subtitle="Purchase spend & expense tracking"
+        subtitle="Track spend across suppliers"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus size={16} /> New purchase
+          <button className="btn-primary" onClick={() => nav("/purchase-orders")}>
+            <Plus size={16} /> New Purchase
           </button>
         }
       />
@@ -154,282 +175,110 @@ export default function Purchase() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
-        <MetricCard
-          label="Total Spend"
-          value={aed(total)}
-          icon={<ShoppingCart size={20} />}
-        />
-        <MetricCard
-          label="This Month"
-          value={aed(thisMonth)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
-        />
-        <MetricCard
-          label="Purchases"
-          value={num(expenses.length)}
-          icon={<Receipt size={20} />}
-          iconClass="bg-info/15 text-info"
-        />
-        <MetricCard
-          label="Categories"
-          value={num(byCat.length)}
-          icon={<ShoppingCart size={20} />}
-          iconClass="bg-primary-100 text-ink"
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <SearchInput
-          className="w-full max-w-xs"
-          value={search}
-          onChange={setSearch}
-          placeholder="Search purchases by category or description…"
-        />
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FilterChip
-            active={catFilter === "all"}
-            onClick={() => setCatFilter("all")}
-            count={expenses.length}
-          >
-            All
-          </FilterChip>
-          {byCat.map(([c]) => (
-            <FilterChip
-              key={c}
-              active={catFilter === c}
-              onClick={() => setCatFilter(c)}
-              count={catCounts.get(c)}
+      {/* ── KPI strip (joined 4-up, DEMO tile markup) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card">
+        {kpis.map((k, i) => {
+          const up = (k.delta ?? 0) >= 0;
+          const Icon = up ? TrendingUp : TrendingDown;
+          return (
+            <div
+              key={k.label}
+              className={cn(
+                "p-5 border-b lg:border-b-0 border-border",
+                i < 3 && "lg:border-r",
+                i % 2 === 0 && "sm:border-r lg:border-r"
+              )}
             >
-              {c}
-            </FilterChip>
-          ))}
-        </div>
+              <div className="text-[13px] text-muted-foreground">{k.label}</div>
+              <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+                {k.value}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11.5px]">
+                {k.delta != null && (
+                  <span
+                    title="vs previous 30 days"
+                    className={cn(
+                      "inline-flex items-center gap-1 font-medium",
+                      up ? "text-success" : "text-danger"
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {k.delta >= 0 ? "+" : ""}
+                    {k.delta.toFixed(1)}%
+                  </span>
+                )}
+                <span className="text-muted-foreground">{k.hint}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <InfoCard title="Spend by category">
-          <ul className="space-y-3">
-            {byCat.slice(0, 6).map(([c, v]) => {
-              const pct = total ? Math.round((v / total) * 100) : 0;
-              return (
-                <li key={c}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-brand-500 font-medium">{c}</span>
-                    <span className="font-medium text-ink">{aed(v)}</span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-brand-100 dark:bg-white/12 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-primary-400"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
-            {byCat.length === 0 && (
-              <li className="text-sm text-brand-400">No purchases yet.</li>
-            )}
-          </ul>
-        </InfoCard>
-
-        <div className="lg:col-span-2">
-          <DataTable<Expense>
-            rows={filtered}
-            loading={loading}
-            empty={
-              search || catFilter !== "all"
-                ? "No purchases match your filters"
-                : "No purchases recorded"
-            }
-            onRowClick={(e) => openQuickView(e)}
-            columns={[
-              {
-                key: "cat",
-                label: "Category",
-                sortValue: (e) => e.category,
-                render: (e) => <Badge tone="info">{e.category}</Badge>,
-              },
-              {
-                key: "desc",
-                label: "Description",
-                sortValue: (e) => e.description ?? "",
-                render: (e) => <span className="text-ink">{e.description ?? "—"}</span>,
-              },
-              {
-                key: "amt",
-                label: "Amount",
-                sortValue: (e) => e.amount,
-                render: (e) => <span className="font-medium">{aed(e.amount)}</span>,
-              },
-              {
-                key: "date",
-                label: "Date",
-                sortValue: (e) => e.expense_date,
-                render: (e) => fmtDate(e.expense_date),
-              },
-              {
-                key: "act",
-                label: "Actions",
-                render: (e) => (
-                  <RowActions
-                    onView={() => openQuickView(e)}
-                    onCopy={() => duplicateRow(e)}
-                    onDelete={() => deleteRow(e)}
-                    onSend={{
-                      whatsapp: () => shareRow("whatsapp", e),
-                      email: () => shareRow("email", e),
-                      sms: () => shareRow("sms", e),
-                      copyLink: () => shareRow("copyLink", e),
-                    }}
-                  />
-                ),
-              },
-            ]}
-          />
+      {/* ── Recent purchases (first 8 POs) ── */}
+      <div className="mt-5 border border-border rounded-xl overflow-hidden bg-card">
+        <div className="px-5 pt-4 pb-3">
+          <div className="text-[14px] font-semibold text-foreground">Recent purchases</div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">
+            Latest purchase orders across your suppliers
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">PO</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Supplier</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Items</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Total</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Status</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">ETA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && recent.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-10 text-center text-muted-foreground">
+                    Loading…
+                  </td>
+                </tr>
+              )}
+              {!loading && recent.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-10 text-center text-muted-foreground">
+                    No purchase orders yet
+                  </td>
+                </tr>
+              )}
+              {recent.map((p) => (
+                <tr
+                  key={p.id}
+                  onClick={() => nav("/purchase-orders")}
+                  className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
+                >
+                  <td className="px-5 py-3">
+                    <span className="font-mono text-xs font-medium text-primary-700 dark:text-primary-300">
+                      {p.po_number}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-foreground">{p.supplier_name}</td>
+                  <td className="px-5 py-3 text-foreground tabular-nums">
+                    {num(p.items_count)}
+                  </td>
+                  <td className="px-5 py-3 text-foreground tabular-nums font-medium">
+                    {money(p.total, p.currency || "AED")}
+                  </td>
+                  <td className="px-5 py-3">
+                    <Badge tone={statusTone(p.status)}>{p.status}</Badge>
+                  </td>
+                  <td className="px-5 py-3 text-muted-foreground">
+                    {p.expected_date ? fmtDate(p.expected_date) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-
-      <PurchaseModal open={open} onClose={() => setOpen(false)} onSaved={load} />
-
-      <QuickViewModal
-        open={!!quickView}
-        onClose={() => setQuickView(null)}
-        data={
-          quickView
-            ? {
-                title: quickView.description || `${quickView.category} purchase`,
-                subtitle: `Recorded ${fmtDate(quickView.expense_date)}`,
-                badge: <Badge tone="info">{quickView.category}</Badge>,
-                meta: [
-                  { label: "Date", value: fmtDate(quickView.expense_date) },
-                  { label: "Amount", value: aed(quickView.amount) },
-                  {
-                    label: "Paid from",
-                    value: quickView.account_id
-                      ? accounts.find((a) => a.id === quickView.account_id)?.name ??
-                        `Account #${quickView.account_id}`
-                      : "Not linked",
-                  },
-                  { label: "Record ID", value: `#${quickView.id}` },
-                ],
-                total: quickView.amount,
-                currency: getDisplayCurrency(),
-              }
-            : null
-        }
-      />
     </div>
-  );
-}
-
-function PurchaseModal({
-  open,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useUI();
-  const [f, setF] = useState({
-    category: "",
-    description: "",
-    amount: 0,
-    expense_date: new Date().toISOString().slice(0, 10),
-    account_id: "" as string,
-  });
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  useEffect(() => {
-    if (open)
-      fin
-        .accounts()
-        .then(setAccounts)
-        .catch(() => setAccounts([]));
-  }, [open]);
-  return (
-    <Modal open={open} onClose={onClose} title="New Purchase">
-      <div className="space-y-3">
-        <Field label="Category *">
-          <input
-            className={cn("input", !f.category.trim() && "border-danger")}
-            value={f.category}
-            onChange={(e) => setF({ ...f, category: e.target.value })}
-            placeholder="Raw materials"
-          />
-          {!f.category.trim() && (
-            <p className="text-[11px] text-danger mt-1">Category is required.</p>
-          )}
-        </Field>
-        <Field label="Description">
-          <input
-            className="input"
-            value={f.description}
-            onChange={(e) => setF({ ...f, description: e.target.value })}
-          />
-        </Field>
-        <Field label={`Amount (${getDisplayCurrency()})`}>
-          <input
-            type="number"
-            className="input"
-            placeholder="0"
-            value={f.amount || ""}
-            onChange={(e) => setF({ ...f, amount: numInput(e.target.value) })}
-          />
-        </Field>
-        <Field label="Date">
-          <DateField
-            value={f.expense_date}
-            onChange={(v) => setF({ ...f, expense_date: v })}
-            clearable={false}
-          />
-        </Field>
-        <Field label="Pay from account (posts to ledger)">
-          <select
-            className="select"
-            value={f.account_id}
-            onChange={(e) => setF({ ...f, account_id: e.target.value })}
-          >
-            <option value="">Not linked (no ledger post)</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={String(a.id)}>
-                {a.code} — {a.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          className="btn-primary"
-          disabled={!f.category.trim() || f.amount <= 0}
-          onClick={async () => {
-            try {
-              await fin.createExpense(
-                f.category,
-                f.description || null,
-                f.amount,
-                f.expense_date,
-                f.account_id ? Number(f.account_id) : null
-              );
-              toast.success("Purchase saved.");
-              onSaved();
-              onClose();
-            } catch (e) {
-              toast.error(
-                `Could not save purchase: ${e instanceof Error ? e.message : String(e)}`
-              );
-            }
-          }}
-        >
-          Save Purchase
-        </button>
-      </div>
-    </Modal>
   );
 }

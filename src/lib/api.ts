@@ -3609,6 +3609,8 @@ export interface PoSummary {
   template?: string;
   currency?: string;
   total: number;
+  /** Number of line items on the PO (from purchase_order_items). */
+  items_count: number;
   order_date: string;
   expected_date?: string;
   shared?: boolean;
@@ -3726,14 +3728,27 @@ export const pos = {
     readCached<PoSummary[]>(
       "purchase_orders",
       async () => {
-        const [rows, supRows] = await Promise.all([
+        const [rows, supRows, itemRows] = await Promise.all([
           sList<any>("purchase_orders", [
             { col: "order_date", asc: false },
             { col: "id", asc: false },
           ]),
           sList<Supplier>("suppliers"),
+          // One batched fetch of just the FK, counted in JS below — the
+          // local shim has no embedded count/join, so a subquery select
+          // wouldn't work offline (same pattern as pos.get).
+          sList<{ po_id: number | string }>(
+            "purchase_order_items",
+            undefined,
+            "po_id"
+          ),
         ]);
         const byId = new Map(supRows.map((s) => [s.id, s]));
+        const itemCounts = new Map<number, number>();
+        for (const it of itemRows) {
+          const k = Number(it.po_id);
+          itemCounts.set(k, (itemCounts.get(k) ?? 0) + 1);
+        }
         return rows.map((r) => ({
           id: r.id,
           po_number: r.po_number,
@@ -3743,6 +3758,7 @@ export const pos = {
           template: r.template ?? "uae",
           currency: r.currency ?? "AED",
           total: Number(r.total),
+          items_count: itemCounts.get(Number(r.id)) ?? 0,
           order_date: r.order_date,
           expected_date: r.expected_date ?? undefined,
           shared: r.shared ?? false,

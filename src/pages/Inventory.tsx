@@ -263,7 +263,7 @@ export default function Inventory() {
     <div>
       <PageHeader
         title="Inventory"
-        subtitle="Products, stock levels, batch tracking & barcode scanning"
+        subtitle="Stock levels and reorder alerts"
         action={
           <div className="flex gap-2">
             <button
@@ -307,8 +307,8 @@ export default function Inventory() {
             >
               <ClipboardList size={15} /> Stocktake
             </button>
-            <button className="btn-primary" aria-label="New product" onClick={() => setOpen(true)}>
-              <Plus size={16} /> New product
+            <button className="btn-primary" aria-label="Add Item" onClick={() => setOpen(true)}>
+              <Plus size={16} /> Add Item
             </button>
           </div>
         }
@@ -347,93 +347,6 @@ export default function Inventory() {
           change={outOfStock.length > 0 ? "Restock needed" : "None"}
           changeTone={outOfStock.length > 0 ? "down" : "up"}
         />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <SearchInput
-          className="w-full max-w-xs"
-          value={q}
-          onChange={setQ}
-          placeholder="Search products, SKU, batch or barcode…"
-        />
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FilterChip active={cat === "all"} onClick={() => setCat("all")} count={products.length}>
-            All
-          </FilterChip>
-          {lowStock.length > 0 && (
-            <>
-              <FilterChip
-                active={cat === "__low__"}
-                onClick={() => setCat("__low__")}
-                count={lowStock.length}
-                tone="warn"
-              >
-                Low stock
-              </FilterChip>
-              <button
-                className="btn-ghost !h-8 text-xs"
-                disabled={draftingPo}
-                onClick={draftPoFromLowStock}
-              >
-                {draftingPo ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <ShoppingCart size={13} />
-                )}
-                Draft PO from low stock
-              </button>
-            </>
-          )}
-          {outOfStock.length > 0 && (
-            <FilterChip
-              active={cat === "__out__"}
-              onClick={() => setCat("__out__")}
-              count={outOfStock.length}
-              tone="danger"
-            >
-              Out of stock
-            </FilterChip>
-          )}
-          {expiring.length > 0 && (
-            <FilterChip
-              active={cat === "__exp__"}
-              onClick={() => setCat("__exp__")}
-              count={expiring.length}
-              tone="warn"
-            >
-              <Calendar size={12} /> Expiring soon
-            </FilterChip>
-          )}
-          {categories.map((c) => (
-            <FilterChip
-              key={c}
-              active={cat === c}
-              onClick={() => setCat(c)}
-            >
-              {c}
-            </FilterChip>
-          ))}
-        </div>
-        {uniqueBatches.length > 0 && (
-          <div className="flex items-center gap-1.5 ml-2">
-            <Hash size={13} className="text-brand-400" />
-            <select
-              className="select !h-8 text-xs"
-              value={batchFilter}
-              onChange={(e) => setBatchFilter(e.target.value)}
-            >
-              <option value="">All batches</option>
-              {uniqueBatches.map((b: string) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <span className="ml-auto text-[11px] font-medium text-brand-500 tracking-tight">
-          {filtered.length} of {products.length}
-        </span>
       </div>
 
       {error && (
@@ -494,185 +407,285 @@ export default function Inventory() {
         </InfoCard>
       )}
 
-      <DataTable<Product>
-        rows={filtered}
-        loading={loading}
-        empty="No products match your filters"
-        rowKey={(p) => p.id}
-        bulkActions={[
-          {
-            label: "Share",
-            icon: <Users size={13} />,
-            run: async (sel) => {
-              try {
-                for (const p of sel) await shareRecord("products", p.id, true);
-                load();
-                toast.success(`Shared ${sel.length}.`);
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Failed to share products");
-              }
+      <div className="card overflow-hidden p-0 [&_.card]:rounded-none [&_.card]:border-0">
+        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3 border-b border-border">
+          <SearchInput
+            className="w-full max-w-xs"
+            value={q}
+            onChange={setQ}
+            placeholder="Search SKU, name or category"
+          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <FilterChip active={cat === "all"} onClick={() => setCat("all")} count={products.length}>
+              All
+            </FilterChip>
+            {lowStock.length > 0 && (
+              <>
+                <FilterChip
+                  active={cat === "__low__"}
+                  onClick={() => setCat("__low__")}
+                  count={lowStock.length}
+                  tone="warn"
+                >
+                  Low stock
+                </FilterChip>
+                <button
+                  className="btn-ghost !h-8 text-xs"
+                  disabled={draftingPo}
+                  onClick={draftPoFromLowStock}
+                >
+                  {draftingPo ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <ShoppingCart size={13} />
+                  )}
+                  Draft PO from low stock
+                </button>
+              </>
+            )}
+            {outOfStock.length > 0 && (
+              <FilterChip
+                active={cat === "__out__"}
+                onClick={() => setCat("__out__")}
+                count={outOfStock.length}
+                tone="danger"
+              >
+                Out of stock
+              </FilterChip>
+            )}
+            {expiring.length > 0 && (
+              <FilterChip
+                active={cat === "__exp__"}
+                onClick={() => setCat("__exp__")}
+                count={expiring.length}
+                tone="warn"
+              >
+                <Calendar size={12} /> Expiring soon
+              </FilterChip>
+            )}
+            {categories.map((c) => (
+              <FilterChip
+                key={c}
+                active={cat === c}
+                onClick={() => setCat(c)}
+              >
+                {c}
+              </FilterChip>
+            ))}
+          </div>
+          {uniqueBatches.length > 0 && (
+            <div className="flex items-center gap-1.5 ml-2">
+              <Hash size={13} className="text-brand-400" />
+              <select
+                className="select !h-8 text-xs"
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+              >
+                <option value="">All batches</option>
+                {uniqueBatches.map((b: string) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <span className="ml-auto text-[11px] font-medium text-brand-500 tracking-tight">
+            {filtered.length} shown
+          </span>
+        </div>
+        <DataTable<Product>
+          rows={filtered}
+          loading={loading}
+          empty="No products match your filters"
+          rowKey={(p) => p.id}
+          bulkActions={[
+            {
+              label: "Share",
+              icon: <Users size={13} />,
+              run: async (sel) => {
+                try {
+                  for (const p of sel) await shareRecord("products", p.id, true);
+                  load();
+                  toast.success(`Shared ${sel.length}.`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Failed to share products");
+                }
+              },
             },
-          },
-          {
-            label: "Make private",
-            icon: <Lock size={13} />,
-            run: async (sel) => {
-              try {
-                for (const p of sel) await shareRecord("products", p.id, false);
-                load();
-                toast.success(`Set ${sel.length} private.`);
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Failed to set products private");
-              }
+            {
+              label: "Make private",
+              icon: <Lock size={13} />,
+              run: async (sel) => {
+                try {
+                  for (const p of sel) await shareRecord("products", p.id, false);
+                  load();
+                  toast.success(`Set ${sel.length} private.`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Failed to set products private");
+                }
+              },
             },
-          },
-          {
-            label: "Delete",
-            icon: <Trash2 size={13} />,
-            danger: true,
-            run: async (sel) => {
-              const ok = await confirm({
-                title: "Delete products",
-                message: `Delete ${sel.length} product(s)? This cannot be undone.`,
-                confirmLabel: "Delete",
-                danger: true,
-              });
-              if (!ok) return;
-              try {
-                for (const p of sel) await erp.deleteProduct(p.id);
-                load();
-                toast.success(`Deleted ${sel.length}.`);
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Failed to delete products");
-              }
+            {
+              label: "Delete",
+              icon: <Trash2 size={13} />,
+              danger: true,
+              run: async (sel) => {
+                const ok = await confirm({
+                  title: "Delete products",
+                  message: `Delete ${sel.length} product(s)? This cannot be undone.`,
+                  confirmLabel: "Delete",
+                  danger: true,
+                });
+                if (!ok) return;
+                try {
+                  for (const p of sel) await erp.deleteProduct(p.id);
+                  load();
+                  toast.success(`Deleted ${sel.length}.`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Failed to delete products");
+                }
+              },
             },
-          },
-        ]}
-        columns={[
-          {
-            key: "sku",
-            label: "SKU",
-            sortValue: (p) => p.sku,
-            render: (p) => (
-              <span className="text-xs text-brand-500 font-medium">{p.sku}</span>
-            ),
-          },
-          {
-            key: "name",
-            label: "Product",
-            sortValue: (p) => p.name,
-            render: (p) => (
-              <span className="font-semibold text-ink">{p.name}</span>
-            ),
-          },
-          {
-            key: "batch",
-            label: "Batch",
-            render: (p) => {
-              const bn = p.batch_number as string | undefined;
-              const exp = p.expiry_date as string | undefined;
-              if (!bn) return <span className="text-brand-400">—</span>;
-              return (
-                <span className="flex flex-col">
-                  <span className="text-xs font-medium">{bn}</span>
-                  {exp && (
-                    <span className="text-[10px] text-brand-500 flex items-center gap-1">
-                      <Calendar size={9} />
-                      {fmtDate(exp)}
-                      {new Date(exp) < new Date() && (
-                        <Badge tone="danger">Expired</Badge>
-                      )}
-                    </span>
+          ]}
+          columns={[
+            {
+              key: "sku",
+              label: "SKU",
+              sortValue: (p) => p.sku,
+              render: (p) => (
+                <span className="text-xs text-brand-500 font-medium">{p.sku}</span>
+              ),
+            },
+            {
+              key: "name",
+              label: "Item",
+              sortValue: (p) => p.name,
+              render: (p) => (
+                <span className="font-semibold text-ink">{p.name}</span>
+              ),
+            },
+            {
+              key: "cat",
+              label: "Category",
+              sortValue: (p) => p.category ?? "",
+              render: (p) => (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-hover text-foreground ring-1 ring-border">
+                  {p.category || "—"}
+                </span>
+              ),
+            },
+            {
+              key: "qty",
+              label: "Stock",
+              sortValue: (p) => p.quantity,
+              render: (p) => (
+                <span className="flex items-center gap-2">
+                  <span className="font-semibold">{p.quantity}</span>
+                  {p.quantity === 0 ? (
+                    <Badge tone="danger">Out</Badge>
+                  ) : p.quantity <= p.reorder_level ? (
+                    <Badge tone="warn">Low</Badge>
+                  ) : (
+                    <Badge tone="success">OK</Badge>
                   )}
                 </span>
-              );
+              ),
             },
-          },
-          {
-            key: "cat",
-            label: "Category",
-            sortValue: (p) => p.category ?? "",
-            render: (p) => p.category ?? "—",
-          },
-          {
-            key: "price",
-            label: "Unit Price",
-            sortValue: (p) => p.unit_price,
-            render: (p) => aed(p.unit_price),
-          },
-          {
-            key: "qty",
-            label: "Stock",
-            sortValue: (p) => p.quantity,
-            render: (p) => (
-              <span className="flex items-center gap-2">
-                <span className="font-semibold">{p.quantity}</span>
-                {p.quantity === 0 ? (
-                  <Badge tone="danger">Out</Badge>
-                ) : p.quantity <= p.reorder_level ? (
-                  <Badge tone="warn">Low</Badge>
+            {
+              key: "reorder",
+              label: "Reorder at",
+              sortValue: (p) => p.reorder_level,
+              render: (p) => (
+                <span className="text-muted-foreground">{num(p.reorder_level)}</span>
+              ),
+            },
+            {
+              key: "price",
+              label: "Unit price",
+              sortValue: (p) => p.unit_price,
+              render: (p) => aed(p.unit_price),
+            },
+            {
+              key: "batch",
+              label: "Batch",
+              render: (p) => {
+                const bn = p.batch_number as string | undefined;
+                const exp = p.expiry_date as string | undefined;
+                if (!bn) return <span className="text-brand-400">—</span>;
+                return (
+                  <span className="flex flex-col">
+                    <span className="text-xs font-medium">{bn}</span>
+                    {exp && (
+                      <span className="text-[10px] text-brand-500 flex items-center gap-1">
+                        <Calendar size={9} />
+                        {fmtDate(exp)}
+                        {new Date(exp) < new Date() && (
+                          <Badge tone="danger">Expired</Badge>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                );
+              },
+            },
+            {
+              key: "issued",
+              label: "Issued out",
+              sortValue: (p) => issuedTotal(p),
+              render: (p) => {
+                const t = issuedTotal(p);
+                return t > 0 ? (
+                  <span className="font-medium text-brand-600">{t}</span>
                 ) : (
-                  <Badge tone="success">OK</Badge>
-                )}
-              </span>
-            ),
-          },
-          {
-            key: "issued",
-            label: "Issued out",
-            sortValue: (p) => issuedTotal(p),
-            render: (p) => {
-              const t = issuedTotal(p);
-              return t > 0 ? (
-                <span className="font-medium text-brand-600">{t}</span>
-              ) : (
-                <span className="text-brand-400">—</span>
-              );
+                  <span className="text-brand-400">—</span>
+                );
+              },
             },
-          },
-          {
-            key: "share",
-            label: "Sharing",
-            render: (p) => (
-              <ShareToggle
-                shared={p.shared}
-                onToggle={(next) => toggleShare(p, next)}
-              />
-            ),
-          },
-          {
-            key: "act",
-            label: "Actions",
-            render: (p) => (
-              <div className="flex items-center justify-end gap-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIssueFor(p);
-                  }}
-                  className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors"
-                  title="Stock entry"
-                  aria-label={`Stock entry for ${p.name}`}
-                >
-                  <PackageMinus className="h-3.5 w-3.5" />
-                </button>
-                <RowActions
-                  onView={() => setQuickView(p)}
-                  onEdit={() => editProduct(p)}
-                  onCopy={() => duplicateProduct(p)}
-                  onDelete={() => deleteProduct(p)}
-                  onSend={{
-                    whatsapp: () => shareProduct("whatsapp", p),
-                    email: () => shareProduct("email", p),
-                    sms: () => shareProduct("sms", p),
-                    copyLink: () => shareProduct("copyLink", p),
-                  }}
+            {
+              key: "share",
+              label: "Sharing",
+              render: (p) => (
+                <ShareToggle
+                  shared={p.shared}
+                  onToggle={(next) => toggleShare(p, next)}
                 />
-              </div>
-            ),
-          },
-        ]}
-      />
+              ),
+            },
+            {
+              key: "act",
+              label: "Actions",
+              render: (p) => (
+                <div className="flex items-center justify-end gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIssueFor(p);
+                    }}
+                    className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors"
+                    title="Stock entry"
+                    aria-label={`Stock entry for ${p.name}`}
+                  >
+                    <PackageMinus className="h-3.5 w-3.5" />
+                  </button>
+                  <RowActions
+                    onView={() => setQuickView(p)}
+                    onEdit={() => editProduct(p)}
+                    onCopy={() => duplicateProduct(p)}
+                    onDelete={() => deleteProduct(p)}
+                    onSend={{
+                      whatsapp: () => shareProduct("whatsapp", p),
+                      email: () => shareProduct("email", p),
+                      sms: () => shareProduct("sms", p),
+                      copyLink: () => shareProduct("copyLink", p),
+                    }}
+                  />
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
 
       <ProductModal
         open={open}
