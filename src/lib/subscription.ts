@@ -4,65 +4,99 @@ import { supabase, invokeFn } from "./supabase";
  * member's own org) and invokes the `stripe` edge function for checkout /
  * the billing portal. Live once the function is deployed and keys are set. */
 
-export type Plan = "free" | "pro" | "business";
+export type Plan = "free" | "pro" | "business" | "enterprise";
 
-export interface Subscription {
-  plan: Plan;
-  plan_status?: string | null;
-  current_period_end?: string | null;
-}
+/** How a plan card is sold: monthly subscription via Stripe, one-time
+ * offline license via the license checkout, or contact-sales only. */
+export type PlanKind = "subscription" | "license" | "contact";
 
-export const PLANS: {
-  id: Plan;
+export interface PlanCard {
+  /** Card identity; also the org plan value for subscription plans. */
+  id: "free" | "lite" | "pro" | "enterprise";
+  kind: PlanKind;
   name: string;
   price: string;
   period?: string;
   blurb: string;
   recommended?: boolean;
   features: string[];
-}[] = [
+}
+
+export const PLANS: PlanCard[] = [
   {
     id: "free",
+    kind: "subscription",
     name: "Free",
     price: "$0",
-    blurb: "Run your books on one device.",
+    blurb: "Start free with the essentials.",
     features: [
       "Core ERP & CRM — all modules",
-      "25 invoices/month",
+      "20 invoices/month",
+      "Cloud account — 1 device",
       "“Made with Filey” on documents",
-      "1 device, local only",
       "Bring-your-own AI key",
     ],
   },
   {
+    id: "lite",
+    kind: "license",
+    name: "Offline",
+    price: "$99",
+    period: " one-time",
+    blurb: "Own it outright — runs fully offline.",
+    features: [
+      "Everything in Free — no monthly cap",
+      "Fully offline — data stays on your device",
+      "2 device slots",
+      "Free updates included",
+      "No watermark",
+    ],
+  },
+  {
     id: "pro",
+    kind: "subscription",
     name: "Pro",
     price: "$19",
     period: "/month",
     blurb: "Cloud sync for growing businesses.",
     recommended: true,
     features: [
-      "Everything in Free — no caps",
-      "Cloud sync, backup & web access",
+      "Everything in Offline",
+      "Cloud sync, backup & multi-device",
       "Up to 5 devices, team included",
       "Recurring invoices",
       "Priority support",
     ],
   },
   {
-    id: "business",
-    name: "Business",
-    price: "$49",
-    period: "/month",
+    id: "enterprise",
+    kind: "contact",
+    name: "Enterprise",
+    price: "Custom",
     blurb: "For teams that run on Filey.",
     features: [
       "Everything in Pro",
       "Team seats & roles",
       "Customer portal",
       "Highest limits",
+      "Priority onboarding",
     ],
   },
 ];
+
+/** Map an org's stored plan value onto its display card (legacy "business"
+ *  subscribers show as Enterprise). */
+export function planCardFor(orgPlan: string | null | undefined): PlanCard {
+  if (orgPlan === "business" || orgPlan === "enterprise")
+    return PLANS.find((p) => p.id === "enterprise")!;
+  return PLANS.find((p) => p.id === orgPlan) ?? PLANS[0];
+}
+
+export interface Subscription {
+  plan: Plan;
+  plan_status?: string | null;
+  current_period_end?: string | null;
+}
 
 export async function getSubscription(): Promise<Subscription> {
   if (!supabase) return { plan: "free" };

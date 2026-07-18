@@ -226,7 +226,7 @@ export async function startLiteCheckout(): Promise<void> {
 export type Tier = "free" | "lite" | "pro";
 
 /** Free tier caps. Volume + branding only — never compliance/correctness. */
-export const FREE_LIMITS = { invoicesPerMonth: 25 };
+export const FREE_LIMITS = { invoicesPerMonth: 20 };
 
 /** Pure tier resolution — pro needs a live plan (past_due = grace period),
  *  lite needs a valid offline license, everything else is free. */
@@ -287,7 +287,7 @@ export async function checkFreeInvoiceCap(
   if (used >= FREE_LIMITS.invoicesPerMonth)
     throw new Error(
       `Free plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Upgrade to Filey Lite (one-time) or Pro in Settings → Desktop License.`
+        `Upgrade to Filey Offline (one-time) or Pro in Settings → Billing.`
     );
 }
 

@@ -4,14 +4,19 @@ import {
   getSubscription,
   startCheckout,
   openBillingPortal,
+  planCardFor,
   PLANS,
+  type PlanCard,
   type Subscription,
-  type Plan,
 } from "../../lib/subscription";
+import { startLiteCheckout } from "../../lib/license";
 import { Check } from "lucide-react";
 import { billing, erp, crm, quotes } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
+
+const ENTERPRISE_MAILTO =
+  "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
 
 export default function BillingPanel() {
   const { toast } = useUI();
@@ -55,10 +60,12 @@ export default function BillingPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const upgrade = async (plan: Plan) => {
-    setBusy(plan);
+  const buy = async (p: PlanCard) => {
+    setBusy(p.id);
     try {
-      await startCheckout(plan);
+      if (p.kind === "license") await startLiteCheckout();
+      else if (p.kind === "subscription") await startCheckout(p.id as "pro");
+      else if (p.kind === "contact") window.location.href = ENTERPRISE_MAILTO;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
       setBusy(null);
@@ -74,9 +81,14 @@ export default function BillingPanel() {
     }
   };
 
-  const current = PLANS.find((p) => p.id === sub.plan) ?? PLANS[0];
+  const current = planCardFor(sub.plan);
   const used = Object.values(stats).reduce((a, b) => a + b, 0);
-  const LIMITS: Record<Plan, number> = { free: 500, pro: 25000, business: Infinity };
+  const LIMITS: Record<string, number> = {
+    free: 500,
+    pro: 25000,
+    business: 25000,
+    enterprise: Infinity,
+  };
   const limit = LIMITS[sub.plan] ?? 500;
   const pctUsed =
     limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100));
@@ -132,13 +144,13 @@ export default function BillingPanel() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3 items-stretch">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
         {PLANS.map((p) => (
           <div
             key={p.id}
             className={cn(
               "card flex flex-col !p-5",
-              p.id === sub.plan
+              p.id === current.id
                 ? "ring-2 ring-primary-400"
                 : p.recommended && "border-ink/25 dark:border-white/25"
             )}
@@ -147,7 +159,7 @@ export default function BillingPanel() {
               <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-400">
                 {p.name}
               </p>
-              {p.id === sub.plan ? (
+              {p.id === current.id ? (
                 <span className="pill bg-primary-100 text-ink text-[11px]">Current</span>
               ) : (
                 p.recommended && (
@@ -173,7 +185,7 @@ export default function BillingPanel() {
               ))}
             </ul>
             <div className="mt-5">
-              {p.id === sub.plan ? (
+              {p.id === current.id ? (
                 <button className="btn-ghost w-full" disabled>
                   Your plan
                 </button>
@@ -184,25 +196,20 @@ export default function BillingPanel() {
               ) : (
                 <button
                   className={cn("w-full", p.recommended ? "btn-primary" : "btn-ghost")}
-                  onClick={() => upgrade(p.id)}
+                  onClick={() => buy(p)}
                   disabled={busy === p.id}
                 >
-                  {busy === p.id ? "Redirecting…" : `Upgrade to ${p.name}`}
+                  {busy === p.id
+                    ? "Redirecting…"
+                    : p.kind === "contact"
+                      ? "Contact sales"
+                      : `Get ${p.name}`}
                 </button>
               )}
             </div>
           </div>
         ))}
       </div>
-
-      <p className="text-xs text-brand-400">
-        Prefer to own it outright? The one-time desktop license (2 devices,
-        offline forever) lives under{" "}
-        <a href="#/settings?section=license" className="font-medium text-ink hover:underline">
-          Settings → Desktop License
-        </a>
-        .
-      </p>
 
       <div className="card">
         <p className="mb-3 font-medium text-ink">Usage</p>

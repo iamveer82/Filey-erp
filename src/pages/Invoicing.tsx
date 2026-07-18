@@ -360,6 +360,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     data: QuickViewData;
   } | null>(null);
   const [reminding, setReminding] = useState(false);
+  // Free-tier invoice cap hit (client check or server trigger) → upgrade modal.
+  const [capOpen, setCapOpen] = useState(false);
+  const isCapError = (e: unknown) => errMsg(e).includes("Free plan limit reached");
   const loadDocs = () =>
     billing
       .listDocs(mode)
@@ -699,7 +702,8 @@ const editInvoice = async (id: number) => {
       await loadDocs();
       return id;
     } catch (e) {
-      toast.error(`Could not save: ${errMsg(e)}`);
+      if (isCapError(e)) setCapOpen(true);
+      else toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -778,7 +782,8 @@ const editInvoice = async (id: number) => {
           : "Moved back to draft."
       );
     } catch (e) {
-      toast.error(`Could not update: ${errMsg(e)}`);
+      if (isCapError(e)) setCapOpen(true);
+      else toast.error(`Could not update: ${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -1418,6 +1423,36 @@ const editInvoice = async (id: number) => {
       />
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
+
+      {/* Free-tier invoice cap — upgrade path instead of a bare error toast. */}
+      <Modal
+        open={capOpen}
+        onClose={() => setCapOpen(false)}
+        title="Free plan limit reached"
+      >
+        <p className="text-[13px] text-brand-500">
+          You've used all 20 invoices in this calendar month on the Free plan.
+          Upgrade to keep invoicing without interruption:
+        </p>
+        <ul className="mt-3 space-y-1.5 text-[13px] text-brand-500 list-disc pl-5">
+          <li>
+            <b className="text-ink">Offline</b> — one-time purchase, fully offline,
+            no monthly cap.
+          </li>
+          <li>
+            <b className="text-ink">Pro</b> — cloud sync and multi-device, no monthly
+            cap.
+          </li>
+        </ul>
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn-ghost" onClick={() => setCapOpen(false)}>
+            Not now
+          </button>
+          <a href="#/settings?section=billing" className="btn-primary">
+            View plans
+          </a>
+        </div>
+      </Modal>
 
       {company && (
         <CompanyModal
@@ -2665,6 +2700,12 @@ function Editor({
                     ))}
                   </select>
                 </Field>
+                <p className="col-span-full text-[11px] text-brand-400">
+                  The PDF is the human-readable copy your customer sees. Under the
+                  FTA e-invoicing mandate (MD 243/2025), the legal invoice is the
+                  PINT-AE XML exchanged via your accredited service provider —
+                  export it with the XML button in the toolbar above.
+                </p>
               </div>
             </div>
           </Step>

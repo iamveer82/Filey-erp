@@ -110,6 +110,19 @@ test("buildInvoiceXml: credit note carries BillingReference; foreign currency ad
   expect(fx).toContain('<cbc:TaxAmount currencyID="AED">36.73</cbc:TaxAmount>');
 });
 
+test("buildInvoiceXml: price carries BaseQuantity; foreign-currency lines state AED amounts (MoF fields 45/48/49)", () => {
+  // BaseQuantity is mandatory (field 45) and defaults to 1 with the line's UoM.
+  const xml = buildInvoiceXml(sample());
+  expect(xml).toContain('<cbc:BaseQuantity unitCode="C62">1</cbc:BaseQuantity>');
+
+  // USD doc at 3.67: line 1 (net 200 + VAT 10 = 210) → 770.70 AED; line VAT 10 → 36.70 AED.
+  const fx = buildInvoiceXml({ ...sample(), currency: "USD", aed_exchange_rate: 3.67 });
+  expect(fx).toContain('<cbc:Amount currencyID="AED">770.70</cbc:Amount>');
+  expect(fx).toContain('<cbc:TaxAmount currencyID="AED">36.70</cbc:TaxAmount>');
+  // LineExtensionAmount stays in the document currency.
+  expect(fx).toContain('<cbc:LineExtensionAmount currencyID="USD">200.00</cbc:LineExtensionAmount>');
+});
+
 test("buildInvoiceXml: legacy AE-xx emirate is normalized to 3-letter on export", () => {
   const xml = buildInvoiceXml({
     ...sample(),

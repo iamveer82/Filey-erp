@@ -281,9 +281,12 @@ ${doc.original_invoice_date ? `      <cbc:IssueDate>${esc(doc.original_invoice_d
       const rate = cat === "S" ? doc.tax_rate || 0 : 0;
       const lineTax = r2((net * rate) / 100);
       // ItemPriceExtension: line amount incl. VAT (BTAE-10) + line VAT (BTAE-08),
-      // both fatal-mandatory (ibr-104/194-ae). BTAE-10 is nominally "in AED";
-      // ponytail: emitted in the document currency, which is AED for the default
-      // case — confirm conversion for non-AED docs against docs/pint-ae.
+      // both fatal-mandatory (ibr-104/194-ae). Per the MoF mandatory-fields list
+      // (fields 48-49) both are AED amounts even on foreign-currency invoices —
+      // convert at the frozen rate when the doc currency isn't AED.
+      const lineCcy = needAed ? "AED" : ccy;
+      const lineAmount = needAed ? r2((net + lineTax) * aedRate) : r2(net + lineTax);
+      const lineVat = needAed ? r2(lineTax * aedRate) : lineTax;
       return `  <cac:InvoiceLine>
     <cbc:ID>${i + 1}</cbc:ID>
     <cbc:InvoicedQuantity unitCode="${unitCode(it.unit)}">${it.qty}</cbc:InvoicedQuantity>
@@ -299,11 +302,12 @@ ${exemptReason(cat)}        <cac:TaxScheme><cbc:ID>${DEFAULT_TAX_SCHEME}</cbc:ID
     </cac:Item>
     <cac:Price>
       <cbc:PriceAmount ${amt(it.unit_price, ccy)}</cbc:PriceAmount>
+      <cbc:BaseQuantity unitCode="${unitCode(it.unit)}">1</cbc:BaseQuantity>
     </cac:Price>
     <cac:ItemPriceExtension>
-      <cbc:Amount ${amt(r2(net + lineTax), ccy)}</cbc:Amount>
+      <cbc:Amount ${amt(lineAmount, lineCcy)}</cbc:Amount>
       <cac:TaxTotal>
-        <cbc:TaxAmount ${amt(lineTax, ccy)}</cbc:TaxAmount>
+        <cbc:TaxAmount ${amt(lineVat, lineCcy)}</cbc:TaxAmount>
       </cac:TaxTotal>
     </cac:ItemPriceExtension>
   </cac:InvoiceLine>`;

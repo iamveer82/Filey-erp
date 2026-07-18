@@ -8,9 +8,16 @@ import {
   ShieldCheck,
   ScanText,
   Check,
+  Download,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "../components/Logo";
+import { PLANS } from "../lib/subscription";
+
+/** Latest desktop installer (GitHub Releases — Windows + Linux artifacts). */
+const DOWNLOAD_URL = "https://github.com/iamveer82/Filey-erp/releases/latest";
+const ENTERPRISE_MAILTO =
+  "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
 
 /** Minimal landing page (design.md §0.8). All entrance / CountUp animations
  * removed — content is laid out statically and reads as a calm brochure. */
@@ -106,9 +113,9 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             <button onClick={onGetStarted} className="btn-primary px-4">
               Get started free <ArrowRight size={15} />
             </button>
-            <button onClick={onGetStarted} className="btn-ghost px-4">
-              Sign in
-            </button>
+            <a href={DOWNLOAD_URL} target="_blank" rel="noreferrer" className="btn-ghost px-4">
+              <Download size={15} /> Download for Windows
+            </a>
           </div>
 
           <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-brand-400">
@@ -213,6 +220,79 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             </div>
           ))}
         </div>
+      </section>
+
+      {/* ───────── Pricing ───────── */}
+      <section className="mx-auto max-w-6xl px-6 pb-16">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl font-medium sm:text-4xl">Simple, honest pricing</h2>
+          <p className="mt-3 text-brand-500">
+            Start free. Own it outright, or grow with cloud sync.
+          </p>
+        </div>
+
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+          {PLANS.map((p) => (
+            <div
+              key={p.id}
+              className={`card flex flex-col !p-5 ${
+                p.recommended ? "border-ink/25 dark:border-white/25" : ""
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-400">
+                  {p.name}
+                </p>
+                {p.recommended && (
+                  <span className="pill bg-primary-100 text-ink text-[11px]">
+                    Recommended
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
+                {p.price}
+                {p.period && (
+                  <span className="text-sm font-medium text-brand-400">{p.period}</span>
+                )}
+              </p>
+              <p className="mt-1 text-sm text-brand-500">{p.blurb}</p>
+              <ul className="mt-4 flex-1 space-y-2 border-t border-brand-100 pt-4 text-sm text-brand-500 dark:border-white/10">
+                {p.features.map((f) => (
+                  <li key={f} className="flex gap-2">
+                    <Check size={14} className="mt-0.5 shrink-0 text-success" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-5">
+                {p.kind === "contact" ? (
+                  <a href={ENTERPRISE_MAILTO} className="btn-ghost w-full">
+                    Contact sales
+                  </a>
+                ) : (
+                  <button
+                    onClick={onGetStarted}
+                    className={p.recommended ? "btn-primary w-full" : "btn-ghost w-full"}
+                  >
+                    {p.id === "free" ? "Get started free" : `Get ${p.name}`}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-6 text-center text-xs text-brand-400">
+          <a
+            href={DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-ink hover:underline"
+          >
+            Download the desktop app
+          </a>{" "}
+          — every plan starts with the free download.
+        </p>
       </section>
 
       {/* ───────── CTA band ───────── */}
