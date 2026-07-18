@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Trash2, AlarmClock, Repeat, Check } from "lucide-react";
 import {
   followups,
@@ -13,6 +13,21 @@ import { cn, fmtDate } from "../lib/format";
 import { DateField } from "./DatePicker";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/** Relative label for a date-only (yyyy-mm-dd) due date. */
+const relDue = (d: string): string => {
+  const today = todayISO();
+  if (d === today) return "Today";
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // Append T00:00:00Z so both parse as UTC — no timezone drift on date-only strings.
+  const diff = Math.round(
+    (Date.parse(d + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS
+  );
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  if (diff < -1) return `Overdue by ${-diff}d`;
+  return fmtDate(d);
+};
 
 type CustomerOpt = { id: number; name: string; company?: string };
 
@@ -109,15 +124,6 @@ export default function FollowUps({
   };
 
   const today = todayISO();
-  const groups = useMemo(() => {
-    const open = items.filter((f) => !f.done);
-    return {
-      overdue: open.filter((f) => f.due_date < today),
-      today: open.filter((f) => f.due_date === today),
-      upcoming: open.filter((f) => f.due_date > today),
-      done: items.filter((f) => f.done),
-    };
-  }, [items, today]);
 
   type RowStatus = "overdue" | "today" | "upcoming" | "done";
   const statusPill: Record<RowStatus, ReactNode> = {
@@ -125,6 +131,13 @@ export default function FollowUps({
     today: <Badge tone="warn">Today</Badge>,
     upcoming: <Badge tone="neutral">Upcoming</Badge>,
     done: <Badge tone="success">Done</Badge>,
+  };
+
+  const statusOf = (f: FollowUp): RowStatus => {
+    if (f.done) return "done";
+    if (f.due_date < today) return "overdue";
+    if (f.due_date === today) return "today";
+    return "upcoming";
   };
 
   const Row = (f: FollowUp, status: RowStatus) => (
@@ -147,7 +160,7 @@ export default function FollowUps({
       <div className="min-w-0 flex-1">
         <p
           className={cn(
-            "truncate text-[13.5px] text-foreground",
+            "truncate text-[13.5px] font-semibold text-foreground",
             f.done && "text-muted-foreground line-through"
           )}
         >
@@ -155,7 +168,7 @@ export default function FollowUps({
         </p>
         <p className="text-[11.5px] text-muted-foreground">
           {f.customer_name ? `${f.customer_name} · ` : ""}
-          {fmtDate(f.due_date)}
+          {relDue(f.due_date)}
           {f.repeat && f.repeat !== "none" && (
             <span className="ml-1 inline-flex items-center gap-0.5">
               <Repeat size={10} /> {f.repeat}
@@ -250,8 +263,9 @@ export default function FollowUps({
               width="52"
               height="44"
               rx="5"
-              fill="#FFF3C4"
-              stroke="#E0AE00"
+              fill="#f59e0b"
+              fill-opacity="0.12"
+              stroke="#f59e0b"
               strokeWidth="1.5"
             />
             <line
@@ -259,7 +273,7 @@ export default function FollowUps({
               y1="20"
               x2="66"
               y2="20"
-              stroke="#E0AE00"
+              stroke="#f59e0b"
               strokeWidth="1.5"
               strokeLinecap="round"
             />
@@ -268,7 +282,7 @@ export default function FollowUps({
               y1="28"
               x2="58"
               y2="28"
-              stroke="#D4D4D8"
+              stroke="#71717a"
               strokeWidth="1.5"
               strokeLinecap="round"
             />
@@ -277,7 +291,7 @@ export default function FollowUps({
               y1="36"
               x2="50"
               y2="36"
-              stroke="#D4D4D8"
+              stroke="#71717a"
               strokeWidth="1.5"
               strokeLinecap="round"
             />
@@ -286,7 +300,7 @@ export default function FollowUps({
               y1="44"
               x2="62"
               y2="44"
-              stroke="#D4D4D8"
+              stroke="#71717a"
               strokeWidth="1.5"
               strokeLinecap="round"
             />
@@ -294,13 +308,14 @@ export default function FollowUps({
               cx="50"
               cy="68"
               r="7"
-              fill="#FFFBEB"
-              stroke="#E0AE00"
+              fill="#f59e0b"
+              fill-opacity="0.12"
+              stroke="#f59e0b"
               strokeWidth="1.5"
             />
             <path
               d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="#B88C00"
+              stroke="#f59e0b"
               strokeWidth="1.2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -315,27 +330,7 @@ export default function FollowUps({
         </div>
       )}
 
-      {groups.overdue.length > 0 && (
-        <Section label="Overdue">{groups.overdue.map((f) => Row(f, "overdue"))}</Section>
-      )}
-      {groups.today.length > 0 && (
-        <Section label="Today">{groups.today.map((f) => Row(f, "today"))}</Section>
-      )}
-      {groups.upcoming.length > 0 && (
-        <Section label="Upcoming">{groups.upcoming.map((f) => Row(f, "upcoming"))}</Section>
-      )}
-      {groups.done.length > 0 && (
-        <Section label="Done">{groups.done.map((f) => Row(f, "done"))}</Section>
-      )}
-    </div>
-  );
-}
-
-function Section({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="mb-3 last:mb-0">
-      <p className="mb-1 text-[10px] font-medium text-brand-400">{label}</p>
-      <ul>{children}</ul>
+      {items.length > 0 && <ul>{items.map((f) => Row(f, statusOf(f)))}</ul>}
     </div>
   );
 }

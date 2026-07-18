@@ -23,6 +23,7 @@ import {
 } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, CURRENCIES, errMsg } from "../lib/format";
+import { downloadCsv } from "../lib/csv";
 import ColorPicker from "../components/ColorPicker";
 import { nextDocNumber } from "../lib/docNumber";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
@@ -414,10 +415,30 @@ export default function PaymentReceipt() {
     const matchQ =
       !q ||
       d.number.toLowerCase().includes(q) ||
-      d.customer_name.toLowerCase().includes(q);
+      d.customer_name.toLowerCase().includes(q) ||
+      (d.payment_method || "").toLowerCase().includes(q);
     const matchS = statusFilter === "all" || (d.status || "draft") === statusFilter;
     return matchQ && matchS;
   });
+
+  const exportCsv = () =>
+    downloadCsv(
+      "payment-receipts",
+      filtered.map((d) => ({
+        number: d.number,
+        customer_name: d.customer_name,
+        date: fmtDate(d.payment_date),
+        amount: money(d.amount, company?.currency || "AED"),
+        status: d.status,
+      })),
+      [
+        { key: "number", label: "Number" },
+        { key: "customer_name", label: "Received From" },
+        { key: "date", label: "Date" },
+        { key: "amount", label: "Amount" },
+        { key: "status", label: "Status" },
+      ]
+    );
 
   const statuses = Array.from(new Set(docs.map((d) => d.status || "draft"))).sort();
 
@@ -434,12 +455,17 @@ export default function PaymentReceipt() {
         title="Payment Receipts"
         subtitle="Payments received against invoices"
         action={
-          <button
-            onClick={newReceipt}
-            className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
-          >
-            <Plus size={14} /> New Receipt
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" aria-label="Export" onClick={exportCsv}>
+              <Download size={14} /> Export
+            </button>
+            <button
+              onClick={newReceipt}
+              className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
+            >
+              <Plus size={14} /> Record Payment
+            </button>
+          </div>
         }
       />
 
@@ -461,7 +487,7 @@ export default function PaymentReceipt() {
             <SearchInput
               value={search}
               onChange={setSearch}
-              placeholder="Search receipts by number or payer…"
+              placeholder="Search receipt, payer or method…"
               className="max-w-xs"
             />
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -487,6 +513,7 @@ export default function PaymentReceipt() {
                 { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
                 { key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
                 { key: "payment_date", label: "Date", render: (d) => fmtDate(d.payment_date) },
+                { key: "payment_method", label: "Method", render: (d) => d.payment_method || "—" },
                 {
                   key: "amount",
                   label: "Amount",

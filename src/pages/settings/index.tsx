@@ -6,7 +6,6 @@ import {
   Users as UsersIcon,
   SlidersHorizontal,
   CreditCard,
-  ShieldCheck,
   Bell,
   DatabaseBackup,
   Sparkles,
@@ -43,7 +42,6 @@ import LicensePanel from "./LicensePanel";
 type Section =
   | "company"
   | "account"
-  | "account-mgmt"
   | "users"
   | "apps"
   | "appearance"
@@ -64,7 +62,6 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
-  { id: "account-mgmt", label: "Account Management", icon: ShieldCheck },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
@@ -83,7 +80,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the
 // user never lands on a panel of dead/erroring controls.
-const CLOUD_ONLY = new Set<Section>(["account-mgmt", "users", "billing", "security"]);
+const CLOUD_ONLY = new Set<Section>(["users", "billing", "security"]);
 const NAV = ALL_NAV.filter((n) => cloudConfigured || !CLOUD_ONLY.has(n.id));
 
 export default function Settings() {
@@ -135,7 +132,6 @@ export default function Settings() {
         {section === "company" && <CompanyDetails />}
         {section === "account" && <AccountProfile />}
         {section === "ai" && <AiSettings />}
-        {section === "account-mgmt" && <AccountProfile />}
         {section === "users" && <UsersRoles />}
         {section === "apps" && <AppsManager />}
         {section === "appearance" && <AppearancePanel />}

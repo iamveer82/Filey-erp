@@ -4079,6 +4079,7 @@ export interface ReceiptSummary {
   template: string;
   amount: number;
   payment_date: string;
+  payment_method?: string;
   shared?: boolean;
   updated_at: string;
 }
@@ -4139,6 +4140,7 @@ export const receipts = {
           template: r.template,
           amount: Number(r.amount),
           payment_date: r.issue_date,
+          payment_method: r.payment_method,
           shared: r.shared ?? false,
           updated_at: r.updated_at,
         })) as ReceiptSummary[];

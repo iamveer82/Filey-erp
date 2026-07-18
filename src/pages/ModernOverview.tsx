@@ -21,7 +21,6 @@ import {
   fin,
   crm,
   quotes,
-  pos,
   billing,
   type Product,
   type Order,
@@ -29,13 +28,13 @@ import {
   type Expense,
   type CrmCustomer,
   type QuotationSummary,
-  type PoSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { num, aed, cn, fmtDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { Badge, statusTone, ErrorBanner, PageHeader, Skeleton } from "../components/ui";
 import { useChartColors } from "../lib/accent";
+import { useAuth } from "../lib/auth";
 
 /* ── Overview (Emergent reference layout) ──────────────────────────────────
    JoinedGrid KPIs → Sales/Received bar + segments pie → Recent invoices +
@@ -44,9 +43,24 @@ import { useChartColors } from "../lib/accent";
 type Range = "7d" | "30d" | "90d";
 const RANGE_DAYS: Record<Range, number> = { "7d": 8, "30d": 30, "90d": 90 };
 
+/** Relative timestamp: "just now" / "Nm ago" / "Nh ago" / "Nd ago", else date. */
+const relTime = (iso: string): string => {
+  const diff = Date.now() - +new Date(iso);
+  if (Number.isNaN(diff)) return "";
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return fmtDate(iso);
+};
+
 export default function ModernOverview() {
   const nav = useNavigate();
   const c = useChartColors();
+  const { profile } = useAuth();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -54,8 +68,6 @@ export default function ModernOverview() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [quotations, setQuotations] = useState<QuotationSummary[]>([]);
-  const [posList, setPosList] = useState<PoSummary[]>([]);
-  const [poPayments, setPoPayments] = useState<{ po_id: number; amount: number }[]>([]);
   const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -64,16 +76,14 @@ export default function ModernOverview() {
   const load = async () => {
     setError("");
     try {
-      const [p, o, i, e, cust, q, po, comp, poPays] = await Promise.all([
+      const [p, o, i, e, cust, q, comp] = await Promise.all([
         erp.products().catch(() => [] as Product[]),
         erp.orders().catch(() => [] as Order[]),
         billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
         fin.expenses().catch(() => [] as Expense[]),
         crm.customers().catch(() => [] as CrmCustomer[]),
         quotes.listDocs().catch(() => [] as QuotationSummary[]),
-        pos.list().catch(() => [] as PoSummary[]),
         billing.getCompany().catch(() => null),
-        pos.allPayments().catch(() => [] as { po_id: number; amount: number }[]),
       ]);
       setProducts(p);
       setOrders(o);
@@ -81,8 +91,6 @@ export default function ModernOverview() {
       setExpenses(e);
       setCustomers(cust);
       setQuotations(q);
-      setPosList(po);
-      setPoPayments(poPays);
       setCompanyName((comp as { name?: string } | null)?.name || "");
     } catch (err: unknown) {
       setError((err as Error)?.message || "Failed to load overview data");
@@ -115,41 +123,24 @@ export default function ModernOverview() {
     return { collected, total, count: issued.length };
   }, [invoices]);
 
-  // Vyapar-style receivable/payable: who owes you (unpaid invoice balances,
-  // per party) and what you owe suppliers (PO totals minus payments made).
+  // Outstanding = unpaid invoice balances, plus how many are past due date.
   const receivable = useMemo(() => {
-    const parties = new Set<string>();
+    const today = new Date().toISOString().slice(0, 10);
     let total = 0;
+    let overdue = 0;
     for (const i of invoices) {
       if (i.status === "draft" || i.status === "paid") continue;
       const bal = i.balance ?? 0;
       if (bal <= 0) continue;
       total += bal;
-      parties.add((i.customer_name || "").trim().toLowerCase());
+      if (i.due_date && i.due_date < today) overdue += 1;
     }
-    return { total, parties: parties.size };
+    return { total, overdue };
   }, [invoices]);
-
-  const payable = useMemo(() => {
-    const paidByPo = new Map<number, number>();
-    for (const p of poPayments)
-      paidByPo.set(p.po_id, (paidByPo.get(p.po_id) || 0) + p.amount);
-    const parties = new Set<string>();
-    let total = 0;
-    for (const po of posList) {
-      const s = (po.status || "").toLowerCase();
-      if (["draft", "cancelled", "canceled"].includes(s)) continue;
-      const due = Math.max(0, (po.total || 0) - (paidByPo.get(po.id) || 0));
-      if (due <= 0) continue;
-      total += due;
-      parties.add((po.supplier_name || "").trim().toLowerCase());
-    }
-    return { total, parties: parties.size };
-  }, [posList, poPayments]);
 
   // ── Real period-over-period deltas: last 30 days vs the 30 before that.
   // Only computed where dated history exists (revenue by invoice issue date,
-  // orders by creation date). Point-in-time balances (to collect / to pay)
+  // orders/customers by creation date). Point-in-time balances (outstanding)
   // have no prior snapshot, so they show their hint text only — no invented
   // percentages.
   const deltas = useMemo(() => {
@@ -179,8 +170,21 @@ export default function ModernOverview() {
       else if (t >= prevStart) ordPrev += 1;
     }
 
-    return { revenue: pct(revCur, revPrev), orders: pct(ordCur, ordPrev) };
-  }, [invoices, orders]);
+    let custCur = 0;
+    let custPrev = 0;
+    for (const cu of customers) {
+      if (!cu.created_at) continue;
+      const t = +new Date(cu.created_at);
+      if (t >= curStart) custCur += 1;
+      else if (t >= prevStart) custPrev += 1;
+    }
+
+    return {
+      revenue: pct(revCur, revPrev),
+      orders: pct(ordCur, ordPrev),
+      customers: pct(custCur, custPrev),
+    };
+  }, [invoices, orders, customers]);
 
   // ── Daily invoiced vs collected series for the selected range. Collected
   // is attributed to the invoice's issue date (payment dates aren't in the
@@ -227,28 +231,30 @@ export default function ModernOverview() {
 
   const recent = useMemo(() => invoices.slice(0, 5), [invoices]);
 
-  // ── Recent activity (orders / invoices / expenses) ─────────────────────
+  // ── Recent activity (orders / invoices / expenses) — "{Label} — {Status}"
+  // title with a "{Source} • {relative time}" second line, like the reference.
   const activity = useMemo(() => {
-    type Ev = { who: string; what: string; when: string; kind: "order" | "invoice" | "expense" };
+    type Ev = { title: string; status: string; when: string; kind: "order" | "invoice" | "expense" };
+    const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
     const out: Ev[] = [];
     for (const o of orders.slice(0, 6))
       out.push({
-        who: o.customer_name || "Customer",
-        what: `placed order ${o.order_number}`,
+        title: `Order ${o.order_number}`,
+        status: cap(o.status || "Pending"),
         when: o.created_at,
         kind: "order",
       });
     for (const i of invoices.slice(0, 6))
       out.push({
-        who: i.customer_name || "Customer",
-        what: `${i.status === "paid" ? "paid" : "issued"} invoice ${i.number}`,
+        title: `Invoice ${i.number}`,
+        status: cap(i.status || "draft"),
         when: i.issue_date || i.updated_at,
         kind: "invoice",
       });
     for (const e of expenses.slice(0, 4))
       out.push({
-        who: e.category || "Expense",
-        what: `${e.description || "expense"} ${aed(e.amount || 0)}`,
+        title: `Expense ${e.category || ""}`.trim(),
+        status: aed(e.amount || 0),
         when: e.expense_date,
         kind: "expense",
       });
@@ -270,29 +276,29 @@ export default function ModernOverview() {
       label: "Revenue",
       value: aed(revenue.collected),
       delta: deltas.revenue,
-      hint: `${num(revenue.count)} invoices · ${aed(revenue.total)} issued`,
+      hint: `${num(revenue.count)} invoices`,
       to: "/invoicing",
     },
     {
       label: "Orders",
       value: num(orderStats.total),
       delta: deltas.orders,
-      hint: `${orderStats.progress} active · ${orderStats.completed} done`,
+      hint: `${orderStats.progress} pending`,
       to: "/orders",
     },
     {
-      label: "To collect",
-      value: aed(receivable.total),
-      delta: null as number | null,
-      hint: `${receivable.parties} ${receivable.parties === 1 ? "party" : "parties"} owe you`,
-      to: "/invoicing",
+      label: "Active customers",
+      value: num(customers.length),
+      delta: deltas.customers,
+      hint: "Directory count",
+      to: "/customers",
     },
     {
-      label: "To pay",
-      value: aed(payable.total),
+      label: "Outstanding",
+      value: aed(receivable.total),
       delta: null as number | null,
-      hint: `${payable.parties} ${payable.parties === 1 ? "supplier" : "suppliers"}`,
-      to: "/purchase-orders",
+      hint: `${receivable.overdue} overdue`,
+      to: "/invoicing",
     },
   ];
 
@@ -323,10 +329,13 @@ export default function ModernOverview() {
     );
   };
 
+  const firstName =
+    (profile?.name || "").trim().split(" ")[0] || companyName || "your business";
+
   return (
     <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
-        title={`Welcome back, ${companyName || "your business"}`}
+        title={`Welcome back, ${firstName}`}
         subtitle="Live view of your business — driven by real data in your workspace."
         action={
           <>
@@ -391,14 +400,14 @@ export default function ModernOverview() {
         <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border p-5">
           <div className="flex items-center gap-2">
             <div className="text-[14px] font-semibold text-foreground">
-              Invoiced vs collected
+              Sales vs Payments received
             </div>
             <span className="px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-success/10 text-success ring-1 ring-success/30 inline-flex items-center gap-1">
               <TrendingUp className="h-3 w-3" /> Live
             </span>
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Last 8 days — from your invoices
+            Last 8 days — from your invoices &amp; receipts
           </div>
           <div className="h-[280px] mt-4">
             <ResponsiveContainer width="100%" height="100%">
@@ -419,7 +428,7 @@ export default function ModernOverview() {
                 />
                 <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
                 <Bar dataKey="invoiced" name="Invoiced" fill="url(#barSold)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="received" name="Collected" fill={c.primary} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="received" name="Received" fill={c.primary} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -427,7 +436,7 @@ export default function ModernOverview() {
         <div className="p-5">
           <div className="text-[14px] font-semibold text-foreground">Customer segments</div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            {num(customers.length)} customers by segment
+            By segment tag
           </div>
           {segmentPie.length === 0 ? (
             <div className="h-[220px] grid place-items-center text-[12.5px] text-muted-foreground">
@@ -545,10 +554,10 @@ export default function ModernOverview() {
                 </div>
                 <div className="min-w-0">
                   <div className="text-[13px] text-foreground leading-snug">
-                    <span className="font-medium">{a.who}</span> {a.what}
+                    <span className="font-medium">{a.title}</span> — {a.status}
                   </div>
                   <div className="text-[11.5px] text-muted-foreground mt-0.5">
-                    {fmtDate(a.when)}
+                    System • {relTime(a.when)}
                   </div>
                 </div>
               </div>
@@ -563,7 +572,7 @@ export default function ModernOverview() {
           <div>
             <div className="text-[14px] font-semibold text-foreground">Cash movement</div>
             <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              Invoiced vs collected over time
+              Money in vs money out
             </div>
           </div>
           <div className="flex items-center gap-1 border border-border rounded-md p-0.5 text-[12px]">
@@ -602,7 +611,7 @@ export default function ModernOverview() {
               <Tooltip contentStyle={tooltipStyle} formatter={(v) => aed(Number(v) || 0)} />
               <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
               <Area type="monotone" dataKey="received" name="Cash in" stroke={c.accent} fill="url(#cashIn)" strokeWidth={2} />
-              <Area type="monotone" dataKey="invoiced" name="Invoiced" stroke={c.primary} fill="url(#cashOut)" strokeWidth={2} />
+              <Area type="monotone" dataKey="invoiced" name="Sales" stroke={c.primary} fill="url(#cashOut)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>

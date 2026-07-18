@@ -15,7 +15,7 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { PageHeader, Card, Badge, FilterChip } from "../components/ui";
+import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
 import { cn } from "../lib/format";
 import { cloudConfigured } from "../lib/supabase";
@@ -235,9 +235,12 @@ export default function Integrations() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border">
         {filtered.map((i) => (
-          <Card key={i.name} className={cn("p-5 flex flex-col", i.soon && "opacity-60")}>
+          <div
+            key={i.name}
+            className={cn("bg-card p-5 flex flex-col", i.soon && "opacity-60")}
+          >
             <div className="flex items-start gap-3">
               <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
                 {i.icon}
@@ -292,7 +295,7 @@ export default function Integrations() {
                 </>
               )}
             </div>
-          </Card>
+          </div>
         ))}
       </div>
     </div>

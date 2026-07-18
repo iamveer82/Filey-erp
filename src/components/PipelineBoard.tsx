@@ -66,7 +66,9 @@ function DealCardBody({ deal }: { deal: Deal }) {
         {deal.title}
       </div>
       <div className="text-[12px] text-muted-foreground mt-0.5 truncate">
-        {deal.customer_name || "No company"}
+        {deal.owner
+          ? `${deal.owner} • ${deal.customer_name || "No company"}`
+          : deal.customer_name || "No company"}
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-2">
         <span className="text-[13px] font-semibold text-foreground tabular-nums">
@@ -189,7 +191,9 @@ function SortableDealCard({
             {deal.title}
           </div>
           <div className="text-[12px] text-muted-foreground mt-0.5 truncate">
-            {deal.customer_name || "No company"}
+            {deal.owner
+              ? `${deal.owner} • ${deal.customer_name || "No company"}`
+              : deal.customer_name || "No company"}
           </div>
         </div>
         <DealCardMenu onView={() => onOpen(deal)} onDelete={() => onDelete(deal)} />

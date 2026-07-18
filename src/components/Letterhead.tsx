@@ -73,7 +73,7 @@ export function LetterheadConfig({
     r.readAsDataURL(f);
   };
   return (
-    <div className="rounded-3xl border border-brand-200 p-3 dark:border-[#2C2C2E]">
+    <div className="rounded-3xl border border-brand-200 p-3 dark:border-border">
       <div className="flex items-center gap-2 text-ink font-medium text-sm mb-2">
         <FileImage size={15} /> Letterhead page (A4)
       </div>

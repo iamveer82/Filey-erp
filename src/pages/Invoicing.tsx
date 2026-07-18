@@ -28,7 +28,6 @@ import {
   Maximize2,
   FileText,
   Wallet,
-  Clock,
   PackageSearch,
   Landmark,
   SeparatorHorizontal,
@@ -361,7 +360,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     data: QuickViewData;
   } | null>(null);
   const [reminding, setReminding] = useState(false);
-  const [advancesTotal, setAdvancesTotal] = useState(0);
   const loadDocs = () =>
     billing
       .listDocs(mode)
@@ -381,16 +379,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     loadInvoiceFormat().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
-    advances
-      .list()
-      .then((all) =>
-        setAdvancesTotal(
-          all
-            .filter((a) => a.party_type === "customer")
-            .reduce((s, a) => s + Number(a.amount), 0)
-        )
-      )
-      .catch(() => {});
   };
   useEffect(reload, []);
   useLiveSync(reload);
@@ -843,15 +831,6 @@ const editInvoice = async (id: number) => {
   }
 
   const statToday = new Date().toISOString().slice(0, 10);
-  const outstanding = docs.reduce((s, d) => s + (d.balance ?? 0), 0);
-  const paidTotal = docs.reduce((s, d) => s + (d.paid ?? 0), 0);
-  const overdueCount = docs.filter(
-    (d) =>
-      (d.balance ?? 0) > 0 &&
-      !!d.due_date &&
-      d.due_date < statToday &&
-      d.status !== "paid"
-  ).length;
   const statCcy = company?.currency || "AED";
   // Overdue = unpaid balance past the due date — same predicate as the Status
   // column and the Overdue KPI card.
@@ -860,6 +839,18 @@ const editInvoice = async (id: number) => {
     !!d.due_date &&
     d.due_date < statToday &&
     d.status !== "paid";
+  // KPI strip: billed = non-draft totals; outstanding splits into pending
+  // (not past due) and overdue (past due with a balance).
+  const billedTotal = docs
+    .filter((d) => d.status !== "draft")
+    .reduce((s, d) => s + d.total, 0);
+  const paidTotal = docs.reduce((s, d) => s + (d.paid ?? 0), 0);
+  const overdueTotal = docs
+    .filter(isOverdueDoc)
+    .reduce((s, d) => s + (d.balance ?? 0), 0);
+  const pendingTotal = docs
+    .filter((d) => d.status !== "draft" && !isOverdueDoc(d))
+    .reduce((s, d) => s + (d.balance ?? 0), 0);
   const filteredDocs = docs.filter((d) => {
     if (statusFilter === "overdue") {
       if (!isOverdueDoc(d)) return false;
@@ -1053,7 +1044,7 @@ const editInvoice = async (id: number) => {
         subtitle={
           isPurchase
             ? "Record supplier bills — receives stock and posts to Inventory & Payables"
-            : "Create FTA tax invoices — pick a template, fill details, send"
+            : "Create, send and track invoices"
         }
         action={
           <div className="flex gap-2">
@@ -1088,51 +1079,36 @@ const editInvoice = async (id: number) => {
         }
       />
 
-      <div
-            className={`grid grid-cols-2 ${isPurchase ? "lg:grid-cols-4" : "lg:grid-cols-5"} joined-kpis mb-4`}
-          >
-            <MetricCard
-              label="Invoices"
-              value={num(docs.length)}
-              icon={<FileText size={20} />}
-              change={`${filteredDocs.length} shown`}
-              changeTone="up"
-            />
-            <MetricCard
-              label="Outstanding"
-              value={money(outstanding, statCcy)}
-              icon={<Wallet size={20} />}
-              iconClass="bg-secondary-400/20 text-secondary-600"
-              change={outstanding > 0 ? "Awaiting payment" : "All settled"}
-              changeTone={outstanding > 0 ? "warn" : "up"}
-            />
-            <MetricCard
-              label="Paid"
-              value={money(paidTotal, statCcy)}
-              icon={<CheckCircle2 size={20} />}
-              iconClass="bg-success/15 text-success"
-              change="Collected"
-              changeTone="up"
-            />
-            <MetricCard
-              label="Overdue"
-              value={num(overdueCount)}
-              icon={<Clock size={20} />}
-              iconClass="bg-danger/15 text-danger"
-              change={overdueCount > 0 ? "Past due date" : "None"}
-              changeTone={overdueCount > 0 ? "down" : "up"}
-            />
-            {!isPurchase && (
-              <MetricCard
-                label="Customer Advances"
-                value={money(advancesTotal, statCcy)}
-                icon={<CreditCard size={20} />}
-                iconClass="bg-primary-400/20 text-primary-600"
-                change="Prepayments"
-                changeTone="up"
-              />
-            )}
-          </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+        <MetricCard
+          label="Total billed"
+          value={money(billedTotal, statCcy)}
+          change={`${num(docs.filter((d) => d.status !== "draft").length)} invoices`}
+          changeTone="up"
+        />
+        <MetricCard
+          label="Paid"
+          value={money(paidTotal, statCcy)}
+          change="Collected"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Pending"
+          value={money(pendingTotal, statCcy)}
+          change={pendingTotal > 0 ? "Awaiting payment" : "All settled"}
+          changeTone={pendingTotal > 0 ? "warn" : "up"}
+        />
+        <MetricCard
+          label="Overdue"
+          value={money(overdueTotal, statCcy)}
+          change={
+            overdueTotal > 0
+              ? `${num(docs.filter(isOverdueDoc).length)} past due date`
+              : "None"
+          }
+          changeTone={overdueTotal > 0 ? "down" : "up"}
+        />
+      </div>
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
@@ -1193,29 +1169,25 @@ const editInvoice = async (id: number) => {
           <FilterChip
             active={statusFilter === "all"}
             onClick={() => setStatusFilter("all")}
-            count={docs.length}
           >
             All
           </FilterChip>
           <FilterChip
             active={statusFilter === "draft"}
             onClick={() => setStatusFilter("draft")}
-            count={docs.filter((d) => d.status === "draft").length}
           >
             Draft
           </FilterChip>
           <FilterChip
             active={statusFilter === "sent"}
             onClick={() => setStatusFilter("sent")}
-            count={docs.filter((d) => d.status === "sent").length}
           >
-            Sent
+            Pending
           </FilterChip>
           <FilterChip
             active={statusFilter === "paid"}
             onClick={() => setStatusFilter("paid")}
             tone="success"
-            count={docs.filter((d) => d.status === "paid").length}
           >
             Paid
           </FilterChip>
@@ -1223,7 +1195,6 @@ const editInvoice = async (id: number) => {
             active={statusFilter === "overdue"}
             onClick={() => setStatusFilter("overdue")}
             tone="danger"
-            count={docs.filter(isOverdueDoc).length}
           >
             Overdue
           </FilterChip>
@@ -1382,9 +1353,9 @@ const editInvoice = async (id: number) => {
           },
           {
             key: "upd",
-            label: "Updated",
-            sortValue: (d) => d.updated_at,
-            render: (d) => fmtDate(d.updated_at),
+            label: "Date",
+            sortValue: (d) => d.issue_date ?? "",
+            render: (d) => fmtDate(d.issue_date),
           },
           {
             key: "share",
@@ -1447,6 +1418,31 @@ const editInvoice = async (id: number) => {
       />
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
+
+      {company && (
+        <CompanyModal
+          open={companyOpen}
+          company={company}
+          onClose={() => setCompanyOpen(false)}
+          onSaved={(c) => {
+            setCompany(c);
+            setForm((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                seller_name: c.name,
+                seller_address: c.address ?? prev.seller_address,
+                seller_trn: c.trn ?? prev.seller_trn,
+                seller_email: c.email ?? prev.seller_email,
+                seller_phone: c.phone ?? prev.seller_phone,
+                logo: c.logo ?? prev.logo,
+                tax_rate: c.default_tax_rate ?? prev.tax_rate,
+              };
+            });
+            setCompanyOpen(false);
+          }}
+        />
+      )}
 
       <PaymentsModal doc={payFor} onClose={() => setPayFor(null)} onSaved={loadDocs} />
 

@@ -7,6 +7,7 @@ import {
   Wallet,
   Sliders,
   FileText,
+  Mail,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
@@ -137,14 +138,14 @@ export default function People() {
     <div className="animate-fade-up">
       <PageHeader
         title="People"
-        subtitle="Employees, attendance & payroll"
+        subtitle="Employees and contacts on your team"
         action={
           <div className="flex gap-2 flex-wrap">
             <button className="btn-ghost" onClick={() => setManageOpen(true)}>
               <Sliders size={15} /> Customize fields
             </button>
             <button className="btn-primary" onClick={() => setOpen(true)}>
-              <Plus size={16} /> Add employee
+              <Plus size={16} /> Add Person
             </button>
           </div>
         }
@@ -210,43 +211,48 @@ export default function People() {
               cx="36"
               cy="28"
               r="12"
-              fill="#FFF3C4"
-              stroke="#E0AE00"
+              fill="#f59e0b"
+              fillOpacity="0.12"
+              stroke="#f59e0b"
               strokeWidth="1.5"
             />
-            <circle cx="34" cy="26" r="3" fill="#B88C00" />
+            <circle cx="34" cy="26" r="3" fill="#f59e0b" />
             <path
               d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z"
-              fill="#FFF3C4"
-              stroke="#E0AE00"
+              fill="#f59e0b"
+              fillOpacity="0.12"
+              stroke="#f59e0b"
               strokeWidth="1.5"
             />
             <circle
               cx="64"
               cy="28"
               r="12"
-              fill="#FFF3C4"
-              stroke="#E0AE00"
+              fill="#71717a"
+              fillOpacity="0.12"
+              stroke="#71717a"
               strokeWidth="1.5"
             />
-            <circle cx="62" cy="26" r="3" fill="#B88C00" />
+            <circle cx="62" cy="26" r="3" fill="#3f3f46" />
             <path
               d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z"
-              fill="#FFF3C4"
-              stroke="#E0AE00"
+              fill="#71717a"
+              fillOpacity="0.12"
+              stroke="#71717a"
               strokeWidth="1.5"
             />
             <circle
               cx="50"
               cy="68"
               r="7"
-              fill="#FFFBEB"
-              stroke="#E0AE00"
+              fill="#f59e0b"
+              fillOpacity="0.12"
+              stroke="#f59e0b"
               strokeWidth="1.5"
             />
             <path
               d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="#B88C00"
+              stroke="#f59e0b"
               strokeWidth="1.2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -302,14 +308,6 @@ export default function People() {
         onRowClick={(e) => setQuickViewFor(e)}
         columns={[
           {
-            key: "code",
-            label: "Code",
-            sortValue: (e) => e.employee_code,
-            render: (e) => (
-              <span className="font-mono text-xs text-brand-500">{e.employee_code}</span>
-            ),
-          },
-          {
             key: "name",
             label: "Name",
             sortValue: (e) => e.name,
@@ -324,7 +322,9 @@ export default function People() {
                 </div>
                 <div>
                   <p className="font-medium text-ink">{e.name}</p>
-                  <p className="text-[11px] text-brand-400">{e.email ?? "—"}</p>
+                  <p className="font-mono text-[11px] text-brand-400">
+                    {e.employee_code}
+                  </p>
                 </div>
               </div>
             ),
@@ -340,6 +340,20 @@ export default function People() {
             label: "Position",
             sortValue: (e) => e.position ?? "",
             render: (e) => e.position ?? "—",
+          },
+          {
+            key: "email",
+            label: "Email",
+            sortValue: (e) => e.email ?? "",
+            render: (e) =>
+              e.email ? (
+                <span className="flex items-center gap-1.5">
+                  <Mail size={13} className="shrink-0 text-brand-400" />
+                  {e.email}
+                </span>
+              ) : (
+                "—"
+              ),
           },
           {
             key: "salary",
@@ -668,7 +682,7 @@ function EmployeeModal({
       });
   }, [open]);
   return (
-    <Modal open={open} onClose={onClose} title="Add Employee">
+    <Modal open={open} onClose={onClose} title="Add Person">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Employee Code">
           <input

@@ -37,7 +37,7 @@ export function useBranding() {
   return {
     get,
     set,
-    brandColor: get("brand_color", "#FFD600"),
+    brandColor: get("brand_color", "#f59e0b"),
     setBrandColor: (v: string) => set("brand_color", v),
     ready,
   };
@@ -133,7 +133,7 @@ export default function PreferencesPanel() {
                   width: 28,
                   height: 28,
                   "--accent1": brandColor,
-                  "--accent2": blend(brandColor, "#FF8C00", 0.3),
+                  "--accent2": blend(brandColor, "#f59e0b", 0.3),
                   "--accent3": blend(brandColor, "#FFFFFF", 0.25),
                 } as React.CSSProperties}
               />

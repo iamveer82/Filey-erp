@@ -117,8 +117,8 @@ export default function BillingPanel() {
               className="h-full rounded-full transition-[width]"
               style={{
                 width: `${pctUsed}%`,
-                // design.md: no gradients — flat brand yellow, danger at ≥90%.
-                background: pctUsed >= 90 ? "#E5484D" : "#FFD600",
+                // design.md: no gradients — flat amber accent, red at ≥90%.
+                background: pctUsed >= 90 ? "#ef4444" : "#f59e0b",
               }}
             />
           </div>

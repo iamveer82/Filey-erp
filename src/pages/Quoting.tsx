@@ -1971,7 +1971,7 @@ export default function Quoting() {
     <div>
       <PageHeader
         title="Quoting"
-        subtitle="Create quotations, send them to customers and convert wins to invoices"
+        subtitle="Draft, send and convert quotes into invoices"
         action={
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
@@ -2017,7 +2017,7 @@ export default function Quoting() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search quotes by number or customer…"
+          placeholder="Search quote or customer…"
           className="max-w-xs"
         />
       </div>
@@ -2087,7 +2087,7 @@ export default function Quoting() {
         columns={[
           {
             key: "no",
-            label: "Quote #",
+            label: "Quote",
             sortValue: (d) => d.number,
             render: (d) => (
               <span className="font-mono text-xs font-medium">{d.number}</span>
@@ -2113,7 +2113,7 @@ export default function Quoting() {
           },
           {
             key: "total",
-            label: "Total",
+            label: "Amount",
             sortValue: (d) => d.total,
             render: (d) => (
               <span className="font-medium">{money(d.total, statCcy)}</span>

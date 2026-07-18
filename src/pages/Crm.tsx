@@ -24,6 +24,7 @@ import { crm, Opportunity, CrmCustomer, Activity, Lead } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
+import { useChartColors } from "../lib/accent";
 import ImportCsvModal from "../components/ImportCsvModal";
 import DealDrawer from "../components/DealDrawer";
 import PipelineBoard from "../components/PipelineBoard";
@@ -45,7 +46,8 @@ import { Tabs, TabsList, TabsTrigger } from "../components/Tabs";
 export default function Crm() {
   const nav = useNavigate();
   const { toast } = useUI();
-  const [view, setView] = useState<"dashboard" | "pipeline">("dashboard");
+  const c = useChartColors();
+  const [view, setView] = useState<"dashboard" | "pipeline">("pipeline");
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
@@ -294,19 +296,19 @@ export default function Crm() {
                   <AreaChart data={trend}>
                     <defs>
                       <linearGradient id="crm" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#FFD600" stopOpacity={0.5} />
-                        <stop offset="100%" stopColor="#FFD600" stopOpacity={0} />
+                        <stop offset="0%" stopColor={c.accent} stopOpacity={0.5} />
+                        <stop offset="100%" stopColor={c.accent} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#DEDBD2" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
                     <XAxis
                       dataKey="name"
-                      tick={{ fontSize: 12, fill: "#A39B8C" }}
+                      tick={{ fontSize: 12, fill: c.axis }}
                       axisLine={false}
                       tickLine={false}
                     />
                     <YAxis
-                      tick={{ fontSize: 12, fill: "#A39B8C" }}
+                      tick={{ fontSize: 12, fill: c.axis }}
                       axisLine={false}
                       tickLine={false}
                       width={40}
@@ -314,14 +316,16 @@ export default function Crm() {
                     <Tooltip
                       contentStyle={{
                         borderRadius: 12,
-                        border: "1px solid #DEDBD2",
+                        background: c.tooltipBg,
+                        border: `1px solid ${c.tooltipBorder}`,
+                        color: c.tooltipFg,
                         fontSize: 13,
                       }}
                     />
                     <Area
                       type="monotone"
                       dataKey="v"
-                      stroke="#E0AE00"
+                      stroke={c.accent}
                       strokeWidth={2.5}
                       fill="url(#crm)"
                     />

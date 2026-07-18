@@ -17,7 +17,7 @@ const FollowUpsPage = lazy(() => import("../pages/FollowUps"));
 const Suppliers = lazy(() => import("../pages/Suppliers"));
 const Purchase = lazy(() => import("../pages/Purchase"));
 const PurchaseOrders = lazy(() => import("../pages/PurchaseOrders"));
-const Reports = lazy(() => import("../pages/reports/Reports"));
+const Reports = lazy(() => import("../pages/Reports"));
 const People = lazy(() => import("../pages/People"));
 const Accounting = lazy(() => import("../pages/Accounting"));
 const ToolsPage = lazy(() => import("../pages/PdfTools"));

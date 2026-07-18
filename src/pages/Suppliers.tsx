@@ -7,6 +7,8 @@ import {
   Package,
   Plus,
   Sliders,
+  AlarmClock,
+  Download,
 } from "lucide-react";
 import {
   erp,
@@ -18,6 +20,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, num } from "../lib/format";
+import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { Button, Card, Field, Badge, DataTable, Modal, MetricCard, PageHeader, ShareToggle, ErrorBanner } from "../components/primitives";
 import { SearchInput } from "../components/ui";
@@ -116,12 +119,39 @@ export default function Suppliers() {
     <div className="animate-fade-up">
       <PageHeader
         title="Suppliers"
-        subtitle="Vendor records & sourcing performance"
+        subtitle="Vendors you buy from — track balances and purchase history"
         action={
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="md" onClick={() => setManageOpen(true)}>
               <Sliders size={15} /> Customize fields
             </Button>
+            <button
+              className="btn-ghost"
+              aria-label="Export"
+              onClick={() =>
+                downloadCsv(
+                  "filey-suppliers",
+                  filtered as unknown as Record<string, unknown>[],
+                  [
+                    { key: "name", label: "Supplier" },
+                    { key: "contact_person", label: "Contact" },
+                    { key: "email", label: "Email" },
+                    { key: "phone", label: "Phone" },
+                    { key: "address", label: "Address" },
+                    { key: "tax_id", label: "Tax ID / TRN" },
+                  ]
+                )
+              }
+            >
+              <Download size={15} /> Export
+            </button>
+            <button
+              className="btn-ghost"
+              aria-label="Follow-ups"
+              onClick={() => nav("/follow-ups")}
+            >
+              <AlarmClock size={15} /> Follow-ups
+            </button>
             <Button
               variant="primary"
               size="md"
@@ -196,7 +226,12 @@ export default function Suppliers() {
             key: "name",
             label: "Supplier",
             sortValue: (s) => s.name,
-            render: (s) => <span className="font-medium text-ink">{s.name}</span>,
+            render: (s) => (
+              <div className="min-w-0">
+                <p className="truncate text-ink font-medium">{s.name}</p>
+                <p className="truncate text-[11px] text-brand-400 font-mono">SUP-{s.id}</p>
+              </div>
+            ),
           },
           {
             key: "contact",

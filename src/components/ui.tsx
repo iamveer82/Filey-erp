@@ -315,11 +315,13 @@ export function statusTone(
   s: string
 ): "success" | "warn" | "danger" | "info" | "neutral" {
   const v = s.toLowerCase();
-  if (["paid", "active", "present", "delivered", "confirmed", "in stock"].includes(v))
+  if (["paid", "active", "present", "delivered", "confirmed", "in stock", "accepted"].includes(v))
     return "success";
-  if (["pending", "draft", "unpaid", "leave", "low", "low stock"].includes(v))
+  if (["draft", "cancelled"].includes(v))
+    return "neutral";
+  if (["pending", "unpaid", "leave", "low", "low stock"].includes(v))
     return "warn";
-  if (["inactive", "cancelled", "absent", "overdue", "out of stock"].includes(v))
+  if (["inactive", "absent", "overdue", "out of stock"].includes(v))
     return "danger";
   return "info";
 }
