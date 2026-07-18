@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { tools, org } from "./api";
 import { useAuth } from "./auth";
+import { isLocalMode } from "./dataMode";
 import { MODULES, type AppModule } from "../modules/registry";
 
 const KEY = "modules.disabled";
@@ -48,7 +49,11 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!user?.id) {
+    // Local mode is single-user and on-device only: there is no org
+    // membership to resolve, and the privacy promise is that nothing leaves
+    // the machine — so never fire the cloud org_members/profiles queries
+    // (they 401 without a cloud session anyway).
+    if (!user?.id || isLocalMode()) {
       setAllowed(null);
       return;
     }
