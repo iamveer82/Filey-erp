@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
+import { checkEmailDailyCap, bumpEmailCount } from "./license";
 
 export interface EmailConfig {
   host: string;
@@ -53,6 +54,10 @@ export async function saveEmailConfig(c: EmailConfig): Promise<void> {
 export async function sendEmail(msg: EmailMessage): Promise<void> {
   if (!msg.to.trim()) throw new Error("No recipient email address.");
 
+  // Per-tier daily cap. Cloud/free is *also* enforced server-side (send-email
+  // edge fn); this is the local check that gates the desktop SMTP path.
+  await checkEmailDailyCap();
+
   if (hasDesktop) {
     const config = await loadEmailConfig();
     if (!emailConfigured(config))
@@ -60,6 +65,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
         "Email isn't configured. Add your Gmail SMTP details in Settings → Email."
       );
     await invoke("send_email", { config, message: msg });
+    await bumpEmailCount();
     return;
   }
 
@@ -73,6 +79,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
       "Could not send email. Make sure the send-email function is deployed " +
         `and RESEND_API_KEY is set. (${error.message})`
     );
+  await bumpEmailCount();
 }
 
 /** Escape a user-supplied value before embedding it in email HTML.

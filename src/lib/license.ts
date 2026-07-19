@@ -294,6 +294,53 @@ export async function checkFreeInvoiceCap(
     );
 }
 
+/* ---------------- email daily cap (per tier) ---------------- */
+
+/** Emails a user may send per day, by tier. Free is also enforced server-side
+ *  in the send-email edge function (mirror these numbers there); lite/pro use
+ *  their own SMTP so the local counter below is authoritative for them. */
+export const EMAIL_DAILY_LIMIT: Record<Tier, number> = {
+  free: 10,
+  lite: 500,
+  pro: Infinity,
+};
+
+const EMAIL_COUNT_KEY = "filey:email_count";
+const localDay = () => new Date().toISOString().slice(0, 10);
+
+async function emailCountToday(): Promise<number> {
+  const raw = await kvGet(EMAIL_COUNT_KEY);
+  if (!raw) return 0;
+  try {
+    const { date, n } = JSON.parse(raw) as { date: string; n: number };
+    return date === localDay() ? n : 0; // stale day → counter resets
+  } catch {
+    return 0;
+  }
+}
+
+/** Throws when today's sends have hit the current tier's daily email cap.
+ *  No-op for unlimited (pro) tiers or while licensing is unenforced.
+ *  ponytail: local per-device counter — honest-enough for lite (own SMTP);
+ *  the cloud/free path is additionally capped server-side where it matters. */
+export async function checkEmailDailyCap(): Promise<void> {
+  if (!ENFORCE_LICENSING) return;
+  const limit = EMAIL_DAILY_LIMIT[await entitlement()];
+  if (!Number.isFinite(limit)) return;
+  if ((await emailCountToday()) >= limit)
+    throw new Error(
+      `Daily email limit reached (${limit} today). ` +
+        `Upgrade in Settings → Billing to send more.`
+    );
+}
+
+/** Record one successful send against today's local counter. */
+export async function bumpEmailCount(): Promise<void> {
+  if (!ENFORCE_LICENSING) return;
+  const n = (await emailCountToday()) + 1;
+  await kvSet(EMAIL_COUNT_KEY, JSON.stringify({ date: localDay(), n }));
+}
+
 /** The account's license + device slots (RLS-scoped reads, for the panel). */
 export async function licenseOverview() {
   if (!supabase) return null;

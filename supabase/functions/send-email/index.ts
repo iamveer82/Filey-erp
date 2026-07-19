@@ -11,10 +11,14 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// SECURITY: per-user hourly cap so a compromised account can't mass-mail
-// from our domain. Counted in audit_log (action='email_send') via the
-// service-role client — no extra table.
-const HOURLY_LIMIT = 30;
+// SECURITY: per-user DAILY cap so a compromised account can't mass-mail from
+// our domain. Counted in audit_log (action='email_send') via the service-role
+// client — no extra table. Tiered to mirror src/lib/license.ts:
+//   free  → 10/day (must match EMAIL_DAILY_LIMIT.free)
+//   paid  → effectively unlimited; a high safety ceiling still guards our
+//           Resend quota if a paid account is compromised.
+const FREE_DAILY_LIMIT = 10;
+const PAID_DAILY_CEILING = 5000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -55,15 +59,43 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+
+    // Resolve the user's tier from their org's plan (service role bypasses
+    // RLS). Mirrors resolveTier() in src/lib/license.ts.
+    let paid = false;
+    const { data: prof } = await supa
+      .from("profiles")
+      .select("org_id")
+      .eq("id", userId)
+      .maybeSingle();
+    const orgId = prof?.org_id as string | undefined;
+    if (orgId && orgId !== "default") {
+      const { data: org } = await supa
+        .from("organizations")
+        .select("plan, plan_status")
+        .eq("id", orgId)
+        .maybeSingle();
+      const plan = org?.plan as string | undefined;
+      const status = org?.plan_status as string | undefined;
+      paid =
+        !!plan &&
+        plan !== "free" &&
+        (status === "active" || status === "trialing" || status === "past_due");
+    }
+    const limit = paid ? PAID_DAILY_CEILING : FREE_DAILY_LIMIT;
+
+    const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
     const { count } = await supa
       .from("audit_log")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("action", "email_send")
-      .gte("created_at", hourAgo);
-    if ((count ?? 0) >= HOURLY_LIMIT) {
-      return json({ error: "Email rate limit reached — try again later." }, 429);
+      .gte("created_at", dayAgo);
+    if ((count ?? 0) >= limit) {
+      return json(
+        { error: `Daily email limit reached (${limit}/day). Try again tomorrow or upgrade your plan.` },
+        429
+      );
     }
 
     const res = await fetch("https://api.resend.com/emails", {
