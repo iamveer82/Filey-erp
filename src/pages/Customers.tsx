@@ -318,7 +318,7 @@ export default function Customers() {
               {filtered.map((c) => (
                 <tr
                   key={c.id}
-                  onClick={() => setDetail(c)}
+                  onClick={() => nav(`/customers/${c.id}`)}
                   className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
                 >
                   <td className="px-5 py-3">
