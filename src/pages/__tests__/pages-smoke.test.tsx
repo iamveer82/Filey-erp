@@ -85,7 +85,7 @@ import Crm from "../Crm";
 import ModernOverview from "../ModernOverview";
 import People from "../People";
 import Accounting from "../Accounting";
-import Reports from "../Reports";
+import Reports from "../reports/Reports";
 import EmailTemplates from "../EmailTemplates";
 import Integrations from "../Integrations";
 import DeliveryChallan from "../DeliveryChallan";
