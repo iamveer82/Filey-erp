@@ -1,15 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
 import { checkEmailDailyCap, bumpEmailCount } from "./license";
-
-export interface EmailConfig {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  from_name: string;
-  from_email: string;
-}
 
 export interface EmailAttachment {
   /** File name shown in the email, e.g. "INV-1001.pdf". */
@@ -35,92 +25,33 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-const KEY = "email_config";
-
-export const hasDesktop =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-export const emailConfigured = (c: EmailConfig | null): c is EmailConfig =>
-  !!c && !!c.host && !!c.port && !!c.username && !!c.password;
-
-export async function loadEmailConfig(): Promise<EmailConfig | null> {
-  // SMTP credentials only ever live in the desktop app's encrypted store.
-  // We never persist them in browser localStorage (plaintext, readable by
-  // any script/XSS and other OS users on a shared machine).
-  if (!hasDesktop) return null;
-  try {
-    const v = await invoke<string | null>("cache_get", { key: KEY });
-    return v ? (JSON.parse(v) as EmailConfig) : null;
-  } catch (e) {
-    console.error("Failed to load email config", e);
-    return null;
-  }
-}
-
-export async function saveEmailConfig(c: EmailConfig): Promise<void> {
-  if (!hasDesktop)
-    throw new Error(
-      "Email/SMTP setup is available in the Filey desktop app only — " +
-        "credentials are never stored in the browser."
-    );
-  await invoke("cache_set", { key: KEY, value: JSON.stringify(c) });
-}
-
-/** Send one HTML email. Cloud-first: every user (free-cloud and paid-offline)
- * has cloud API access, so invoices go out via the Supabase `send-email` Edge
- * Function (Resend, from noreply@gofiley.com) with the API key kept
- * server-side — it never touches the client. On desktop we fall back to the
- * user's own SMTP only when the cloud path isn't reachable (truly offline or
- * not signed in) and they've configured it. */
+/** Send one HTML email through Resend via the Supabase `send-email` Edge
+ * Function (from noreply@gofiley.com). The API key stays server-side. Every
+ * user — free-cloud and paid-offline alike — has cloud API access, so this is
+ * the only send path (no local SMTP). */
 export async function sendEmail(msg: EmailMessage): Promise<void> {
   if (!msg.to.trim()) throw new Error("No recipient email address.");
+  if (!supabase)
+    throw new Error("Email is not available — sign in to send.");
 
-  // Per-tier daily cap. Cloud sends are *also* capped server-side (send-email
-  // edge fn); this local check additionally gates the desktop SMTP fallback.
+  // Per-tier daily cap (cloud sends are also capped server-side in the
+  // send-email edge fn).
   await checkEmailDailyCap();
 
-  // Preferred path: cloud Resend via the edge function.
-  if (supabase) {
-    try {
-      const { error } = (await invokeFn(supabase, "send-email", {
-        body: {
-          to: msg.to,
-          subject: msg.subject,
-          html: msg.html,
-          attachments: msg.attachments,
-        },
-      })) as { error: { message: string } | null };
-      if (!error) {
-        await bumpEmailCount();
-        return;
-      }
-      // Cloud reachable but refused (e.g. rate limit, not signed in). Surface
-      // it on web; on desktop, try the SMTP fallback below.
-      if (!hasDesktop)
-        throw new Error(
-          "Could not send email. Make sure the send-email function is deployed " +
-            `and RESEND_API_KEY is set. (${error.message})`
-        );
-    } catch (e) {
-      // Network error / offline. Web has no fallback; desktop falls through.
-      if (!hasDesktop) throw e;
-    }
-  }
-
-  // Desktop fallback: the user's own SMTP (works fully offline).
-  if (hasDesktop) {
-    const config = await loadEmailConfig();
-    if (!emailConfigured(config))
-      throw new Error(
-        "Email isn't configured. Sign in for cloud sending, or add your own " +
-          "SMTP details in Settings → Email for offline use."
-      );
-    await invoke("send_email", { config, message: msg });
-    await bumpEmailCount();
-    return;
-  }
-
-  throw new Error("Email is not available — cloud storage isn't configured.");
+  const { error } = (await invokeFn(supabase, "send-email", {
+    body: {
+      to: msg.to,
+      subject: msg.subject,
+      html: msg.html,
+      attachments: msg.attachments,
+    },
+  })) as { error: { message: string } | null };
+  if (error)
+    throw new Error(
+      "Could not send email. Make sure the send-email function is deployed " +
+        `and RESEND_API_KEY is set. (${error.message})`
+    );
+  await bumpEmailCount();
 }
 
 /** Escape a user-supplied value before embedding it in email HTML.

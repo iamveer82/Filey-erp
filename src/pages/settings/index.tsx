@@ -13,7 +13,6 @@ import {
   Grid3x3,
   Palette,
   Lock,
-  Mail,
   Cable,
   Activity,
   KeyRound,
@@ -35,7 +34,6 @@ import BillingPanel from "./BillingPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import BackupPanel from "./BackupPanel";
 import DataModePanel from "./DataModePanel";
-import EmailPanel from "./EmailPanel";
 import LicensePanel from "./LicensePanel";
 // import { MessageSquare } from "lucide-react";
 
@@ -49,7 +47,6 @@ type Section =
   | "billing"
   | "security"
   | "notifications"
-  | "email"
   | "sms"
   | "integrations"
   | "backup"
@@ -70,7 +67,6 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "license", label: "Desktop License", icon: KeyRound },
   { id: "security", label: "Security", icon: Lock },
   { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "email", label: "Email", icon: Mail },
   // { id: "sms", label: "SMS", icon: MessageSquare },
   { id: "integrations", label: "Integrations", icon: Cable },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
@@ -143,7 +139,6 @@ export default function Settings() {
         {section === "billing" && <BillingPanel />}
         {section === "license" && <LicensePanel />}
         {section === "notifications" && <NotificationsPanel />}
-        {section === "email" && <EmailPanel />}
         {/* {section === "sms" && <SmsPanel />} */}
         {section === "integrations" && <IntegrationsPanel />}
         {section === "backup" && <BackupPanel />}

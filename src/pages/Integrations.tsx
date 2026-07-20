@@ -8,7 +8,6 @@ import {
   FileText,
   Hash,
   Landmark,
-  Mail,
   Send,
   ShoppingBag,
   Sparkles,
@@ -19,7 +18,6 @@ import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
 import { cn } from "../lib/format";
 import { cloudConfigured } from "../lib/supabase";
-import { loadEmailConfig, emailConfigured } from "../lib/email";
 import { hasDesktop, composioList } from "../lib/composio";
 
 /* ── Integrations directory (Filey-DEMO parity) ────────────────────────────
@@ -53,7 +51,6 @@ type Integration = {
 export default function Integrations() {
   const [cat, setCat] = useState("All");
   const [composioActive, setComposioActive] = useState<Set<string>>(new Set());
-  const [smtpReady, setSmtpReady] = useState(false);
 
   useEffect(() => {
     // Live connection states — desktop-only stores, no-op on web.
@@ -69,9 +66,6 @@ export default function Integrations() {
       .catch(() => {
         /* key may not be set yet */
       });
-    loadEmailConfig()
-      .then((c) => setSmtpReady(emailConfigured(c)))
-      .catch(() => {});
   }, []);
 
   const integrations = useMemo<Integration[]>(
@@ -84,16 +78,6 @@ export default function Integrations() {
         to: "/settings?section=integrations",
         action: "Configure",
         connected: composioActive.has("gmail"),
-        desktopOnly: true,
-      },
-      {
-        name: "Email (SMTP)",
-        desc: "Send invoices, quotes and receipts through your own Gmail SMTP account.",
-        category: "Email",
-        icon: <Mail className="h-5 w-5" />,
-        to: "/settings?section=email",
-        action: "Configure",
-        connected: smtpReady,
         desktopOnly: true,
       },
       {
@@ -210,7 +194,7 @@ export default function Integrations() {
         soon: true,
       },
     ],
-    [composioActive, smtpReady]
+    [composioActive]
   );
 
   const categories = useMemo(
