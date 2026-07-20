@@ -233,6 +233,7 @@ export default function SupplierDetail() {
         total: o.total,
         currency: o.currency,
         status: o.status,
+        tax_rate: o.tax_rate,
       })),
     [myOrders]
   );
@@ -320,6 +321,7 @@ export default function SupplierDetail() {
       number: o.po_number,
       date: o.order_date,
       total: o.total,
+      taxRate: o.tax_rate ?? 0,
     }));
     return buildStatement({
       kind: "supplier",

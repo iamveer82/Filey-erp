@@ -250,6 +250,8 @@ export interface InvoiceDocSummary {
   shared?: boolean;
   updated_at: string;
   unit_price_formula?: { a: string; b?: string } | null;
+  /** VAT rate (%) applied to this document — used by statement engine. */
+  tax_rate?: number;
 }
 export interface InvoicePayment {
   id: number;
@@ -2714,6 +2716,7 @@ export const billing = {
             due_date: d.due_date ?? undefined,
             shared: d.shared ?? undefined,
             updated_at: d.updated_at,
+            tax_rate: d.tax_rate ?? undefined,
           };
         }) as InvoiceDocSummary[];
       },
@@ -3615,6 +3618,8 @@ export interface PoSummary {
   expected_date?: string;
   shared?: boolean;
   updated_at: string;
+  /** VAT rate (%) applied to this PO — used by statement engine. */
+  tax_rate?: number;
 }
 export interface PurchaseOrder {
   id: number;
@@ -3763,6 +3768,7 @@ export const pos = {
           expected_date: r.expected_date ?? undefined,
           shared: r.shared ?? false,
           updated_at: r.updated_at,
+          tax_rate: r.tax_rate ?? undefined,
         })) as PoSummary[];
       },
       []

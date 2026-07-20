@@ -37,6 +37,7 @@ export interface StatementDocRef {
   total: number;
   currency?: string;
   status?: string;
+  tax_rate?: number;
 }
 
 export interface StatementPartyRef {
@@ -209,6 +210,7 @@ export default function StatementModal({
       number: d.number,
       date: d.date,
       total: d.total,
+      taxRate: d.tax_rate ?? 0,
     }));
     return buildStatement({
       kind: partyType,

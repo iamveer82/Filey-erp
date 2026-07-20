@@ -282,6 +282,7 @@ export default function CustomerDetail() {
         total: d.total,
         currency: d.currency,
         status: d.status,
+        tax_rate: d.tax_rate,
       })),
     [myInvoices]
   );
@@ -384,6 +385,7 @@ export default function CustomerDetail() {
       number: d.number,
       date: d.issue_date,
       total: d.total,
+      taxRate: d.tax_rate ?? 0,
     }));
     return buildStatement({
       kind: "customer",

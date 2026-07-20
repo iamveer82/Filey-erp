@@ -18,6 +18,8 @@ export interface StatementDocEntry {
    *  line cannot be placed honestly without one. */
   date?: string;
   total: number;
+  /** VAT rate (%) applied to this document — 0/undefined = no VAT. */
+  taxRate?: number;
 }
 
 export interface StatementPaymentEntry {
@@ -90,6 +92,8 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
     description: string;
     debit: number;
     credit: number;
+    net?: number;
+    vat?: number;
   };
   const events: Event[] = [];
 
@@ -97,8 +101,11 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
     const date = ymd(d.date);
     const total = Number(d.total) || 0;
     if (!date || total === 0) continue;
+    const rate = Number(d.taxRate) || 0;
+    const vat = rate > 0 ? total - total / (1 + rate / 100) : 0;
+    const net = total - vat;
     if (total > 0)
-      events.push({ date, ref: d.number, description: docLabel, debit: total, credit: 0 });
+      events.push({ date, ref: d.number, description: docLabel, debit: total, credit: 0, net, vat: vat || undefined });
     else
       events.push({
         date,
@@ -180,6 +187,8 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
 
   const totalDebit = within.reduce((s, e) => s + e.debit, 0);
   const totalCredit = within.reduce((s, e) => s + e.credit, 0);
+  const totalVat = within.reduce((s, e) => s + (e.vat || 0), 0);
+  const totalNet = within.reduce((s, e) => s + (e.net || e.debit), 0);
   const closing = opening + totalDebit - totalCredit;
 
   const earliest = events.reduce((m, e) => (e.date < m ? e.date : m), "9999-12-31");
@@ -206,6 +215,8 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
       totalDebit,
       totalCredit,
       closingBalance: closing,
+      totalVat,
+      totalNet,
       generatedOn: fmtDate(new Date().toISOString()),
       lines: lines.map((l) => ({ ...l, date: fmtDate(l.date) })),
     },
