@@ -924,13 +924,14 @@ export default function Quoting() {
                   }
                 >
                   <DocTemplateGallery
-                    key={tplNonce}
-                    value={form.template}
-                    onChange={(id) => set("template", id)}
-                    onDesign={() => setDesigning(true)}
-                    viewAll={viewAll}
-                    onViewAllToggle={setViewAll}
-                  />
+                                      key={tplNonce}
+                                      value={form.template}
+                                      onChange={(id) => set("template", id)}
+                                      onDesign={() => setDesigning(true)}
+                                      docType="quote"
+                                      viewAll={viewAll}
+                                      onViewAllToggle={setViewAll}
+                                    />
                 </Step>
 
                 {/* 2 · Quote details */}

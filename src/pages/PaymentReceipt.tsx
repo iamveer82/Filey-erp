@@ -663,6 +663,7 @@ export default function PaymentReceipt() {
                       value={form.template || "receipt"}
                       onChange={(id) => update({ template: id })}
                       onDesign={() => setTemplateOpen(true)}
+                      docType="receipt"
                       viewAll={false}
                     />
 

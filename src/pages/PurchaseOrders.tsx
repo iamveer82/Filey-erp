@@ -1366,11 +1366,12 @@ function Editor({
             {/* 1 · Template */}
             <Step n={1} title="Choose Template">
               <DocTemplateGallery
-                key={tplRev}
-                value={form.template}
-                onChange={(id) => set("template", id)}
-                onDesign={() => setDesigning(true)}
-              />
+                              key={tplRev}
+                              value={form.template}
+                              onChange={(id) => set("template", id)}
+                              onDesign={() => setDesigning(true)}
+                              docType="po"
+                            />
               <div className="flex items-center justify-between mt-3 border border-brand-200 rounded-xl px-3 py-2">
                 <span className="text-xs font-semibold text-brand-500">Accent color</span>
                 <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
