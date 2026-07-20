@@ -150,7 +150,8 @@ export default function PortalView() {
           </div>
         )}
 
-        <div className="paper-texture rounded-xl border border-border p-8 shadow-sm min-h-[1123px]">
+        {/* ponytail: customer-facing invoice stays English regardless of app lang */}
+        <div className="paper-texture rounded-xl border border-border p-8 shadow-sm min-h-[1123px]" data-no-i18n dir="ltr">
           <DocView form={form} labels={labels} />
         </div>
 

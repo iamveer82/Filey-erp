@@ -3462,7 +3462,10 @@ function Editor({
             </div>
 
             <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
-              <div ref={invoiceRef}>
+              {/* ponytail: data-no-i18n + dir=ltr — invoice preview stays English
+                  (text + layout) regardless of app language; PDF export clones
+                  this subtree so the exemption carries into the captured pages. */}
+              <div ref={invoiceRef} data-no-i18n dir="ltr">
                 <div
                   style={{
                     width: device === "desktop" ? 794 : 420,
@@ -3544,6 +3547,8 @@ function Editor({
                 <div
                   ref={exportRef}
                   aria-hidden
+                  data-no-i18n
+                  dir="ltr"
                   className="fixed left-[-99999px] top-0 pointer-events-none"
                   style={{ width: 794, background: "#fff" }}
                 >
@@ -3749,6 +3754,8 @@ function Editor({
             <div className="flex-1 overflow-auto p-6">
               <div className="mx-auto max-w-5xl">
                 <div
+                  data-no-i18n
+                  dir="ltr"
                   className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
                 >
                   <div style={{ position: "relative", minHeight: 1059 }}>

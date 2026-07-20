@@ -924,7 +924,8 @@ function DeclarationEditor({
             </div>
 
             <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
-              <div ref={declRef} className="relative">
+              {/* ponytail: keep declaration preview + PDF English regardless of app lang */}
+              <div ref={declRef} data-no-i18n dir="ltr" className="relative">
                 <StampSignatureLayer
                   stamp={
                     showStamp

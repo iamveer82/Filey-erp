@@ -1585,7 +1585,8 @@ export default function Quoting() {
                   </div>
 
                   <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
-                    <div ref={quoteRef}>
+                    {/* ponytail: keep quote preview + PDF English regardless of app lang */}
+                    <div ref={quoteRef} data-no-i18n dir="ltr">
                       <div style={{ position: "relative", minHeight: device === "desktop" ? 1027 : 498 }}>
                         <StampSignatureLayer
                           stamp={
@@ -1660,6 +1661,8 @@ export default function Quoting() {
                       <div
                         ref={exportRef}
                         aria-hidden
+                        data-no-i18n
+                        dir="ltr"
                         className="fixed left-[-99999px] top-0 pointer-events-none"
                         style={{ width: 794, background: "#fff" }}
                       >
@@ -1891,6 +1894,8 @@ export default function Quoting() {
                   <div className="mx-auto max-w-5xl">
                     <div
                       className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
+                      data-no-i18n
+                      dir="ltr"
                     >
                       <div style={{ position: "relative", minHeight: 1059 }}>
                         <StampSignatureLayer

@@ -845,7 +845,8 @@ export default function PaymentReceipt() {
                 }
                 right={
                   <FitPreview baseWidth={794} zoom={zoom} padding={0}>
-                    <div ref={previewRef}>
+                    {/* ponytail: keep receipt preview + PDF English regardless of app lang */}
+                    <div ref={previewRef} data-no-i18n dir="ltr">
                       <div style={{ position: "relative", minHeight: 1027 }}>
                         <DocView
                           form={docViewForm(form)}

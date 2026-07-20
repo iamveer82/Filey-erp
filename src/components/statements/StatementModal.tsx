@@ -361,6 +361,8 @@ export default function StatementModal({
           <div
             ref={exportRef}
             aria-hidden
+            data-no-i18n
+            dir="ltr"
             className="fixed left-[-99999px] top-0 pointer-events-none"
             style={{ width: 794, background: "#fff" }}
           >

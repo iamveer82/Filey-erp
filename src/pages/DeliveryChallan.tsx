@@ -1115,6 +1115,8 @@ function DcPreview({
   return (
     <div
       ref={dcRef}
+      data-no-i18n
+      dir="ltr"
       className="bg-white shadow-card rounded-2xl overflow-hidden print:shadow-none print:rounded-none relative"
       style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
     >
