@@ -75,6 +75,11 @@ import {
   type StatementPage,
   type StatementTemplateKey,
 } from "../components/statements/StatementTemplates";
+import {
+  buildSalesJournal,
+  type SalesJournal,
+} from "../components/statements/buildSalesJournal";
+import { SalesJournalTemplate } from "../components/statements/SalesJournalTemplate";
 
 // Local re-export so the edit form doesn't need a separate import (same
 // helper as the Customers page — keeps phone_e164 in sync for OTP/SMS).
@@ -165,6 +170,9 @@ export default function CustomerDetail() {
   // Inline statement panel (DEMO parity): template picker + live preview.
   const [showAllLedger, setShowAllLedger] = useState(false);
   const [tplKey, setTplKey] = useState<StatementTemplateKey>("ledger");
+  const [journalMode, setJournalMode] = useState(false);
+  const [journalData, setJournalData] = useState<SalesJournal | null>(null);
+  const [journalLoading, setJournalLoading] = useState(false);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [receiptRows, setReceiptRows] = useState<ReceiptSummary[]>([]);
   const [stmtPayments, setStmtPayments] = useState<StatementPaymentEntry[]>([]);
@@ -253,6 +261,37 @@ export default function CustomerDetail() {
     () => invoices.filter((d) => names.has(d.customer_name)),
     [invoices, names]
   );
+
+  // Fetch the itemised Sales & Collections Journal (DEMO parity) — loads
+  // full invoice docs with line items, not just summaries.
+  const loadJournal = async () => {
+    if (!customer) return;
+    setJournalLoading(true);
+    try {
+      const ids = myInvoices
+        .filter((d) => d.status !== "draft")
+        .map((d) => d.id);
+      const allReceipts = await receiptsApi.list().catch(() => [] as ReceiptSummary[]);
+      const data = await buildSalesJournal({
+        customerId: customer.id,
+        customer,
+        company,
+        invoiceIds: ids,
+        receipts: allReceipts,
+      });
+      setJournalData(data);
+    } catch (e) {
+      console.error("Journal build failed:", e);
+    } finally {
+      setJournalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (journalMode && customer && !journalData && !journalLoading) {
+      loadJournal();
+    }
+  }, [journalMode, customer]);
   const myQuotes = useMemo(
     () => quotations.filter((d) => names.has(d.customer_name)),
     [quotations, names]
@@ -964,7 +1003,24 @@ export default function CustomerDetail() {
               </button>
             </div>
           </div>
-          <div className="p-4 overflow-x-auto">
+          <div className="p-4">
+            {/* Mode toggle: Ledger vs Sales Journal */}
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                onClick={() => setJournalMode(false)}
+                className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium border transition-colors ${!journalMode ? "bg-foreground text-background border-foreground" : "bg-card text-muted-foreground border-border hover:bg-hover"}`}
+              >
+                Ledger templates
+              </button>
+              <button
+                onClick={() => setJournalMode(true)}
+                className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium border transition-colors ${journalMode ? "bg-foreground text-background border-foreground" : "bg-card text-muted-foreground border-border hover:bg-hover"}`}
+              >
+                Sales Journal
+              </button>
+            </div>
+
+            {!journalMode && (
             <div className="flex items-stretch gap-3">
               {statementTemplateList.map((t) => (
                 <StatementThumb
@@ -975,6 +1031,17 @@ export default function CustomerDetail() {
                 />
               ))}
             </div>
+            )}
+
+            {journalMode && (
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30">
+                <div className="h-10 w-10 rounded-lg bg-neutral-900 grid place-items-center text-white text-[11px] font-bold">J</div>
+                <div>
+                  <div className="text-[13px] font-medium text-foreground">Sales & Collections Journal</div>
+                  <div className="text-[11.5px] text-muted-foreground">Itemised invoice lines with VAT, qty, rate & payments — DUNE-style.</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -983,25 +1050,58 @@ export default function CustomerDetail() {
             <div className="text-[12px] text-muted-foreground uppercase tracking-wider">
               Selected template
             </div>
-            <div className="text-[16px] font-semibold text-foreground mt-1">
-              {tplMeta.name}
-            </div>
-            <div className="text-[12.5px] text-muted-foreground mt-1 px-3">
-              {tplMeta.desc}
-            </div>
-            <div className="mt-3 text-[11.5px] text-muted-foreground">
-              Includes: {stmt.lines.length} entries · balance{" "}
-              {money(netBalance, currency)}
-            </div>
+            {journalMode ? (
+              <>
+                <div className="text-[16px] font-semibold text-foreground mt-1">
+                  Sales & Collections Journal
+                </div>
+                <div className="text-[12.5px] text-muted-foreground mt-1 px-3">
+                  Itemised invoice lines with VAT, qty, rate & payments
+                </div>
+                <div className="mt-3 text-[11.5px] text-muted-foreground">
+                  Includes: {journalData?.transactions.length ?? 0} entries ·
+                  balance {money(journalData?.summary.netBalance ?? 0, currency)}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[16px] font-semibold text-foreground mt-1">
+                  {tplMeta.name}
+                </div>
+                <div className="text-[12.5px] text-muted-foreground mt-1 px-3">
+                  {tplMeta.desc}
+                </div>
+                <div className="mt-3 text-[11.5px] text-muted-foreground">
+                  Includes: {stmt.lines.length} entries · balance{" "}
+                  {money(netBalance, currency)}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* DEMO parity: live preview of the selected statement template */}
+      {/* Live preview of the selected statement template */}
       <div className="rounded-xl border border-border bg-card p-4 mb-5">
         <div className="text-[13px] text-muted-foreground mb-3">
-          Live preview — how the exported {tplMeta.name} will look
+          Live preview — how the exported{" "}
+          {journalMode ? "Sales & Collections Journal" : tplMeta.name} will look
         </div>
+        {journalMode ? (
+          journalLoading ? (
+            <Skeleton className="h-[420px] w-full" />
+          ) : journalData ? (
+            <FitPreview baseWidth={794} zoom={100} padding={0}>
+              <SalesJournalTemplate data={journalData} />
+            </FitPreview>
+          ) : (
+            <div className="py-16 text-center text-[13px] text-muted-foreground">
+              No invoice data — the journal appears once this customer has
+              non-draft invoices on record.
+            </div>
+          )
+        ) : (
+        <>
         {stmtExtrasLoading && !built.hasContent ? (
           <Skeleton className="h-[420px] w-full" />
         ) : !built.hasContent ? (
@@ -1013,6 +1113,8 @@ export default function CustomerDetail() {
           <FitPreview baseWidth={794} zoom={100} padding={0}>
             <ActiveTpl data={stmt} />
           </FitPreview>
+        )}
+        </>
         )}
       </div>
 
