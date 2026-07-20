@@ -56,7 +56,7 @@ import { docLineAmount, docTotals } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
 import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
 import { loadInvoiceFormat } from "../lib/numberFormat";
-import { sendEmail, emailShell, esc } from "../lib/email";
+import { sendEmail, emailShell, esc, bytesToBase64 } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
 import StatStrip from "../components/StatStrip";
@@ -2057,10 +2057,28 @@ function Editor({
     } catch {
       /* link optional */
     }
+    // Attach the rendered invoice as a PDF (best-effort — never block the send
+    // if PDF generation fails; the summary + portal link still go out).
+    let attachments: { filename: string; content: string }[] | undefined;
+    try {
+      const el = exportRef.current || invoiceRef.current;
+      if (el) {
+        const pdf = await elementToPdfBytes(el, form.number || "invoice");
+        attachments = [
+          {
+            filename: `${form.number || "invoice"}.pdf`,
+            content: bytesToBase64(pdf.bytes),
+          },
+        ];
+      }
+    } catch {
+      /* attachment optional */
+    }
     try {
       await sendEmail({
         to: form.customer_email,
         subject: `Invoice ${form.number} from ${form.seller_name}`,
+        attachments,
         html: emailShell(
           `Invoice ${form.number}`,
           `<p>Dear ${esc(form.customer_name || "customer")},</p>

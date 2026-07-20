@@ -31,7 +31,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
-    const { to, subject, html } = await req.json();
+    const { to, subject, html, attachments } = await req.json();
     if (!to || !subject || !html) {
       return json({ error: "to, subject and html are required" }, 400);
     }
@@ -40,6 +40,24 @@ serve(async (req) => {
     if (typeof to !== "string" || to.length > 320 ||
         String(subject).length > 500 || String(html).length > 500_000) {
       return json({ error: "invalid payload" }, 400);
+    }
+    // Optional file attachments (e.g. the invoice PDF). Base64 content, capped
+    // so a signed-in user can't push huge payloads through our Resend quota.
+    if (attachments !== undefined) {
+      if (!Array.isArray(attachments) || attachments.length > 5) {
+        return json({ error: "invalid attachments" }, 400);
+      }
+      let totalB64 = 0;
+      for (const a of attachments) {
+        if (!a || typeof a.filename !== "string" || a.filename.length > 200 ||
+            typeof a.content !== "string") {
+          return json({ error: "invalid attachment" }, 400);
+        }
+        totalB64 += a.content.length;
+      }
+      if (totalB64 > 15_000_000) { // ~11 MB of files once decoded
+        return json({ error: "attachments too large" }, 400);
+      }
     }
 
     const RESEND = Deno.env.get("RESEND_API_KEY");
@@ -104,7 +122,13 @@ serve(async (req) => {
         Authorization: `Bearer ${RESEND}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: FROM, to, subject, html }),
+      body: JSON.stringify({
+        from: FROM,
+        to,
+        subject,
+        html,
+        ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+      }),
     });
 
     const data = await res.json();

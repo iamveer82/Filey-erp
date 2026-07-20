@@ -11,10 +11,28 @@ export interface EmailConfig {
   from_email: string;
 }
 
+export interface EmailAttachment {
+  /** File name shown in the email, e.g. "INV-1001.pdf". */
+  filename: string;
+  /** Base64-encoded file bytes (no `data:` prefix). */
+  content: string;
+}
+
 export interface EmailMessage {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
+}
+
+/** Base64-encode raw bytes for use as an EmailAttachment `content`. Chunked so
+ *  large PDFs don't blow the call stack via String.fromCharCode(...spread). */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  return btoa(bin);
 }
 
 const KEY = "email_config";
@@ -65,7 +83,12 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
   if (supabase) {
     try {
       const { error } = (await invokeFn(supabase, "send-email", {
-        body: { to: msg.to, subject: msg.subject, html: msg.html },
+        body: {
+          to: msg.to,
+          subject: msg.subject,
+          html: msg.html,
+          attachments: msg.attachments,
+        },
       })) as { error: { message: string } | null };
       if (!error) {
         await bumpEmailCount();
