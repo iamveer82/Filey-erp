@@ -139,7 +139,7 @@ export default function DocTemplateGallery({
 
       {/* Expanded: grouped by category */}
       {viewAll && (
-        <div className="space-y-4 max-h-[400px] overflow-y-auto">
+        <div className="space-y-4 max-h-[500px] overflow-y-auto">
           {allCategorized.map((cat) => (
             <div key={cat.category}>
               <p className="text-[11px] font-semibold text-brand-400 uppercase tracking-wide mb-2">

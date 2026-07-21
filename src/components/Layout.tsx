@@ -702,7 +702,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main className="flex-1 min-w-0 overflow-auto">
+          <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
             {/* Route container — pages are content-only; padding lives here
                 (reference: px-6 pt-6 page gutter). */}
             <div key={pathname} className="fade-in px-4 sm:px-6 py-6">

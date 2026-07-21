@@ -1236,7 +1236,7 @@ function StocktakeModal({
         </p>
       </div>
 
-      <div className="max-h-[50vh] overflow-auto rounded-xl border border-brand-100 dark:border-white/10">
+      <div className="overflow-auto rounded-xl border border-brand-100 dark:border-white/10">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-brand-50 text-left">
             <tr className="text-[11px] uppercase tracking-wider text-brand-400">

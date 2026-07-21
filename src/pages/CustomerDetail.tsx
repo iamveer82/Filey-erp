@@ -896,7 +896,7 @@ export default function CustomerDetail() {
               </button>
             )}
           </div>
-          <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+          <div className="overflow-x-auto overflow-y-auto">
             <table className="w-full text-[12.5px]">
               <thead className="sticky top-0 bg-card z-10">
                 <tr className="text-left text-muted-foreground border-b border-border">
@@ -1160,7 +1160,7 @@ export default function CustomerDetail() {
             </button>
           )}
         </div>
-        <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+        <div className="overflow-x-auto overflow-y-auto">
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-card z-10">
               <tr className="text-left border-b border-border">

@@ -196,7 +196,7 @@ export default function Purchase() {
               All logged company expenses
             </div>
           </div>
-          <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+          <div className="overflow-x-auto overflow-y-auto">
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-card">
                 <tr className="text-left text-muted-foreground border-b border-border">
