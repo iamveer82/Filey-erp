@@ -1,11 +1,11 @@
 {
-  "version": "2.3.7",
-  "notes": "v2.3.7 \u2014 Latest update with invoice live preview fix and dashboard improvements.",
-  "pub_date": "2026-07-21T04:11:19Z",
+  "version": "2.3.8",
+  "notes": "Payslip dedicated page, People crash fix, Customers/Suppliers table cleanup, page scroll fix",
+  "pub_date": "2026-07-21T10:30:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlZzZllqNkdtbGVqcE9RVXdhWERDK3N3ZDZ3cE1pWmUvcXdyUWptQlMxdnVqbkdmZTJrTDhySTJidkxsZENPM0ZwT2xTazkrcG0rcWlHNXdwbW9aSVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjA3MDYyCWZpbGU6RmlsZXkgRVJQXzIuMy43X3g2NC1zZXR1cC5leGUKcm13TXpWUzJ0cUNlUzBkTWhWaWtLUGhwcWliakx5c2hFL3Vnd2pqdVFadmlYb2Nuem01c2pud3owMURJbVc5cld6K2F3MnZrTDREVnBwbmxhVi9IQ0E9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.7/Filey.ERP_2.3.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmNieW5yL3dIWXdBUkpwRmZlN21HZVk5MUNGd0o4MU4yclIwMktkeXNrWFlYNXk0L25KUEdIMnUrK3lGWHV0RFY0Zy9YSGJSaG5MeXRrdTBkaW1UMmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjE3OTEwCWZpbGU6RmlsZXkgRVJQXzIuMy44X3g2NC1zZXR1cC5leGUKaGdrWVRldnNuZjFHSmlRU3hmWGxYcW5DelBjeUcvUEgrY3FHN3RxWVRCN1RjeHVSc205b0dsQ3lmNzFlZzJYNE5qdEtTVVNSZi90ODA5MHJZRC9hQ1E9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.8/Filey.ERP_2.3.8_x64-setup.exe"
     }
   }
 }
