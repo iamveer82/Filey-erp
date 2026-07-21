@@ -565,12 +565,6 @@ export default function PurchaseOrders() {
             render: (r) => <span className="font-medium">{r.supplier_name}</span>,
           },
           {
-            key: "items",
-            label: "Items",
-            sortValue: (r) => r.items_count,
-            render: (r) => <span className="tabular-nums">{num(r.items_count)}</span>,
-          },
-          {
             key: "total",
             label: "Total",
             sortValue: (r) => r.total,
@@ -589,12 +583,6 @@ export default function PurchaseOrders() {
             label: "ETA",
             sortValue: (r) => r.expected_date ?? "",
             render: (r) => (r.expected_date ? fmtDate(r.expected_date) : "—"),
-          },
-          {
-            key: "order_date",
-            label: "Order Date",
-            sortValue: (r) => r.order_date,
-            render: (r) => fmtDate(r.order_date),
           },
           {
             key: "share",
