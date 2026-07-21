@@ -1,11 +1,11 @@
 {
   "version": "2.3.7",
-  "notes": "Reports module, VAT statements, Sales Journal, customer dedicated page, expense logger, template categorization",
-  "pub_date": "2026-07-20T19:20:00Z",
+  "notes": "v2.3.7 \u2014 Latest update with invoice live preview fix and dashboard improvements.",
+  "pub_date": "2026-07-21T04:11:19Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmUwNlQwT25vVUFmd3ZlU1luMzdGY0RPVXVlRGRmY1dMUkdnSEp3bXVOcTMwTHBDSngzNzJURnNEbjZCSmJvbkx3VkdtbWcwQkx5cEREQThHNGNuNFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NTc5OTgyCWZpbGU6RmlsZXkgRVJQXzIuMy43X3g2NC1zZXR1cC5leGUKZTJRMXpqMTBBUmcxVHZGeTlSTjhSZy9MT1ZJQVdORkxBRmpmVlJpOHgvWWZCY1FsbUtabGZjTzBENE82cldqcHh2MDBIcVp2MnA0cFBSclQwU2RDQ3c9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.7/Filey ERP_2.3.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlZzZllqNkdtbGVqcE9RVXdhWERDK3N3ZDZ3cE1pWmUvcXdyUWptQlMxdnVqbkdmZTJrTDhySTJidkxsZENPM0ZwT2xTazkrcG0rcWlHNXdwbW9aSVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjA3MDYyCWZpbGU6RmlsZXkgRVJQXzIuMy43X3g2NC1zZXR1cC5leGUKcm13TXpWUzJ0cUNlUzBkTWhWaWtLUGhwcWliakx5c2hFL3Vnd2pqdVFadmlYb2Nuem01c2pud3owMURJbVc5cld6K2F3MnZrTDREVnBwbmxhVi9IQ0E9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.7/Filey.ERP_2.3.7_x64-setup.exe"
     }
   }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Users,
@@ -38,6 +39,7 @@ import MultiDatePicker from "../components/MultiDatePicker";
 
 export default function People() {
   const { toast, confirm } = useUI();
+  const nav = useNavigate();
   const [emps, setEmps] = useState<Employee[]>([]);
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
@@ -494,7 +496,7 @@ export default function People() {
                       onClick={() => {
                         const emp = quickViewFor;
                         setQuickViewFor(null);
-                        setPayslipFor(emp);
+                        nav(`/people/${emp.id}/payslip`);
                       }}
                     >
                       <FileText size={14} /> Payslip

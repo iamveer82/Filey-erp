@@ -31,6 +31,7 @@ import { maybePromptDesktopShortcut } from "./lib/shortcut";
 
 const CustomerDetail = lazy(() => import("./pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("./pages/SupplierDetail"));
+const PayslipPage = lazy(() => import("./pages/PayslipPage"));
 const PortalView = lazy(() => import("./pages/PortalView"));
 const ModernOverview = lazy(() => import("./pages/ModernOverview"));
 
@@ -74,6 +75,7 @@ function AppRoutes() {
         <Route path="/my-files" element={<Navigate to="/files" replace />} />
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/suppliers/:id" element={<SupplierDetail />} />
+        <Route path="/people/:id/payslip" element={<PayslipPage />} />
         <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
