@@ -312,9 +312,9 @@ export function Badge({
 }
 
 export function statusTone(
-  s: string
+  s?: string | null
 ): "success" | "warn" | "danger" | "info" | "neutral" {
-  const v = s.toLowerCase();
+  const v = (s ?? "").toLowerCase();
   if (["paid", "active", "present", "delivered", "confirmed", "in stock", "accepted"].includes(v))
     return "success";
   if (["draft", "cancelled"].includes(v))
