@@ -1,11 +1,11 @@
 {
-  "version": "2.3.8",
-  "notes": "Payslip dedicated page, People crash fix, Customers/Suppliers table cleanup, page scroll fix",
-  "pub_date": "2026-07-21T10:30:00Z",
+  "version": "2.3.9",
+  "notes": "Push-to-cloud fix, PO table cleanup, People crash fix, payslip page, scroll fix",
+  "pub_date": "2026-07-21T17:10:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmNieW5yL3dIWXdBUkpwRmZlN21HZVk5MUNGd0o4MU4yclIwMktkeXNrWFlYNXk0L25KUEdIMnUrK3lGWHV0RFY0Zy9YSGJSaG5MeXRrdTBkaW1UMmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjE3OTEwCWZpbGU6RmlsZXkgRVJQXzIuMy44X3g2NC1zZXR1cC5leGUKaGdrWVRldnNuZjFHSmlRU3hmWGxYcW5DelBjeUcvUEgrY3FHN3RxWVRCN1RjeHVSc205b0dsQ3lmNzFlZzJYNE5qdEtTVVNSZi90ODA5MHJZRC9hQ1E9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.8/Filey.ERP_2.3.8_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlprNXFYOGhpWWdRMC9GQmdHZGlpK1FLVWZUUFhndmxkUkh4dWRuczc0Y2xYd014RzJqanAvc3JGRnAyUmlPV0d5UnU1NmUwOXoyZkpZRFd6WTA5R1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjM5Mjg4CWZpbGU6RmlsZXkgRVJQXzIuMy45X3g2NC1zZXR1cC5leGUKaVFTa1VwY3FwSGZ6aHhzR1JORm5SQ0grcmpDckVIb0YvYlFJMHhXZ1c2em82T1B3a1orOEd6SnRudDV6eHY3NHRTWkt3RXI0QTNzSFNMRWtRWU5ZRFE9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.9/Filey.ERP_2.3.9_x64-setup.exe"
     }
   }
 }

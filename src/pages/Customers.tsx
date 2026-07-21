@@ -288,9 +288,7 @@ export default function Customers() {
             <thead>
               <tr>
                 <TH label="Customer" k="company" sortBy={sortBy} onSort={toggleSort} />
-                <TH label="TRN" k="trn" sortBy={sortBy} onSort={toggleSort} />
-                <TH label="Email" k="email" sortBy={sortBy} onSort={toggleSort} />
-                <TH label="Phone" k="phone" sortBy={sortBy} onSort={toggleSort} />
+                <TH label="Contact" k="email" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Segment" k="segment" sortBy={sortBy} onSort={toggleSort} />
                 <th className="th w-10" />
               </tr>
@@ -300,14 +298,14 @@ export default function Customers() {
                 rows.length === 0 &&
                 [0, 1, 2].map((i) => (
                   <tr key={i}>
-                    <td colSpan={6} className="td">
+                    <td colSpan={4} className="td">
                       <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
                     </td>
                   </tr>
                 ))}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="td py-14">
+                  <td colSpan={4} className="td py-14">
                     <div className="flex flex-col items-center gap-2 text-center">
                       <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
                         <Users size={24} className="text-muted-foreground" />
@@ -339,13 +337,10 @@ export default function Customers() {
                     </div>
                   </td>
                   <td className="td">
-                    {c.trn ? <span className="tabular-nums">{c.trn}</span> : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="td">
-                    {c.email || <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="td">
-                    {c.phone || <span className="text-muted-foreground">—</span>}
+                    <div className="min-w-0">
+                      <p className="truncate text-foreground">{c.email || <span className="text-muted-foreground">—</span>}</p>
+                      <p className="truncate text-[11.5px] text-muted-foreground">{c.phone || "—"}</p>
+                    </div>
                   </td>
                   <td className="td text-muted-foreground">
                     {c.segment || "—"}
