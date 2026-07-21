@@ -13,7 +13,6 @@ import {
   Info,
   Search,
   ArrowUpDown,
-  ChevronRight,
 } from "lucide-react";
 import { crm, type CrmCustomer } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -251,8 +250,8 @@ export default function Customers() {
       </div>
 
       {/* ── Table card: toolbar lives inside the card (DEMO reference) ── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-2">
+      <div className="card overflow-hidden p-0">
+        <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <input
@@ -285,33 +284,41 @@ export default function Customers() {
           </span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
+          <table className="w-full">
             <thead>
-              <tr className="text-left text-muted-foreground border-b border-border">
+              <tr>
                 <TH label="Customer" k="company" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="TRN" k="trn" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Email" k="email" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Phone" k="phone" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Segment" k="segment" sortBy={sortBy} onSort={toggleSort} />
-                <th className="px-3 py-2.5" />
+                <th className="th w-10" />
               </tr>
             </thead>
             <tbody>
               {loading &&
                 rows.length === 0 &&
                 [0, 1, 2].map((i) => (
-                  <tr key={i} className="border-b border-border">
-                    <td colSpan={6} className="px-5 py-3">
+                  <tr key={i}>
+                    <td colSpan={6} className="td">
                       <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
                     </td>
                   </tr>
                 ))}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">
-                    {rows.length === 0
-                      ? "No customers yet — add your first"
-                      : "No customers match your filters."}
+                  <td colSpan={6} className="td py-14">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
+                        <Users size={24} className="text-muted-foreground" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">
+                        {rows.length === 0 ? "No customers yet" : "No matches"}
+                      </p>
+                      <p className="text-[12.5px] text-muted-foreground">
+                        {rows.length === 0 ? "Add your first customer to get started" : "Try adjusting your filters"}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -319,9 +326,9 @@ export default function Customers() {
                 <tr
                   key={c.id}
                   onClick={() => nav(`/customers/${c.id}`)}
-                  className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
+                  className="row-hover cursor-pointer"
                 >
-                  <td className="px-5 py-3">
+                  <td className="td">
                     <div className="min-w-0">
                       <p className="truncate font-medium text-foreground">
                         {c.company || c.name}
@@ -331,19 +338,19 @@ export default function Customers() {
                       </p>
                     </div>
                   </td>
-                  <td className="px-5 py-3 text-foreground">
+                  <td className="td">
                     {c.trn ? <span className="tabular-nums">{c.trn}</span> : <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="px-5 py-3 text-foreground">
+                  <td className="td">
                     {c.email || <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="px-5 py-3 text-foreground">
+                  <td className="td">
                     {c.phone || <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="px-5 py-3 text-muted-foreground">
+                  <td className="td text-muted-foreground">
                     {c.segment || "—"}
                   </td>
-                  <td className="px-3 py-3 text-muted-foreground">
+                  <td className="td w-10">
                     <div className="flex items-center gap-1 justify-end">
                       <RowActions
                         onView={() => setQuickView(c)}
@@ -397,7 +404,6 @@ export default function Customers() {
                           toast.success("Customer deleted.");
                         }}
                       />
-                      <ChevronRight className="h-4 w-4" />
                     </div>
                   </td>
                 </tr>
@@ -628,7 +634,7 @@ function TH({
 }) {
   const active = sortBy.key === k;
   return (
-    <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">
+    <th className="th">
       <button
         onClick={() => onSort(k)}
         className={cn(

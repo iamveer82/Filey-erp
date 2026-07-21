@@ -294,9 +294,9 @@ export default function Suppliers() {
         />
       </div>
 
-      {/* ── Table card: toolbar lives inside the card (DEMO reference) ── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-2">
+      {/* ── Table card ── */}
+      <div className="card overflow-hidden p-0">
+        <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <input
@@ -311,32 +311,40 @@ export default function Suppliers() {
           </span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
+          <table className="w-full">
             <thead>
-              <tr className="text-left text-muted-foreground border-b border-border">
+              <tr>
                 <TH label="Supplier" k="name" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Category" k="category" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Contact" k="contact" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Open balance" k="balance" sortBy={sortBy} onSort={toggleSort} right />
-                <th className="px-3 py-2.5" />
+                <th className="th w-10" />
               </tr>
             </thead>
             <tbody>
               {loading &&
                 suppliers.length === 0 &&
                 [0, 1, 2].map((i) => (
-                  <tr key={i} className="border-b border-border">
-                    <td colSpan={5} className="px-5 py-3">
+                  <tr key={i}>
+                    <td colSpan={5} className="td">
                       <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
                     </td>
                   </tr>
                 ))}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-muted-foreground">
-                    {suppliers.length === 0
-                      ? "No suppliers yet — add your first one"
-                      : "No suppliers match your search."}
+                  <td colSpan={5} className="td py-14">
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
+                        <Building2 size={24} className="text-muted-foreground" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">
+                        {suppliers.length === 0 ? "No suppliers yet" : "No matches"}
+                      </p>
+                      <p className="text-[12.5px] text-muted-foreground">
+                        {suppliers.length === 0 ? "Add your first supplier to get started" : "Try adjusting your search"}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -344,9 +352,9 @@ export default function Suppliers() {
                 <tr
                   key={s.id}
                   onClick={() => nav(`/suppliers/${s.id}`)}
-                  className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
+                  className="row-hover cursor-pointer"
                 >
-                  <td className="px-5 py-3">
+                  <td className="td">
                     <div className="min-w-0">
                       <p className="truncate font-medium text-foreground">{s.name}</p>
                       <p className="truncate text-[11.5px] text-muted-foreground font-mono">
@@ -354,18 +362,18 @@ export default function Suppliers() {
                       </p>
                     </div>
                   </td>
-                  <td className="px-5 py-3 text-foreground">
+                  <td className="td">
                     {categoryBySupplier.get(s.id) || (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-foreground">
+                  <td className="td">
                     {contactOf(s) || <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="px-5 py-3 text-right text-foreground tabular-nums">
+                  <td className="td text-right tabular-nums">
                     {money(balanceBySupplier.get(s.id) ?? 0)}
                   </td>
-                  <td className="px-3 py-3 text-muted-foreground">
+                  <td className="td w-10">
                     <div className="flex items-center gap-1 justify-end">
                       <RowActions
                         onView={() => setQuickView(s)}
@@ -547,7 +555,7 @@ function TH({
   return (
     <th
       className={cn(
-        "px-5 py-2.5 font-medium text-[12px] tracking-wide",
+        "th",
         right && "text-right"
       )}
     >
