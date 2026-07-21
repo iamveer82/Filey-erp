@@ -340,7 +340,7 @@ export default function DataModePanel() {
   const runPush = async () => {
     if (
       !window.confirm(
-        "Upload this device's local data to your cloud account? The web version will then show the same data. Requires an empty cloud account (tables that already have cloud data are skipped). You must be signed in."
+        "Upload this device's local data to your cloud account? The web version will then show the same data. Cloud records with the same id are OVERWRITTEN — this device wins. You must be signed in."
       )
     )
       return;
@@ -575,8 +575,8 @@ export default function DataModePanel() {
             <p className="text-sm text-brand-500 mt-0.5">
               Uploads everything on this device (invoices, customers, products,
               files…) to your cloud account, so the web version shows the same
-              data. Works on a fresh cloud account — tables that already have
-              cloud data are skipped to protect them.
+              data. Cloud records sharing an id are overwritten by this
+              device's copy.
             </p>
           </div>
           <button
@@ -594,21 +594,14 @@ export default function DataModePanel() {
               <ul className="text-brand-500 grid grid-cols-2 gap-x-6 gap-y-0.5">
                 {result
                   .filter((r) => r.rows > 0 || r.error)
-                  .map((r) => {
-                    const skipped = r.error?.startsWith("skipped");
-                    return (
-                      <li key={r.table} className="flex justify-between" title={r.error}>
-                        <span>{r.table}</span>
-                        <span
-                          className={
-                            r.error ? (skipped ? "text-brand-400" : "text-danger") : "tabular-nums"
-                          }
-                        >
-                          {r.error ? (skipped ? "already in cloud" : "failed") : r.rows}
-                        </span>
-                      </li>
-                    );
-                  })}
+                  .map((r) => (
+                    <li key={r.table} className="flex justify-between" title={r.error}>
+                      <span>{r.table}</span>
+                      <span className={r.error ? "text-danger" : "tabular-nums"}>
+                        {r.error ? `${r.rows} · ${r.error}` : r.rows}
+                      </span>
+                    </li>
+                  ))}
               </ul>
             </div>
           )}

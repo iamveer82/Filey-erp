@@ -128,7 +128,7 @@ const FK_COLUMNS: Record<string, string[]> = {
  *  back to per-row so one bad row can't block the rest, and retry a row with
  *  its foreign keys nulled if a FK constraint is what failed. Returns the ids
  *  that could not be pushed (rare — logged, retried next sync). */
-async function pushCollection(
+export async function pushCollection(
   supa: SupabaseClient,
   table: string,
   rows: Record<string, any>[]

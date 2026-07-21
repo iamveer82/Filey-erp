@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { cleanRowForPush } from "./sync";
+import { cleanRowForPush, pushCollection } from "./sync";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -133,9 +133,9 @@ export interface MigrateResult {
 /** Push all local on-device data into the signed-in cloud account, so the web
  *  version shows the same data. Rows keep their local ids (FK relationships
  *  survive); user/org ownership is re-stamped by the cloud's defaults and
- *  triggers. To avoid id collisions, each table is only pushed when its cloud
- *  side is EMPTY — tables that already have cloud rows are skipped and
- *  reported. File bytes stored locally are uploaded to the files bucket. */
+ *  triggers. Rows UPSERT by id — a cloud row with the same id is replaced by
+ *  this device's copy (the caller's confirm dialog says so). File bytes stored
+ *  locally are uploaded to the files bucket. */
 export async function migrateLocalToCloud(
   onProgress?: (msg: string) => void
 ): Promise<MigrateResult[]> {
@@ -145,11 +145,11 @@ export async function migrateLocalToCloud(
   const uid = sess.session?.user?.id;
   if (!uid)
     throw new Error(
-      "Sign in to your cloud account first: switch to Cloud mode, log in, then push."
+      "Not signed in to your cloud account. In offline mode, connect under " +
+        "“Cloud sync (automatic)” above; in cloud mode, log in — then push again."
     );
 
   const out: MigrateResult[] = [];
-  const CHUNK = 200;
 
   for (const t of PUSH_TABLES) {
     const raw = await localGet("localdb:" + t);
@@ -162,33 +162,17 @@ export async function migrateLocalToCloud(
     if (!Array.isArray(rows) || rows.length === 0) continue;
 
     onProgress?.(`Pushing ${t}…`);
-    // Never merge into a table that already has cloud rows — pushed rows keep
-    // their local ids, and colliding ids would corrupt FK relationships.
-    const { count, error: ce } = await supabase
-      .from(t)
-      .select("id", { count: "exact", head: true });
-    if (ce) {
-      out.push({ table: t, rows: 0, error: ce.message });
-      continue;
-    }
-    if ((count ?? 0) > 0) {
-      out.push({ table: t, rows: 0, error: "skipped — cloud already has data" });
-      continue;
-    }
-
     const cleaned = rows.map((r) => cleanRowForPush(r as Record<string, any>, uid));
-
-    let pushed = 0;
-    let err: string | undefined;
-    for (let i = 0; i < cleaned.length; i += CHUNK) {
-      const { error } = await supabase.from(t).insert(cleaned.slice(i, i + CHUNK));
-      if (error) {
-        err = error.message;
-        break;
-      }
-      pushed += Math.min(CHUNK, cleaned.length - i);
-    }
-    out.push({ table: t, rows: pushed, error: err });
+    // Same resilient upsert the continuous sync uses: chunked, per-row
+    // fallback, dangling FKs stripped on retry. Upserting (not inserting) is
+    // what makes this work against an account that already has rows — the old
+    // "skip any table with cloud data" rule silently pushed nothing at all.
+    const failed = await pushCollection(supabase, t, cleaned);
+    out.push({
+      table: t,
+      rows: cleaned.length - failed.length,
+      error: failed.length ? `${failed.length} row(s) failed` : undefined,
+    });
   }
 
   // Pushed rows kept their local ids — bump identity sequences past them so

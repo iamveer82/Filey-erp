@@ -119,12 +119,32 @@ export async function verifyStoredLicense(): Promise<LicenseState> {
   }
 }
 
+/** Collections whose presence proves this device has been used offline. */
+const LOCAL_DATA_KEYS = [
+  "localdb:company_profile",
+  "localdb:invoice_docs",
+  "localdb:crm_customers",
+  "localdb:products",
+];
+
+/** True when this device already holds offline data. */
+async function hasLocalData(): Promise<boolean> {
+  for (const k of LOCAL_DATA_KEYS) {
+    const raw = await kvGet(k);
+    if (raw && raw !== "[]" && raw !== "null") return true;
+  }
+  return false;
+}
+
 /** Offline/local mode is the paid Lite feature: cloud is the free default,
  *  keeping data on-device needs a desktop license. Always true while
- *  ENFORCE_LICENSING is off (pre-launch), so nothing is gated yet. */
+ *  ENFORCE_LICENSING is off (pre-launch), and always true when this device
+ *  already has offline data — a licence check must never lock someone out of
+ *  data that is already on their own machine. */
 export async function canUseLocalMode(): Promise<boolean> {
   if (!ENFORCE_LICENSING) return true;
-  return (await verifyStoredLicense()).valid;
+  if ((await verifyStoredLicense()).valid) return true;
+  return hasLocalData();
 }
 
 /** Activate this device against the signed-in account's license (one server
