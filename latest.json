@@ -1,11 +1,11 @@
 {
-  "version": "2.3.5",
-  "notes": "VAT-aware statement engine + modular 6-tab reports",
-  "pub_date": "2026-07-20T11:30:00Z",
+  "version": "2.3.7",
+  "notes": "Reports module, VAT statements, Sales Journal, customer dedicated page, expense logger, template categorization",
+  "pub_date": "2026-07-20T19:20:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZllZbE0yNGNlRGM0UXNIVWV3ZUc5WWhHOVVBUmRXUVhhcmxCMElxZG5ob21BbEhXOFc0NTZsVmlldjl3K0JlMlRrWUZpQkF5RDVFYksyMWFNaVZvdXcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NTMyNTU1CWZpbGU6RmlsZXkgRVJQXzIuMy41X3g2NC1zZXR1cC5leGUKRUNnclJ5N0k3MjBxTGlGSWpxckVrVUFVSWZUSkNrY1RWRXZ0RC90RTJSOEI0bXVFVitEaTdEdkMxZCszeEpacUZWMDdDN1ZUYUxqUzZSV09YTW5sQlE9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.5/Filey ERP_2.3.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmUwNlQwT25vVUFmd3ZlU1luMzdGY0RPVXVlRGRmY1dMUkdnSEp3bXVOcTMwTHBDSngzNzJURnNEbjZCSmJvbkx3VkdtbWcwQkx5cEREQThHNGNuNFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NTc5OTgyCWZpbGU6RmlsZXkgRVJQXzIuMy43X3g2NC1zZXR1cC5leGUKZTJRMXpqMTBBUmcxVHZGeTlSTjhSZy9MT1ZJQVdORkxBRmpmVlJpOHgvWWZCY1FsbUtabGZjTzBENE82cldqcHh2MDBIcVp2MnA0cFBSclQwU2RDQ3c9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.7/Filey ERP_2.3.7_x64-setup.exe"
     }
   }
 }
