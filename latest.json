@@ -1,11 +1,11 @@
 {
-  "version": "2.3.9",
-  "notes": "Push-to-cloud fix, PO table cleanup, People crash fix, payslip page, scroll fix",
-  "pub_date": "2026-07-21T17:10:00Z",
+  "version": "2.3.10",
+  "notes": "Advance edit/remove, PO PDF fix, VAT + Bank toggle",
+  "pub_date": "2026-07-22T14:15:40Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlprNXFYOGhpWWdRMC9GQmdHZGlpK1FLVWZUUFhndmxkUkh4dWRuczc0Y2xYd014RzJqanAvc3JGRnAyUmlPV0d5UnU1NmUwOXoyZkpZRFd6WTA5R1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NjM5Mjg4CWZpbGU6RmlsZXkgRVJQXzIuMy45X3g2NC1zZXR1cC5leGUKaVFTa1VwY3FwSGZ6aHhzR1JORm5SQ0grcmpDckVIb0YvYlFJMHhXZ1c2em82T1B3a1orOEd6SnRudDV6eHY3NHRTWkt3RXI0QTNzSFNMRWtRWU5ZRFE9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.9/Filey.ERP_2.3.9_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlRuZ1EzNlRDYnJ3K1V2YXZaajFTQTBDcUZWRHVUVmNKbHdCOEZKdDBtU0lzclRhU3l0YTY0bFF0eEh6YlFMVzBkTDg4bFNOTURVNlBRLzA3QnhNS3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NzI2NTI2CWZpbGU6RmlsZXkgRVJQXzIuMy4xMF94NjQtc2V0dXAuZXhlCkRMRFd3aDBnT3NEd1hjUVAveXlCY0RpbDF1UWQvR0lWTU4yTGd5SVJLZ0JNQkhmQWpUdERLS3E4Ukd2bWpZSHN4YWRxL1FqOWVUNUcrQTE1N3F0NkRBPT0K",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.10/Filey.ERP_2.3.10_x64-setup.exe"
     }
   }
 }
