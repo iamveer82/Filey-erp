@@ -23,6 +23,7 @@ import {
   ClipboardList,
   Wallet,
   Send,
+  Landmark,
 } from "lucide-react";
 import {
   pos,
@@ -60,8 +61,16 @@ import TemplateDesigner, { type CustomTemplate } from "../components/TemplateDes
 import {
   StampSignatureLayer,
   StampSigAdjust,
+  DraggableBlock,
   type StampSig,
 } from "../components/StampSignature";
+import {
+  BankDetailsBlock,
+  loadBankInfo,
+  hasBankInfo,
+  EMPTY_BANK,
+  type BankInfo,
+} from "../components/BankDetails";
 import {
   loadCompanyStampSig,
   EMPTY_STAMP_SIG,
@@ -80,6 +89,7 @@ import {
   ShareToggle,
   SearchInput,
   FilterChip,
+  ToggleTile,
 } from "../components/ui";
 import {
   RowActions,
@@ -113,6 +123,7 @@ type Form = Omit<PoInput, "items"> & {
   signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
+  show_bank?: boolean;
 };
 
 /* ------------------------------------------------------------------ */
@@ -161,6 +172,7 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
     customColumns: [],
     show_stamp: false,
     show_signature: false,
+    show_bank: false,
     unit_price_formula: null,
   };
 }
@@ -764,6 +776,7 @@ function poDocToForm(
     ),
     show_stamp: po.show_stamp ?? false,
     show_signature: po.show_signature ?? false,
+    show_bank: (po as any).show_bank ?? false,
     unit_price_formula: po.unit_price_formula || null,
     items: po.items.map((i) => {
       const { custom, pageBreakBefore } = splitPageBreak(i.custom);
@@ -864,6 +877,9 @@ function Editor({
   const [viewOpen, setViewOpen] = useState(false);
   const [viewPage, setViewPage] = useState(1);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [bankX, setBankX] = useState(50);
+  const [bankY, setBankY] = useState(88);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierModal, setSupplierModal] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
@@ -872,6 +888,7 @@ function Editor({
     loadCompanyStampSig()
       .then(setCompanyStampSig)
       .catch(() => {});
+    loadBankInfo().then(setBank).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1047,7 +1064,8 @@ function Editor({
         expected_date: form.expected_date || undefined,
         show_stamp: form.show_stamp ?? false,
         show_signature: form.show_signature ?? false,
-      };
+      } as PoInput;
+      (payload as any).show_bank = form.show_bank ?? false;
       // Remove the in-memory aliases that don't exist on the DB model.
       delete (payload as any).customColumns;
 
@@ -1182,8 +1200,8 @@ function Editor({
       customer_trn: form.supplier_trn,
       issue_date: form.order_date,
       due_date: form.expected_date,
-      tax_rate: 0,
-      discount: 0,
+      tax_rate: form.tax_rate ?? 0,
+      discount: form.discount ?? 0,
       notes: form.notes,
       terms: form.terms,
       items: form.items.map((it) => ({
@@ -1910,6 +1928,32 @@ function Editor({
                   <p className="text-[11px] text-brand-500">
                     Tip: set this once in Settings → Company Details to auto-fill every PO.
                   </p>
+                  <div className="space-y-2 pt-2">
+                    <Field label="VAT rate %">
+                      <input
+                        type="number"
+                        className="input"
+                        min="0"
+                        step="0.01"
+                        placeholder="0"
+                        value={form.tax_rate ?? ""}
+                        onChange={(e) => set("tax_rate", numInput(e.target.value))}
+                      />
+                    </Field>
+                    <ToggleTile
+                      icon={Landmark}
+                      label="Bank details"
+                      desc={
+                        hasBankInfo(bank)
+                          ? "Show bank details on the PO"
+                          : "Add bank details in Settings first"
+                      }
+                      active={!!form.show_bank}
+                      onToggle={() => {
+                        if (hasBankInfo(bank)) setForm({ ...form, show_bank: !form.show_bank });
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             </Step>
@@ -1973,77 +2017,18 @@ function Editor({
                       showFooter={isLastPreviewPage}
                       labels={docViewLabels}
                     />
+                    {form.show_bank && (
+                      <DraggableBlock
+                        x={bankX}
+                        y={bankY}
+                        onMove={(x, y) => { setBankX(x); setBankY(y); }}
+                      >
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
                   </div>
                 </div>
               </FitPreview>
-
-              {/* Off-screen export container — captures every page for the PDF. */}
-              {(() => {
-                const exportPages = paginateItems(docItems);
-                return (
-                  <div
-                    ref={exportRef}
-                    aria-hidden
-                    data-no-i18n
-                    dir="ltr"
-                    className="fixed left-[-99999px] top-0 pointer-events-none"
-                    style={{ width: 794, background: "#fff" }}
-                  >
-                    {exportPages.map((group, gi) => {
-                      const startIdx = exportPages
-                        .slice(0, gi)
-                        .reduce((n, g) => n + g.length, 0);
-                      const isLast = gi === exportPages.length - 1;
-                      return (
-                        <div
-                          key={gi}
-                          className="invoice-print"
-                          style={{
-                            width: 794,
-                            height: 1123,
-                            background: "#fff",
-                            position: "relative",
-                            overflow: "hidden",
-                            padding: 48,
-                            boxSizing: "border-box",
-                          }}
-                        >
-                          <div
-                            style={{
-                              position: "relative",
-                              width: "100%",
-                              minHeight: 1027,
-                              background: "#fff",
-                            }}
-                          >
-                            {isLast && (
-                              <StampSignatureLayer
-                                stamp={activeStamp}
-                                signature={activeSignature}
-                                onStampMove={() => {}}
-                                onSignatureMove={() => {}}
-                              />
-                            )}
-                            <DocView
-                              form={docViewForm as any}
-                              pageItems={
-                                docViewForm.items.slice(
-                                  startIdx,
-                                  startIdx + group.length
-                                ) as any
-                              }
-                              itemStartIndex={startIdx}
-                              showTotals={isLast}
-                              showFooter={isLast}
-                              labels={docViewLabels}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
 
               {previewPages > 1 && (
                 <div className="no-print flex items-center justify-center gap-2 mt-2">
@@ -2124,6 +2109,80 @@ function Editor({
           </div>
         }
       />
+
+      {/* Off-screen export container — always mounted so PDF export works
+          even when the preview panel is collapsed. */}
+      {(() => {
+        const exportPages = paginateItems(docItems);
+        return (
+          <div
+            ref={exportRef}
+            aria-hidden
+            data-no-i18n
+            dir="ltr"
+            className="fixed left-[-99999px] top-0 pointer-events-none"
+            style={{ width: 794, background: "#fff" }}
+          >
+            {exportPages.map((group, gi) => {
+              const startIdx = exportPages
+                .slice(0, gi)
+                .reduce((n, g) => n + g.length, 0);
+              const isLast = gi === exportPages.length - 1;
+              return (
+                <div
+                  key={gi}
+                  className="invoice-print"
+                  style={{
+                    width: 794,
+                    height: 1123,
+                    background: "#fff",
+                    position: "relative",
+                    overflow: "hidden",
+                    padding: 48,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      minHeight: 1027,
+                      background: "#fff",
+                    }}
+                  >
+                    {isLast && (
+                      <StampSignatureLayer
+                        stamp={activeStamp}
+                        signature={activeSignature}
+                        onStampMove={() => {}}
+                        onSignatureMove={() => {}}
+                      />
+                    )}
+                    <DocView
+                      form={docViewForm as any}
+                      pageItems={
+                        docViewForm.items.slice(
+                          startIdx,
+                          startIdx + group.length
+                        ) as any
+                      }
+                      itemStartIndex={startIdx}
+                      showTotals={isLast}
+                      showFooter={isLast}
+                      labels={docViewLabels}
+                    />
+                    {isLast && form.show_bank && (
+                      <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Full-screen view modal */}
       {viewOpen && (

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Wallet, Plus, Trash2 } from "lucide-react";
+import { Wallet, Plus, Trash2, Pencil } from "lucide-react";
 import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
 import { aed, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
@@ -24,6 +23,7 @@ export default function AdvanceCard({
   const { toast, confirm } = useUI();
   const [rows, setRows] = useState<Advance[]>([]);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Advance | null>(null);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -40,7 +40,23 @@ export default function AdvanceCard({
   const net = outstanding != null ? Math.max(0, outstanding - total) : undefined;
   const label = partyType === "customer" ? "Advance received" : "Advance paid";
 
-  const add = async () => {
+  const openAdd = () => {
+    setEditing(null);
+    setAmount("");
+    setNote("");
+    setDate(new Date().toISOString().slice(0, 10));
+    setOpen(true);
+  };
+
+  const openEdit = (a: Advance) => {
+    setEditing(a);
+    setAmount(String(a.amount));
+    setNote(a.note || "");
+    setDate(a.paid_at);
+    setOpen(true);
+  };
+
+  const save = async () => {
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) {
       toast.error("Enter a valid amount.");
@@ -48,21 +64,24 @@ export default function AdvanceCard({
     }
     setSaving(true);
     try {
-      await advances.add({
-        party_type: partyType,
-        party_id: partyId,
-        party_name: partyName,
-        amount: amt,
-        note: note || undefined,
-        paid_at: date,
-      });
-      setAmount("");
-      setNote("");
+      if (editing) {
+        await advances.update(editing.id, { amount: amt, note: note || undefined, paid_at: date });
+        toast.success("Advance updated.");
+      } else {
+        await advances.add({
+          party_type: partyType,
+          party_id: partyId,
+          party_name: partyName,
+          amount: amt,
+          note: note || undefined,
+          paid_at: date,
+        });
+        toast.success("Advance recorded.");
+      }
       setOpen(false);
-      toast.success("Advance recorded.");
       load();
     } catch (e: any) {
-      toast.error(e?.message || "Failed to record advance.");
+      toast.error(e?.message || "Failed to save advance.");
     } finally {
       setSaving(false);
     }
@@ -93,7 +112,7 @@ export default function AdvanceCard({
         </div>
         <button
           className="btn-ghost text-xs !py-1 !px-2.5"
-          onClick={() => setOpen(true)}
+          onClick={openAdd}
         >
           <Plus size={13} /> Add
         </button>
@@ -130,13 +149,22 @@ export default function AdvanceCard({
                   <span className="text-brand-500"> — {a.note}</span>
                 )}
               </div>
-              <button
-                className="text-brand-400 hover:text-danger p-1 rounded cursor-pointer shrink-0"
-                onClick={() => remove(a)}
-                aria-label="Remove advance"
-              >
-                <Trash2 size={13} />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  className="text-brand-400 hover:text-ink p-1 rounded cursor-pointer"
+                  onClick={() => openEdit(a)}
+                  aria-label="Edit advance"
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  className="text-brand-400 hover:text-danger p-1 rounded cursor-pointer"
+                  onClick={() => remove(a)}
+                  aria-label="Remove advance"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -144,7 +172,7 @@ export default function AdvanceCard({
         <p className="text-xs text-brand-400 mt-3">No advances recorded yet.</p>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={label}>
+      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit advance" : label}>
         <div className="space-y-3">
           <Field label="Amount (AED)">
             <input
@@ -178,8 +206,8 @@ export default function AdvanceCard({
             <button className="btn-ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
-            <button className="btn-primary" disabled={saving} onClick={add}>
-              {saving ? "Saving…" : "Save advance"}
+            <button className="btn-primary" disabled={saving} onClick={save}>
+              {saving ? "Saving…" : editing ? "Update advance" : "Save advance"}
             </button>
           </div>
         </div>
@@ -189,12 +217,15 @@ export default function AdvanceCard({
 }
 
 /** Invoicing-dashboard widget: record customer advances and see every customer
- *  holding credit (net of amounts already applied to invoices), summed + ranked. */
+ *  holding credit (net of amounts already applied to invoices), summed + ranked.
+ *  Click a customer to expand and see/edit/remove individual entries. */
 export function CustomerAdvancesPanel() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [rows, setRows] = useState<Advance[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Advance | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
   const [custId, setCustId] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
@@ -223,37 +254,74 @@ export function CustomerAdvancesPanel() {
     .sort((x, y) => y.total - x.total);
   const total = list.reduce((s, p) => s + p.total, 0);
 
-  const add = async () => {
-    const c = customers.find((x) => String(x.id) === custId);
+  const openAdd = () => {
+    setEditing(null);
+    setCustId("");
+    setAmount("");
+    setNote("");
+    setDate(new Date().toISOString().slice(0, 10));
+    setOpen(true);
+  };
+
+  const openEdit = (a: Advance) => {
+    setEditing(a);
+    setCustId(String(a.party_id));
+    setAmount(String(a.amount));
+    setNote(a.note || "");
+    setDate(a.paid_at);
+    setOpen(true);
+  };
+
+  const save = async () => {
     const amt = parseFloat(amount);
-    if (!c) {
-      toast.error("Pick a customer.");
-      return;
-    }
     if (!amt || amt <= 0) {
       toast.error("Enter a valid amount.");
       return;
     }
     setSaving(true);
     try {
-      await advances.add({
-        party_type: "customer",
-        party_id: c.id,
-        party_name: c.company || c.name,
-        amount: amt,
-        note: note || undefined,
-        paid_at: date,
-      });
-      setCustId("");
-      setAmount("");
-      setNote("");
+      if (editing) {
+        await advances.update(editing.id, { amount: amt, note: note || undefined, paid_at: date });
+        toast.success("Advance updated.");
+      } else {
+        const c = customers.find((x) => String(x.id) === custId);
+        if (!c) {
+          toast.error("Pick a customer.");
+          setSaving(false);
+          return;
+        }
+        await advances.add({
+          party_type: "customer",
+          party_id: c.id,
+          party_name: c.company || c.name,
+          amount: amt,
+          note: note || undefined,
+          paid_at: date,
+        });
+        toast.success("Advance recorded.");
+      }
       setOpen(false);
-      toast.success("Advance recorded.");
       load();
     } catch (e: any) {
-      toast.error(e?.message || "Failed to record advance.");
+      toast.error(e?.message || "Failed to save advance.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const remove = async (a: Advance) => {
+    const ok = await confirm({
+      title: "Remove advance",
+      message: `Remove the ${aed(a.amount)} advance? This cannot be undone.`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await advances.remove(a.id);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to remove.");
     }
   };
 
@@ -269,28 +337,65 @@ export function CustomerAdvancesPanel() {
         </div>
         <button
           className="btn-ghost text-xs !py-1 !px-2.5"
-          onClick={() => setOpen(true)}
+          onClick={openAdd}
         >
           <Plus size={13} /> Add advance
         </button>
       </div>
       {list.length > 0 ? (
-        <ul className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {list.map((p) => (
-            <li
-              key={p.id}
-              className="flex items-center justify-between rounded-lg border border-brand-100 px-3 py-2 text-sm"
-            >
-              <Link
-                to={`/customers/${p.id}`}
-                className="truncate text-brand-700 hover:text-ink"
-              >
-                {p.name}
-              </Link>
-              <span className="font-medium text-ink shrink-0 ml-2">{aed(p.total)}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-1">
+          {list.map((p) => {
+            const partyRows = rows
+              .filter((a) => a.party_id === p.id)
+              .sort((a, b) => b.paid_at.localeCompare(a.paid_at));
+            const isOpen = expanded === p.id;
+            return (
+              <div key={p.id} className="rounded-lg border border-brand-100 overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-brand-50 cursor-pointer"
+                  onClick={() => setExpanded(isOpen ? null : p.id)}
+                >
+                  <span className="truncate text-brand-700 hover:text-ink">{p.name}</span>
+                  <span className="font-medium text-ink shrink-0 ml-2">{aed(p.total)}</span>
+                </button>
+                {isOpen && partyRows.length > 0 && (
+                  <ul className="divide-y divide-brand-100 border-t border-brand-100">
+                    {partyRows.map((a) => (
+                      <li
+                        key={a.id}
+                        className="flex items-center justify-between px-3 py-1.5 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <span className="font-medium text-ink">{aed(a.amount)}</span>
+                          <span className="text-brand-400"> · {fmtDate(a.paid_at)}</span>
+                          {a.note && (
+                            <span className="text-brand-500"> — {a.note}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            className="text-brand-400 hover:text-ink p-1 rounded cursor-pointer"
+                            onClick={() => openEdit(a)}
+                            aria-label="Edit advance"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            className="text-brand-400 hover:text-danger p-1 rounded cursor-pointer"
+                            onClick={() => remove(a)}
+                            aria-label="Remove advance"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <p className="text-xs text-brand-400">
           No advances on file. Record one when a customer pays up front — it's
@@ -298,22 +403,29 @@ export function CustomerAdvancesPanel() {
         </p>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Record customer advance">
+      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit advance" : "Record customer advance"}>
         <div className="space-y-3">
-          <Field label="Customer">
-            <select
-              className="select"
-              value={custId}
-              onChange={(e) => setCustId(e.target.value)}
-            >
-              <option value="">Select customer…</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.company || c.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+          {editing && (
+            <Field label="Customer">
+              <input className="input" value={editing.party_name} disabled />
+            </Field>
+          )}
+          {!editing && (
+            <Field label="Customer">
+              <select
+                className="select"
+                value={custId}
+                onChange={(e) => setCustId(e.target.value)}
+              >
+                <option value="">Select customer…</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company || c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Amount (AED)">
             <input
               className="input"
@@ -323,6 +435,7 @@ export function CustomerAdvancesPanel() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
+              autoFocus
             />
           </Field>
           <Field label="Date">
@@ -345,8 +458,8 @@ export function CustomerAdvancesPanel() {
             <button className="btn-ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
-            <button className="btn-primary" disabled={saving} onClick={add}>
-              {saving ? "Saving…" : "Save advance"}
+            <button className="btn-primary" disabled={saving} onClick={save}>
+              {saving ? "Saving…" : editing ? "Update advance" : "Save advance"}
             </button>
           </div>
         </div>

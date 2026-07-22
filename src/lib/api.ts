@@ -4042,6 +4042,10 @@ export const advances = {
     write({ k: "delete", t: "advances", id }, () =>
       sDelete("advances", id), undefined
     ),
+  update: (id: number, patch: Partial<Pick<Advance, "amount" | "note" | "paid_at">>) =>
+    write({ k: "update", t: "advances", id, row: patch }, () =>
+      sUpdate("advances", id, patch), undefined
+    ),
   /** Apply (consume) advance credit against a specific invoice. Idempotent per
    *  invoice id: replaces any prior consumption for that invoice, so re-saving
    *  with a new amount rebalances cleanly. Stored as a NEGATIVE ledger entry so

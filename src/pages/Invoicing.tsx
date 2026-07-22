@@ -3538,87 +3538,6 @@ function Editor({
               </div>
             </FitPreview>
 
-            {/* Off-screen full render: every page stacked as a real A4 sheet.
-                This is what the PDF captures — all items, manual page breaks
-                honored, and totals/notes only on the final sheet. */}
-            {(() => {
-              const exportPages = paginateItems(form.items);
-              return (
-                <div
-                  ref={exportRef}
-                  aria-hidden
-                  data-no-i18n
-                  dir="ltr"
-                  className="fixed left-[-99999px] top-0 pointer-events-none"
-                  style={{ width: 794, background: "#fff" }}
-                >
-                  {exportPages.map((group, gi) => {
-                    const startIdx = exportPages
-                      .slice(0, gi)
-                      .reduce((n, g) => n + g.length, 0);
-                    const isLast = gi === exportPages.length - 1;
-                    return (
-                      <div
-                        key={gi}
-                        className="invoice-print"
-                        style={{
-                          width: 794,
-                          height: 1123,
-                          background: "#fff",
-                          position: "relative",
-                          overflow: "hidden",
-                          padding: 48,
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <div
-                          style={{
-                            position: "relative",
-                            width: "100%",
-                            minHeight: 1027,
-                            background: "#fff",
-                          }}
-                        >
-                          {isLast && (
-                            <StampSignatureLayer
-                              stamp={
-                                form.show_stamp
-                                  ? form.stamp?.data
-                                    ? form.stamp
-                                    : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
-                                  : undefined
-                              }
-                              signature={
-                                form.show_signature
-                                  ? form.signature?.data
-                                    ? form.signature
-                                    : (companyStampSig ?? EMPTY_STAMP_SIG).signature
-                                  : undefined
-                              }
-                              onStampMove={() => {}}
-                              onSignatureMove={() => {}}
-                            />
-                          )}
-                          <DocView
-                            form={form}
-                            pageItems={group}
-                            itemStartIndex={startIdx}
-                            showTotals={isLast}
-                            showFooter={isLast}
-                          />
-                          {isLast && form.show_bank && (
-                            <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                              <BankDetailsBlock bank={bank} accent={form.accent} />
-                            </DraggableBlock>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
             {previewPages > 1 && (
               <div className="no-print flex items-center justify-center gap-2 mt-2">
                 <button
@@ -3698,6 +3617,86 @@ function Editor({
           </div>
         }
       />
+
+      {/* Off-screen full render: every page stacked as a real A4 sheet.
+          Always mounted so PDF export works even when the preview panel is collapsed. */}
+      {(() => {
+        const exportPages = paginateItems(form.items);
+        return (
+          <div
+            ref={exportRef}
+            aria-hidden
+            data-no-i18n
+            dir="ltr"
+            className="fixed left-[-99999px] top-0 pointer-events-none"
+            style={{ width: 794, background: "#fff" }}
+          >
+            {exportPages.map((group, gi) => {
+              const startIdx = exportPages
+                .slice(0, gi)
+                .reduce((n, g) => n + g.length, 0);
+              const isLast = gi === exportPages.length - 1;
+              return (
+                <div
+                  key={gi}
+                  className="invoice-print"
+                  style={{
+                    width: 794,
+                    height: 1123,
+                    background: "#fff",
+                    position: "relative",
+                    overflow: "hidden",
+                    padding: 48,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      minHeight: 1027,
+                      background: "#fff",
+                    }}
+                  >
+                    {isLast && (
+                      <StampSignatureLayer
+                        stamp={
+                          form.show_stamp
+                            ? form.stamp?.data
+                              ? form.stamp
+                              : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
+                            : undefined
+                        }
+                        signature={
+                          form.show_signature
+                            ? form.signature?.data
+                              ? form.signature
+                              : (companyStampSig ?? EMPTY_STAMP_SIG).signature
+                            : undefined
+                        }
+                        onStampMove={() => {}}
+                        onSignatureMove={() => {}}
+                      />
+                    )}
+                    <DocView
+                      form={form}
+                      pageItems={group}
+                      itemStartIndex={startIdx}
+                      showTotals={isLast}
+                      showFooter={isLast}
+                    />
+                    {isLast && form.show_bank && (
+                      <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {viewOpen && (
         <div
