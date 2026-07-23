@@ -35,6 +35,7 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
+import { sendShareEmail } from "../lib/email";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
@@ -163,12 +164,22 @@ export default function Orders() {
       (c) => c.name === o.customer_name || c.company === o.customer_name
     );
 
-  const doShare = (kind: ShareKind, o: Order) => {
+  const doShare = async (kind: ShareKind, o: Order) => {
     const cust = findCustomer(o);
+    const text = `Order ${o.order_number} for ${o.customer_name} — total ${aed(o.total)}. Status: ${o.status}.`;
+    if (kind === "email") {
+      try {
+        await sendShareEmail(cust?.email || "", `Order ${o.order_number}`, text);
+        toast.success(`Order emailed to ${cust?.email}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     shareVia(kind, {
       phone: cust?.phone_e164 || cust?.phone || "",
       email: cust?.email || "",
-      text: `Order ${o.order_number} for ${o.customer_name} — total ${aed(o.total)}. Status: ${o.status}.`,
+      text,
       url: `${window.location.origin}/orders?id=${o.id}`,
     });
     if (kind === "copyLink") toast.success("Link copied.");

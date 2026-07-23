@@ -98,6 +98,7 @@ import {
   type QuickViewData,
   type ShareKind,
 } from "../components/RowActions";
+import { sendShareEmail } from "../lib/email";
 import { DateField } from "../components/DatePicker";
 
 /* ------------------------------------------------------------------ */
@@ -392,6 +393,11 @@ export default function PurchaseOrders() {
       const text = `Purchase Order ${doc.po_number} to ${
         doc.supplier_name || r.supplier_name
       } — ${doc.items.length} item(s), ${money(r.total, ccy)}.${eta}`;
+      if (kind === "email") {
+        await sendShareEmail(email, `Purchase Order ${doc.po_number}`, text);
+        toast.success(`Purchase order emailed to ${email}`);
+        return;
+      }
       shareVia(kind, {
         phone,
         email,

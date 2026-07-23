@@ -44,7 +44,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
 import { nextDocNumber } from "../lib/docNumber";
-import { sendEmail, emailShell, esc } from "../lib/email";
+import { sendEmail, emailShell, esc, sendShareEmail } from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
@@ -434,6 +434,15 @@ export default function Quoting() {
       d.total || 0,
       statCcy
     )} is ready. Please review: ${url}`;
+    if (kind === "email") {
+      try {
+        await sendShareEmail(cust?.email || "", `Quotation ${d.number}`, text);
+        toast.success(`Quotation emailed to ${cust?.email}`);
+      } catch (e) {
+        toast.error(errMsg(e));
+      }
+      return;
+    }
     shareVia(kind, {
       phone: cust?.phone || "",
       email: cust?.email || "",

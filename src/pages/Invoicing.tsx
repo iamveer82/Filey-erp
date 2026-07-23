@@ -952,12 +952,47 @@ const editInvoice = async (id: number) => {
       const text = `Hi ${doc.customer_name || "there"},\n\n${
         isPurchase ? "Purchase invoice" : "Invoice"
       } ${doc.number} for ${money(d.total, ccy)} is available. Thank you!`;
+      const subject = `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`;
+      // Email sends through Resend (server), not the OS mail client — so the
+      // customer actually receives it. WhatsApp/SMS still open the user's apps.
+      if (kind === "email") {
+        if (!doc.customer_email) {
+          toast.error("This customer has no email address on file.");
+          return;
+        }
+        let portalUrl = "";
+        try {
+          const token = await billing.publicLink(d.id);
+          portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+        } catch {
+          /* link optional */
+        }
+        await sendEmail({
+          to: doc.customer_email,
+          subject,
+          html: emailShell(
+            subject,
+            `<p>Dear ${esc(doc.customer_name || "customer")},</p>
+             <p>Your ${esc(isPurchase ? "purchase invoice" : "invoice")} <b>${esc(
+               doc.number
+             )}</b> for <b>${esc(money(d.total, ccy))}</b> is ready.</p>
+             ${
+               portalUrl
+                 ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>`
+                 : ""
+             }
+             <p>${esc(doc.notes ?? "")}</p>`
+          ),
+        });
+        toast.success(`Invoice emailed to ${doc.customer_email}`);
+        return;
+      }
       shareVia(kind, {
         phone,
         email: doc.customer_email || "",
         text,
         // shareVia uses `url` as the mail subject for email shares.
-        url: `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`,
+        url: subject,
       });
     } catch (e) {
       toast.error(errMsg(e));

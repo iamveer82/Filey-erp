@@ -33,6 +33,7 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
+import { sendShareEmail } from "../lib/email";
 import { DateField } from "../components/DatePicker";
 import {
   loadCompanyStampSig,
@@ -286,11 +287,20 @@ export default function DeliveryChallan() {
     });
   };
 
-  const shareDc = (kind: ShareKind, r: DcRecord) => {
+  const shareDc = async (kind: ShareKind, r: DcRecord) => {
     const cust = customers.find((c) => (c.company || c.name) === r.party_name);
     const text = `Hi ${r.party_name || "there"},\n\n${typeLabel(r.dc_type)} ${
       r.number
     } dated ${fmtDate(r.issue_date)} (${r.item_count} item(s)) is ready.`;
+    if (kind === "email") {
+      try {
+        await sendShareEmail(cust?.email || "", `${typeLabel(r.dc_type)} ${r.number}`, text);
+        toast.success(`${typeLabel(r.dc_type)} emailed to ${cust?.email}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     // shareVia reuses `url` as the email subject.
     shareVia(kind, {
       phone: cust?.phone || "",

@@ -58,6 +58,7 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
+import { sendShareEmail } from "../lib/email";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -369,6 +370,15 @@ export default function PaymentReceipt() {
       /* fall back to the app link (e.g. Local mode) */
     }
     const text = `Receipt ${d.number} for ${money(d.amount || 0, ccy)} received. Thank you! View: ${url}`;
+    if (kind === "email") {
+      try {
+        await sendShareEmail(cust?.email || "", `Receipt ${d.number}`, text);
+        toast.success(`Receipt emailed to ${cust?.email}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     shareVia(kind, {
       phone: cust?.phone || "",
       email: cust?.email || "",

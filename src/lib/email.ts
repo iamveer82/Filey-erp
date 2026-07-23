@@ -54,6 +54,22 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
   await bumpEmailCount();
 }
 
+/** Send a document-summary email through Resend for the list-row "Email"
+ *  share, so it actually sends instead of opening the OS mail client. `text`
+ *  is the same summary used for the WhatsApp/SMS shares; URLs in it are made
+ *  clickable. */
+export async function sendShareEmail(
+  to: string,
+  subject: string,
+  text: string
+): Promise<void> {
+  if (!to.trim()) throw new Error("This contact has no email address on file.");
+  const html = esc(text)
+    .replace(/\n/g, "<br>")
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+  await sendEmail({ to, subject, html: emailShell(subject, html) });
+}
+
 /** Escape a user-supplied value before embedding it in email HTML.
  * Prevents HTML/script injection from customer names, notes, etc. */
 export function esc(v: unknown): string {
