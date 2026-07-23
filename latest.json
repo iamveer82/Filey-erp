@@ -1,35 +1,35 @@
 {
-  "version": "2.3.11",
-  "notes": "Redeem a voucher under Settings -> Desktop License to unlock offline mode free (first 25 accounts).",
-  "pub_date": "2026-07-23T18:38:08.459Z",
+  "version": "2.3.12",
+  "notes": "Emailing an invoice, quote, PO, receipt, challan or order from the list now sends through Filey (Resend) instead of opening your mail app.",
+  "pub_date": "2026-07-23T19:21:47.490Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlNGTWdNblY0cUloaVpBNURoN2Q3VDJPS3JSdm0rTnNkcDcrbEY0WG5hSitBQnIyanFqeG03R2wxRndYaDNKU08rbnJtVUdlRTVXclhiZHJWOGRCMmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxMDIzCWZpbGU6RmlsZXkgRVJQXzIuMy4xMV94NjRfZW4tVVMubXNpCjhOMkRTTldmUDIzbGg0c3I1RkpMK2xKQ3ozOGtsTjlxdW9td3c2VU1KeWdRNWhQZFpxbWpHWGt5MmF0VmFJV2tjSHE5TnZGMDZIOHNDUldOQ3h6S0N3PT0K",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_x64_en-US.msi"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmJxY0U4L0YwdCtmQXlRMlprY3o3NVppc0hNclMva1d0dmUrWGJ6aWJ0M2ovZGszNHhEelpncmVXa3VyQU5peWc0bUJ6WjU3cHJvbXBjdEpybmlUUEFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDc3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl94NjRfZW4tVVMubXNpClpVZGZaN2hqNThwaGVHRk1SMmtKU1NlZVFFUUFmQVl1QmJOTXBXeVlqc2hJWTR4MHQrc2NkYW5wRzlLNC91Q3BPUHlsY1NVYTFLVUVsSnJtYzFGRkR3PT0K",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_x64_en-US.msi"
     },
     "windows-x86_64-msi": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlNGTWdNblY0cUloaVpBNURoN2Q3VDJPS3JSdm0rTnNkcDcrbEY0WG5hSitBQnIyanFqeG03R2wxRndYaDNKU08rbnJtVUdlRTVXclhiZHJWOGRCMmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxMDIzCWZpbGU6RmlsZXkgRVJQXzIuMy4xMV94NjRfZW4tVVMubXNpCjhOMkRTTldmUDIzbGg0c3I1RkpMK2xKQ3ozOGtsTjlxdW9td3c2VU1KeWdRNWhQZFpxbWpHWGt5MmF0VmFJV2tjSHE5TnZGMDZIOHNDUldOQ3h6S0N3PT0K",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_x64_en-US.msi"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmJxY0U4L0YwdCtmQXlRMlprY3o3NVppc0hNclMva1d0dmUrWGJ6aWJ0M2ovZGszNHhEelpncmVXa3VyQU5peWc0bUJ6WjU3cHJvbXBjdEpybmlUUEFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDc3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl94NjRfZW4tVVMubXNpClpVZGZaN2hqNThwaGVHRk1SMmtKU1NlZVFFUUFmQVl1QmJOTXBXeVlqc2hJWTR4MHQrc2NkYW5wRzlLNC91Q3BPUHlsY1NVYTFLVUVsSnJtYzFGRkR3PT0K",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_x64_en-US.msi"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlI1MmJFMGVZdHh2cmhmS1drL1pMRHM2MkVXZXUybFNKRUZkdDlzcnNzV1NmNTJMNURTQVBFU3pTVUMxY1hWNUpLUi9FUE9lMGxXbUlJM3kzbWo3OGc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxMDIzCWZpbGU6RmlsZXkgRVJQXzIuMy4xMV94NjQtc2V0dXAuZXhlCmlpZm9UTm5sRmhlVE1FYkdWZDAwU0t5K1J6WXlLTkMvRVFxUUVaTnlsZXFwWGR2bk1hbncxQmxoaUcxK0h1WWdVNG9XMEE0MjRrYVRZYlZaOVdscEJBPT0K",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmQwWmU3UmM4YUVPQVBPYUVvTTdXMkdEZHJjbjZtRGwyZ1p1Q1JjbFlhY0RGWFF6ejc1NGk1TC9lY01mdlNLR2xGeWkxWVlKcWF0MkMwYjVwN2lZb3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDc3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl94NjQtc2V0dXAuZXhlCmVQckltM2kxL3hhV0FFZkdGQTAvWmowc3BSSkpMUkFQOGgwTG9lS2UvdGE2cUF5aWxDZXZCYU9ZSEloaVFNeXlZOEJxY2pLdkdJbDIxU3BPTmVKbERnPT0K",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmN0RFBqQk1UeXQyaTUyREllRXRzR0JyVTZCNWJDTDNJcHdhS2RkYUEwU1lGaTJtZXl3NmZwSDRpbmQyWGxOQnNEMmsvSGI0WUhkYUVXWVFETGdFOEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxODY3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMV9hbWQ2NC5BcHBJbWFnZQowL05xTzdnMnhDMkphWVNQMTR6Z0J4K0htVWxPdmZCbzJxZ3M5TkcxVTM5dVlmV2pleXlBb25iNnFXR3ZpNm82aVltY1Vxd2szK2hpOU5NaDFMT2FDQT09Cg==",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlYwMWRoMVFlcG1scUFyQmJDUTlxNUY3VVhvOVpYZGI1SWtTVzdCaTcyeGEzVWZ4Sk9VWG1hVnlkTTNUMVA4TmFLWStFL0MzSlgzZXV6YXNiajFVM1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDk3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl9hbWQ2NC5BcHBJbWFnZQpodWRRcjJhY2NJN0NVQ2MzVEhEenlDVThsdXJDckZNd2IzeEVXaFRUSmhqUHpFd0liUXR4cXVGQnAzZDBoRHpDNUYva1lRMDF2UmdBYVpwZUxVeVpBdz09Cg==",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_amd64.AppImage"
     },
     "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmN0RFBqQk1UeXQyaTUyREllRXRzR0JyVTZCNWJDTDNJcHdhS2RkYUEwU1lGaTJtZXl3NmZwSDRpbmQyWGxOQnNEMmsvSGI0WUhkYUVXWVFETGdFOEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxODY3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMV9hbWQ2NC5BcHBJbWFnZQowL05xTzdnMnhDMkphWVNQMTR6Z0J4K0htVWxPdmZCbzJxZ3M5TkcxVTM5dVlmV2pleXlBb25iNnFXR3ZpNm82aVltY1Vxd2szK2hpOU5NaDFMT2FDQT09Cg==",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlYwMWRoMVFlcG1scUFyQmJDUTlxNUY3VVhvOVpYZGI1SWtTVzdCaTcyeGEzVWZ4Sk9VWG1hVnlkTTNUMVA4TmFLWStFL0MzSlgzZXV6YXNiajFVM1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDk3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl9hbWQ2NC5BcHBJbWFnZQpodWRRcjJhY2NJN0NVQ2MzVEhEenlDVThsdXJDckZNd2IzeEVXaFRUSmhqUHpFd0liUXR4cXVGQnAzZDBoRHpDNUYva1lRMDF2UmdBYVpwZUxVeVpBdz09Cg==",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_amd64.AppImage"
     },
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmV2K0V1dmlJUzA3KzJ3L2ZkcHR4TFNoYUVkYThucG9VTmZzYktLSGdubHN2SUJYKzRqc0tZMkFOUGZkb3NDQXgxVVFMMDJUK2c2U0M2TmI3dW0zS0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxODY3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMV9hbWQ2NC5kZWIKbnJ2S3dKUnZzSFYrNE1xMU9NZVBaNlY5NGxMOHFNSG9mV3l5U29xUTBma2N4OGU4dDdCZ1ZhWkN5ZjJVamFlUjVtVzJic2NOWC9MUlNPcTN0OWs5Qnc9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP_2.3.11_amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZmVCbjd4NllZaDdlVVFHY25WS09xUzVyNDR1ZUFWcjdHbmdkdXVKd1RmUDEyclN0VFJPY0dLbllpdzFVRXB2SXlQRXN5WkpwYnNCdklxc1F2M2xhTGd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDk3CWZpbGU6RmlsZXkgRVJQXzIuMy4xMl9hbWQ2NC5kZWIKZGpqT3k1RUlHaVpNRjQ3OHowcUYwTnQ4b0hOQnRLVWhuVmJMUFEydGh2SjJrclV6cWFweUF0anhkS2hpYmMrQTV0WnlGV3dkam9LNFlVMEc5MFljREE9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP_2.3.12_amd64.deb"
     },
     "linux-x86_64-rpm": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlZPQnFzVFp3bHpRekhOcmFaMkpHS2Z2RVhET21JN0Q2Yjc1UmsycUxyVkJGQ05ZbW9pWTlmRWw1bHJmNGJ0dnJyMllVcjdBZ0JBbnlpMWlROFA1YXdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODMxODY3CWZpbGU6RmlsZXkgRVJQLTIuMy4xMS0xLng4Nl82NC5ycG0KOXkwMkZTUFU4d01vNHlDRkl3T3pnYTZZcE9RWjJYSjhYZGprUDVZSStXMlFVVEFyS1M1elNKN1BTSTM3RFE2ZXhONG9McWljU3prdXBScmFJemdIQ3c9PQo=",
-      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.11/Filey.ERP-2.3.11-1.x86_64.rpm"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOGpxa2x3Y0MvZlg3VXpQY09YQk9oNDZkWHYvSm1MSDgwK245dXgrcVBRSVpNUjRqVnJUVkk1UG9kNDlZNGtSNjNNd0ZTcFdxNk8zM0NmTGwvOXArZzJGRVN1RkJqaVE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0ODM0NDk3CWZpbGU6RmlsZXkgRVJQLTIuMy4xMi0xLng4Nl82NC5ycG0KcTFualRhVG5MbGRzVlAxaWpVWDdJbHhrZ0wvdjVaNjVyMjBpdUJMTmRuSzV5NFlxdHAwTENKbVVueUNGSkJsZytEZ2IrMlJKc01UdVJIeGRCVnQzREE9PQo=",
+      "url": "https://github.com/iamveer82/Filey-erp/releases/download/v2.3.12/Filey.ERP-2.3.12-1.x86_64.rpm"
     }
   }
 }
