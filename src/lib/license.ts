@@ -137,7 +137,8 @@ async function hasLocalData(): Promise<boolean> {
 }
 
 /** Offline/local mode is the paid Lite feature: cloud is the free default,
- *  keeping data on-device needs a desktop license. Always true while
+ *  keeping data on-device needs a desktop license (buy it, or claim a free
+ *  seat with a voucher — see redeemVoucher). Always true while
  *  ENFORCE_LICENSING is off (pre-launch), and always true when this device
  *  already has offline data — a licence check must never lock someone out of
  *  data that is already on their own machine. */
@@ -163,6 +164,25 @@ export async function activateThisDevice(): Promise<LicenseState> {
   if (!data?.token) throw new Error("Activation failed — no token returned.");
   await kvSet(TOKEN_KEY, data.token as string);
   return verifyStoredLicense();
+}
+
+/** Redeem a promo voucher (one-time, online). The server caps total redemptions
+ *  per code, grants this account a desktop license, then we activate THIS device
+ *  through the normal path — offline forever after. Requires a cloud sign-in. */
+export async function redeemVoucher(code: string): Promise<LicenseState> {
+  if (!supabase) throw new Error("Cloud isn't configured — sign in to redeem a voucher.");
+  const { data, error } = await supabase.rpc("redeem_voucher", { p_code: code.trim() });
+  if (error) throw new Error(error.message);
+  const res = (data ?? {}) as { ok?: boolean; reason?: string };
+  if (!res.ok) {
+    const msg: Record<string, string> = {
+      not_signed_in: "Sign in first, then redeem your voucher.",
+      invalid_code: "That voucher code isn't valid.",
+      exhausted: "This voucher is fully claimed — all free seats are taken.",
+    };
+    throw new Error(msg[res.reason ?? ""] ?? "Couldn't redeem this voucher.");
+  }
+  return activateThisDevice();
 }
 
 /** Free a device slot — any of the account's devices, by fingerprint. Used

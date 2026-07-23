@@ -23,7 +23,7 @@ export default function SetupNotice() {
       choose("local");
     } else {
       setLicenseMsg(
-        "Offline mode needs a one-time Filey Desktop license. Start free in the cloud — you can buy the license later under Settings → Desktop License."
+        "Offline mode needs a Filey Desktop license. Start free in the cloud — then buy a license or redeem a voucher under Settings → Desktop License."
       );
     }
   };

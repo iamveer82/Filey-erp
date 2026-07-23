@@ -4,6 +4,7 @@ import { cloudConfigured } from "../../lib/supabase";
 import {
   verifyStoredLicense,
   activateThisDevice,
+  redeemVoucher,
   deactivateDevice,
   startLiteCheckout,
   licenseOverview,
@@ -31,6 +32,7 @@ export default function LicensePanel() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [voucher, setVoucher] = useState("");
 
   const refresh = () => {
     verifyStoredLicense().then(setLocal).catch(() => {});
@@ -215,6 +217,35 @@ export default function LicensePanel() {
               >
                 <ShoppingCart size={15} /> Buy desktop license
               </button>
+
+              <div className="mt-4 border-t border-brand-100 dark:border-white/8 pt-4">
+                <label htmlFor="voucher" className="text-sm font-medium text-ink flex items-center gap-1.5">
+                  <KeyRound size={14} /> Have a voucher?
+                </label>
+                <p className="text-xs text-brand-400 mt-1">
+                  Redeem a promo code to unlock offline mode for free.
+                </p>
+                <form
+                  className="flex gap-2 mt-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (voucher.trim())
+                      run(() => redeemVoucher(voucher), "Voucher redeemed — offline mode unlocked on this device.");
+                  }}
+                >
+                  <input
+                    id="voucher"
+                    className="input flex-1"
+                    placeholder="Enter voucher code"
+                    autoCapitalize="characters"
+                    value={voucher}
+                    onChange={(e) => setVoucher(e.target.value)}
+                  />
+                  <button className="btn-ghost" disabled={busy || !voucher.trim()}>
+                    Redeem
+                  </button>
+                </form>
+              </div>
             </>
           )}
         </div>
