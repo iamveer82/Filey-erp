@@ -11,7 +11,6 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Logo from "../components/Logo";
-import PeekingCharacters from "../components/PeekingCharacters";
 import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
@@ -91,7 +90,6 @@ export default function Login() {
   const [otpPurpose, setOtpPurpose] = useState<"signup" | "login">("login");
   const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
 
   // Inline validation
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -241,66 +239,39 @@ export default function Login() {
     </p>
   );
 
+  const heading =
+    screen === "otp"
+      ? "Enter the code"
+      : mode === "signin"
+        ? "Welcome back"
+        : "Create your account";
+  const subheading =
+    screen === "otp" ? (
+      <>
+        Sent to <span className="font-medium text-ink">{identifier}</span>
+      </>
+    ) : mode === "signin" ? (
+      "Sign in to continue to your workspace."
+    ) : (
+      "Start managing your business in minutes."
+    );
+
+  // Minimal centered auth surface — the same quiet canvas+card language as
+  // the rest of the app (SetupNotice, ProfileSetup). No brand circus.
   return (
-    <div className="min-h-full grid lg:grid-cols-2 bg-background">
-      {/* ── Brand panel with playful characters — pinned dark in both themes
-          (the characters + white type are designed for a dark backdrop). ── */}
-      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between p-12 bg-neutral-900 text-white">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.05]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle, rgba(255,255,255,0.7) 1px, transparent 1px)",
-            backgroundSize: "22px 22px",
-          }}
-        />
-
-        <div className="relative flex items-center gap-3">
-          <Logo size={56} />
-          <p className="text-2xl font-semibold tracking-tight leading-none">Filey</p>
+    <div className="min-h-full bg-canvas grid place-items-center p-6">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center text-center mb-6">
+          <Logo size={44} />
+          <h1 className="mt-4 text-xl font-semibold tracking-tight text-foreground">
+            {heading}
+          </h1>
+          <p className="mt-1.5 text-sm text-brand-500">{subheading}</p>
         </div>
 
-        <div className="relative">
-          <h2 className="text-[32px] leading-[1.15] font-medium max-w-md">
-            Run your whole business from one calm place.
-          </h2>
-          <p className="text-white/60 mt-3 max-w-sm">
-            Inventory, orders, invoicing and CRM — fast and beautifully simple. (Mind the
-            password — they're watching.)
-          </p>
-        </div>
-
-        <div className="relative flex items-end justify-center">
-          <PeekingCharacters
-            typing={isTyping}
-            passwordLength={password.length}
-            passwordVisible={showPw}
-          />
-        </div>
-      </div>
-
-      {/* ── Form panel ── */}
-      <div className="flex items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-sm">
-          <div className="flex lg:hidden flex-col items-center mb-8">
-            <Logo size={64} />
-            <h1 className="text-2xl font-semibold tracking-tight leading-none text-foreground mt-3">Filey</h1>
-          </div>
-
+        <div className="card p-6">
           {screen === "form" ? (
             <form onSubmit={submitForm} className="space-y-4">
-              <div className="mb-2">
-                <h1 className="text-2xl font-medium text-ink">
-                  {mode === "signin" ? "Welcome back" : "Create your account"}
-                </h1>
-                <p className="text-sm text-brand-500 mt-1">
-                  {mode === "signin"
-                    ? "Sign in to continue to your workspace."
-                    : "Start managing your business in minutes."}
-                </p>
-              </div>
-
               <Segmented<Channel>
                 value={channel}
                 disabled={busy}
@@ -348,8 +319,6 @@ export default function Login() {
                       setIdentifier(e.target.value);
                       if (fieldErrors.identifier) setFieldError("identifier", "");
                     }}
-                    onFocus={() => setIsTyping(true)}
-                    onBlur={() => setIsTyping(false)}
                   />
                 </div>
               </FormField>
@@ -378,8 +347,6 @@ export default function Login() {
                         setPassword(e.target.value);
                         if (fieldErrors.password) setFieldError("password", "");
                       }}
-                      onFocus={() => setIsTyping(true)}
-                      onBlur={() => setIsTyping(false)}
                       minLength={6}
                     />
                     <button
@@ -458,42 +425,35 @@ export default function Login() {
               </button>
 
               {!hasTauriShell && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="btn-ghost w-full"
-                  onClick={async () => {
-                    setErr(null);
-                    try {
-                      await signInWithGoogle();
-                    } catch (e) {
-                      setErr(e instanceof Error ? e.message : String(e));
-                    }
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.02.15 3.5 2.7.24.02c2.2-2 3.5-5 3.5-8.6z" />
-                    <path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.7-2.9c-1 .7-2.4 1.2-4.2 1.2-3.1 0-5.8-2.1-6.7-5l-.14.01-3.6 2.8-.05.13C3.5 21.3 7.4 24 12 24z" />
-                    <path fill="#FBBC05" d="M5.3 14.4c-.3-.8-.4-1.6-.4-2.4s.1-1.7.4-2.4l-.01-.16-3.7-2.8-.12.06C.5 8.2 0 10 0 12s.5 3.8 1.5 5.4l3.8-3z" />
-                    <path fill="#EA4335" d="M12 4.7c2.2 0 3.7 1 4.6 1.8l3.3-3.2C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.5 6.6l3.8 3c.9-2.9 3.6-4.9 6.7-4.9z" />
-                  </svg>
-                  Continue with Google
-                </button>
+                <>
+                  <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-brand-400">
+                    <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
+                    or
+                    <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="btn-ghost w-full"
+                    onClick={async () => {
+                      setErr(null);
+                      try {
+                        await signInWithGoogle();
+                      } catch (e) {
+                        setErr(e instanceof Error ? e.message : String(e));
+                      }
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.02.15 3.5 2.7.24.02c2.2-2 3.5-5 3.5-8.6z" />
+                      <path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.7-2.9c-1 .7-2.4 1.2-4.2 1.2-3.1 0-5.8-2.1-6.7-5l-.14.01-3.6 2.8-.05.13C3.5 21.3 7.4 24 12 24z" />
+                      <path fill="#FBBC05" d="M5.3 14.4c-.3-.8-.4-1.6-.4-2.4s.1-1.7.4-2.4l-.01-.16-3.7-2.8-.12.06C.5 8.2 0 10 0 12s.5 3.8 1.5 5.4l3.8-3z" />
+                      <path fill="#EA4335" d="M12 4.7c2.2 0 3.7 1 4.6 1.8l3.3-3.2C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.5 6.6l3.8 3c.9-2.9 3.6-4.9 6.7-4.9z" />
+                    </svg>
+                    Continue with Google
+                  </button>
+                </>
               )}
-
-              <button
-                type="button"
-                className="text-xs font-medium text-brand-500 hover:text-ink w-full text-center cursor-pointer"
-                onClick={() => {
-                  setMode(mode === "signin" ? "signup" : "signin");
-                  setMethod("password");
-                  reset(true);
-                }}
-              >
-                {mode === "signin"
-                  ? "No account? Create one"
-                  : "Have an account? Sign in"}
-              </button>
             </form>
           ) : (
             <form onSubmit={submitOtp} className="space-y-4">
@@ -509,13 +469,6 @@ export default function Login() {
               >
                 <ArrowLeft size={14} /> Back
               </button>
-
-              <div>
-                <h1 className="text-2xl font-medium text-ink">Enter the code</h1>
-                <p className="text-sm text-brand-500 mt-1">
-                  Sent to <span className="font-medium text-ink">{identifier}</span>
-                </p>
-              </div>
 
               <FormField label="6-digit code" required>
                 <InputOTP
@@ -549,11 +502,35 @@ export default function Login() {
               </button>
             </form>
           )}
-
-          <p className="text-[11px] text-brand-400 text-center mt-8">
-            Protected workspace · Supabase-secured
-          </p>
         </div>
+
+        {screen === "form" && (
+          <button
+            type="button"
+            className="mt-4 w-full text-center text-xs text-brand-500 cursor-pointer"
+            onClick={() => {
+              setMode(mode === "signin" ? "signup" : "signin");
+              setMethod("password");
+              reset(true);
+            }}
+          >
+            {mode === "signin" ? (
+              <>
+                No account yet?{" "}
+                <span className="font-medium text-ink">Create one</span>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <span className="font-medium text-ink">Sign in</span>
+              </>
+            )}
+          </button>
+        )}
+
+        <p className="text-[11px] text-brand-400 text-center mt-6">
+          Protected workspace · Supabase-secured
+        </p>
       </div>
     </div>
   );
