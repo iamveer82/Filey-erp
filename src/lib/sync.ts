@@ -372,9 +372,24 @@ export function startAutoSync(): void {
   // enough that a burst of saves (e.g. an invoice + its items) becomes one push.
   window.addEventListener("filey:local-write", () => scheduleSync(1000));
   window.addEventListener("online", () => scheduleSync(1000));
+  // Pull once when the user returns to the app — covers edits missed while the
+  // window was hidden (see the idle-poll note below).
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) scheduleSync(1000);
+  });
   scheduleSync(3000); // catch up on writes made while offline or signed out
-  // Idle poll so teammate / second-device edits land within a minute.
-  setInterval(() => void syncCycle(), 60_000);
+  // Idle poll so teammate / second-device edits land. pullNow re-downloads a
+  // full snapshot of every table, so a short interval on an always-open app
+  // burns cloud egress 24/7 for nothing — this is what exhausted the free-tier
+  // quota. Poll every 5 min, and NOT while the window is hidden (a backgrounded
+  // app syncs nothing until you look at it again — the visibilitychange pull
+  // above catches you up).
+  // ponytail: interval + visibility gate. If egress is still high, make
+  // pullNow incremental (updated_at > lastPull) instead of full-snapshot.
+  setInterval(() => {
+    if (typeof document !== "undefined" && document.hidden) return;
+    void syncCycle();
+  }, 300_000);
 }
 
 /** Mark every non-empty local collection dirty, then sync — the "upload all my
