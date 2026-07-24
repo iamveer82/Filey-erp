@@ -151,8 +151,10 @@ export default function MyFiles() {
   // Breadcrumb trail from root to the current folder.
   const trail = useMemo(() => {
     const out: UserFolder[] = [];
+    const seen = new Set<string>(); // guard against a parentId cycle (concurrent re-parent across synced devices)
     let id = cwd;
-    while (id) {
+    while (id && !seen.has(id)) {
+      seen.add(id);
       const f = foldersById.get(id);
       if (!f) break;
       out.unshift(f);
