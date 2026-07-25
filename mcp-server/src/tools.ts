@@ -17,6 +17,15 @@ const Limit = z
   .optional()
   .describe("Max rows to return (default 10, max 100)");
 
+/**
+ * `invoice_docs` holds sales AND purchase documents. The app tags purchases with
+ * `doc_type = "purchase"` and strips the field on sales docs (older rows kept a
+ * printed title there, e.g. "Tax Invoice") — see src/lib/api.ts, which reads
+ * anything that isn't "purchase" as a sales document. So the sales filter is
+ * "not a purchase", with NULL matched explicitly because SQL `<>` drops NULLs.
+ */
+const SALES_ONLY = "doc_type.is.null,doc_type.neq.purchase";
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -139,7 +148,7 @@ export const tools: ToolDef[] = [
         .from("invoice_docs")
         .select("id, status, tax_rate, due_date")
         .eq("org_id", ctx.orgId)
-        .eq("doc_type", "invoice");
+        .or(SALES_ONLY);
       if (invErr) throw new Error(`invoice_docs query failed: ${invErr.message}`);
 
       const counts: Record<string, number> = { draft: 0, sent: 0, paid: 0 };
@@ -194,7 +203,7 @@ export const tools: ToolDef[] = [
         .from("invoice_docs")
         .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, tax_rate")
         .eq("org_id", ctx.orgId)
-        .eq("doc_type", "invoice")
+        .or(SALES_ONLY)
         .order("issue_date", { ascending: false })
         .limit(limit);
       if (args.status && args.status !== "overdue") q = q.eq("status", args.status);
@@ -388,7 +397,7 @@ export const tools: ToolDef[] = [
           .from("invoice_docs")
           .select("id, issue_date, tax_rate")
           .eq("org_id", ctx.orgId)
-          .eq("doc_type", "invoice")
+          .or(SALES_ONLY)
           .neq("status", "draft")
           .gte("issue_date", since.toISOString().slice(0, 10));
         if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
@@ -418,7 +427,7 @@ export const tools: ToolDef[] = [
           .from("invoice_docs")
           .select("id, customer_name, tax_rate")
           .eq("org_id", ctx.orgId)
-          .eq("doc_type", "invoice")
+          .or(SALES_ONLY)
           .neq("status", "draft")
           .gte("issue_date", isoDaysAgo(90));
         if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
@@ -450,7 +459,7 @@ export const tools: ToolDef[] = [
         .from("invoice_docs")
         .select("id, number, customer_name, due_date, tax_rate")
         .eq("org_id", ctx.orgId)
-        .eq("doc_type", "invoice")
+        .or(SALES_ONLY)
         .eq("status", "sent");
       if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
       const itemsMap = await itemsForInvoices(ctx, (data ?? []).map((i) => i.id));

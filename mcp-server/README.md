@@ -2,8 +2,14 @@
 
 MCP (Model Context Protocol) server for **Filey ERP**. It lets external AI clients —
 Claude Code, Hermes, Cursor, or any MCP-compatible host — read financials and create
-draft documents in Filey over a stdio transport, backed by Supabase/PostgREST with
-row-level security enforced as *your* user.
+draft documents in Filey over a stdio transport.
+
+It runs against either backend:
+
+- **Local mode** — reads and writes the desktop app's own SQLite database. No account,
+  no network, no Supabase project. This is the default when the desktop app is
+  installed and no `SUPABASE_URL` is configured.
+- **Cloud mode** — Supabase/PostgREST with row-level security enforced as *your* user.
 
 - 17 tools: financial summaries, invoices, quotes, purchase orders, customers,
   products, low-stock alerts, built-in reports, draft-only writes, and a
@@ -28,12 +34,38 @@ Or run the published package directly:
 npx -y filey-erp-mcp
 ```
 
+## Local mode (offline, no account)
+
+Point an MCP client at your desktop install and every tool works against the data
+already on the machine:
+
+```bash
+claude mcp add filey -e FILEY_LOCAL=1 -- npx -y filey-erp-mcp
+```
+
+That's the whole setup. The server finds `filey-erp.db` in the app-data folder
+(`%APPDATA%\com.iamvi.filey-erp` on Windows, `~/Library/Application Support/…` on
+macOS, `~/.config/…` on Linux), honouring the `data_dir.txt` pointer if you moved
+your data folder in **Settings → Data**. Pass `FILEY_LOCAL_DB=/full/path/filey-erp.db`
+to override.
+
+Notes:
+
+- The desktop app can stay open — SQLite handles concurrent access, and the app
+  picks up agent-created drafts on its next read.
+- Drafts created here are marked dirty in the app's sync journal, so they upload
+  with the next cloud sync if you use one.
+- `request_payment_reminder` still only *proposes*; the reminder is sent by the
+  cloud channel agent after `APPROVE <code>`, so it needs the Supabase deployment.
+
 ## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `SUPABASE_URL` | yes | Your Supabase project URL, e.g. `https://xyz.supabase.co` |
-| `SUPABASE_ANON_KEY` | yes | Supabase anon/public key |
+| `FILEY_LOCAL` | local mode | `1` forces local mode even when `SUPABASE_URL` is set |
+| `FILEY_LOCAL_DB` | local mode | Full path to `filey-erp.db`; overrides auto-detection |
+| `SUPABASE_URL` | cloud mode | Your Supabase project URL, e.g. `https://xyz.supabase.co` |
+| `SUPABASE_ANON_KEY` | cloud mode | Supabase anon/public key |
 | `SUPABASE_ACCESS_TOKEN` | one of the two auth options | A Filey **user JWT**. Pinned as the `Authorization` header on every request so Postgres RLS runs as that user. |
 | `FILEY_EMAIL` + `FILEY_PASSWORD` | one of the two auth options | Alternative to a token: the server signs in with password on first use and pins the returned access token. |
 
@@ -144,11 +176,16 @@ returns `{error: "..."}` payloads on failure instead of crashing.
 | `new row violates row-level security policy` | Expired or wrong-user JWT; get a fresh token. |
 | `Could not list orders: ...` from `list_orders` | Expected on deployments without an `orders` table — use `list_invoices` / `list_purchase_orders`. |
 | Tools don't show up in the client | Run `npm run smoke` in the package dir; it handshakes the server offline and prints the 17 tool names. |
+| `Local mode requested but no Filey database found` | The desktop app hasn't run on this machine, or its data folder was moved — set `FILEY_LOCAL_DB` to the full path of `filey-erp.db`. |
+| Local mode returns empty results | Check you're on the right database: the server logs `local mode — <path>` to stderr on the first tool call. |
 
 ## Development
 
 ```bash
-npm run build   # tsc → dist/
-npm run smoke   # offline stdio handshake + tools/list assertion (17 tools)
-npm start       # run the server
+npm run build       # tsc → dist/
+npm run smoke       # offline stdio handshake + tools/list assertion (17 tools)
+npm run smoke:local # drives the real tool handlers against a throwaway SQLite db
+npm start           # run the server
 ```
+
+Requires Node >= 22.5 (local mode uses the built-in `node:sqlite`).
