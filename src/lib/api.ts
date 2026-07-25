@@ -3213,11 +3213,23 @@ export interface Recurrence {
   active: boolean;
 }
 
-function addInterval(dateISO: string, interval: string): string {
-  const d = new Date(dateISO + "T00:00:00");
-  if (interval === "weekly") d.setDate(d.getDate() + 7);
-  else if (interval === "yearly") d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
+// All-UTC so the YYYY-MM-DD in == YYYY-MM-DD out (mixing local Date with
+// toISOString() shifts a day in UTC-negative zones). Month/year steps clamp
+// to the target month's last day, so Jan 31 +1mo = Feb 28/29, not Mar 3.
+export function addInterval(dateISO: string, interval: string): string {
+  const d = new Date(dateISO + "T00:00:00Z");
+  if (interval === "weekly") {
+    d.setUTCDate(d.getUTCDate() + 7);
+  } else {
+    const day = d.getUTCDate();
+    d.setUTCDate(1); // avoid overflow while we shift the month/year
+    if (interval === "yearly") d.setUTCFullYear(d.getUTCFullYear() + 1);
+    else d.setUTCMonth(d.getUTCMonth() + 1);
+    const lastDay = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    d.setUTCDate(Math.min(day, lastDay));
+  }
   return d.toISOString().slice(0, 10);
 }
 
