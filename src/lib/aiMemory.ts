@@ -73,13 +73,74 @@ export function listMemories(): Memory[] {
   return load().reverse();
 }
 
-/** Substring search over text + tag, newest-first, capped. Empty query =
- *  most-recent memories. */
+/* ── recall ranking ────────────────────────────────────────────────────────
+ * A plain substring match only found a memory when the user echoed its exact
+ * wording — ask "what do I know about pricing?" and a memory reading "Bapco
+ * gets 5% off list price" stayed invisible. Recall now scores by term overlap
+ * so partial and reordered wording still retrieves.
+ *
+ * ponytail: term overlap, not embeddings — it needs no API key, no index to
+ * rebuild, and works offline, which matters because memories live on-device.
+ * Swap in vector search only if recall quality measurably falls short.
+ */
+
+/** Words too common to carry meaning — they'd match nearly every memory. */
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is", "are",
+  "was", "were", "be", "been", "it", "its", "this", "that", "with", "from",
+  "at", "by", "as", "my", "our", "we", "i", "you", "your", "do", "does", "did",
+  "what", "which", "who", "when", "where", "how", "any", "all", "about",
+]);
+
+function terms(s: string): string[] {
+  return norm(s)
+    .split(/[^a-z0-9%@.]+/)
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t));
+}
+
+/** Length of the leading run two words have in common. */
+function sharedPrefix(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a[i] === b[i]) i++;
+  return i;
+}
+
+/** How well one memory answers a query. 0 = no connection at all. */
+function score(mem: Memory, query: string, queryTerms: string[]): number {
+  const text = norm(mem.text);
+  const tag = norm(mem.tag ?? "");
+  // Whole-phrase hit is the strongest signal — keeps old exact-match behaviour
+  // ranked top rather than merely preserved.
+  let total = text.includes(query) || (tag && tag.includes(query)) ? 10 : 0;
+  const memTerms = terms(mem.text);
+  const tagTerms = terms(mem.tag ?? "");
+  for (const q of queryTerms) {
+    if (tagTerms.some((t) => t === q)) total += 3; // the tag IS the topic
+    if (memTerms.some((t) => t === q)) total += 2;
+    // Shared-stem match catches plurals and morphology — "invoice"/"invoices"
+    // share 7 leading characters, "price"/"pricing" share 4. Cheaper and less
+    // brittle than a stemmer, and 4 is long enough to keep "price" away from
+    // "principal".
+    else if (memTerms.some((t) => sharedPrefix(t, q) >= 4)) total += 1;
+  }
+  return total;
+}
+
+/** Relevance-ranked search over text + tag, capped. Ties break newest-first,
+ *  and an empty query returns the most recent memories. */
 export function searchMemories(query?: string, limit = 8): Memory[] {
-  const all = listMemories();
+  const all = listMemories(); // newest first
   const q = norm(query ?? "");
-  const hits = q ? all.filter((m) => norm(m.text).includes(q) || norm(m.tag ?? "").includes(q)) : all;
-  return hits.slice(0, limit);
+  if (!q) return all.slice(0, limit);
+
+  const queryTerms = terms(q);
+  const ranked = all
+    .map((m, i) => ({ m, i, s: score(m, q, queryTerms) }))
+    .filter((r) => r.s > 0)
+    // `i` ascends with age, so it doubles as the newest-first tiebreak.
+    .sort((a, b) => b.s - a.s || a.i - b.i);
+  return ranked.slice(0, limit).map((r) => r.m);
 }
 
 export function deleteMemory(id: string): void {
