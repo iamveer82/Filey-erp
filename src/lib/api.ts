@@ -196,15 +196,66 @@ export interface CrmCustomer {
   shared?: boolean;
   created_at: string;
 }
+/** Anything a note, task or activity can be attached to. Stored as
+ *  (target_type, target_id) so one timeline query serves every record type. */
+export type CrmTargetType = "company" | "person" | "deal" | "lead" | "invoice";
+
+/** A contact at a company. `company_id` points at crm_customers, which is the
+ *  company/account object. */
+export interface Person {
+  id: number;
+  company_id?: number | null;
+  name: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  phone_e164?: string;
+  linkedin?: string;
+  notes?: string;
+  owner?: string;
+  is_primary?: boolean;
+  custom_fields?: Record<string, unknown>;
+  created_at: string;
+}
+export interface CrmNote {
+  id: number;
+  target_type: CrmTargetType;
+  target_id: number;
+  body: string;
+  author?: string;
+  pinned?: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+export interface CrmTask {
+  id: number;
+  target_type?: CrmTargetType | null;
+  target_id?: number | null;
+  title: string;
+  body?: string;
+  due_date?: string;
+  /** open | in_progress | done | cancelled */
+  status: string;
+  priority?: string;
+  assignee?: string;
+  completed_at?: string | null;
+  created_at: string;
+}
 export interface Opportunity {
   id: number;
   title: string;
+  /** Display name, kept in step with customer_id for back-compat. */
   customer_name: string;
+  customer_id?: number | null;
+  person_id?: number | null;
+  pipeline?: string;
   stage: string;
   value: number;
   probability: number;
   owner?: string;
   expected_close?: string;
+  close_reason?: string;
+  closed_at?: string | null;
   created_at: string;
 }
 export interface Activity {
@@ -212,6 +263,8 @@ export interface Activity {
   kind: string;
   subject: string;
   related_to?: string;
+  target_type?: CrmTargetType | null;
+  target_id?: number | null;
   due_date?: string;
   done: boolean;
   created_at: string;
@@ -1836,6 +1889,25 @@ const STAGE_PROB: Record<string, number> = {
   lost: 0,
 };
 
+/** Resolve a deal's stored display name back to a customer row.
+ *
+ *  Deals were created with `company || name` as their only link, so match on
+ *  either field. Returns null when nothing matches OR when several customers
+ *  share the name — an ambiguous link is worse than none, because the wrong
+ *  company would silently inherit the deal's value in every forecast. */
+export function matchCustomerId(
+  displayName: string | null | undefined,
+  customers: Pick<CrmCustomer, "id" | "name" | "company">[]
+): number | null {
+  const key = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const target = key(displayName);
+  if (!target) return null;
+  const hits = customers.filter(
+    (c) => key(c.company) === target || key(c.name) === target
+  );
+  return hits.length === 1 ? hits[0].id : null;
+}
+
 export const crm = {
   leads: () =>
     readCached<Lead[]>(
@@ -2005,6 +2077,142 @@ export const crm = {
         activities_due: 0,
       }
     ),
+
+  // ---------- people (contacts at a company) ----------
+  people: () =>
+    readCached<Person[]>(
+      "crm_people",
+      () => sList<Person>("crm_people", [{ col: "name", asc: true }]),
+      []
+    ),
+  createPerson: (input: Omit<Person, "id" | "created_at">) => {
+    const row = clean(input as Record<string, unknown>);
+    return write({ k: "insert", t: "crm_people", row }, () =>
+      sInsert("crm_people", row), -1
+    );
+  },
+  updatePerson: (personId: number, patch: Partial<Person>) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write(
+      { k: "update", t: "crm_people", id: personId, row },
+      () => sUpdate("crm_people", personId, row),
+      undefined
+    );
+  },
+  deletePerson: (personId: number) =>
+    write({ k: "delete", t: "crm_people", id: personId }, () =>
+      sDelete("crm_people", personId), undefined
+    ),
+
+  // ---------- notes (attach to any record) ----------
+  notes: () =>
+    readCached<CrmNote[]>(
+      "crm_notes",
+      () => sList<CrmNote>("crm_notes", [{ col: "id", asc: false }]),
+      []
+    ),
+  addNote: (input: Omit<CrmNote, "id" | "created_at">) => {
+    const row = clean(input as Record<string, unknown>);
+    return write({ k: "insert", t: "crm_notes", row }, () =>
+      sInsert("crm_notes", row), -1
+    );
+  },
+  updateNote: (noteId: number, patch: Partial<CrmNote>) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write(
+      { k: "update", t: "crm_notes", id: noteId, row },
+      () => sUpdate("crm_notes", noteId, row),
+      undefined
+    );
+  },
+  deleteNote: (noteId: number) =>
+    write({ k: "delete", t: "crm_notes", id: noteId }, () =>
+      sDelete("crm_notes", noteId), undefined
+    ),
+
+  // ---------- tasks ----------
+  tasks: () =>
+    readCached<CrmTask[]>(
+      "crm_tasks",
+      () => sList<CrmTask>("crm_tasks", [{ col: "id", asc: false }]),
+      []
+    ),
+  addTask: (input: Omit<CrmTask, "id" | "created_at" | "status"> & { status?: string }) => {
+    const row = clean({ status: "open", ...input } as Record<string, unknown>);
+    return write({ k: "insert", t: "crm_tasks", row }, () =>
+      sInsert("crm_tasks", row), -1
+    );
+  },
+  updateTask: (taskId: number, patch: Partial<CrmTask>) => {
+    const row = clean(patch as Record<string, unknown>);
+    return write(
+      { k: "update", t: "crm_tasks", id: taskId, row },
+      () => sUpdate("crm_tasks", taskId, row),
+      undefined
+    );
+  },
+  /** Flip a task between done and open, stamping completed_at to match. */
+  setTaskDone: (taskId: number, done: boolean) => {
+    const row = {
+      status: done ? "done" : "open",
+      completed_at: done ? new Date().toISOString() : null,
+    };
+    return write(
+      { k: "update", t: "crm_tasks", id: taskId, row },
+      () => sUpdate("crm_tasks", taskId, row),
+      undefined
+    );
+  },
+  deleteTask: (taskId: number) =>
+    write({ k: "delete", t: "crm_tasks", id: taskId }, () =>
+      sDelete("crm_tasks", taskId), undefined
+    ),
+
+  /** Link deals to companies and promote merged contact names to real people.
+   *  Mirrors the backfill in supabase/2026-07-26-crm-objects.sql for local
+   *  mode, where that SQL never runs. Idempotent — only touches rows that are
+   *  still unlinked, so it is safe to call on every load. */
+  backfillLinks: () =>
+    online(async () => {
+      const [customers, opps, people] = await Promise.all([
+        sList<CrmCustomer>("crm_customers"),
+        sList<Opportunity>("crm_opportunities"),
+        sList<Person>("crm_people"),
+      ]);
+
+      let linked = 0;
+      for (const o of opps) {
+        if (o.customer_id != null) continue;
+        const id = matchCustomerId(o.customer_name, customers);
+        if (id == null) continue;
+        await sUpdate("crm_opportunities", o.id, { customer_id: id });
+        linked++;
+      }
+
+      let promoted = 0;
+      for (const c of customers) {
+        const name = (c.name ?? "").trim();
+        const company = (c.company ?? "").trim();
+        if (!name || !company) continue;
+        if (name.toLowerCase() === company.toLowerCase()) continue;
+        const exists = people.some(
+          (p) =>
+            p.company_id === c.id &&
+            (p.name ?? "").trim().toLowerCase() === name.toLowerCase()
+        );
+        if (exists) continue;
+        await sInsert("crm_people", {
+          company_id: c.id,
+          name,
+          email: c.email ?? null,
+          phone: c.phone ?? null,
+          phone_e164: c.phone_e164 ?? null,
+          is_primary: true,
+        });
+        promoted++;
+      }
+      return { linked, promoted };
+    }),
 };
 
 // ===== Follow-ups / reminders =====

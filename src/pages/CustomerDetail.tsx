@@ -52,6 +52,7 @@ import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
+import CrmRecordPanel from "../components/CrmRecordPanel";
 import PartyBankDetails from "../components/PartyBankDetails";
 import FollowUps from "../components/FollowUps";
 import AdvanceCard from "../components/AdvanceCard";
@@ -1284,6 +1285,12 @@ export default function CustomerDetail() {
             }}
           />
         </div>
+      )}
+
+      {customer && (
+        <Section title="Notes & tasks">
+          <CrmRecordPanel targetType="company" targetId={customer.id} />
+        </Section>
       )}
 
       {customer && (

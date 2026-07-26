@@ -31,8 +31,12 @@ export const PUSH_TABLES = [
   "attendance",
   "payroll",
   "crm_leads",
+  // people before the deals that reference them, deals before their notes/tasks
+  "crm_people",
   "crm_opportunities",
   "crm_activities",
+  "crm_notes",
+  "crm_tasks",
   "follow_ups",
   "tool_runs",
   "user_folders",
