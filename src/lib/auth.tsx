@@ -97,6 +97,12 @@ interface AuthValue {
 
 const Ctx = createContext<AuthValue | null>(null);
 
+/** Supabase's email-enumeration guard: signing up an address that already
+ *  exists returns a decoy user with no identities instead of an error. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const isExistingAccount =(u: { identities?: unknown[] | null } | null) =>
+  !!u && u.identities?.length === 0;
+
 const norm = (c: Credential) =>
   c.channel === "email"
     ? { email: c.value.trim().toLowerCase() }
@@ -247,12 +253,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUpWithPassword = async (c: Credential, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");
-    if (password.length < 6) throw new Error("Password must be at least 6 characters.");
+    // Must match Supabase's password_min_length, or the server rejects with a
+    // raw "weak_password" error after the form has already accepted it.
+    if (password.length < 8) throw new Error("Password must be at least 8 characters.");
     const { data, error } = await supabase.auth.signUp({
       ...norm(c),
       password,
     } as any);
     if (error) throw error;
+    // Signing up an address that already exists returns a decoy user with an
+    // empty identities array (Supabase's enumeration guard) and no session.
+    // Without this check the UI parks the user on the OTP screen forever.
+    if (isExistingAccount(data.user))
+      throw new Error("An account with this email already exists. Sign in instead.");
     // A session here means email confirmation is disabled → straight in.
     // Otherwise an OTP (email code / SMS) was sent and must be verified.
     return { needsOtp: !data.session };

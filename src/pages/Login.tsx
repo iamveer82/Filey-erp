@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Mail,
@@ -72,6 +72,11 @@ export default function Login() {
   // Google blocks OAuth inside embedded webviews — web build only.
   const hasTauriShell =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  // ponytail: providers are off in Supabase (phone_provider_disabled, google
+  // disabled), so offering them only produces errors. Flip the env var once
+  // the provider is actually enabled in the dashboard.
+  const phoneEnabled = import.meta.env.VITE_PHONE_AUTH === "1";
+  const googleEnabled = import.meta.env.VITE_GOOGLE_AUTH === "1";
 
   const [screen, setScreen] = useState<Screen>("form");
   const [mode, setMode] = useState<Mode>("signin");
@@ -88,6 +93,14 @@ export default function Login() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [otpPurpose, setOtpPurpose] = useState<"signup" | "login">("login");
+  // Supabase's smtp_max_frequency is 60s — resending sooner only returns an
+  // error, so hold the button until the window is open again.
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
   const [showPw, setShowPw] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -142,8 +155,8 @@ export default function Login() {
       if (!password) {
         setFieldError("password", "Password is required");
         hasError = true;
-      } else if (password.length < 6) {
-        setFieldError("password", "Password must be at least 6 characters");
+      } else if (password.length < 8) {
+        setFieldError("password", "Password must be at least 8 characters");
         hasError = true;
       }
       if (mode === "signup" && password !== confirm) {
@@ -161,9 +174,10 @@ export default function Login() {
         if (needsOtp) {
           setOtpPurpose("signup");
           setScreen("otp");
+          setCooldown(60);
           setMsg(
             channel === "email"
-              ? "We sent a 6-digit code to your email. Enter it below. (If you got a confirmation link instead, click it.)"
+              ? "We sent a 6-digit code to your email. Enter it below."
               : "We sent a 6-digit code by SMS. Enter it below."
           );
         }
@@ -173,6 +187,7 @@ export default function Login() {
         await sendLoginOtp(cred);
         setOtpPurpose("login");
         setScreen("otp");
+        setCooldown(60);
         setMsg(
           channel === "email"
             ? "We emailed you a one-time code."
@@ -205,6 +220,7 @@ export default function Login() {
     setBusy(true);
     try {
       await resendOtp(cred, otpPurpose);
+      setCooldown(60);
       setMsg("A new code is on its way.");
     } catch (e2: any) {
       setErr(e2?.message ?? String(e2));
@@ -272,18 +288,20 @@ export default function Login() {
         <div className="card p-6">
           {screen === "form" ? (
             <form onSubmit={submitForm} className="space-y-4">
-              <Segmented<Channel>
-                value={channel}
-                disabled={busy}
-                onChange={(v) => {
-                  setChannel(v);
-                  reset(false);
-                }}
-                options={[
-                  { v: "email", label: "Email" },
-                  { v: "phone", label: "Phone" },
-                ]}
-              />
+              {phoneEnabled && (
+                <Segmented<Channel>
+                  value={channel}
+                  disabled={busy}
+                  onChange={(v) => {
+                    setChannel(v);
+                    reset(false);
+                  }}
+                  options={[
+                    { v: "email", label: "Email" },
+                    { v: "phone", label: "Phone" },
+                  ]}
+                />
+              )}
 
               <FormField
                 label={idLabel}
@@ -327,7 +345,7 @@ export default function Login() {
                 <FormField
                   label="Password"
                   error={fieldErrors.password}
-                  hint="At least 6 characters"
+                  hint="At least 8 characters"
                   required
                 >
                   <div className="relative">
@@ -347,7 +365,7 @@ export default function Login() {
                         setPassword(e.target.value);
                         if (fieldErrors.password) setFieldError("password", "");
                       }}
-                      minLength={6}
+                      minLength={8}
                     />
                     <button
                       type="button"
@@ -379,7 +397,7 @@ export default function Login() {
                         setConfirm(e.target.value);
                         if (fieldErrors.confirm) setFieldError("confirm", "");
                       }}
-                      minLength={6}
+                      minLength={8}
                     />
                     <button
                       type="button"
@@ -424,7 +442,7 @@ export default function Login() {
                       : "Sign in"}
               </button>
 
-              {!hasTauriShell && (
+              {!hasTauriShell && googleEnabled && (
                 <>
                   <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-brand-400">
                     <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
@@ -494,11 +512,11 @@ export default function Login() {
 
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || cooldown > 0}
                 onClick={resend}
                 className="text-xs font-medium text-brand-500 hover:text-ink w-full text-center cursor-pointer disabled:opacity-50"
               >
-                Resend code
+                {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
               </button>
             </form>
           )}
