@@ -100,8 +100,16 @@ const Ctx = createContext<AuthValue | null>(null);
 /** Supabase's email-enumeration guard: signing up an address that already
  *  exists returns a decoy user with no identities instead of an error. */
 // eslint-disable-next-line react-refresh/only-export-components
-export const isExistingAccount =(u: { identities?: unknown[] | null } | null) =>
+export const isExistingAccount = (u: { identities?: unknown[] | null } | null) =>
   !!u && u.identities?.length === 0;
+
+/** The signup trigger pre-creates a profile row named 'User' with no company,
+ *  so a plain `!profile` check never fires and first-run setup never showed —
+ *  every cloud signup landed in the app as "User". Treat that untouched stub
+ *  as "still needs setup"; anything the user actually filled in counts as real. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const isProfileStub = (p: Pick<Profile, "name" | "company"> | null) =>
+  !!p && !p.company?.trim() && (!p.name?.trim() || p.name === "User");
 
 const norm = (c: Credential) =>
   c.channel === "email"
@@ -364,7 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     session,
     profile,
-    needsProfile: !!user && profileLoaded && !profile,
+    needsProfile: !!user && profileLoaded && (!profile || isProfileStub(profile)),
     profileLoading: !!user && !profileLoaded,
     signInWithPassword,
     signInWithGoogle,
