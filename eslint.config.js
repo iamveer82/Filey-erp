@@ -20,6 +20,7 @@ export default tseslint.config(
       "public/sw.js", // service-worker globals, hand-written
       "public/tesseract", // vendored tesseract.js worker + wasm (minified)
       "worker", // separate Cloudflare worker deploy, Node runtime
+      "mcp-server", // separate Node package (MCP server), own tsconfig + tooling
       "**/*.config.{js,ts,mjs}",
       "scripts",
     ],

@@ -21,6 +21,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
    - `stripe-billing.sql` — Stripe subscription tables
    - `customer-portal.sql` — customer portal access
    - `2026-06-16-sms-otp-templates.sql` — SMS/OTP/template + CRM/ERP custom fields (`sms_providers`, `sms_templates`, `sms_logs`, `otp_codes`, `custom_entity_fields`, `custom_entity_values`) and `products.unit`
+   - `2026-07-26-agent-memories.sql` — `agent_memories`: durable long-term memory for the channel agent (remember/recall tools), per-user RLS
 3. `verify-rls.sql` — run last to assert RLS is enabled everywhere (check, not a change).
 
 ## Prod state — verified 2026-06-16
