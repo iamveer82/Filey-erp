@@ -53,6 +53,7 @@ import { useUI } from "../lib/ui";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
 import CrmRecordPanel from "../components/CrmRecordPanel";
+import ContactsPanel from "../components/ContactsPanel";
 import PartyBankDetails from "../components/PartyBankDetails";
 import FollowUps from "../components/FollowUps";
 import AdvanceCard from "../components/AdvanceCard";
@@ -1285,6 +1286,12 @@ export default function CustomerDetail() {
             }}
           />
         </div>
+      )}
+
+      {customer && (
+        <Section title="Contacts">
+          <ContactsPanel companyId={customer.id} />
+        </Section>
       )}
 
       {customer && (
