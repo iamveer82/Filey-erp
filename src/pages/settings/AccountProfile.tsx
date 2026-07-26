@@ -106,9 +106,20 @@ export default function AccountProfile() {
       placeholder: "you@company.com",
     });
     if (!next || !supabase) return;
-    const { error } = await supabase.auth.updateUser({ email: next });
+    const email = next.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return toast.error("Enter a valid email address.");
+    if (email === profile?.email?.trim().toLowerCase())
+      return toast.error("That is already your email address.");
+    const { error } = await supabase.auth.updateUser({ email });
     if (error) toast.error(`Could not change email: ${error.message}`);
-    else toast.success("Confirmation sent to the new email address.");
+    // Secure email change is on, so Supabase mails BOTH addresses and the
+    // change only lands once each link is clicked. Saying "sent to the new
+    // address" left people waiting on a change that never completed.
+    else
+      toast.success(
+        "Confirmation sent to both your current and new address — open each and confirm."
+      );
   };
 
   const updatePassword = async () => {
