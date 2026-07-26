@@ -97,6 +97,9 @@ export default function AccountProfile() {
   const [pwBusy, setPwBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const pwValid = PW_RULES.every((r) => r.test(npw));
+  // An email change in flight: the new address plus the code from each inbox.
+  const [pending, setPending] = useState<{ next: string; cur: string; nw: string } | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
 
   const changeEmail = async () => {
     const next = await prompt({
@@ -112,14 +115,43 @@ export default function AccountProfile() {
     if (email === profile?.email?.trim().toLowerCase())
       return toast.error("That is already your email address.");
     const { error } = await supabase.auth.updateUser({ email });
-    if (error) toast.error(`Could not change email: ${error.message}`);
-    // Secure email change is on, so Supabase mails BOTH addresses and the
-    // change only lands once each link is clicked. Saying "sent to the new
-    // address" left people waiting on a change that never completed.
-    else
-      toast.success(
-        "Confirmation sent to both your current and new address — open each and confirm."
-      );
+    if (error) return toast.error(`Could not change email: ${error.message}`);
+    // Secure email change is on, so Supabase mails a code to BOTH addresses
+    // and the change only lands once each is verified.
+    setPending({ next: email, cur: "", nw: "" });
+    toast.success("We sent a code to your current address and to the new one.");
+  };
+
+  const confirmEmailChange = async () => {
+    if (!supabase || !pending || !profile) return;
+    if (pending.cur.length !== 6 || pending.nw.length !== 6)
+      return toast.error("Enter both 6-digit codes.");
+    setEmailBusy(true);
+    try {
+      // Both sides must verify; the first call alone leaves the change pending.
+      for (const [addr, token] of [
+        [profile.email, pending.cur],
+        [pending.next, pending.nw],
+      ] as const) {
+        const { error } = await supabase.auth.verifyOtp({
+          email: addr,
+          token,
+          type: "email_change",
+        });
+        // The first of the two returns "Confirmation link accepted. Please
+        // proceed to confirm link sent to the other email" — a progress
+        // message, not a failure. Only a real rejection should stop us.
+        if (error && !/proceed to confirm/i.test(error.message)) throw error;
+      }
+      // auth.users is updated by Supabase; profiles.email is ours to keep in step.
+      await updateProfile({ email: pending.next });
+      setPending(null);
+      toast.success("Email updated.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not confirm the change.");
+    } finally {
+      setEmailBusy(false);
+    }
   };
 
   const updatePassword = async () => {
@@ -275,10 +307,76 @@ export default function AccountProfile() {
                     {verified ? "Verified" : "Unverified"}
                   </Badge>
                 </div>
-                <button className="btn-ghost shrink-0" onClick={changeEmail}>
+                <button
+                  className="btn-ghost shrink-0"
+                  onClick={changeEmail}
+                  disabled={!!pending}
+                >
                   Change Email
                 </button>
               </div>
+
+              {pending && (
+                <div className="mb-4 rounded-lg border border-brand-200 dark:border-white/10 p-3">
+                  <p className="text-sm font-medium text-ink">
+                    Confirm the change to {pending.next}
+                  </p>
+                  <p className="text-xs text-brand-500 mt-0.5 mb-3">
+                    We emailed a 6-digit code to each address. Both are needed, so nobody
+                    can move your account without access to your current inbox.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FormField label={`Code sent to ${profile?.email}`}>
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={pending.cur}
+                        onChange={(e) =>
+                          setPending({
+                            ...pending,
+                            cur: e.target.value.replace(/\D/g, "").slice(0, 6),
+                          })
+                        }
+                      />
+                    </FormField>
+                    <FormField label={`Code sent to ${pending.next}`}>
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={pending.nw}
+                        onChange={(e) =>
+                          setPending({
+                            ...pending,
+                            nw: e.target.value.replace(/\D/g, "").slice(0, 6),
+                          })
+                        }
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      className="btn-primary"
+                      onClick={confirmEmailChange}
+                      disabled={emailBusy || pending.cur.length < 6 || pending.nw.length < 6}
+                    >
+                      {emailBusy ? "Confirming…" : "Confirm change"}
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => setPending(null)}
+                      disabled={emailBusy}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           <label className="label">Username</label>
