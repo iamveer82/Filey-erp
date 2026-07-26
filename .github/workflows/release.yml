@@ -17,6 +17,13 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # One runner at a time. Both jobs call tauri-action, which looks for a
+      # draft release with this tag and creates one if it finds none — run them
+      # together and each finds nothing, so the tag ends up with TWO draft
+      # releases (v2.3.14 did) whose assets and latest.json have to be merged by
+      # hand. Sequential means the second job finds the first job's release and
+      # appends to it, giving one release with every platform in one latest.json.
+      max-parallel: 1
       matrix:
         include:
           # macOS dropped: needs an Apple Developer signing cert we don't have,
@@ -91,4 +98,7 @@ jobs:
             src-tauri/target/**/release/bundle/**/*.rpm
             src-tauri/target/**/release/bundle/**/*.msi
             src-tauri/target/**/release/bundle/**/*.exe
+            # Updater signatures — without these the artifacts can't be turned
+            # into a working latest.json if the release upload ever needs redoing.
+            src-tauri/target/**/release/bundle/**/*.sig
           if-no-files-found: ignore
