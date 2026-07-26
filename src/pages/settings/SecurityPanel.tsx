@@ -98,7 +98,7 @@ export function ChangePasswordModal({
   }, [open]);
 
   const submit = async () => {
-    if (pw.length < 6) return setErr("Password must be at least 6 characters.");
+    if (pw.length < 8) return setErr("Password must be at least 8 characters.");
     if (pw !== pw2) return setErr("Passwords do not match.");
     if (!supabase) return setErr("Auth not configured.");
     setBusy(true);
