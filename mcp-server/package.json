@@ -1,0 +1,27 @@
+{
+  "name": "filey-erp-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Filey ERP — drive invoices, quotes, POs, customers, products and reports from any MCP client.",
+  "type": "module",
+  "bin": {
+    "filey-erp-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "smoke": "node dist/smoke.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}
