@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { Check, Moon, Sun } from "lucide-react";
 import { getTheme, setTheme, type Theme } from "../../lib/theme";
+import { getSmoothScroll, setSmoothScroll } from "../../lib/smoothScroll";
+import { Toggle } from "./PreferencesPanel";
 import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
 import { useUI } from "../../lib/ui";
 import { cn } from "../../lib/format";
@@ -27,6 +29,7 @@ export default function AppearancePanel() {
   const { toast } = useUI();
   const { theme, setTheme } = useTheme();
   const { accent, setAccent } = useAccent();
+  const smooth = useSyncExternalStore(subscribe, getSmoothScroll);
 
   return (
     <div className="space-y-4">
@@ -57,6 +60,29 @@ export default function AppearancePanel() {
             desc="Easy on the eyes at night"
             preview="dark"
           />
+        </div>
+      </div>
+
+      {/* Scrolling */}
+      <div className="rounded-xl border border-border bg-card">
+        <div className="px-6 pt-5 pb-4 border-b border-border">
+          <div className="text-[17px] font-semibold text-foreground">
+            Scrolling
+          </div>
+          <div className="text-[13px] text-muted-foreground mt-1">
+            How the main panel responds to your mouse wheel.
+          </div>
+        </div>
+        <div className="p-6 flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <div className="text-[14px] text-foreground">Smooth scrolling</div>
+            <div className="text-[12.5px] text-muted-foreground mt-0.5">
+              Eases the wheel instead of jumping line by line. Tables, menus and
+              the sidebar always scroll normally, and this turns itself off when
+              your system asks for reduced motion.
+            </div>
+          </div>
+          <Toggle on={smooth} onChange={setSmoothScroll} />
         </div>
       </div>
 

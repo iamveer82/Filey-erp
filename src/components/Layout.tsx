@@ -31,6 +31,7 @@ import { useLang, LANGS, type Lang } from "../lib/i18n";
 import { billing, followups, notifs as notifsApi, type Notification } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
+import { attachSmoothScroll } from "../lib/smoothScroll";
 import { useUI } from "../lib/ui";
 import {
   DropdownMenu,
@@ -312,6 +313,17 @@ export default function Layout({ children }: { children: ReactNode }) {
     );
 
   /** Shared account dropdown content (header avatar + sidebar footer). */
+  // Smooth wheel scrolling on the main column. <main> is the app's only page
+  // scroller — the window never scrolls — so Lenis is bound to it directly.
+  const scrollWrapRef = useRef<HTMLElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const wrap = scrollWrapRef.current;
+    const content = scrollContentRef.current;
+    if (!wrap || !content) return;
+    return attachSmoothScroll(wrap, content);
+  }, []);
+
   const accountMenu = (
     <DropdownMenuContent align="end" className="min-w-52">
       <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
@@ -702,11 +714,18 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-            {/* Route container — pages are content-only; padding lives here
-                (reference: px-6 pt-6 page gutter). */}
-            <div key={pathname} className="fade-in px-4 sm:px-6 py-6">
-              <ErrorBoundary>{children}</ErrorBoundary>
+          <main
+            ref={scrollWrapRef}
+            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
+          >
+            {/* Stable content box for Lenis: the keyed child below is remounted
+                on every navigation, so anchoring to it would lose the node. */}
+            <div ref={scrollContentRef}>
+              {/* Route container — pages are content-only; padding lives here
+                  (reference: px-6 pt-6 page gutter). */}
+              <div key={pathname} className="fade-in px-4 sm:px-6 py-6">
+                <ErrorBoundary>{children}</ErrorBoundary>
+              </div>
             </div>
           </main>
         </div>
