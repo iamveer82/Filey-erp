@@ -96,6 +96,7 @@ import Tools from "../Tools";
 import PdfTools from "../PdfTools";
 import AgentChat from "../AgentChat";
 import CustomerDetail from "../CustomerDetail";
+import EmployeeDetail from "../EmployeeDetail";
 import SupplierDetail from "../SupplierDetail";
 import PortalView from "../PortalView";
 import Login from "../Login";
@@ -165,5 +166,8 @@ describe("detail page render smoke", () => {
   });
   it("SupplierDetail mounts without throwing", () => {
     wrapAt("/suppliers/1", "/suppliers/:id", <SupplierDetail />).unmount();
+  });
+  it("EmployeeDetail mounts without throwing", () => {
+    wrapAt("/people/1", "/people/:id", <EmployeeDetail />).unmount();
   });
 });

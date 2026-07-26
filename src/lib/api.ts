@@ -6,6 +6,7 @@ import { splitItemMeta, docTotals as lineAwareTotals } from "./docItems";
 import { getExchangeRates } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
+import { localYmd } from "./format";
 
 // ===== Types =====
 export interface Product {
@@ -84,6 +85,9 @@ export interface Payroll {
   deductions: number;
   net_pay: number;
   status: string;
+  /** Date the salary actually went out. Null while status is 'pending'. */
+  paid_on?: string | null;
+  created_at?: string;
 }
 export interface HrSummary {
   headcount: number;
@@ -198,7 +202,13 @@ export interface CrmCustomer {
 }
 /** Anything a note, task or activity can be attached to. Stored as
  *  (target_type, target_id) so one timeline query serves every record type. */
-export type CrmTargetType = "company" | "person" | "deal" | "lead" | "invoice";
+export type CrmTargetType =
+  | "company"
+  | "person"
+  | "deal"
+  | "lead"
+  | "invoice"
+  | "employee";
 
 /** A contact at a company. `company_id` points at crm_customers, which is the
  *  company/account object. */
@@ -1243,10 +1253,25 @@ export const hr = {
           deductions: r.deductions,
           net_pay: r.net_pay,
           status: r.status,
+          paid_on: r.paid_on ?? null,
+          created_at: r.created_at,
         })) as Payroll[];
       },
       []
     ),
+  /** Mark a payroll run paid (or back to pending), stamping the date it went
+   *  out. `status` alone couldn't answer "when was this salary paid?". */
+  setPayrollPaid: (payrollId: number, paid: boolean, paidOn?: string) => {
+    const row = {
+      status: paid ? "paid" : "pending",
+      paid_on: paid ? paidOn || localYmd(new Date()) : null,
+    };
+    return write(
+      { k: "update", t: "payroll", id: payrollId, row },
+      () => sUpdate("payroll", payrollId, row),
+      undefined
+    );
+  },
   runPayroll: (
     employeeId: number,
     period: string,

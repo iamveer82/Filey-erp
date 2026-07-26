@@ -22,6 +22,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
    - `customer-portal.sql` — customer portal access
    - `2026-06-16-sms-otp-templates.sql` — SMS/OTP/template + CRM/ERP custom fields (`sms_providers`, `sms_templates`, `sms_logs`, `otp_codes`, `custom_entity_fields`, `custom_entity_values`) and `products.unit`
    - `2026-07-26-agent-memories.sql` — `agent_memories`: durable long-term memory for the channel agent (remember/recall tools), per-user RLS
+   - `2026-07-26-payroll-paid-on.sql` — `payroll.paid_on`: the date a salary was actually paid (status alone couldn't say when); backfills paid rows from `updated_at`
    - `2026-07-26-crm-objects.sql` — CRM relational layer: `crm_people`, `crm_notes`, `crm_tasks` (org RLS like every app table); `customer_id`/`person_id`/`pipeline` on `crm_opportunities`; `target_type`/`target_id` on `crm_activities`; backfills deal→customer links and promotes contact names to people
 3. `verify-rls.sql` — run last to assert RLS is enabled everywhere (check, not a change).
 

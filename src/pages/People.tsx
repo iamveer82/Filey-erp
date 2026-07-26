@@ -307,7 +307,7 @@ export default function People() {
             : "No people match your search or filters"
         }
         rowKey={(e) => e.id}
-        onRowClick={(e) => setQuickViewFor(e)}
+        onRowClick={(e) => nav(`/people/${e.id}`)}
         columns={[
           {
             key: "name",
