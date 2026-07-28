@@ -1,4 +1,5 @@
 import { Field } from "../../components/ui";
+import UpdateCard from "../../components/UpdateCard";
 import { tools, billing, CompanyProfile } from "../../lib/api";
 import { useUI } from "../../lib/ui";
 import { useEffect, useState } from "react";
@@ -79,6 +80,7 @@ export default function PreferencesPanel() {
     return <div className="card text-sm text-brand-400">Loading…</div>;
   return (
     <div className="space-y-4">
+      <UpdateCard />
       <div className="card">
         <p className="font-bold text-ink">Document defaults</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">

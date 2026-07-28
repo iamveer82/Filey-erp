@@ -20,18 +20,27 @@ export interface UpdateInfo {
   handle: Update;
 }
 
+/**
+ * Same check, but failures throw. A user who pressed "Check for updates"
+ * needs "couldn't reach the update server" told apart from "you're up to
+ * date" — the silent version below reports both as null.
+ */
+export async function checkForUpdateStrict(): Promise<UpdateInfo | null> {
+  if (!hasDesktop) return null;
+  const update = await check();
+  if (!update) return null;
+  return {
+    version: update.version,
+    currentVersion: update.currentVersion,
+    notes: update.body ?? "",
+    handle: update,
+  };
+}
+
 /** Returns update info if a newer signed release is available, else null. */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
-  if (!hasDesktop) return null;
   try {
-    const update = await check();
-    if (!update) return null;
-    return {
-      version: update.version,
-      currentVersion: update.currentVersion,
-      notes: update.body ?? "",
-      handle: update,
-    };
+    return await checkForUpdateStrict();
   } catch (e) {
     // No endpoint yet, offline, bad signature, etc. — silently no-update.
     console.warn("Update check skipped:", e);
