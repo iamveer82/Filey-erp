@@ -19,24 +19,33 @@ export default function UpdateNotice() {
 
   useEffect(() => {
     let alive = true;
+    const look = () => {
+      checkForUpdate()
+        .then((u) => {
+          if (!alive || !u) return;
+          // Skip a version the user already dismissed; a newer one still shows.
+          let last: string | null = null;
+          try {
+            last = localStorage.getItem(DISMISS_KEY);
+          } catch {
+            /* ignore */
+          }
+          if (last === u.version) return;
+          setInfo(u);
+        })
+        // A failed check must not reject unhandled — no network, or the backend
+        // briefly unreachable, simply means we look again later.
+        .catch(() => {});
+    };
     // Defer so it doesn't compete with first paint / auth.
-    const t = setTimeout(() => {
-      checkForUpdate().then((u) => {
-        if (!alive || !u) return;
-        // Skip a version the user already dismissed; a newer one still shows.
-        let last: string | null = null;
-        try {
-          last = localStorage.getItem(DISMISS_KEY);
-        } catch {
-          /* ignore */
-        }
-        if (last === u.version) return;
-        setInfo(u);
-      });
-    }, 4000);
+    const t = setTimeout(look, 4000);
+    // One check per launch stranded anyone whose first check failed or who
+    // leaves the app open for days. Look again periodically.
+    const i = setInterval(look, 6 * 60 * 60 * 1000);
     return () => {
       alive = false;
       clearTimeout(t);
+      clearInterval(i);
     };
   }, []);
 
