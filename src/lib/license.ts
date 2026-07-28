@@ -5,8 +5,9 @@
 // the embedded public key below on every launch — no network call. The
 // cloud (Pro) tier is the opposite: a live org-plan check (subscription.ts).
 //
-// Enforcement is OFF by default (ENFORCE_LICENSING) — the mechanism ships
-// first, the paywall flips on at launch.
+// Enforcement is ON (ENFORCE_LICENSING, below): offline mode requires a Lite
+// license. The header used to say the paywall was still off, which stopped
+// being true when the flag flipped for the v2.3.0 licensing launch.
 
 import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
@@ -138,8 +139,8 @@ async function hasLocalData(): Promise<boolean> {
 
 /** Offline/local mode is the paid Lite feature: cloud is the free default,
  *  keeping data on-device needs a desktop license (buy it, or claim a free
- *  seat with a voucher — see redeemVoucher). Always true while
- *  ENFORCE_LICENSING is off (pre-launch), and always true when this device
+ *  seat with a voucher — see redeemVoucher). Always true if
+ *  ENFORCE_LICENSING is ever turned back off, and always true when this device
  *  already has offline data — a licence check must never lock someone out of
  *  data that is already on their own machine. */
 export async function canUseLocalMode(): Promise<boolean> {
