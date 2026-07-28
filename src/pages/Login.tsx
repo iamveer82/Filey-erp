@@ -15,6 +15,14 @@ import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
 
+/* The primary action deliberately mirrors the sign-up page on gofiley.com —
+   same amber gradient, same 44px height — so signing up on the site and
+   signing in here read as one product rather than two. It is fixed brand
+   colour rather than the user's accent: this screen is pre-auth, before any
+   accent preference has loaded. */
+const CTA =
+  "flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 text-sm font-semibold text-[#1A1206] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-60 disabled:hover:brightness-100";
+
 type Mode = "signin" | "signup";
 type Method = "password" | "otp";
 type Screen = "form" | "otp";
@@ -327,7 +335,7 @@ export default function Login() {
                   )}
                   <input
                     id="identifier"
-                    className="input pl-10"
+                    className="input h-11 pl-10"
                     type={channel === "email" ? "email" : "tel"}
                     inputMode={channel === "email" ? "email" : "tel"}
                     autoComplete={channel === "email" ? "email" : "tel"}
@@ -355,7 +363,7 @@ export default function Login() {
                     />
                     <input
                       id="password"
-                      className="input pl-10 pr-10"
+                      className="input h-11 pl-10 pr-10"
                       type={showPw ? "text" : "password"}
                       autoComplete={
                         mode === "signup" ? "new-password" : "current-password"
@@ -389,7 +397,7 @@ export default function Login() {
                     />
                     <input
                       id="confirm"
-                      className="input pl-10 pr-10"
+                      className="input h-11 pl-10 pr-10"
                       type={showConfirm ? "text" : "password"}
                       autoComplete="new-password"
                       value={confirm}
@@ -431,7 +439,7 @@ export default function Login() {
               {err && <Msg kind="err">{err}</Msg>}
               {msg && <Msg kind="msg">{msg}</Msg>}
 
-              <button className="btn-primary w-full" disabled={busy}>
+              <button className={CTA} disabled={busy}>
                 {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy
                   ? "Please wait…"
@@ -505,7 +513,7 @@ export default function Login() {
               {err && <Msg kind="err">{err}</Msg>}
               {msg && <Msg kind="msg">{msg}</Msg>}
 
-              <button className="btn-primary w-full" disabled={busy || token.length < 6}>
+              <button className={CTA} disabled={busy || token.length < 6}>
                 {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy ? "Verifying…" : "Verify"}
               </button>

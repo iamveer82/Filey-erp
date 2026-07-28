@@ -1,7 +1,8 @@
 import { supabase, cloudConfigured } from "../../lib/supabase";
+import { cloudSessionEmail } from "../../lib/sync";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
 
@@ -97,6 +98,28 @@ export default function AccountProfile() {
   const [pwBusy, setPwBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const pwValid = PW_RULES.every((r) => r.test(npw));
+  // cloudConfigured is true in every build (Supabase is baked in), so it says
+  // nothing about whether this install has an account — and offline mode is
+  // NOT the answer either: an offline install still signs in to the cloud for
+  // sync, sharing and licensing. What actually decides whether these controls
+  // can work is a live Supabase session, so ask for one. In offline mode the
+  // AuthProvider runs a synthetic on-device user, so profile.email is not the
+  // account address; the session's email is.
+  const [cloudEmail, setCloudEmail] = useState<string | null>(null);
+  const [cloudChecked, setCloudChecked] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    cloudSessionEmail()
+      .then((e) => alive && setCloudEmail(e))
+      .catch(() => {})
+      .finally(() => alive && setCloudChecked(true));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const cloudAccount = cloudConfigured && !!cloudEmail;
+  /** The address the cloud account actually uses. */
+  const accountEmail = cloudEmail ?? profile?.email ?? "";
   // An email change in flight: the new address plus the code from each inbox.
   const [pending, setPending] = useState<{ next: string; cur: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -105,14 +128,14 @@ export default function AccountProfile() {
     const next = await prompt({
       title: "Change email",
       label: "New email address",
-      defaultValue: profile?.email ?? "",
+      defaultValue: accountEmail,
       placeholder: "you@company.com",
     });
     if (!next || !supabase) return;
     const email = next.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return toast.error("Enter a valid email address.");
-    if (email === profile?.email?.trim().toLowerCase())
+    if (email === accountEmail.trim().toLowerCase())
       return toast.error("That is already your email address.");
     const { error } = await supabase.auth.updateUser({ email });
     if (error) return toast.error(`Could not change email: ${error.message}`);
@@ -123,14 +146,14 @@ export default function AccountProfile() {
   };
 
   const confirmEmailChange = async () => {
-    if (!supabase || !pending || !profile) return;
+    if (!supabase || !pending || !accountEmail) return;
     if (pending.cur.length !== 6 || pending.nw.length !== 6)
       return toast.error("Enter both 6-digit codes.");
     setEmailBusy(true);
     try {
       // Both sides must verify; the first call alone leaves the change pending.
       for (const [addr, token] of [
-        [profile.email, pending.cur],
+        [accountEmail, pending.cur],
         [pending.next, pending.nw],
       ] as const) {
         const { error } = await supabase.auth.verifyOtp({
@@ -145,6 +168,7 @@ export default function AccountProfile() {
       }
       // auth.users is updated by Supabase; profiles.email is ours to keep in step.
       await updateProfile({ email: pending.next });
+      setCloudEmail(pending.next);
       setPending(null);
       toast.success("Email updated.");
     } catch (e: any) {
@@ -158,10 +182,12 @@ export default function AccountProfile() {
     setPwMsg(null);
     if (!pwValid) return setPwMsg({ ok: false, t: "New password too weak." });
     if (npw !== cpw) return setPwMsg({ ok: false, t: "Passwords do not match." });
-    if (!supabase || !profile) return;
+    if (!supabase || !accountEmail) return;
     setPwBusy(true);
     try {
-      await signInWithPassword({ channel: "email", value: profile.email }, cur);
+      // Re-auth against the cloud account, which in offline mode is not the
+      // on-device profile.
+      await signInWithPassword({ channel: "email", value: accountEmail }, cur);
       const { error } = await supabase.auth.updateUser({ password: npw });
       if (error) throw error;
       setPwMsg({ ok: true, t: "Password updated." });
@@ -297,12 +323,19 @@ export default function AccountProfile() {
           <p className="text-sm text-brand-500 mt-0.5 mb-4">
             Manage your login email and connected methods
           </p>
-          {cloudConfigured && (
+          {cloudChecked && !cloudAccount && (
+            <p className="text-sm text-brand-500 rounded-lg bg-muted px-3 py-2.5">
+              This device isn't signed in to a Filey account yet, so there's no
+              login email to manage. Sign in under Data &amp; Sync — it works in
+              offline mode too, and is what enables sync, sharing and licensing.
+            </p>
+          )}
+          {cloudAccount && (
             <>
               <label className="label">Login Email</label>
               <div className="flex gap-2 mb-3">
                 <div className="input flex items-center justify-between">
-                  <span className="truncate">{profile?.email}</span>
+                  <span className="truncate">{accountEmail}</span>
                   <Badge tone={verified ? "success" : "warn"}>
                     {verified ? "Verified" : "Unverified"}
                   </Badge>
@@ -326,7 +359,7 @@ export default function AccountProfile() {
                     can move your account without access to your current inbox.
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <FormField label={`Code sent to ${profile?.email}`}>
+                    <FormField label={`Code sent to ${accountEmail}`}>
                       <input
                         className="input"
                         inputMode="numeric"
@@ -510,7 +543,7 @@ export default function AccountProfile() {
       </div>
 
       {/* right column: Change Password (cloud auth only) */}
-      {cloudConfigured && (
+      {cloudAccount && (
       <div className="card xl:sticky xl:top-2">
         <p className="font-medium text-ink">Change Password</p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
