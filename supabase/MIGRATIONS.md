@@ -26,7 +26,20 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
    - `2026-07-26-crm-objects.sql` — CRM relational layer: `crm_people`, `crm_notes`, `crm_tasks` (org RLS like every app table); `customer_id`/`person_id`/`pipeline` on `crm_opportunities`; `target_type`/`target_id` on `crm_activities`; backfills deal→customer links and promotes contact names to people
 3. `verify-rls.sql` — run last to assert RLS is enabled everywhere (check, not a change).
 
-## Prod state — verified 2026-06-16
+## Prod state — verified 2026-07-28
+
+The three `2026-07-26-*` migrations were **not** applied when the features that
+need them shipped (v2.3.16/v2.3.17), so in cloud mode the contacts panel, notes
+and tasks, deal→customer links, activity targets, `payroll.paid_on` and agent
+memories were all hitting tables and columns that did not exist. Applied
+2026-07-28 and verified present via `information_schema`, with RLS enabled and
+policies on `crm_people`, `crm_notes`, `crm_tasks` and `agent_memories`.
+
+The section below was last checked 2026-06-16 — note that a dated "verified"
+line only covers what existed on that date. **Re-verify against
+`information_schema` when shipping, not against this file.**
+
+## Earlier prod state — verified 2026-06-16
 
 All of the above are **applied** to prod project `voyrjqgaypiylwskkwpr`. Verified via
 `information_schema` (tables: `follow_ups`, `tool_jobs`, `invoice_recurrence`,
