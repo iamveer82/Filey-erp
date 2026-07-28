@@ -4,7 +4,7 @@
 // collections.
 import { describe, it, expect, beforeEach } from "vitest";
 import { localClient, journalSnapshot, replaceColl } from "./localdb";
-import { syncNow, pullNow, syncCycle, cleanRowForPush } from "./sync";
+import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus } from "./sync";
 
 // syncNow only runs in local mode.
 beforeEach(() => {
@@ -165,6 +165,34 @@ describe("syncNow", () => {
     expect(calls).toHaveLength(0);
     const j = await journalSnapshot();
     expect(j.tables.products).toBeTruthy(); // still pending
+  });
+
+  // "Upload all local data" pressed with auto-sync switched off used to return
+  // false in silence, so the button did nothing and explained nothing.
+  it("skips a background run when auto-sync is off", async () => {
+    await localClient.from("products").insert({ name: "A" });
+    localStorage.setItem("filey_auto_sync", "off");
+    const { client, calls } = fakeCloud();
+    expect(await syncNow(client)).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("still pushes on a manual run when auto-sync is off", async () => {
+    await localClient.from("products").insert({ name: "A" });
+    localStorage.setItem("filey_auto_sync", "off");
+    const { client, calls } = fakeCloud();
+    expect(await syncNow(client, { manual: true })).toBe(true);
+    expect(calls.some((c) => c.table === "products" && c.op === "upsert")).toBe(true);
+  });
+
+  it("reports why a manual run stopped instead of failing silently", async () => {
+    await localClient.from("products").insert({ name: "A" });
+    const { client } = fakeCloud();
+    client.auth.getSession = async () => ({ data: { session: null } });
+    expect(await syncNow(client, { manual: true })).toBe(false);
+    const s = getSyncStatus();
+    expect(s.state).toBe("error");
+    expect(s.error ?? "").toMatch(/sign in/i);
   });
 });
 

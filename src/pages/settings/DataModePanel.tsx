@@ -21,7 +21,7 @@ import {
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
-import { canUseLocalMode, ENFORCE_LICENSING } from "../../lib/license";
+import { canUseLocalMode, hasLocalData, ENFORCE_LICENSING } from "../../lib/license";
 import {
   hasTauri,
   pickFolder,
@@ -100,7 +100,14 @@ function CloudSyncCard() {
     setErr("");
     try {
       await markAllForSync();
-      await syncNow();
+      const ok = await syncNow(null, { manual: true });
+      // syncNow reports its own reason via sync status; surface anything left.
+      if (!ok && getSyncStatus().state !== "error")
+        setErr("Upload did not run. Check that you're signed in and online.");
+    } catch (e) {
+      // Without this the whole thing failed in silence: setErr("") above, no
+      // catch, and the rejection vanished into an unhandled promise.
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -153,7 +160,12 @@ function CloudSyncCard() {
             <button
               className="btn-ghost"
               disabled={busy || sync.state === "syncing"}
-              onClick={() => void syncCycle()}
+              onClick={() => {
+                setErr("");
+                void syncCycle(null, { manual: true }).catch((e) =>
+                  setErr(e instanceof Error ? e.message : String(e))
+                );
+              }}
             >
               Sync now
             </button>
@@ -311,6 +323,19 @@ export default function DataModePanel() {
         "Offline mode needs a Filey Desktop license. Get one under Settings → Desktop License, then switch."
       );
       return;
+    }
+    // Offline and cloud are separate stores. Switching to offline on a device
+    // that has never held local records shows an empty workspace — no company
+    // details, no customers — which reads exactly like the app wiped your
+    // data. Say so before the reload, and point at the import that fixes it.
+    if (m === "local" && !(await hasLocalData())) {
+      const go = window.confirm(
+        "This device has no offline data yet.\n\n" +
+          "Offline mode keeps its own copy, separate from the cloud, so switching now opens an empty workspace — your cloud records are NOT deleted and are still there when you switch back.\n\n" +
+          'To bring them across, cancel and use "Copy cloud data to this device" first.\n\n' +
+          "Switch to an empty offline workspace anyway?"
+      );
+      if (!go) return;
     }
     setDataMode(m);
     window.location.reload();

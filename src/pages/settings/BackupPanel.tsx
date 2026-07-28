@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, Info, Upload } from "lucide-react";
 import { billing, erp, crm, fin, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
-import { cn } from "../../lib/format";
+import { cn, errMsg } from "../../lib/format";
 
 /* ---------------- Backup & Restore ----------------
    Reference two-card layout. Export is the real API snapshot; in-app
@@ -11,22 +11,39 @@ import { cn } from "../../lib/format";
 export default function BackupPanel() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
   const { get, set, ready } = useSettings();
   const lastExportAt = get("backup.last_export_at", "");
 
   const exportData = async () => {
     setBusy(true);
+    setErr("");
+    setDone(false);
     try {
+      // Each source used to carry its own .catch that substituted null or [],
+      // so a section that failed to read was written out as "you have none of
+      // these" and still reported "Downloaded". A backup silently missing your
+      // invoices is far more dangerous than an export that refuses to run, so
+      // collect the failures and write nothing if there are any.
+      const sources = [
+        ["company", () => billing.getCompany()],
+        ["products", () => erp.products()],
+        ["orders", () => erp.orders()],
+        ["invoices", () => billing.listDocs()],
+        ["quotations", () => quotes.listDocs()],
+        ["customers", () => crm.customers()],
+        ["expenses", () => fin.expenses()],
+      ] as const;
+      const settled = await Promise.allSettled(sources.map(([, load]) => load()));
+      const failed = sources
+        .filter((_, i) => settled[i].status === "rejected")
+        .map(([name]) => name);
+      if (failed.length)
+        throw new Error(
+          `Could not read ${failed.join(", ")}. Nothing was downloaded — a backup missing data is worse than none.`
+        );
       const [company, products, orders, invoices, quotations, customers, expenses] =
-        await Promise.all([
-          billing.getCompany().catch(() => null),
-          erp.products().catch(() => []),
-          erp.orders().catch(() => []),
-          billing.listDocs().catch(() => []),
-          quotes.listDocs().catch(() => []),
-          crm.customers().catch(() => []),
-          fin.expenses().catch(() => []),
-        ]);
+        settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
       const blob = new Blob(
         [
           JSON.stringify(
@@ -54,6 +71,8 @@ export default function BackupPanel() {
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       setDone(true);
       set("backup.last_export_at", new Date().toISOString());
+    } catch (e) {
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -94,6 +113,9 @@ export default function BackupPanel() {
                 <span className="ml-2 text-[12px] font-medium text-success">
                   Downloaded
                 </span>
+              )}
+              {err && !busy && (
+                <p className="mt-2 text-[12.5px] font-medium text-danger">{err}</p>
               )}
             </div>
           </div>

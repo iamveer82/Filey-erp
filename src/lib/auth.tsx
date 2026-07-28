@@ -317,13 +317,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return;
     await supabase.auth.signOut();
     setCacheOrg(null);
-    setProfile(null);
+    // In offline mode the profile is the ON-DEVICE one and has nothing to do
+    // with the cloud session being ended. Clearing it left a truthy synthetic
+    // user with a null profile, so needsProfile flipped true and dumped the
+    // user back into first-run setup — and createProfile() there overwrites
+    // the stored local profile, wiping the name and company they had. Signing
+    // out of the cloud must not touch on-device data.
+    if (!local) setProfile(null);
   };
 
   const createProfile = async (firstName: string, lastName: string, company: string) => {
     if (local) {
       const np: Profile = {
-        ...(profile ?? { id: LOCAL_USER.id, email: "" }),
+        // Merge onto what is actually STORED, not onto possibly-empty state:
+        // falling back to a bare object here discarded every other saved field.
+        ...loadLocalProfile(),
+        ...(profile ?? {}),
         name: `${firstName.trim()} ${lastName.trim()}`.trim(),
         company: company.trim(),
       };

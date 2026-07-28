@@ -541,6 +541,9 @@ export default function CustomerDetail() {
         el,
         `Statement-${(display || "customer").replace(/[^\w.-]+/g, "_").slice(0, 40)}-${localYmd(new Date())}`
       );
+    } catch (e) {
+      // The spinner used to just stop, leaving "nothing happened".
+      toast.error(`Could not export the statement: ${errMsg(e)}`);
     } finally {
       setExporting(false);
     }

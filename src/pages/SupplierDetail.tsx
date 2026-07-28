@@ -422,6 +422,8 @@ export default function SupplierDetail() {
         el,
         `Statement-${(supplier?.name || "supplier").replace(/[^\w.-]+/g, "_").slice(0, 40)}-${localYmd(new Date())}`
       );
+    } catch (e) {
+      toast.error(`Could not export the statement: ${errMsg(e)}`);
     } finally {
       setExporting(false);
     }

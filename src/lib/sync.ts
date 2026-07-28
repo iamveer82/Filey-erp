@@ -178,15 +178,43 @@ let running = false;
 
 /** Push everything the journal marked dirty. Returns true when the push ran to
  *  completion (including "nothing to do"). `client` is injectable for tests. */
-export async function syncNow(client?: SupabaseClient | null): Promise<boolean> {
+export async function syncNow(
+  client?: SupabaseClient | null,
+  opts?: { manual?: boolean }
+): Promise<boolean> {
   const supa = client ?? supabase;
-  if (!isLocalMode() || !supa || !autoSyncEnabled() || running) return false;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  const manual = opts?.manual === true;
+  // A press of "Upload all local data" is an instruction, not a background
+  // tick. Every one of these used to return false in silence, so the button
+  // did nothing and said nothing — most cruelly when auto-sync was simply
+  // switched off. Manual runs ignore that preference and report why they stop.
+  const stop = (error: string): boolean => {
+    if (manual) setStatus({ state: "error", error });
+    return false;
+  };
+  if (!isLocalMode())
+    return stop(
+      "This device already works directly against the cloud, so there is nothing to upload."
+    );
+  if (!supa) return stop("Cloud is not configured in this build.");
+  if (!manual && !autoSyncEnabled()) return false;
+  if (running) return stop("A sync is already running — wait for it to finish.");
+  if (typeof navigator !== "undefined" && !navigator.onLine)
+    return stop("No internet connection.");
 
   const { data: sess } = await supa.auth.getSession();
   const uid = sess.session?.user?.id;
   if (!uid) {
-    setStatus({ state: "signed-out" });
+    setStatus({
+      state: manual
+        ? // Redeeming an offline licence does not sign you in — people reach for
+          // the voucher when the upload fails, so name the actual requirement.
+          "error"
+        : "signed-out",
+      ...(manual
+        ? { error: "Sign in to your Filey account first — uploading needs an account to push to." }
+        : {}),
+    });
     return false;
   }
 
@@ -330,9 +358,14 @@ export async function pullNow(client?: SupabaseClient | null): Promise<boolean> 
 /** One full sync beat: seed once, push local changes, then pull what's new
  *  from other devices and teammates. Pull after a failed push is safe — dirty
  *  tables are skipped, so unpushed local edits can't be overwritten. */
-export async function syncCycle(client?: SupabaseClient | null): Promise<boolean> {
+export async function syncCycle(
+  client?: SupabaseClient | null,
+  opts?: { manual?: boolean }
+): Promise<boolean> {
   await seedIfNeeded(client);
-  const pushed = await syncNow(client);
+  // "Sync now" is a button, not a heartbeat: pass the intent down so it does
+  // not sit there doing nothing when auto-sync happens to be switched off.
+  const pushed = await syncNow(client, opts);
   const pulled = await pullNow(client);
   return pushed && pulled;
 }

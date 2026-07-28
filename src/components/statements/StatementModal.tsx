@@ -278,6 +278,8 @@ export default function StatementModal({
     setExporting(true);
     try {
       await downloadElementAsPdf(el, baseName());
+    } catch (e) {
+      toast.error(`Could not export the statement: ${errMsg(e)}`);
     } finally {
       setExporting(false);
     }

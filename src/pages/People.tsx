@@ -15,7 +15,7 @@ import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { aed, num, fmtDate, numInput, cn, errMsg, getDisplayCurrency } from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import {
   PageHeader,
@@ -791,6 +791,7 @@ function LeaveModal({
 }) {
   const [dates, setDates] = useState<Date[]>([]);
   const [busy, setBusy] = useState(false);
+  const { toast } = useUI();
   useEffect(() => {
     if (employee) setDates([]);
   }, [employee]);
@@ -802,6 +803,10 @@ function LeaveModal({
         await hr.markAttendance(employee.id, format(d, "yyyy-MM-dd"), "leave");
       }
       onSaved();
+    } catch (e) {
+      // A failed write left the modal sitting there with onSaved() never
+      // called, which reads as "the button does nothing".
+      toast.error(`Could not mark leave: ${errMsg(e)}`);
     } finally {
       setBusy(false);
     }

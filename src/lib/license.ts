@@ -129,7 +129,9 @@ const LOCAL_DATA_KEYS = [
 ];
 
 /** True when this device already holds offline data. */
-async function hasLocalData(): Promise<boolean> {
+/** True when this device already holds offline records. Exported so the mode
+ *  switch can warn before dropping someone into an empty local workspace. */
+export async function hasLocalData(): Promise<boolean> {
   for (const k of LOCAL_DATA_KEYS) {
     const raw = await kvGet(k);
     if (raw && raw !== "[]" && raw !== "null") return true;
