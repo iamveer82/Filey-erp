@@ -3,8 +3,11 @@ import { FREE_LIMITS, resolveTier } from "../license";
 import { planCardFor, PLANS } from "../subscription";
 
 describe("FREE_LIMITS", () => {
-  it("caps the free tier at 20 invoices per month", () => {
-    expect(FREE_LIMITS.invoicesPerMonth).toBe(20);
+  // Must match the server trigger in supabase/2026-07-29-free-invoice-cap-5.sql.
+  // If they drift, the client lets an invoice through and the database rejects
+  // it — a save that fails for no reason the user can see.
+  it("caps the free tier at 5 invoices per month", () => {
+    expect(FREE_LIMITS.invoicesPerMonth).toBe(5);
   });
 });
 
@@ -50,7 +53,7 @@ describe("planCardFor", () => {
 
   it("carries the launch prices (AED)", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 399");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 499");
     expect(PLANS.find((p) => p.id === "pro")?.price).toBe("AED 29");
   });
 });

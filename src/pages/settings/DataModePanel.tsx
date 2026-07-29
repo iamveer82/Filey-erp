@@ -320,7 +320,7 @@ export default function DataModePanel() {
     // Offline/local mode is the licensed tier; cloud is the free default.
     if (m === "local" && !(await canUseLocalMode())) {
       setErr(
-        "Offline mode needs a Filey Desktop license. Get one under Settings → Desktop License, then switch."
+        "Offline mode comes with Filey Freedom (AED 499, one-time). Get it under Settings → Desktop License, then switch."
       );
       return;
     }

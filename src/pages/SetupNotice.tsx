@@ -23,7 +23,7 @@ export default function SetupNotice() {
       choose("local");
     } else {
       setLicenseMsg(
-        "Offline mode needs a Filey Desktop license. Start free in the cloud — then buy a license or redeem a voucher under Settings → Desktop License."
+        "Offline mode comes with Filey Freedom (AED 499, one-time). Start free in the cloud — then buy Freedom or redeem a voucher under Settings → Desktop License."
       );
     }
   };
