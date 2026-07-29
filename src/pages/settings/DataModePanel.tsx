@@ -36,6 +36,59 @@ import {
   restoreAll,
 } from "../../lib/localPaths";
 
+/** The one control most people should ever need: sync on, or everything here. */
+function SyncSwitch({
+  on,
+  busy,
+  progress,
+  onChange,
+}: {
+  on: boolean;
+  busy: boolean;
+  progress: string;
+  onChange: (want: boolean) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-brand-200 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="font-medium text-ink flex items-center gap-2">
+            {on ? <Cloud size={16} /> : <HardDrive size={16} />}
+            Sync with your Filey account
+          </p>
+          <p className="text-sm text-brand-500 mt-0.5">
+            {on
+              ? "Your data is in your account, so you can sign in on another device and pick up where you left off."
+              : "Your data lives on this computer and is not being sent anywhere. Turn this on to use it on another device."}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label="Sync with your Filey account"
+          disabled={busy}
+          onClick={() => onChange(!on)}
+          className={`relative w-11 h-6 rounded-full shrink-0 cursor-pointer transition-colors disabled:opacity-50 ${
+            on ? "bg-primary-400" : "bg-brand-200"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+              on ? "left-[22px]" : "left-0.5"
+            }`}
+          />
+        </button>
+      </div>
+      {busy && (
+        <p className="text-xs text-brand-500 mt-3">
+          {progress || "Working…"}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Cloud sync card (local mode only): connect a cloud account and this device
 // syncs both ways — local changes upload within a second, and edits from your
 // other devices or teammates download automatically.
@@ -403,6 +456,72 @@ export default function DataModePanel() {
     }
   };
 
+  /**
+   * The whole storage question as one switch.
+   *
+   * ON  — data lives in the account and reaches every device you sign in to.
+   * OFF — copy everything to this computer FIRST, then stop sending. The copy
+   *       is the point: flipping storage without it is what made the app look
+   *       like it had thrown the user's data away.
+   *
+   * Nothing is deleted from the cloud either way, so turning sync back on
+   * reunites the device with the account rather than starting over.
+   */
+  const setSync = async (want: boolean) => {
+    setErr("");
+    setResult(null);
+    if (want) {
+      // Back on: keep this device's copy and push it up, rather than pulling
+      // the cloud down over the top of local work that was done while off.
+      setBusy(true);
+      try {
+        setAutoSyncEnabled(true);
+        if (getDataMode() === "local") {
+          await markAllForSync();
+          const ok = await syncNow(null, { manual: true });
+          if (!ok && getSyncStatus().state !== "error")
+            setErr("Sync is on, but nothing uploaded yet — check you're signed in.");
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Stop syncing to the cloud?\n\n" +
+          "Filey will copy everything to this computer first, then keep it here and send nothing further. Your cloud copy is left as it is — turning sync back on reconnects this device to it.\n\n" +
+          "You will need sync on again to use the same data on another device."
+      )
+    )
+      return;
+
+    setBusy(true);
+    try {
+      // Copy down BEFORE switching, and abort the switch if it fails —
+      // otherwise the user lands in an empty workspace, which is the exact
+      // failure this flow exists to prevent.
+      if (getDataMode() !== "local") {
+        setResult(await migrateCloudToLocal(setProgress));
+      }
+      setAutoSyncEnabled(false);
+      setDataMode("local");
+      window.location.reload();
+    } catch (e) {
+      setErr(
+        `Could not copy your data to this device, so sync is still on and nothing changed: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  };
+
   const Card = ({
     m,
     icon: Icon,
@@ -450,34 +569,47 @@ export default function DataModePanel() {
   return (
     <div className="card space-y-4">
       <div>
-        <h2 className="text-lg font-medium text-ink">Data & Storage</h2>
+        <h2 className="text-lg font-medium text-ink">Data &amp; Storage</h2>
         <p className="text-sm text-brand-500 mt-1">
-          Choose where Filey keeps your data. Switching reloads the app and does
-          not move existing data between local and cloud.
+          Your data syncs to your Filey account so you can use it on more than
+          one device. Turn sync off and Filey copies everything to this computer
+          first, then keeps it here and stops sending anything to the cloud.
         </p>
       </div>
-      <div className="space-y-3">
-        <Card
-          m="cloud"
-          icon={Cloud}
-          title="Filey Cloud (free)"
-          desc={
-            cloudConfigured
-              ? "Stored securely in the cloud and synced across your devices and team."
-              : "Not available — Supabase isn't configured in this build."
-          }
-          disabled={!cloudConfigured}
-        />
-        <Card
-          m="local"
-          icon={HardDrive}
-          title="Offline (this device)"
-          desc={
-            "Everything stored on this computer. No account, no internet, never leaves the machine." +
-            (ENFORCE_LICENSING ? " Requires a Filey Desktop license." : "")
-          }
-        />
-      </div>
+
+      <SyncSwitch
+        on={mode === "cloud" || autoSyncEnabled()}
+        busy={busy}
+        progress={progress}
+        onChange={(want) => void setSync(want)}
+      />
+      <details className="rounded-xl border border-brand-200 p-3">
+        <summary className="text-sm text-brand-500 cursor-pointer">
+          Advanced — choose storage manually
+        </summary>
+        <div className="space-y-3 mt-3">
+          <Card
+            m="cloud"
+            icon={Cloud}
+            title="Filey Cloud"
+            desc={
+              cloudConfigured
+                ? "Stored in your account and available on every device you sign in to."
+                : "Not available — Supabase isn't configured in this build."
+            }
+            disabled={!cloudConfigured}
+          />
+          <Card
+            m="local"
+            icon={HardDrive}
+            title="This device only"
+            desc={
+              "Everything stored on this computer. No internet needed, nothing leaves the machine." +
+              (ENFORCE_LICENSING ? " Requires a Filey Freedom license." : "")
+            }
+          />
+        </div>
+      </details>
       {err && (
         <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
       )}
