@@ -76,7 +76,7 @@ export function drainFileOutputs(): FileOutput[] {
 }
 
 async function findInvoice(numberOrId: unknown) {
-  const docs = (await billing.listDocs().catch(() => [])) as Record<string, unknown>[];
+  const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
   const q = lc(numberOrId);
   return (
     docs.find((d) => lc(d.number) === q || String(d.id) === str(numberOrId)) ||
@@ -84,7 +84,7 @@ async function findInvoice(numberOrId: unknown) {
   );
 }
 async function findProduct(name: unknown) {
-  const all = (await erp.products().catch(() => [])) as Record<string, unknown>[];
+  const all = (await erp.products()) as unknown as Record<string, unknown>[];
   const q = lc(name);
   return all.find((p) => lc(p.name) === q) || all.find((p) => lc(p.name).includes(q));
 }
@@ -115,14 +115,14 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: {} },
     run: async () => {
       const [c, p, o, inv, q] = await Promise.all([
-        crm.customers().catch(() => []),
-        erp.products().catch(() => []),
-        erp.orders().catch(() => []),
-        billing.listDocs().catch(() => []),
-        (await import("./api")).quotes.listDocs().catch(() => []),
+        crm.customers(),
+        erp.products(),
+        erp.orders(),
+        billing.listDocs(),
+        (await import("./api")).quotes.listDocs(),
       ]);
       const t = today();
-      const overdue = (inv as Record<string, unknown>[]).filter(
+      const overdue = (inv as unknown as Record<string, unknown>[]).filter(
         (d) =>
           numOf(d.balance) > 0 && d.due_date && str(d.due_date) < t && d.status !== "paid"
       ).length;
@@ -141,7 +141,7 @@ export const TOOLS: ToolDef[] = [
     description: "Search customers by name (omit query to list recent).",
     parameters: { type: "object", properties: { query: { type: "string" } } },
     run: async ({ query }) => {
-      const all = (await crm.customers().catch(() => [])) as Record<string, unknown>[];
+      const all = (await crm.customers()) as unknown as Record<string, unknown>[];
       const q = lc(query);
       return all
         .filter((c) => !q || lc(c.name).includes(q))
@@ -160,7 +160,7 @@ export const TOOLS: ToolDef[] = [
     description: "Search products by name. Returns name, price and stock quantity.",
     parameters: { type: "object", properties: { query: { type: "string" } } },
     run: async ({ query }) => {
-      const all = (await erp.products().catch(() => [])) as Record<string, unknown>[];
+      const all = (await erp.products()) as unknown as Record<string, unknown>[];
       const q = lc(query);
       return all
         .filter((p) => !q || lc(p.name).includes(q))
@@ -184,10 +184,7 @@ export const TOOLS: ToolDef[] = [
       },
     },
     run: async ({ status }) => {
-      const docs = (await billing.listDocs().catch(() => [])) as Record<
-        string,
-        unknown
-      >[];
+      const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
       const t = today();
       let rows = docs;
       if (status === "overdue")
@@ -346,7 +343,10 @@ export const TOOLS: ToolDef[] = [
       required: ["customer_name", "items"],
     },
     run: async (args) => {
-      const co = await billing.getCompany().catch(() => null);
+      // Not swallowed: these details carry the company's TRN onto the document,
+      // and a UAE tax invoice issued without one is a compliance problem. Fail
+      // loudly rather than quietly draft an invalid invoice.
+      const co = await billing.getCompany();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
@@ -609,7 +609,7 @@ export const TOOLS: ToolDef[] = [
     description: "List all employees with their status.",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const emps = (await hr.employees().catch(() => [])) as Record<string, unknown>[];
+      const emps = (await hr.employees()) as unknown as Record<string, unknown>[];
       return emps.map((e) => ({
         id: e.id,
         name: e.name,
@@ -636,7 +636,7 @@ export const TOOLS: ToolDef[] = [
       required: ["employee_name", "status"],
     },
     run: async (a) => {
-      const emps = (await hr.employees().catch(() => [])) as Record<string, unknown>[];
+      const emps = (await hr.employees()) as unknown as Record<string, unknown>[];
       const q = lc(a.employee_name);
       const emp =
         emps.find((e) => lc(e.name) === q) || emps.find((e) => lc(e.name).includes(q));
@@ -762,13 +762,22 @@ export const TOOLS: ToolDef[] = [
     run: async (a) => {
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
-      // Fetch full doc to get customer_email
-      const full = await billing.getDoc(Number(d.id)).catch(() => null);
+      // Fetch full doc to get customer_email. Keep the summary as a fallback,
+      // but remember a failed lookup: reporting "no email on file" when the
+      // read simply failed sends the user off to fix a record that is fine.
+      let full: Record<string, unknown> | null = null;
+      let lookupFailed = false;
+      try {
+        full = (await billing.getDoc(Number(d.id))) as unknown as Record<string, unknown> | null;
+      } catch {
+        lookupFailed = true;
+      }
       const email = str(full?.customer_email) || str((d as any).customer_email);
       if (!email)
         return {
-          error:
-            "This invoice has no customer email on file. Add an email to the customer record first.",
+          error: lookupFailed
+            ? "Could not load that invoice to find the customer's email — try again."
+            : "This invoice has no customer email on file. Add an email to the customer record first.",
         };
       const body = `<p>Your invoice <strong>${esc(d.number)}</strong> for ${esc(d.currency || "AED")} ${numOf(d.total)} is ready.</p>`;
       await sendEmail({
@@ -784,7 +793,7 @@ export const TOOLS: ToolDef[] = [
     description: "Show today's attendance — who's present, absent, on leave.",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const records = (await hr.attendance().catch(() => [])) as Record<
+      const records = (await hr.attendance()) as unknown as Record<
         string,
         unknown
       >[];

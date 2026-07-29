@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Wallet, Plus, Trash2, Pencil } from "lucide-react";
 import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
-import { aed, fmtDate } from "../lib/format";
+import { aed, errMsg, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { Modal, Field } from "./ui";
 
@@ -29,15 +29,27 @@ export default function AdvanceCard({
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
 
+  // A failed read left rows empty, so the advance total read as zero and the
+  // "net after advance" line showed the party owing the FULL amount despite
+  // having paid. Money on screen must not be a guess.
+  const [loadErr, setLoadErr] = useState("");
   const load = () =>
-    advances.forParty(partyType, partyId).then(setRows).catch(() => {});
+    advances
+      .forParty(partyType, partyId)
+      .then((r) => {
+        setRows(r);
+        setLoadErr("");
+      })
+      .catch((e) => setLoadErr(errMsg(e)));
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyType, partyId]);
 
   const total = rows.reduce((s, a) => s + Number(a.amount), 0);
-  const net = outstanding != null ? Math.max(0, outstanding - total) : undefined;
+  // Suppress the net line when advances failed to load — it would be wrong.
+  const net =
+    outstanding != null && !loadErr ? Math.max(0, outstanding - total) : undefined;
   const label = partyType === "customer" ? "Advance received" : "Advance paid";
 
   const openAdd = () => {
@@ -118,15 +130,22 @@ export default function AdvanceCard({
         </button>
       </div>
 
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-semibold text-ink">{aed(total)}</span>
-        <span className="text-xs text-brand-400">
-          credit balance
-          {rows.length
-            ? ` · ${rows.length} entr${rows.length === 1 ? "y" : "ies"}`
-            : ""}
-        </span>
-      </div>
+      {loadErr ? (
+        <p className="text-sm text-danger">
+          Could not load advances, so no credit balance is shown here — it would
+          read as zero and overstate what is owed. ({loadErr})
+        </p>
+      ) : (
+        <div className="flex items-baseline gap-2">
+          <span className="text-2xl font-semibold text-ink">{aed(total)}</span>
+          <span className="text-xs text-brand-400">
+            credit balance
+            {rows.length
+              ? ` · ${rows.length} entr${rows.length === 1 ? "y" : "ies"}`
+              : ""}
+          </span>
+        </div>
+      )}
       {net != null && (
         <p className="text-xs text-brand-500 mt-1">
           Net {partyType === "customer" ? "due from customer" : "payable"}:{" "}

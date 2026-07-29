@@ -20,17 +20,28 @@ const DOT: Record<Insight["severity"], string> = {
 export default function InsightsCard() {
   const nav = useNavigate();
   const [insights, setInsights] = useState<Insight[] | null>(null);
+  /** Sources that failed. Insights are advice about money — with everything
+   *  failing you get zero insights, and the card used to answer that with
+   *  "All clear … look healthy", which is a confident lie about your finances. */
+  const [incomplete, setIncomplete] = useState<string[]>([]);
 
   useEffect(() => {
     let dead = false;
     (async () => {
+      const missed: string[] = [];
+      const src = <T,>(label: string, p: Promise<T>, fallback: T): Promise<T> =>
+        p.catch(() => {
+          missed.push(label);
+          return fallback;
+        });
       const [sales, purchases, expenses, products, movements] = await Promise.all([
-        billing.listDocs("sales").catch(() => []),
-        billing.listDocs("purchase").catch(() => []),
-        fin.expenses().catch(() => []),
-        erp.products().catch(() => []),
-        erp.stockMovements().catch(() => ({})),
+        src("sales", billing.listDocs("sales"), []),
+        src("purchases", billing.listDocs("purchase"), []),
+        src("expenses", fin.expenses(), []),
+        src("products", erp.products(), []),
+        src("stock movements", erp.stockMovements(), {}),
       ]);
+      if (!dead) setIncomplete(missed);
       const list = buildInsights({
         sales,
         purchases,
@@ -57,6 +68,11 @@ export default function InsightsCard() {
           <Skeleton className="h-10" />
           <Skeleton className="h-10" />
         </div>
+      ) : incomplete.length ? (
+        <p className="text-sm text-danger">
+          Could not read {incomplete.join(", ")}, so these insights are
+          incomplete — treat "nothing to flag" as unknown rather than fine.
+        </p>
       ) : insights.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-brand-500">
           <CheckCircle2 size={15} className="text-success" />

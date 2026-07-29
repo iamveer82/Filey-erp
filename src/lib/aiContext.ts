@@ -3,8 +3,11 @@ import { money, getDisplayCurrency } from "./format";
 
 /* Builds a compact, token-aware snapshot of the signed-in user's OWN business
  * data, injected into the copilot's system prompt so it can answer questions
- * and draft content grounded in their records. Every call is guarded — a
- * failing/empty section is simply omitted. Read-only. */
+ * and draft content grounded in their records. Every call is guarded, but a
+ * section that FAILED to load is reported as unavailable rather than just
+ * omitted: omitting it is indistinguishable from "the user has none of these",
+ * and the model will confidently answer "you have no overdue invoices" when it
+ * simply could not read them. Read-only. */
 
 const CAP = 8;
 
@@ -13,12 +16,21 @@ const n = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 
 export async function buildAiContext(companyName?: string): Promise<string> {
+  const unreadable: string[] = [];
+  const section = (label: string, p: Promise<unknown[]>): Promise<Row[]> =>
+    p
+      .then((rows) => rows as Row[])
+      .catch(() => {
+        unreadable.push(label);
+        return [] as Row[];
+      });
+
   const [customers, invoices, products, quoteDocs, orders] = await Promise.all([
-    crm.customers().catch(() => [] as Row[]),
-    billing.listDocs().catch(() => [] as Row[]),
-    erp.products().catch(() => [] as Row[]),
-    quotes.listDocs().catch(() => [] as Row[]),
-    erp.orders().catch(() => [] as Row[]),
+    section("customers", crm.customers()),
+    section("invoices", billing.listDocs()),
+    section("products", erp.products()),
+    section("quotations", quotes.listDocs()),
+    section("orders", erp.orders()),
   ]);
 
   const ccy = getDisplayCurrency();
@@ -29,6 +41,12 @@ export async function buildAiContext(companyName?: string): Promise<string> {
     `CURRENT BUSINESS DATA (live snapshot — the user owns all of this; use it to answer and to draft):`
   );
   if (companyName) lines.push(`- Company: ${companyName} · display currency ${ccy}`);
+  if (unreadable.length)
+    lines.push(
+      `- UNAVAILABLE THIS TURN: ${unreadable.join(", ")} could not be read. ` +
+        `Their absence below means "unknown", NOT "none". Do not state or imply the user has none of these, ` +
+        `and do not compute totals that depend on them — say you could not read them and offer to retry.`
+    );
 
   // Customers
   if (customers.length) {
