@@ -273,7 +273,9 @@ export default function CustomerDetail() {
       const ids = myInvoices
         .filter((d) => d.status !== "draft")
         .map((d) => d.id);
-      const allReceipts = await receiptsApi.list().catch(() => [] as ReceiptSummary[]);
+      // Receipts offset what is owed — swallowing a failure here would show
+      // the customer as still owing money they have already paid.
+      const allReceipts = await receiptsApi.list();
       const data = await buildSalesJournal({
         customerId: customer.id,
         customer,
@@ -283,7 +285,8 @@ export default function CustomerDetail() {
       });
       setJournalData(data);
     } catch (e) {
-      console.error("Journal build failed:", e);
+      // console.error alone left an empty journal on screen with no hint why.
+      toast.error(`Could not build the sales journal: ${errMsg(e)}`);
     } finally {
       setJournalLoading(false);
     }

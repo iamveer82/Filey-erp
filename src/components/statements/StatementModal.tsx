@@ -99,6 +99,10 @@ export default function StatementModal({
   const [receipts, setReceipts] = useState<StatementReceiptEntry[]>([]);
   const [advRows, setAdvRows] = useState<StatementAdvanceEntry[]>([]);
   const [exporting, setExporting] = useState(false);
+  /** Sources that failed to load. A statement is arithmetic — payments that
+   *  fail to load silently count as zero, which OVERSTATES what the customer
+   *  owes on a document you then send them. Never present that as accurate. */
+  const [missing, setMissing] = useState<string[]>([]);
   const exportRef = useRef<HTMLDivElement>(null);
 
   /** Only issued documents are ledger debits — sales drafts and draft /
@@ -120,7 +124,15 @@ export default function StatementModal({
     let alive = true;
     setLoading(true);
 
-    const mapPay = (docNumber: string) => (p: { paid_at: string; amount: number | string; method?: string | null }) => ({
+    // Collect what failed instead of quietly substituting "none of these".
+    const failed: string[] = [];
+    const note = <T,>(label: string, p: Promise<T>, fallback: T): Promise<T> =>
+      p.catch(() => {
+        if (!failed.includes(label)) failed.push(label);
+        return fallback;
+      });
+
+    const mapPay =(docNumber: string) => (p: { paid_at: string; amount: number | string; method?: string | null }) => ({
       date: (p.paid_at || "").slice(0, 10),
       amount: Number(p.amount) || 0,
       method: p.method || undefined,
@@ -131,31 +143,34 @@ export default function StatementModal({
       partyType === "customer"
         ? Promise.all(
             ledgerDocs.map((d) =>
-              billing
-                .payments(d.id)
-                .then((ps) => ps.map(mapPay(d.number)))
-                .catch(() => [] as StatementPaymentEntry[])
+              note(
+                "payments",
+                billing.payments(d.id).then((ps) => ps.map(mapPay(d.number))),
+                [] as StatementPaymentEntry[]
+              )
             )
           ).then((all) => all.flat())
         : Promise.all(
             ledgerDocs.map((d) =>
-              pos
-                .payments(d.id)
-                .then((ps) => ps.map(mapPay(d.number)))
-                .catch(() => [] as StatementPaymentEntry[])
+              note(
+                "payments",
+                pos.payments(d.id).then((ps) => ps.map(mapPay(d.number))),
+                [] as StatementPaymentEntry[]
+              )
             )
           ).then((all) => all.flat());
 
     Promise.all([
-      billing.getCompany().catch(() => null),
+      note("company details", billing.getCompany(), null),
       perDocPayments,
       partyType === "customer"
-        ? receiptsApi.list().catch(() => [])
+        ? note("receipts", receiptsApi.list(), [])
         : Promise.resolve([]),
-      advances.forParty(partyType, party.id).catch(() => []),
+      note("advances", advances.forParty(partyType, party.id), []),
     ])
       .then(([co, pays, rcs, advs]) => {
         if (!alive) return;
+        setMissing(failed);
         setCompany(co);
         setPayments(pays);
         setReceipts(
@@ -292,6 +307,21 @@ export default function StatementModal({
       title={`Statement of account — ${party.name}`}
       size="full"
     >
+      {missing.length > 0 && !loading && (
+        <div
+          role="alert"
+          className="no-print mb-4 rounded-lg bg-danger/10 px-3 py-2.5 text-[13px] text-danger"
+        >
+          <span className="font-medium">
+            This statement is incomplete — {missing.join(" and ")} could not be
+            loaded.
+          </span>{" "}
+          Anything missing counts as zero here, so the closing balance is likely
+          wrong. Printing and PDF are disabled until it loads cleanly — close and
+          reopen to retry.
+        </div>
+      )}
+
       {/* Controls (never printed/exported) */}
       <div className="no-print flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -310,14 +340,14 @@ export default function StatementModal({
           <button
             className="btn-ghost h-8 inline-flex gap-1.5"
             onClick={() => window.print()}
-            disabled={loading || isEmpty}
+            disabled={loading || isEmpty || missing.length > 0}
           >
             <Printer className="h-3.5 w-3.5" /> Print
           </button>
           <button
             className="btn-primary h-8 inline-flex gap-1.5"
             onClick={downloadPdf}
-            disabled={loading || isEmpty || exporting}
+            disabled={loading || isEmpty || exporting || missing.length > 0}
           >
             <Download className="h-3.5 w-3.5" /> {exporting ? "Preparing…" : "PDF"}
           </button>

@@ -58,11 +58,20 @@ export async function buildSalesJournal(opts: {
 }): Promise<SalesJournal> {
   const { customer, company, invoiceIds, receipts: allReceipts } = opts;
 
-  // Fetch full invoice docs (with line items) in parallel
-  const docs = await Promise.all(
-    invoiceIds.map((id) => billing.getDoc(id).catch(() => null))
+  // Fetch full invoice docs (with line items) in parallel. An invoice that
+  // fails to load used to be dropped silently, so the journal simply came out
+  // short — wrong totals in an accounting document, with nothing to say so.
+  const settled = await Promise.allSettled(
+    invoiceIds.map((id) => billing.getDoc(id))
   );
-  const validDocs = docs.filter((d): d is InvoiceDoc => d !== null);
+  const unreadable = settled.filter((r) => r.status === "rejected").length;
+  if (unreadable)
+    throw new Error(
+      `${unreadable} of ${invoiceIds.length} invoices could not be loaded, so the journal would be missing entries and its totals would be wrong.`
+    );
+  const validDocs = settled
+    .map((r) => (r as PromiseFulfilledResult<InvoiceDoc | null>).value)
+    .filter((d): d is InvoiceDoc => d !== null);
 
   const companyInfo = {
     name: company?.name || "Company",
