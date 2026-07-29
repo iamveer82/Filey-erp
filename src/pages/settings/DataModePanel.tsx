@@ -325,17 +325,37 @@ export default function DataModePanel() {
       return;
     }
     // Offline and cloud are separate stores. Switching to offline on a device
-    // that has never held local records shows an empty workspace — no company
-    // details, no customers — which reads exactly like the app wiped your
-    // data. Say so before the reload, and point at the import that fixes it.
+    // that has never held local records opened an empty workspace — no company
+    // details, no customers — which reads as though the app threw your data
+    // away. Copying it down was a separate button you had to know to press
+    // first, so offer it here, where the need actually arises.
     if (m === "local" && !(await hasLocalData())) {
-      const go = window.confirm(
-        "This device has no offline data yet.\n\n" +
-          "Offline mode keeps its own copy, separate from the cloud, so switching now opens an empty workspace — your cloud records are NOT deleted and are still there when you switch back.\n\n" +
-          'To bring them across, cancel and use "Copy cloud data to this device" first.\n\n' +
-          "Switch to an empty offline workspace anyway?"
+      const bring = window.confirm(
+        "Bring your cloud data to this device first?\n\n" +
+          "Offline mode keeps its own copy, separate from the cloud, and this device has none yet. Switching without copying opens an empty workspace — your cloud records are not deleted either way.\n\n" +
+          "OK — copy it down now, then switch.\n" +
+          "Cancel — switch to an empty offline workspace."
       );
-      if (!go) return;
+      if (bring) {
+        setBusy(true);
+        setErr("");
+        setResult(null);
+        try {
+          setResult(await migrateCloudToLocal(setProgress));
+        } catch (e) {
+          // Switching anyway would drop them into the empty workspace this was
+          // meant to prevent, so stay put and explain.
+          setErr(
+            `Could not copy your cloud data, so this device is still on cloud mode: ${
+              e instanceof Error ? e.message : String(e)
+            }`
+          );
+          return;
+        } finally {
+          setBusy(false);
+          setProgress("");
+        }
+      }
     }
     setDataMode(m);
     window.location.reload();
