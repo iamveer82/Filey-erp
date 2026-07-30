@@ -7,6 +7,7 @@ import { getExchangeRates } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
 import { localYmd, todayYmd } from "./format";
+import { notifyDataChanged } from "./realtime";
 
 // ===== Types =====
 export interface Product {
@@ -455,6 +456,51 @@ async function cacheSet(key: string, value: unknown): Promise<void> {
   }
 }
 
+/** Cache entries carry the moment they were stored so a read can tell whether
+ *  they predate a write made in this session. */
+type CacheEnvelope<T> = { __t: number; v: T };
+
+async function cacheRead<T>(key: string): Promise<CacheEnvelope<T> | null> {
+  const raw = await cacheGet<unknown>(key);
+  if (raw == null) return null;
+  if (typeof raw === "object" && raw !== null && "__t" in raw)
+    return raw as CacheEnvelope<T>;
+  // Written before entries were stamped: still a usable offline fallback, but
+  // never fresh enough to serve without going to the server first.
+  return { __t: 0, v: raw as T };
+}
+
+const cacheWrite = (key: string, value: unknown): Promise<void> =>
+  cacheSet(key, { __t: Date.now(), v: value } satisfies CacheEnvelope<unknown>);
+
+/** When the last mutation happened. A cached list stored before this can't be
+ *  trusted to show it, so those reads go to the server instead of serving. */
+let lastWriteAt = 0;
+function markWrite(): void {
+  lastWriteAt = Date.now();
+}
+
+/** Background refresh behind a served cache hit. One per key at a time; the
+ *  UI is only nudged when the data actually changed, so this can't loop. */
+const revalidating = new Set<string>();
+function revalidate<T>(k: string, run: () => Promise<T>): void {
+  if (revalidating.has(k)) return;
+  revalidating.add(k);
+  void (async () => {
+    try {
+      await flushOutbox();
+      const fresh = await run();
+      const prev = await cacheRead<T>(k);
+      await cacheWrite(k, fresh);
+      if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged();
+    } catch {
+      /* keep serving the cached copy */
+    } finally {
+      revalidating.delete(k);
+    }
+  })();
+}
+
 type OutboxOp =
   | { k: "insert"; t: string; row: Record<string, unknown> }
   | { k: "update"; t: string; id: number; row: Record<string, unknown> }
@@ -556,19 +602,30 @@ async function readCached<T>(
   // Namespace the local cache by the active organization so data from
   // one org never bleeds into another on a shared device.
   const k = `${activeCacheOrg}:${key}`;
-  if (!isConfigured) return (await cacheGet<T>(k)) ?? empty;
-  if (onLine()) {
-    try {
-      await flushOutbox();
-      const data = await run();
-      await cacheSet(k, data);
-      return data;
-    } catch {
-      console.error("Failed to read fresh data from server, using cache");
-      return (await cacheGet<T>(k)) ?? empty;
-    }
+  if (!isConfigured) return (await cacheRead<T>(k))?.v ?? empty;
+
+  const hit = await cacheRead<T>(k);
+  if (!onLine()) return hit?.v ?? empty;
+
+  // Stale-while-revalidate. This used to await the network on every read even
+  // with a perfectly good local copy in hand, so opening the app in cloud mode
+  // paid a full round trip per list before anything appeared. Serve the copy
+  // and refresh behind it — but only when it provably post-dates every write
+  // made this session, or a user could save something and not see it.
+  if (hit && hit.__t > lastWriteAt) {
+    revalidate(k, run);
+    return hit.v;
   }
-  return (await cacheGet<T>(k)) ?? empty;
+
+  try {
+    await flushOutbox();
+    const data = await run();
+    await cacheWrite(k, data);
+    return data;
+  } catch {
+    console.error("Failed to read fresh data from server, using cache");
+    return hit?.v ?? empty;
+  }
 }
 
 function offlineError(): never {
@@ -583,6 +640,7 @@ async function write<T>(
   run: () => Promise<T>,
   offlineResult: T
 ): Promise<T> {
+  markWrite();
   if (isLocalMode()) return run(); // commit straight to the local store
   if (!isConfigured)
     throw new Error("Cloud storage is not configured.");
@@ -596,6 +654,9 @@ async function write<T>(
 
 /** Multi-step / read-modify-write op — requires a live connection. */
 async function online<T>(run: () => Promise<T>): Promise<T> {
+  // Conservative: online() covers read-modify-write ops, so treat it as a
+  // mutation for cache purposes rather than risk serving a stale list after one.
+  markWrite();
   if (isLocalMode()) return run(); // no network needed in local mode
   if (!isConfigured)
     throw new Error("Cloud storage is not configured.");

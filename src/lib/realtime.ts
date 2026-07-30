@@ -27,6 +27,13 @@ function emit(): void {
   }
 }
 
+/** Nudge every mounted page to reload. Used by the cache layer when a
+ *  background revalidation finds the server copy differs from what was just
+ *  served, so a stale-while-revalidate read still converges on the truth. */
+export function notifyDataChanged(): void {
+  emit();
+}
+
 /** Open the single shared channel. Safe to call repeatedly — only the
  *  first call with a session actually wires it up. */
 export async function startRealtime(): Promise<void> {
