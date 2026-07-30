@@ -66,6 +66,8 @@ import { DateField } from "../components/DatePicker";
 import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
 import { loadInvoiceFormat } from "../lib/numberFormat";
 import { sendEmail, emailShell, esc, bytesToBase64 } from "../lib/email";
+import InvoiceExportSheet from "../components/InvoiceExportSheet";
+import { reactToPdfBytes } from "../lib/reactPdf";
 import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
 import StatStrip from "../components/StatStrip";
@@ -222,6 +224,32 @@ const TEMPLATES = [
 const today = () => todayYmd();
 const addDays = (n: number) =>
   localYmd(new Date(Date.now() + n * 86400000));
+
+/** A saved invoice in the shape the export sheet renders. getDoc() returns the
+ *  display fields under the same names already; only the per-line meta needs
+ *  unpacking out of the item's `custom` jsonb, exactly as the editor does when
+ *  it loads a document for editing. */
+function docToExportForm(doc: {
+  items: { custom?: Record<string, string> | null }[];
+}) {
+  return {
+    ...doc,
+    items: doc.items.map((i) => {
+      const { custom, pageBreakBefore, calcMode, amount, itemFormula, discount, tax } =
+        splitItemMeta(i.custom);
+      return {
+        ...i,
+        custom,
+        pageBreakBefore,
+        calcMode: calcMode || "auto",
+        amount: amount ?? 0,
+        itemFormula: itemFormula || null,
+        discount,
+        tax,
+      };
+    }),
+  } as never;
+}
 
 /** VAT rate that actually applies to a line: its own override, else the
  *  document rate, and zero for anything not standard-rated. The editor's
@@ -988,9 +1016,35 @@ const editInvoice = async (id: number) => {
         } catch {
           /* link optional */
         }
+        // Attach the rendered invoice, same as the editor's Send. Best-effort:
+        // the summary and portal link still go out if rendering fails, but a
+        // list-row send is the common path and used to arrive with no document
+        // at all.
+        let attachments: { filename: string; content: string }[] | undefined;
+        try {
+          const [bankInfo, stampSig] = await Promise.all([
+            loadBankInfo().catch(() => EMPTY_BANK),
+            loadCompanyStampSig().catch(() => EMPTY_STAMP_SIG),
+          ]);
+          const base = doc.number || "invoice";
+          const pdf = await reactToPdfBytes(
+            <InvoiceExportSheet
+              form={docToExportForm(doc)}
+              companyStampSig={stampSig}
+              bank={bankInfo}
+            />,
+            base
+          );
+          attachments = [
+            { filename: `${base}.pdf`, content: bytesToBase64(pdf.bytes) },
+          ];
+        } catch {
+          /* attachment optional — never block the send on it */
+        }
         await sendEmail({
           to: doc.customer_email,
           subject,
+          attachments,
           html: emailShell(
             subject,
             `<p>Dear ${esc(doc.customer_name || "customer")},</p>
@@ -3675,84 +3729,25 @@ function Editor({
       />
 
       {/* Off-screen full render: every page stacked as a real A4 sheet.
-          Always mounted so PDF export works even when the preview panel is collapsed. */}
-      {(() => {
-        const exportPages = paginateItems(form.items);
-        return (
-          <div
-            ref={exportRef}
-            aria-hidden
-            data-no-i18n
-            dir="ltr"
-            className="fixed left-[-99999px] top-0 pointer-events-none"
-            style={{ width: 794, background: "#fff" }}
-          >
-            {exportPages.map((group, gi) => {
-              const startIdx = exportPages
-                .slice(0, gi)
-                .reduce((n, g) => n + g.length, 0);
-              const isLast = gi === exportPages.length - 1;
-              return (
-                <div
-                  key={gi}
-                  className="invoice-print"
-                  style={{
-                    width: 794,
-                    height: 1123,
-                    background: "#fff",
-                    position: "relative",
-                    overflow: "hidden",
-                    padding: 48,
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "relative",
-                      width: "100%",
-                      minHeight: 1027,
-                      background: "#fff",
-                    }}
-                  >
-                    {isLast && (
-                      <StampSignatureLayer
-                        stamp={
-                          form.show_stamp
-                            ? form.stamp?.data
-                              ? form.stamp
-                              : (companyStampSig ?? EMPTY_STAMP_SIG).stamp
-                            : undefined
-                        }
-                        signature={
-                          form.show_signature
-                            ? form.signature?.data
-                              ? form.signature
-                              : (companyStampSig ?? EMPTY_STAMP_SIG).signature
-                            : undefined
-                        }
-                        onStampMove={() => {}}
-                        onSignatureMove={() => {}}
-                      />
-                    )}
-                    <DocView
-                      form={form}
-                      pageItems={group}
-                      itemStartIndex={startIdx}
-                      showTotals={isLast}
-                      showFooter={isLast}
-                    />
-                    {isLast && form.show_bank && (
-                      <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                        <BankDetailsBlock bank={bank} accent={form.accent} />
-                      </DraggableBlock>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
+          Always mounted so PDF export works even when the preview panel is collapsed.
+          Shares InvoiceExportSheet with the headless render used to attach a
+          PDF when an invoice is emailed from a list row. */}
+      <div
+        ref={exportRef}
+        aria-hidden
+        data-no-i18n
+        dir="ltr"
+        className="fixed left-[-99999px] top-0 pointer-events-none"
+        style={{ width: 794, background: "#fff" }}
+      >
+        <InvoiceExportSheet
+          form={form as never}
+          companyStampSig={companyStampSig}
+          bank={bank}
+          bankX={bankX}
+          bankY={bankY}
+        />
+      </div>
 
       {viewOpen && (
         <div
