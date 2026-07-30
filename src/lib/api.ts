@@ -678,6 +678,24 @@ async function sList<T>(
   if (error) throw error;
   return (data ?? []) as T[];
 }
+/** Child rows belonging to one parent, filtered by the server.
+ *
+ *  Every caller of this used to sList() the whole child table and throw away
+ *  all but one parent's rows in JavaScript, so opening a single invoice, quote
+ *  or PO transferred every line item in the database. */
+async function sChildren<T>(
+  table: string,
+  fk: string,
+  id: number,
+  order?: { col: string; asc: boolean }[]
+): Promise<T[]> {
+  let q: any = sb().from(table).select("*").eq(fk, id);
+  for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as T[];
+}
+
 async function sInsert(
   table: string,
   row: Record<string, unknown>,
@@ -2978,13 +2996,39 @@ export const billing = {
     readCached<InvoiceDocSummary[]>(
       `billing_docs:${docType}`,
       async () => {
+        // Ask for the summary columns only. `select("*")` pulled all 36 of
+        // them, and invoice_docs carries `logo` — a base64 data URL — so
+        // rendering a list of numbers and totals shipped an embedded image per
+        // invoice, plus notes, terms, addresses and the stamp/signature blobs.
+        // (The local shim ignores the column list and returns whole rows, which
+        // costs nothing there; this is purely for the cloud round trip.)
+        const DOC_COLS =
+          "id,number,customer_name,status,template,currency,issue_date,due_date," +
+          "shared,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
         const [allDocs, items, payments] = await Promise.all([
-          sList<any>("invoice_docs", [
-            { col: "issue_date", asc: false },
-            { col: "id", asc: false },
-          ]),
-          sList<any>("invoice_doc_items"),
-          sList<any>("invoice_payments"),
+          // A purchase list can be filtered server-side. A sales list can't:
+          // doc_type is null on legacy rows and those count as sales, which
+          // PostgREST's neq would exclude — and the shim has no or(). Narrow
+          // rows make the client-side pass cheap either way.
+          docType === "purchase"
+            ? sList<any>(
+                "invoice_docs",
+                [
+                  { col: "issue_date", asc: false },
+                  { col: "id", asc: false },
+                ],
+                DOC_COLS
+              ).then((rows) => rows.filter((d) => d.doc_type === "purchase"))
+            : sList<any>(
+                "invoice_docs",
+                [
+                  { col: "issue_date", asc: false },
+                  { col: "id", asc: false },
+                ],
+                DOC_COLS
+              ),
+          sList<any>("invoice_doc_items", undefined, "invoice_id,qty,unit_price,custom"),
+          sList<any>("invoice_payments", undefined, "invoice_id,amount"),
         ]);
         // Only explicit "purchase" rows are purchase invoices; everything else
         // (including legacy rows whose doc_type held a title) is a sales doc.
@@ -3036,13 +3080,17 @@ export const billing = {
           .eq("id", docId)
           .single();
         if (error) throw error;
-        const items = await sList<any>(
-          "invoice_doc_items",
-          [
-            { col: "position", asc: true },
-            { col: "id", asc: true },
-          ]
-        );
+        // Filter server-side. This used to pull every item row in the database
+        // and discard all but one document's worth in JavaScript, so opening a
+        // single invoice cost a full-table transfer.
+        const { data: itemRows, error: itemErr } = await sb()
+          .from("invoice_doc_items")
+          .select("*")
+          .eq("invoice_id", docId)
+          .order("position", { ascending: true })
+          .order("id", { ascending: true });
+        if (itemErr) throw itemErr;
+        const items = (itemRows ?? []) as any[];
         return {
           ...(d as InvoiceDoc),
           items: items
@@ -3130,12 +3178,11 @@ export const billing = {
         .eq("id", docId)
         .single();
       if (error) throw error;
-      const items = await sList<any>("invoice_doc_items");
+      const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
       await sDelete("invoice_docs", docId);
       await unpropagateInvoice(
         doc as Record<string, unknown>,
         items
-          .filter((i) => i.invoice_id === docId)
           .map((i) => ({
             product_id: i.product_id ?? undefined,
             qty: i.qty,
@@ -3164,10 +3211,9 @@ export const billing = {
           .eq("id", docId)
           .single();
         if (error) throw error;
-        const items = await sList<any>("invoice_doc_items");
+        const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
         await sUpdate("invoice_docs", docId, { status });
         const docItems = items
-          .filter((i) => i.invoice_id === docId)
           .map((i) => ({
             product_id: i.product_id ?? undefined,
             qty: i.qty,
@@ -3245,7 +3291,7 @@ export const billing = {
       // Auto-mark the invoice paid once the balance is cleared.
       const [{ data: doc }, items, { data: pays }] = await Promise.all([
         sb().from("invoice_docs").select("*").eq("id", invoiceId).single(),
-        sList<any>("invoice_doc_items"),
+        sChildren<any>("invoice_doc_items", "invoice_id", invoiceId),
         sb()
           .from("invoice_payments")
           .select("amount")
@@ -3668,7 +3714,7 @@ export const quotes = {
           .eq("id", docId)
           .single();
         if (error) throw error;
-        const items = await sList<any>("quotation_items", [
+        const items = await sChildren<any>("quotation_items", "quotation_id", docId, [
           { col: "position", asc: true },
           { col: "id", asc: true },
         ]);
@@ -3677,7 +3723,6 @@ export const quotes = {
           custom_columns: Array.isArray(d.custom_columns) ? d.custom_columns : [],
           unit_price_formula: d.unit_price_formula || null,
           items: items
-            .filter((i) => i.quotation_id === docId)
             .map((i) => ({
               id: i.id,
               product: i.product,
@@ -3773,11 +3818,9 @@ export const quotes = {
         .single();
       if (error) throw error;
       const qd = q as QuotationDoc;
-      const qItems = await sList<any>(
-        "quotation_items",
-        [{ col: "position", asc: true }]
-      );
-      const items = qItems.filter((i) => i.quotation_id === quotationId);
+      const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [
+        { col: "position", asc: true },
+      ]);
       const company = await billing.getCompany().catch(() => null);
       const y = new Date().getFullYear();
       const number = `INV-${y}-${String(
@@ -4099,11 +4142,10 @@ export const pos = {
           .eq("id", poId)
           .single();
         if (error) throw error;
-        const items = await sList<any>("purchase_order_items", [
+        const items = await sChildren<any>("purchase_order_items", "po_id", poId, [
           { col: "position", asc: true },
         ]);
         const filtered = items
-          .filter((i) => i.po_id === poId)
           .map((i) => ({
             id: i.id,
             product_id: i.product_id ?? undefined,

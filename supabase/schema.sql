@@ -741,7 +741,7 @@ create trigger trg_organizations_updated before update on organizations
 alter table org_members enable row level security;
 drop policy if exists org_members_select on org_members;
 create policy org_members_select on org_members for select
-  using (org_id = public.current_org() or user_id = auth.uid());
+  using (org_id = (select public.current_org()) or user_id = (select auth.uid()));
 
 -- SECURITY: members may NOT freely insert/update their own membership —
 -- that allowed self-escalation to owner/admin and joining arbitrary orgs.
@@ -750,7 +750,7 @@ drop policy if exists org_members_self on org_members;
 -- A member may leave (delete) their own membership.
 drop policy if exists org_members_self_leave on org_members;
 create policy org_members_self_leave on org_members for delete
-  using (user_id = auth.uid());
+  using (user_id = (select auth.uid()));
 
 -- A user may add ONLY themselves, and ONLY to an organization they own
 -- (covers creating a new org). Joining someone else's org is invite-only
@@ -758,19 +758,19 @@ create policy org_members_self_leave on org_members for delete
 drop policy if exists org_members_create_own on org_members;
 create policy org_members_create_own on org_members for insert
   with check (
-    user_id = auth.uid()
+    user_id = (select auth.uid())
     and exists (
       select 1 from public.organizations o
       where o.id::text = org_members.org_id
-        and o.owner_id = auth.uid()
+        and o.owner_id = (select auth.uid())
     )
   );
 
 -- Owners/admins manage membership + roles within their active org.
 drop policy if exists org_members_admin on org_members;
 create policy org_members_admin on org_members for all
-  using (org_id = public.current_org() and public.is_org_admin())
-  with check (org_id = public.current_org() and public.is_org_admin());
+  using (org_id = (select public.current_org()) and (select public.is_org_admin()))
+  with check (org_id = (select public.current_org()) and (select public.is_org_admin()));
 drop trigger if exists trg_org_members_updated on org_members;
 create trigger trg_org_members_updated before update on org_members
   for each row execute function set_updated_at();
@@ -778,7 +778,7 @@ create trigger trg_org_members_updated before update on org_members
 -- Team members may read each other's profiles within the same org.
 drop policy if exists profiles_org_read on profiles;
 create policy profiles_org_read on profiles for select
-  using (org_id = public.current_org());
+  using (org_id = (select public.current_org()));
 
 -- ---------- invitations RLS + accept flow ----------
 alter table invitations enable row level security;
@@ -795,8 +795,8 @@ $$;
 -- Org admins manage invitations for their active org.
 drop policy if exists invitations_admin on invitations;
 create policy invitations_admin on invitations for all
-  using (org_id = public.current_org() and public.is_org_admin())
-  with check (org_id = public.current_org() and public.is_org_admin());
+  using (org_id = (select public.current_org()) and (select public.is_org_admin()))
+  with check (org_id = (select public.current_org()) and (select public.is_org_admin()));
 
 -- An invitee may read pending invitations addressed to their email.
 drop policy if exists invitations_invitee_read on invitations;
@@ -965,9 +965,13 @@ begin
     execute format('drop policy if exists %I on %I;', t || '_org', t);
     execute format('drop policy if exists %I on %I;', t || '_access', t);
 
+    -- PERF: every function call below is wrapped in a scalar subquery so the
+    -- planner evaluates it once per query (InitPlan) instead of once per row.
+    -- current_org() and is_org_admin() are SECURITY DEFINER functions that run
+    -- their own queries, so per-row evaluation dominated every list read.
     if t = any(org_only) then
       execute format(
-        'create policy %I on %I for all using (org_id = public.current_org()) with check (org_id = public.current_org());',
+        'create policy %I on %I for all using (org_id = (select public.current_org())) with check (org_id = (select public.current_org()));',
         t || '_org', t
       );
     else
@@ -982,11 +986,11 @@ begin
       -- on anything that isn't the caller's own row.
       execute format(
         'create policy %I on %I for all '
-        || 'using (user_id = auth.uid() '
-        || 'or (org_id = public.current_org() '
-        || 'and (public.is_org_admin() or shared = true))) '
-        || 'with check (user_id = auth.uid() '
-        || 'or (org_id = public.current_org() and public.is_org_admin()));',
+        || 'using (user_id = (select auth.uid()) '
+        || 'or (org_id = (select public.current_org()) '
+        || 'and ((select public.is_org_admin()) or shared = true))) '
+        || 'with check (user_id = (select auth.uid()) '
+        || 'or (org_id = (select public.current_org()) and (select public.is_org_admin())));',
         t || '_access', t
       );
     end if;
