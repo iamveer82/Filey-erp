@@ -22,7 +22,7 @@ import {
   type CrmCustomer,
 } from "../lib/api";
 import { useUI } from "../lib/ui";
-import { errMsg, fmtDate } from "../lib/format";
+import { errMsg, fmtDate, todayYmd } from "../lib/format";
 import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput } from "../components/ui";
 import {
   RowActions,
@@ -62,7 +62,7 @@ import {
 /*  not charge VAT (Federal Decree-Law No. 8 of 2017, Art. 48).        */
 /* ------------------------------------------------------------------ */
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 /** Default body. Tokens in {curly braces} are filled from the form fields at
  *  render time, so the standard wording stays intact while the figures update

@@ -13,7 +13,7 @@ import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import ExpenseScanModal from "../components/ExpenseScanModal";
-import { aed, fmtDate, numInput, cn, getDisplayCurrency } from "../lib/format";
+import { aed, fmtDate, numInput, cn, getDisplayCurrency, todayYmd } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -786,7 +786,7 @@ function JournalModal({
     txn_type: "debit",
     amount: 0,
     description: "",
-    txn_date: new Date().toISOString().slice(0, 10),
+    txn_date: todayYmd(),
   });
   const firstAcct = useMemo(() => accounts[0]?.id ?? 0, [accounts]);
   useEffect(() => {
@@ -805,7 +805,7 @@ function JournalModal({
           txn_type: "debit",
           amount: 0,
           description: "",
-          txn_date: new Date().toISOString().slice(0, 10),
+          txn_date: todayYmd(),
         });
       }
     }

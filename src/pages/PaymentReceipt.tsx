@@ -22,7 +22,7 @@ import {
   type ReceiptSummary,
 } from "../lib/api";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, CURRENCIES, errMsg } from "../lib/format";
+import { fmtDate, money, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import ColorPicker from "../components/ColorPicker";
 import { nextDocNumber } from "../lib/docNumber";
@@ -60,7 +60,7 @@ import {
 } from "../components/RowActions";
 import { sendShareEmail } from "../lib/email";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 type Form = Omit<ReceiptDoc, "id" | "created_at" | "updated_at" | "items"> & {
   id?: number;

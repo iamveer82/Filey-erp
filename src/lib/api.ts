@@ -6,7 +6,7 @@ import { splitItemMeta, docTotals as lineAwareTotals } from "./docItems";
 import { getExchangeRates } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
-import { localYmd } from "./format";
+import { localYmd, todayYmd } from "./format";
 
 // ===== Types =====
 export interface Product {
@@ -1293,7 +1293,7 @@ export const hr = {
     return online(async () => {
       const id = await sInsert("payroll", row);
       const targetId = accountId ?? (await findOrCreatePayrollAccount());
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayYmd();
       const ref = `Payroll ${id}`;
       if (targetId > 0) {
         await sInsert("transactions", {
@@ -1334,7 +1334,7 @@ export const hr = {
     readCached<HrSummary>(
       "hr_summary",
       async () => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayYmd();
         const [emps, att, pay] = await Promise.all([
           sList<Employee>("employees"),
           sList<{ date: string; status: string }>("attendance"),
@@ -1579,7 +1579,7 @@ export const fin = {
                 txn_type: zeroingDelta > 0 ? "debit" : "credit",
                 amount: Math.abs(zeroingDelta),
                 description: "Account deletion adjustment",
-                txn_date: new Date().toISOString().slice(0, 10),
+                txn_date: todayYmd(),
                 source: "system",
               });
               await adjustAccountBalance(partnerId, Math.abs(zeroingDelta));
@@ -2272,7 +2272,7 @@ export function nextFollowUpDate(due: string, repeat: FollowUpRepeat): string {
   return dt.toISOString().slice(0, 10);
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => todayYmd();
 
 export const followups = {
   list: (customerId?: number) =>
@@ -2605,11 +2605,21 @@ async function propagateInvoice(
     if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
 
     const { net, tax, total } = docTotals(
-      { tax_rate: Number(doc.tax_rate ?? 0), discount: Number(doc.discount ?? 0) },
+      {
+        tax_rate: Number(doc.tax_rate ?? 0),
+        discount: Number(doc.discount ?? 0),
+        // Both of these were missing, so the ledger recomputed the document from
+        // a different formula than the document itself uses: round-off left the
+        // posted total up to 0.50 away from the printed one (AR never cleared,
+        // because payments settle against the rounded figure), and a doc-level
+        // unit-price formula was ignored entirely in favour of qty × price.
+        unit_price_formula:
+          (doc.unit_price_formula as { a: string; b?: string } | null) ?? null,
+        round_off: !!doc.round_off,
+      },
       items
     );
-    const txnDate =
-      (doc.issue_date as string) || new Date().toISOString().slice(0, 10);
+    const txnDate = (doc.issue_date as string) || todayYmd();
 
     if (isPurchase) {
       // Purchase invoice (supplier bill): stock IN, debit Purchases, credit AP.
@@ -2837,7 +2847,7 @@ async function propagatePurchase(doc: Record<string, unknown>) {
     const tax = rate > 0 ? Math.round(net * rate) / 100 : 0; // recoverable Input VAT
     const gross = net + tax; // what we owe the supplier
     const txnDate =
-      (doc.order_date as string) || new Date().toISOString().slice(0, 10);
+      (doc.order_date as string) || todayYmd();
     const inventoryId = await findOrCreateInventoryAccount();
     const apId = await findOrCreateApAccount();
     // debit Inventory (net, ex-VAT)
@@ -3712,7 +3722,7 @@ export const quotes = {
       const number = `INV-${y}-${String(
         Math.floor(Math.random() * 9000) + 1000
       )}`;
-      const issue = new Date().toISOString().slice(0, 10);
+      const issue = todayYmd();
       const due = new Date(Date.now() + 30 * 86400000)
         .toISOString()
         .slice(0, 10);
@@ -3965,7 +3975,7 @@ export const pos = {
           supplier_email: sup?.email ?? "",
           supplier_phone: sup?.phone ?? "",
           supplier_trn: sup?.tax_id ?? "",
-          order_date: new Date().toISOString().slice(0, 10),
+          order_date: todayYmd(),
           notes: "Auto-created from low stock",
           total: items.reduce((s, it) => s + it.quantity * it.unit_cost, 0),
           items,
@@ -4217,8 +4227,8 @@ export const pos = {
     ),
   addPayment: (poId: number, amount: number, method?: string | null, paidAt?: string) =>
     write(
-      { k: "insert", t: "po_payments", row: { po_id: poId, amount, method: method || null, paid_at: paidAt || new Date().toISOString().slice(0, 10) } },
-      () => sInsert("po_payments", { po_id: poId, amount, method: method || null, paid_at: paidAt || new Date().toISOString().slice(0, 10) }),
+      { k: "insert", t: "po_payments", row: { po_id: poId, amount, method: method || null, paid_at: paidAt || todayYmd() } },
+      () => sInsert("po_payments", { po_id: poId, amount, method: method || null, paid_at: paidAt || todayYmd() }),
       -1
     ),
   removePayment: (paymentId: number) =>
@@ -4277,7 +4287,7 @@ export const advances = {
       party_name: input.party_name,
       amount: input.amount,
       note: input.note || null,
-      paid_at: input.paid_at || new Date().toISOString().slice(0, 10),
+      paid_at: input.paid_at || todayYmd(),
     };
     return write({ k: "insert", t: "advances", row }, () =>
       sInsert("advances", row), -1
@@ -4319,7 +4329,7 @@ export const advances = {
           party_name: partyName,
           amount: -Math.abs(amount),
           note: tag,
-          paid_at: new Date().toISOString().slice(0, 10),
+          paid_at: todayYmd(),
         });
     }),
   /** Net advance credit currently available for a customer (sum of all their

@@ -7,7 +7,7 @@ import { useUI } from "../lib/ui";
 import { extractInvoiceFromImage, aiReady, type ExtractedInvoice } from "../lib/ai";
 import { fileToImages } from "../lib/docScan";
 import { billing, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
-import { getDisplayCurrency, numInput } from "../lib/format";
+import { getDisplayCurrency, numInput, todayYmd } from "../lib/format";
 
 /* Scan an invoice/receipt with the user's AI model and create a draft.
  * mode "purchase": the scan is a supplier bill — the DOCUMENT'S SELLER becomes
@@ -91,7 +91,7 @@ export default function ScanDocModal({
     setCreating(true);
     try {
       const co = await billing.getCompany().catch(() => null);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayYmd();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const input: InvoiceDocInput = {
         number: `DRAFT-${stamp}`,

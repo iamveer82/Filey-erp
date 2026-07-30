@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput } from "../lib/format";
+import { fmtDate, numInput, todayYmd } from "../lib/format";
 import { nextDocNumber } from "../lib/docNumber";
 import {
   PageHeader,
@@ -66,7 +66,7 @@ const DC_TEMPLATES = [
 
 const dcNumber = (existing: string[] = []) =>
   nextDocNumber({ prefix: "DC", existing });
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 type DcItem = { description: string; qty: number };
 /** Shipment lifecycle for the list's status pills / filters (DEMO parity). */

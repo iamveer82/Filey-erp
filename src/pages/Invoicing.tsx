@@ -49,7 +49,16 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
+import {
+  fmtDate,
+  money,
+  num,
+  numInput,
+  CURRENCIES,
+  errMsg,
+  todayYmd,
+  localYmd,
+} from "../lib/format";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals } from "../lib/docItems";
@@ -210,9 +219,21 @@ const TEMPLATES = [
   { id: "fresh", name: "Fresh" },
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 const addDays = (n: number) =>
-  new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  localYmd(new Date(Date.now() + n * 86400000));
+
+/** VAT rate that actually applies to a line: its own override, else the
+ *  document rate, and zero for anything not standard-rated. The editor's
+ *  per-line VAT column used the document rate flat, so a zero-rated or exempt
+ *  line was shown 5% VAT that the totals correctly never charged. */
+const lineTaxRate = (
+  it: { tax_category?: string; tax?: number },
+  docRate: number
+): number => {
+  if ((it.tax_category ?? DEFAULT_TAX_CATEGORY) !== "S") return 0;
+  return (it.tax || 0) > 0 ? it.tax! : docRate;
+};
 
 // Payment-terms presets — picking one autofills Due Date from Invoice Date.
 const PAYMENT_TERMS: { id: string; label: string; days: number }[] = [
@@ -835,7 +856,7 @@ const editInvoice = async (id: number) => {
     );
   }
 
-  const statToday = new Date().toISOString().slice(0, 10);
+  const statToday = todayYmd();
   const statCcy = company?.currency || "AED";
   // Overdue = unpaid balance past the due date — same predicate as the Status
   // column and the Overdue KPI card.
@@ -1371,7 +1392,7 @@ const editInvoice = async (id: number) => {
             label: "Status",
             sortValue: (d) => d.status,
             render: (d) => {
-              const today = new Date().toISOString().slice(0, 10);
+              const today = todayYmd();
               const overdue =
                 (d.balance ?? 0) > 0 &&
                 !!d.due_date &&
@@ -1549,7 +1570,7 @@ function PaymentsModal({
   const [rows, setRows] = useState<InvoicePayment[]>([]);
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState("bank transfer");
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [paidAt, setPaidAt] = useState(todayYmd());
   const [busy, setBusy] = useState(false);
 
   const load = () => {
@@ -3036,11 +3057,11 @@ function Editor({
                         <td className="py-2 px-2 text-right text-brand-500">
                           {m(
                             (docLineAmount(it, form.unit_price_formula) *
-                              (form.tax_rate || 0)) /
+                              lineTaxRate(it, form.tax_rate || 0)) /
                               100
                           )}
                           <span className="block text-[10px] text-brand-400">
-                            {form.tax_rate}%
+                            {lineTaxRate(it, form.tax_rate || 0)}%
                           </span>
                         </td>
                       )}

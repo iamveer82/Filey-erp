@@ -42,7 +42,16 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
+import {
+  fmtDate,
+  money,
+  num,
+  numInput,
+  CURRENCIES,
+  errMsg,
+  todayYmd,
+  localYmd,
+} from "../lib/format";
 import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc, sendShareEmail } from "../lib/email";
 import FitPreview from "../components/FitPreview";
@@ -115,9 +124,9 @@ type Form = Omit<QuotationInput, "items" | "custom_columns" | "doc_type"> & {
   unit_price_formula?: { a: string; b: string } | null;
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 const addDays = (n: number) =>
-  new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  localYmd(new Date(Date.now() + n * 86400000));
 
 function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {

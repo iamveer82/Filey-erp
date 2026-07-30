@@ -1,5 +1,5 @@
 import { crm, billing, erp, quotes } from "./api";
-import { money, getDisplayCurrency } from "./format";
+import { money, getDisplayCurrency, todayYmd } from "./format";
 
 /* Builds a compact, token-aware snapshot of the signed-in user's OWN business
  * data, injected into the copilot's system prompt so it can answer questions
@@ -34,7 +34,7 @@ export async function buildAiContext(companyName?: string): Promise<string> {
   ]);
 
   const ccy = getDisplayCurrency();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayYmd();
   const lines: string[] = [];
 
   lines.push(

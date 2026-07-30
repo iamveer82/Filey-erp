@@ -12,6 +12,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
 import { isLocalMode } from "./dataMode";
+import { todayYmd } from "./format";
 
 /** Gates desktop features behind the four-tier plan model. Flipped on for the
  *  v2.3.0 licensing launch — the matching server-side cap (supabase/
@@ -352,7 +353,7 @@ export const EMAIL_DAILY_LIMIT: Record<Tier, number> = {
 };
 
 const EMAIL_COUNT_KEY = "filey:email_count";
-const localDay = () => new Date().toISOString().slice(0, 10);
+const localDay = () => todayYmd();
 
 async function emailCountToday(): Promise<number> {
   const raw = await kvGet(EMAIL_COUNT_KEY);

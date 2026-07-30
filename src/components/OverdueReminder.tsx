@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { billing } from "../lib/api";
 import { useUI } from "../lib/ui";
+import { todayYmd } from "../lib/format";
 
 /* Once per session, nudge the user if invoices are overdue. The overdue
  * "auto-reminder" half of #17 (recurring generation needs a DB migration). */
@@ -19,7 +20,7 @@ export default function OverdueReminder() {
       .listDocs()
       .then((docs) => {
         if (!active) return;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayYmd();
         const overdue = docs.filter(
           (d) =>
             (d.balance ?? 0) > 0 &&

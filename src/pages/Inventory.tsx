@@ -32,7 +32,7 @@ import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { aed, num, numInput, cn, getDisplayCurrency, fmtDate } from "../lib/format";
+import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -1357,7 +1357,7 @@ function IssueStockModal({
     setQty(0);
     setCounted(null);
     setNote("");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayYmd());
     billing
       .listDocs()
       .then((docs) =>

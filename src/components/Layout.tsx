@@ -23,7 +23,7 @@ import {
 import AppIcon from "./AppIcon";
 import ErrorBoundary from "./ErrorBoundary";
 import { PageContextProvider } from "../lib/pageContext";
-import { cn, setDisplayCurrency } from "../lib/format";
+import { cn, setDisplayCurrency, todayYmd } from "../lib/format";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
@@ -227,7 +227,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   // Surface due / overdue follow-ups as in-app reminders, once per day.
   useEffect(() => {
     const key = "reminders.lastShown";
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayYmd();
     if (localStorage.getItem(key) === today) return;
     followups
       .due()

@@ -15,7 +15,7 @@ import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num, fmtDate, numInput, cn, errMsg, getDisplayCurrency } from "../lib/format";
+import { aed, num, fmtDate, numInput, cn, errMsg, getDisplayCurrency, todayYmd } from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import {
   PageHeader,
@@ -668,7 +668,7 @@ function EmployeeModal({
     department: "",
     position: "",
     salary: 0,
-    hire_date: new Date().toISOString().slice(0, 10),
+    hire_date: todayYmd(),
   });
   useEffect(() => {
     if (open)
@@ -680,7 +680,7 @@ function EmployeeModal({
         department: "",
         position: "",
         salary: 0,
-        hire_date: new Date().toISOString().slice(0, 10),
+        hire_date: todayYmd(),
       });
   }, [open]);
   return (

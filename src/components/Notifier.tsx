@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { erp, quotes, tools } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
+import { todayYmd } from "../lib/format";
 
 /* In-app delivery for the Settings → Notifications toggles. Each event is
  * gated by its saved preference (default on) and deduped so it fires once per
@@ -73,7 +74,7 @@ async function check(toast: Toast, firstPass: boolean) {
   // Low-stock — at most once per day. sessionStorage resets on every app
   // launch (fresh webview), which made this re-toast on each open; a
   // localStorage date key survives restarts.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayYmd();
   if (on("notif.lowstock") && localStorage.getItem("notif.lowstock.day") !== today) {
     const low = (await erp.products().catch(() => [])).filter(
       (p) => p.quantity <= p.reorder_level

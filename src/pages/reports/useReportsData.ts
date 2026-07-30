@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { localYmd } from "../../lib/format";
 import {
   erp,
   fin,
@@ -205,7 +206,8 @@ export function useTrend(
     for (let i = 7; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      // Local key: byDay is built from issue_date/payment_date calendar days.
+      const key = localYmd(d);
       const label = d.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",

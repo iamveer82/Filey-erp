@@ -6,7 +6,7 @@ import { useUI } from "../lib/ui";
 import { extractExpenseFromImage, aiReady, type ExtractedExpense } from "../lib/ai";
 import { fileToImages } from "../lib/docScan";
 import { fin } from "../lib/api";
-import { numInput } from "../lib/format";
+import { numInput, todayYmd } from "../lib/format";
 
 /* Scan a receipt with the user's AI model and log it as an expense. */
 
@@ -65,7 +65,7 @@ export default function ExpenseScanModal({
     if (!data) return;
     setSaving(true);
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayYmd();
       const desc = [data.vendor, data.description].filter(Boolean).join(" — ") || null;
       await fin.createExpense(
         data.category || "Other",

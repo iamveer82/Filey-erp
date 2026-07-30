@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, num, cn, errMsg } from "../lib/format";
+import { aed, fmtDate, num, cn, errMsg, todayYmd } from "../lib/format";
 import { PageHeader, Badge, ErrorBanner, Modal, Field } from "../components/ui";
 import { useUI } from "../lib/ui";
 
@@ -22,7 +22,7 @@ export default function Purchase() {
     category: "Rent",
     description: "",
     amount: "",
-    expense_date: new Date().toISOString().slice(0, 10),
+    expense_date: todayYmd(),
   });
   const [saving, setSaving] = useState(false);
 
@@ -98,7 +98,7 @@ export default function Purchase() {
         category: "Rent",
         description: "",
         amount: "",
-        expense_date: new Date().toISOString().slice(0, 10),
+        expense_date: todayYmd(),
       });
       load();
     } catch (e) {

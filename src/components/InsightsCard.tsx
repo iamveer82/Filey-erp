@@ -4,7 +4,7 @@ import { Lightbulb, ChevronRight, CheckCircle2 } from "lucide-react";
 
 import { billing, fin, erp } from "../lib/api";
 import { buildInsights, type Insight } from "../lib/insights";
-import { getDisplayCurrency } from "../lib/format";
+import { getDisplayCurrency, todayYmd } from "../lib/format";
 import { InfoCard, Skeleton } from "./ui";
 
 /* Dashboard insights: cash gap, overdue risk, expense spikes, stockout ETAs.
@@ -48,7 +48,7 @@ export default function InsightsCard() {
         expenses,
         products,
         movements,
-        today: new Date().toISOString().slice(0, 10),
+        today: todayYmd(),
         currency: getDisplayCurrency(),
       });
       if (!dead) setInsights(list);

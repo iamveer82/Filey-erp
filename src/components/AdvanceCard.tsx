@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Wallet, Plus, Trash2, Pencil } from "lucide-react";
 import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
-import { aed, errMsg, fmtDate } from "../lib/format";
+import { aed, errMsg, fmtDate, todayYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { Modal, Field } from "./ui";
 
@@ -26,7 +26,7 @@ export default function AdvanceCard({
   const [editing, setEditing] = useState<Advance | null>(null);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayYmd());
   const [saving, setSaving] = useState(false);
 
   // A failed read left rows empty, so the advance total read as zero and the
@@ -56,7 +56,7 @@ export default function AdvanceCard({
     setEditing(null);
     setAmount("");
     setNote("");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayYmd());
     setOpen(true);
   };
 
@@ -248,7 +248,7 @@ export function CustomerAdvancesPanel() {
   const [custId, setCustId] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayYmd());
   const [saving, setSaving] = useState(false);
 
   const load = () =>
@@ -278,7 +278,7 @@ export function CustomerAdvancesPanel() {
     setCustId("");
     setAmount("");
     setNote("");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayYmd());
     setOpen(true);
   };
 

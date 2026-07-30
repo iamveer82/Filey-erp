@@ -9,6 +9,7 @@ import {
   type CrmCustomer,
 } from "./api";
 import { MODULES } from "../modules/registry";
+import { todayYmd } from "./format";
 
 type Dataset = {
   products: Product[];
@@ -126,7 +127,7 @@ export function useNotifications(): Notif[] {
           to: "/inventory",
           tone: p.quantity === 0 ? "danger" : "warn",
         });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayYmd();
     for (const i of invoices)
       if (i.status !== "paid" && i.due_date && i.due_date < today)
         n.push({

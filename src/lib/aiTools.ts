@@ -10,7 +10,7 @@ import {
   type InvoiceDocInput,
 } from "./api";
 import { sendEmail, emailShell, esc } from "./email";
-import { getDisplayCurrency } from "./format";
+import { getDisplayCurrency, todayYmd } from "./format";
 import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { findSkill, loadSkills } from "./agentSkills";
@@ -51,7 +51,7 @@ export function setToolConfirm(fn: ConfirmFn) {
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const lc = (v: unknown) => str(v).toLowerCase();
 const numOf = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 // The file the user attached to the current chat turn (for run_file_tool).
 let attachment: File | null = null;

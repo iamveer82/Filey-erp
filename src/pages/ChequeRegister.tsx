@@ -7,7 +7,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput } from "../lib/format";
+import { aed, fmtDate, numInput, todayYmd } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -295,7 +295,7 @@ export default function ChequeRegister() {
               const overdue =
                 c.status === "pending" &&
                 !!c.due_date &&
-                c.due_date < new Date().toISOString().slice(0, 10);
+                c.due_date < todayYmd();
               return (
                 <span className={overdue ? "text-danger font-semibold" : ""}>
                   {fmtDate(c.due_date)}
@@ -425,7 +425,7 @@ function ChequeModal({
       party: "",
       bank: "",
       amount: 0,
-      issue_date: new Date().toISOString().slice(0, 10),
+      issue_date: todayYmd(),
       due_date: "",
       status: "pending",
       notes: "",

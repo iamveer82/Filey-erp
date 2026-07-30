@@ -180,22 +180,22 @@ function docLineGross(
   return r2((item.qty || 0) * (item.unit_price || 0));
 }
 
-/** Line amount that respects either a formula or per-line discount/tax. */
+/** Line amount net of the line's own discount and EXCLUSIVE of tax.
+ *
+ *  It used to add the per-line tax back in, which every caller then got wrong
+ *  in the same way: the printed Amount column showed VAT that the Tax row below
+ *  it reported again, and the three places that treat this as a taxable base
+ *  (the editor's per-line VAT column, the UAE pack's line VAT, DocView's
+ *  category allocation) were charging tax on a tax-inclusive figure. Totals are
+ *  unaffected — docTotals works from docLineGross, never from this. */
 export function docLineAmount(
   item: DocItem,
   formula?: { a: string; b?: string } | null
 ): number {
-  if (item.calcMode === "manual") {
-    const gross = item.amount || 0;
-    const disc = gross * ((item.discount || 0) / 100);
-    const tax = (gross - disc) * ((item.tax || 0) / 100);
-    return r2(gross - disc + tax);
-  }
-  if ((item.discount || 0) > 0 || (item.tax || 0) > 0) {
-    const gross = docLineGross(item, formula);
-    const disc = gross * ((item.discount || 0) / 100);
-    const tax = (gross - disc) * ((item.tax || 0) / 100);
-    return r2(gross - disc + tax);
+  if (item.calcMode === "manual" || (item.discount || 0) > 0 || (item.tax || 0) > 0) {
+    const gross =
+      item.calcMode === "manual" ? item.amount || 0 : docLineGross(item, formula);
+    return r2(gross - gross * ((item.discount || 0) / 100));
   }
   return invoiceLineAmount(item, formula);
 }
@@ -211,6 +211,17 @@ export function docTotals(
   if (!hasLineLevel) {
     return invoiceTotals(items, discount, taxRatePct, formula);
   }
+  // Net of each line after its OWN discount %, before the document discount.
+  const lineNet = (i: DocItem) =>
+    docLineGross(i, formula) * (1 - (i.discount || 0) / 100);
+  // Only standard-rated lines carry VAT — zero-rated, exempt, out-of-scope and
+  // reverse-charge do not. invoiceTotals() has always honoured this, but this
+  // branch (taken as soon as any line has a per-line discount or tax) taxed
+  // every line flat, so adding a line discount to an invoice silently charged
+  // 5% on its zero-rated lines and disagreed with the VAT breakdown printed
+  // beside it.
+  const isStandard = (i: DocItem) => (i.tax_category ?? "S") === "S";
+
   const subtotal = items.reduce((s, i) => s + docLineGross(i, formula), 0);
   const lineDiscount = items.reduce(
     (s, i) => s + docLineGross(i, formula) * ((i.discount || 0) / 100),
@@ -219,13 +230,21 @@ export function docTotals(
   const disc = Math.min(Math.max(0, discount || 0) + lineDiscount, subtotal);
   const net = subtotal - disc;
   const lineTax = items.reduce(
-    (s, i) =>
-      s +
-      (docLineGross(i, formula) - docLineGross(i, formula) * ((i.discount || 0) / 100)) *
-        ((i.tax || 0) / 100),
+    (s, i) => (isStandard(i) ? s + lineNet(i) * ((i.tax || 0) / 100) : s),
     0
   );
-  const tax = net * ((taxRatePct || 0) / 100) + lineTax;
+  // The document-level discount is allocated across lines pro-rata by net, so
+  // the standard-rated share of `net` is what the document rate applies to. A
+  // line carrying its OWN tax % is excluded: it has been rated explicitly, and
+  // adding the document rate on top of it taxed that line twice.
+  const netAfterLineDisc = items.reduce((s, i) => s + lineNet(i), 0);
+  const docRatedNet = items.reduce(
+    (s, i) => (isStandard(i) && !((i.tax || 0) > 0) ? s + lineNet(i) : s),
+    0
+  );
+  const taxableNet =
+    netAfterLineDisc > 0 ? net * (docRatedNet / netAfterLineDisc) : 0;
+  const tax = taxableNet * ((taxRatePct || 0) / 100) + lineTax;
   return {
     subtotal: r2(subtotal),
     discount: r2(disc),

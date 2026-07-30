@@ -5,12 +5,13 @@ import { aiChat, aiReady, getPersona, buildSystemPrompt } from "../lib/ai";
 import { buildAiContext } from "../lib/aiContext";
 import { useAuth } from "../lib/auth";
 import ColorOrb from "./ColorOrb";
+import { todayYmd } from "../lib/format";
 
 /* Dashboard "AI daily briefing" — one BYOK call grounded in the user's data.
  * Cached per-day in this browser so it doesn't re-bill on every visit. */
 
 const CACHE_KEY = "filey.ai.summary";
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 function cached(): string {
   try {

@@ -73,7 +73,16 @@ function normalizeDate(s: string): string {
     return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
   const t = Date.parse(s);
-  return isNaN(t) ? "" : new Date(t).toISOString().slice(0, 10);
+  if (isNaN(t)) return "";
+  // Local calendar day, not toISOString(): a format like "5 Jul 2026" parses to
+  // LOCAL midnight, which UTC pushes back to the 4th in Dubai — a statement line
+  // landing on the wrong day defeats the whole point of matching by date.
+  // ponytail: inlined rather than importing format.ts, which would drag clsx +
+  // tailwind-merge into this deliberately dependency-free parser.
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
 }
 
 /** Parse a bank-statement CSV into statement lines. Detects a header row and

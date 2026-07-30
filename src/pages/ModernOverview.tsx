@@ -30,7 +30,7 @@ import {
   type QuotationSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { num, aed, cn, fmtDate } from "../lib/format";
+import { num, aed, cn, fmtDate, todayYmd, localYmd } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { Badge, statusTone, ErrorBanner, PageHeader, Skeleton } from "../components/ui";
 import { useChartColors } from "../lib/accent";
@@ -125,7 +125,7 @@ export default function ModernOverview() {
 
   // Outstanding = unpaid invoice balances, plus how many are past due date.
   const receivable = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayYmd();
     let total = 0;
     let overdue = 0;
     for (const i of invoices) {
@@ -205,7 +205,10 @@ export default function ModernOverview() {
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      // Bucket keys are issue_date strings — local calendar days. A UTC key
+      // here labelled the bar with one day (toLocaleDateString) and looked up
+      // another, so before 4am in Dubai every bar showed the previous day.
+      const key = localYmd(d);
       const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
       const row = byDay.get(key);
       series.push({ d: label, invoiced: row?.invoiced || 0, received: row?.received || 0 });

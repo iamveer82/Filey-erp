@@ -76,6 +76,14 @@ export function localYmd(d: Date): string {
   ).padStart(2, "0")}`;
 }
 
+/** Today's date in the USER'S timezone. `new Date().toISOString().slice(0,10)`
+ *  answers "what day is it in UTC", which in Dubai (UTC+4) is yesterday until
+ *  4am — long enough to date an invoice, a payment or an attendance row to the
+ *  wrong day, and to make "overdue today" comparisons fire a day early. */
+export function todayYmd(): string {
+  return localYmd(new Date());
+}
+
 export function fmtDate(d?: string | null): string {
   if (!d) return "—";
   const date = new Date(d);

@@ -9,10 +9,10 @@ import {
 import { Badge } from "./ui";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { cn, fmtDate } from "../lib/format";
+import { cn, fmtDate, todayYmd } from "../lib/format";
 import { DateField } from "./DatePicker";
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => todayYmd();
 
 /** Relative label for a date-only (yyyy-mm-dd) due date. */
 const relDue = (d: string): string => {

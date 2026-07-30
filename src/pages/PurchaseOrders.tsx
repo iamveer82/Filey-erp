@@ -40,7 +40,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, num, numInput, CURRENCIES, errMsg } from "../lib/format";
+import { fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import {
   docLineAmount,
   docTotals,
@@ -131,7 +131,7 @@ type Form = Omit<PoInput, "items"> & {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayYmd();
 
 function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   return {
@@ -2602,7 +2602,7 @@ function PoPaymentsModal({
   const [rows, setRows] = useState<PoPayment[]>([]);
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState("bank transfer");
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [paidAt, setPaidAt] = useState(todayYmd());
   const [busy, setBusy] = useState(false);
 
   const load = () => {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, Info, Upload } from "lucide-react";
 import { billing, erp, crm, fin, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
-import { cn, errMsg } from "../../lib/format";
+import { cn, errMsg, todayYmd } from "../../lib/format";
 
 /* ---------------- Backup & Restore ----------------
    Reference two-card layout. Export is the real API snapshot; in-app
@@ -66,7 +66,7 @@ export default function BackupPanel() {
       );
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `filey-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `filey-backup-${todayYmd()}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       setDone(true);

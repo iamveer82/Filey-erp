@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { PageHeader, Spinner, ErrorBanner } from "../../components/ui";
 import { downloadCsv } from "../../lib/csv";
-import { cn } from "../../lib/format";
+import { cn, todayYmd } from "../../lib/format";
 import { useReportsData } from "./useReportsData";
 import DashboardTab from "./DashboardTab";
 import SalesTab from "./SalesTab";
@@ -43,7 +43,7 @@ export default function Reports() {
       { metric: "Products", amount: data.products.length },
       { metric: "Suppliers", amount: data.supplierList.length },
     ];
-    downloadCsv(`filey-report-${new Date().toISOString().slice(0, 10)}`, rows, [
+    downloadCsv(`filey-report-${todayYmd()}`, rows, [
       { key: "metric", label: "Metric" },
       { key: "amount", label: "Amount" },
     ]);
