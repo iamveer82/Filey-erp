@@ -35,6 +35,7 @@ import {
   backupAll,
   restoreAll,
 } from "../../lib/localPaths";
+import { todayYmd } from "../../lib/format";
 
 /** The one control most people should ever need: sync on, or everything here. */
 function SyncSwitch({
@@ -340,7 +341,7 @@ export default function DataModePanel() {
   const runBackup = async () => {
     const dir = await pickFolder();
     if (!dir) return;
-    const dest = `${dir}/filey-backup-${new Date().toISOString().slice(0, 10)}`;
+    const dest = `${dir}/filey-backup-${todayYmd()}`;
     setBackupMsg("");
     try {
       const path = await backupAll(dest);
@@ -477,10 +478,16 @@ export default function DataModePanel() {
       try {
         setAutoSyncEnabled(true);
         if (getDataMode() === "local") {
-          await markAllForSync();
-          const ok = await syncNow(null, { manual: true });
+          // Deliberately NOT markAllForSync(). The journal already recorded
+          // every local write made while sync was off, so a normal cycle
+          // pushes exactly those and leaves untouched rows alone. Marking
+          // everything dirty would re-upload this device's stale copies over a
+          // teammate's newer ones — the precise thing row-level push exists to
+          // prevent. "Upload all local data" below is still there for when
+          // someone really does mean "this device wins".
+          const ok = await syncCycle(null, { manual: true });
           if (!ok && getSyncStatus().state !== "error")
-            setErr("Sync is on, but nothing uploaded yet — check you're signed in.");
+            setErr("Sync is on, but nothing moved yet — check you're signed in.");
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
