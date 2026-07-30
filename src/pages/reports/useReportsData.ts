@@ -40,6 +40,10 @@ export interface ReportsData {
   receiptList: ReceiptSummary[];
   supplierList: Supplier[];
   poList: PoSummary[];
+  /** Payments recorded against POs. Payables are PO total MINUS these — a PO
+   *  keeps its full total until it is marked paid, so without them every
+   *  payables figure here counts money that has already gone out. */
+  poPayments: { po_id: number; amount: number }[];
   loading: boolean;
   error: string;
   reload: () => void;
@@ -56,6 +60,7 @@ export function useReportsData(): ReportsData {
   const [receiptList, setReceiptList] = useState<ReceiptSummary[]>([]);
   const [supplierList, setSupplierList] = useState<Supplier[]>([]);
   const [poList, setPoList] = useState<PoSummary[]>([]);
+  const [poPayments, setPoPayments] = useState<{ po_id: number; amount: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -72,6 +77,7 @@ export function useReportsData(): ReportsData {
       receipts.list().then(setReceiptList),
       suppliers.list().then(setSupplierList),
       pos.list().then(setPoList),
+      pos.allPayments().then(setPoPayments),
     ])
       .catch((e) =>
         setError(`Could not load reports: ${e instanceof Error ? e.message : e}`)
@@ -95,6 +101,7 @@ export function useReportsData(): ReportsData {
     receiptList,
     supplierList,
     poList,
+    poPayments,
     loading,
     error,
     reload: load,
@@ -358,26 +365,45 @@ export function useTopSuppliers(poList: PoSummary[], supplierList: Supplier[]) {
   }, [poList, supplierList]);
 }
 
-/** Payables aging — open POs grouped by age bucket. */
-export function usePayablesAging(poList: PoSummary[]) {
+/** Sum of payments recorded against each PO. */
+export function paidByPo(
+  poPayments: { po_id: number; amount: number }[]
+): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const p of poPayments)
+    m.set(p.po_id, (m.get(p.po_id) ?? 0) + (Number(p.amount) || 0));
+  return m;
+}
+
+/** Payables aging — open POs grouped by age bucket, net of payments made.
+ *  A partly paid PO keeps its full total and its non-paid status, so counting
+ *  p.total here billed the whole order as still owed. The Suppliers page and
+ *  supplier detail have always netted payments off; this now agrees with them. */
+export function usePayablesAging(
+  poList: PoSummary[],
+  poPayments: { po_id: number; amount: number }[] = []
+) {
   return useMemo(() => {
     const now = Date.now();
     const DAY = 86400000;
+    const paid = paidByPo(poPayments);
     const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
     for (const p of poList) {
       if (p.status === "paid" || p.status === "cancelled" || p.status === "draft") continue;
+      const open = (p.total || 0) - (paid.get(p.id) ?? 0);
+      if (open <= 0) continue;
       const due = p.expected_date ? +new Date(p.expected_date) : 0;
       if (!due) {
-        buckets.current += p.total || 0;
+        buckets.current += open;
         continue;
       }
       const age = Math.floor((now - due) / DAY);
-      if (age <= 0) buckets.current += p.total || 0;
-      else if (age <= 30) buckets.d30 += p.total || 0;
-      else if (age <= 60) buckets.d60 += p.total || 0;
-      else if (age <= 90) buckets.d90 += p.total || 0;
-      else buckets.d90p += p.total || 0;
+      if (age <= 0) buckets.current += open;
+      else if (age <= 30) buckets.d30 += open;
+      else if (age <= 60) buckets.d60 += open;
+      else if (age <= 90) buckets.d90 += open;
+      else buckets.d90p += open;
     }
     return buckets;
-  }, [poList]);
+  }, [poList, poPayments]);
 }

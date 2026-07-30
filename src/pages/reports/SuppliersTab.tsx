@@ -14,12 +14,13 @@ import {
   ReportsData,
   useTopSuppliers,
   usePayablesAging,
+  paidByPo,
 } from "./useReportsData";
 
 export default function SuppliersTab({ data }: { data: ReportsData }) {
   const c = useChartColors();
   const topSuppliers = useTopSuppliers(data.poList, data.supplierList);
-  const aging = usePayablesAging(data.poList);
+  const aging = usePayablesAging(data.poList, data.poPayments);
 
   const tooltipStyle = {
     borderRadius: 8,
@@ -38,21 +39,24 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
     { name: "90+", value: aging.d90p },
   ];
 
-  /* Supplier-level open PO totals */
+  /* Supplier-level open PO totals, net of payments already made against them. */
   const supplierBalances = useMemo(() => {
+    const paid = paidByPo(data.poPayments);
     const g = new Map<string, { name: string; open: number; poCount: number }>();
     for (const p of data.poList) {
       if (["paid", "cancelled", "draft"].includes(p.status)) continue;
+      const open = (p.total || 0) - (paid.get(p.id) ?? 0);
+      if (open <= 0) continue;
       const name = p.supplier_name || "—";
       const row = g.get(name) || { name, open: 0, poCount: 0 };
-      row.open += p.total || 0;
+      row.open += open;
       row.poCount += 1;
       g.set(name, row);
     }
     return Array.from(g.values())
       .sort((a, b) => b.open - a.open)
       .slice(0, 10);
-  }, [data.poList]);
+  }, [data.poList, data.poPayments]);
 
   const totalPayables = aging.current + aging.d30 + aging.d60 + aging.d90 + aging.d90p;
   const totalSuppliers = data.supplierList.length;
