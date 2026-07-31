@@ -138,9 +138,38 @@ function DeviceLimitScreen() {
   );
 }
 
+function ProfileLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="min-h-screen grid place-items-center p-6 bg-canvas">
+      <div className="card max-w-sm w-full text-center space-y-3">
+        <h1 className="text-lg font-semibold text-ink">Couldn't load your profile</h1>
+        <p className="text-sm text-brand-500">
+          You're signed in, but we couldn't read your account details. This is
+          usually a connection problem — your data is untouched.
+        </p>
+        <p className="text-xs text-brand-400 break-words">{message}</p>
+        <button
+          className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition"
+          onClick={onRetry}
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Gate() {
-  const { loading, configured, user, needsProfile, profileLoading, deviceLimitBlocked } =
-    useAuth();
+  const {
+    loading,
+    configured,
+    user,
+    needsProfile,
+    profileLoading,
+    profileError,
+    reloadProfile,
+    deviceLimitBlocked,
+  } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   // Desktop app, first sign-in on this device: offer to place a Desktop
   // shortcut (once per device; the helper self-guards and never throws).
@@ -160,22 +189,24 @@ function Gate() {
   // Signed in but still fetching the profile — show the splash, not the
   // profile-setup form (which would otherwise flash for existing users).
   if (profileLoading) return <Splash />;
+  // A failed profile READ must never fall through to ProfileSetup — completing
+  // that form upserts over the real name and company.
+  if (profileError)
+    return <ProfileLoadError message={profileError} onRetry={() => void reloadProfile()} />;
   if (needsProfile) return <ProfileSetup />;
   if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 
   return (
     <ModulesProvider>
-      <HashRouter>
-        <Layout>
-          <AppRoutes />
-        </Layout>
-        <CommandPalette />
-        <OverdueReminder />
-        <Notifier />
-        <UpdateNotice />
-        <AgentScheduler />
-        <Toaster />
-      </HashRouter>
+      <Layout>
+        <AppRoutes />
+      </Layout>
+      <CommandPalette />
+      <OverdueReminder />
+      <Notifier />
+      <UpdateNotice />
+      <AgentScheduler />
+      <Toaster />
     </ModulesProvider>
   );
 }
@@ -200,7 +231,16 @@ export default function App() {
     <LanguageProvider>
       <UIProvider>
         <AuthProvider>
-          <Gate />
+          {/* Router wraps the WHOLE gate, not just the signed-in app. Gate
+              returns SetupNotice / Login / Landing / ProfileSetup before it
+              ever reaches the routed shell, and those screens are real pages
+              that may use router hooks — ProfileSetup calls useNavigate() at
+              the top level, so a brand-new account (needsProfile) crashed on
+              mount with "useNavigate() may be used only in the context of a
+              <Router>" before the form could even be shown. */}
+          <HashRouter>
+            <Gate />
+          </HashRouter>
         </AuthProvider>
       </UIProvider>
     </LanguageProvider>

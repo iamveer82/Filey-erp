@@ -103,6 +103,8 @@ function CloudSyncCard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
+  /** Sign-in failed in the way that usually means "no cloud account yet". */
+  const [offerSignup, setOfferSignup] = useState(false);
 
   useEffect(() => {
     cloudSessionEmail().then(setConnected).catch(() => {});
@@ -132,7 +134,22 @@ function CloudSyncCard() {
       setConnected(email.trim());
       setPassword("");
     } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      const msg = e?.message ?? String(e);
+      // Supabase returns the SAME "Invalid login credentials" whether the
+      // password is wrong or no such account exists — it will not confirm
+      // whether an email is registered. People reach this card after using
+      // Filey offline, where the email only ever existed on their own device
+      // and no cloud account was created, so "you typed the wrong password"
+      // is usually the wrong guess. Name both, and offer the way forward
+      // instead of leaving them on a dead end.
+      if (!signup && /invalid login credentials|invalid email or password/i.test(msg)) {
+        setErr(
+          "That email and password didn't match a Filey Cloud account. If you've been using Filey offline, this email has no cloud account yet — creating one takes a moment and your on-device data stays exactly where it is."
+        );
+        setOfferSignup(true);
+      } else {
+        setErr(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -266,7 +283,11 @@ function CloudSyncCard() {
           </div>
           <button
             className="text-xs text-brand-500 underline cursor-pointer"
-            onClick={() => setSignup((s) => !s)}
+            onClick={() => {
+              setSignup((s) => !s);
+              setErr("");
+              setOfferSignup(false);
+            }}
           >
             {signup ? "Have an account? Sign in" : "New to Filey Cloud? Create an account"}
           </button>
@@ -276,7 +297,21 @@ function CloudSyncCard() {
         <p className="text-sm text-ink bg-primary-50 rounded-lg px-3 py-2">{info}</p>
       )}
       {err && (
-        <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
+        <div className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 space-y-2">
+          <p>{err}</p>
+          {offerSignup && (
+            <button
+              className="rounded-lg bg-ink text-white px-3 py-1.5 text-xs font-medium hover:opacity-90 transition"
+              onClick={() => {
+                setSignup(true);
+                setErr("");
+                setOfferSignup(false);
+              }}
+            >
+              Create a cloud account for {email.trim()}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

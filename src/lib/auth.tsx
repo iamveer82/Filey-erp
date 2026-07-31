@@ -76,6 +76,10 @@ interface AuthValue {
   needsProfile: boolean;
   /** True while we're still fetching the signed-in user's profile. */
   profileLoading: boolean;
+  /** Message when the profile READ failed. Never means "no profile". */
+  profileError: string | null;
+  /** Retry a failed profile read. */
+  reloadProfile: () => Promise<void>;
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
   /** Google OAuth (web only — embedded webviews are blocked by Google). */
   signInWithGoogle: () => Promise<void>;
@@ -128,24 +132,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // user. Until then we must NOT treat a missing profile as "needs setup"
   // (that briefly flashes the profile form right after sign-in).
   const [profileLoaded, setProfileLoaded] = useState(local);
+  /** Set when the profile READ failed. Distinct from "no profile exists" —
+   *  the first must never be mistaken for the second (see loadProfile). */
+  const [profileError, setProfileError] = useState<string | null>(null);
   // The user id whose profile is currently loaded — lets us ignore token
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
 
   const loadProfile = async (u: User) => {
     if (!supabase) return;
-    try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", u.id)
-        .maybeSingle();
-      const prof = (data as Profile) ?? null;
-      setCacheOrg(prof?.org_id);
-      setProfile(prof);
-    } finally {
-      setProfileLoaded(true);
-    }
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", u.id)
+      .maybeSingle();
+    // A read that FAILED is not evidence the profile is missing. This used to
+    // ignore `error` and set profileLoaded in a finally, so one network blip or
+    // RLS hiccup on sign-in made needsProfile true and dropped an existing user
+    // into first-run setup — where finishing the form upserts over the real
+    // name and company. Surface the failure and let the user retry instead.
+    if (error) throw error;
+    const prof = (data as Profile) ?? null;
+    setCacheOrg(prof?.org_id);
+    setProfile(prof);
+    setProfileError(null);
+    setProfileLoaded(true);
   };
 
   useEffect(() => {
@@ -165,9 +176,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Defer DB read: never block while the auth lock may be held.
         if (data.session?.user) {
           loadedFor.current = data.session.user.id;
-          void loadProfile(data.session.user).catch((err) =>
-            console.error("[auth] loadProfile failed:", err)
-          );
+          void loadProfile(data.session.user).catch((err) => {
+            console.error("[auth] loadProfile failed:", err);
+            setProfileError(err?.message ?? String(err));
+          });
         }
       })
       .catch((err) => {
@@ -193,9 +205,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfileLoaded(false);
         setTimeout(() => {
           if (active)
-            void loadProfile(u).catch((err) =>
-              console.error("[auth] loadProfile failed:", err)
-            );
+            void loadProfile(u).catch((err) => {
+              console.error("[auth] loadProfile failed:", err);
+              setProfileError(err?.message ?? String(err));
+            });
         }, 0);
       } else {
         loadedFor.current = null;
@@ -381,8 +394,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     session,
     profile,
+    // Only ever true once the profile was actually READ. A failed read leaves
+    // profileLoaded false, so this stays false and the user is not offered
+    // first-run setup on the strength of a network error.
     needsProfile: !!user && profileLoaded && (!profile || isProfileStub(profile)),
-    profileLoading: !!user && !profileLoaded,
+    profileLoading: !!user && !profileLoaded && !profileError,
+    profileError,
+    reloadProfile: async () => {
+      if (!user) return;
+      setProfileError(null);
+      try {
+        await loadProfile(user);
+      } catch (err: any) {
+        setProfileError(err?.message ?? String(err));
+      }
+    },
     signInWithPassword,
     signInWithGoogle,
     deviceLimitBlocked,
