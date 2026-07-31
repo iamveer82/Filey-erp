@@ -12,6 +12,14 @@ import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
 import { registerCloudDevice, entitlement } from "./license";
+import {
+  getLocalCredential,
+  hasLocalCredential,
+  isLocalSignedIn,
+  rememberLocalCredential,
+  setLocalSignedIn,
+  verifyLocalPassword,
+} from "./localAuth";
 
 // ---- Local mode: a single on-device user, no real authentication ----------
 const LOCAL_PROFILE_KEY = "filey_local_profile";
@@ -32,6 +40,15 @@ function loadLocalProfile(): Profile {
     /* ignore */
   }
   return { id: LOCAL_USER.id, email: "", name: "You", company: "" };
+}
+
+/** The on-device user for an offline install, carrying the email of the account
+ *  that claimed this device. Offline data is NOT keyed by user id — localdb is a
+ *  flat per-device store — so attaching an account never moves or hides a row
+ *  that was created before the device had one. */
+function localUserFrom(cred: { email: string; userId: string } | null): User {
+  if (!cred) return LOCAL_USER;
+  return { ...LOCAL_USER, id: cred.userId || LOCAL_USER.id, email: cred.email } as User;
 }
 function saveLocalProfile(p: Profile): void {
   try {
@@ -123,7 +140,14 @@ const norm = (c: Credential) =>
 export function AuthProvider({ children }: { children: ReactNode }) {
   const local = isLocalMode();
   const [loading, setLoading] = useState(!local);
-  const [user, setUser] = useState<User | null>(local ? LOCAL_USER : null);
+  // Offline installs require a real email account too. The device is only
+  // "signed in" once an account has claimed it AND the session flag is set, so
+  // signing out offline returns to the login screens like anywhere else.
+  const [user, setUser] = useState<User | null>(
+    local && hasLocalCredential() && isLocalSignedIn()
+      ? localUserFrom(getLocalCredential())
+      : null
+  );
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(
     local ? loadLocalProfile() : null
@@ -255,12 +279,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session?.user?.id, local]);
 
   const signInWithPassword = async (c: Credential, password: string) => {
+    const email = c.value.trim().toLowerCase();
+    if (local) {
+      // Prefer the server so the password stays authoritative and the cached
+      // hash is refreshed. Fall back to the device only when the server can't
+      // be reached — an offline install must not be locked out of its own data
+      // just because there's no connection right now.
+      const online = typeof navigator === "undefined" || navigator.onLine;
+      if (online && supabase) {
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          } as any);
+          if (error) throw error;
+          const uid = data.user?.id;
+          if (uid) await rememberLocalCredential(email, uid, password);
+          setLocalSignedIn(true);
+          setUser(localUserFrom({ email, userId: uid ?? "" }));
+          setProfile(loadLocalProfile());
+          return;
+        } catch (e: any) {
+          // A refused password is a real answer — don't fall through to the
+          // device and let a stale hash accept it.
+          const msg = e?.message ?? String(e);
+          if (/invalid login credentials|invalid email or password/i.test(msg)) throw e;
+          if (!hasLocalCredential()) throw e;
+          // Otherwise the server was unreachable: fall through to the device.
+        }
+      }
+      if (!hasLocalCredential())
+        throw new Error(
+          "This device isn't linked to a Filey account yet. Connect to the internet once to sign in or create one."
+        );
+      if (!(await verifyLocalPassword(email, password)))
+        throw new Error("That email and password don't match this device's account.");
+      setLocalSignedIn(true);
+      setUser(localUserFrom(getLocalCredential()));
+      setProfile(loadLocalProfile());
+      return;
+    }
     if (!supabase) throw new Error("Supabase not configured");
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       ...norm(c),
       password,
     } as any);
     if (error) throw error;
+    // Remember the identity even in cloud mode: the user may switch this
+    // device to offline later, and it must already know whose device it is.
+    if (data.user?.id && c.channel === "email")
+      await rememberLocalCredential(email, data.user.id, password);
   };
 
   const signInWithGoogle = async () => {
@@ -287,6 +355,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Without this check the UI parks the user on the OTP screen forever.
     if (isExistingAccount(data.user))
       throw new Error("An account with this email already exists. Sign in instead.");
+    // Claim this device for the new account so an offline install can sign in
+    // again without a connection.
+    if (data.user?.id && c.channel === "email")
+      await rememberLocalCredential(c.value, data.user.id, password);
+    if (local && data.session) {
+      setLocalSignedIn(true);
+      setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: data.user!.id }));
+      setProfile(loadLocalProfile());
+    }
     // A session here means email confirmation is disabled → straight in.
     // Otherwise an OTP (email code / SMS) was sent and must be verified.
     return { needsOtp: !data.session };
@@ -327,6 +404,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    if (local) {
+      // End the on-device session and return to the login screens, same as
+      // cloud. The remembered credential SURVIVES so they can sign back in
+      // without a connection, and the on-device profile and data are untouched
+      // — signing out is not a request to erase the company's books.
+      setLocalSignedIn(false);
+      setUser(null);
+      setSession(null);
+      setCacheOrg(null);
+      return;
+    }
     if (!supabase) return;
     await supabase.auth.signOut();
     setCacheOrg(null);

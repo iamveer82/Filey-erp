@@ -14,6 +14,8 @@ import Logo from "../components/Logo";
 import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
+import { isLocalMode } from "../lib/dataMode";
+import { hasLocalCredential } from "../lib/localAuth";
 
 /* The primary action deliberately mirrors the sign-up page on gofiley.com —
    same amber gradient, same 44px height — so signing up on the site and
@@ -85,6 +87,26 @@ export default function Login() {
   // the provider is actually enabled in the dashboard.
   const phoneEnabled = import.meta.env.VITE_PHONE_AUTH === "1";
   const googleEnabled = import.meta.env.VITE_GOOGLE_AUTH === "1";
+
+  // Offline installs still require a real account, but a device that has
+  // already been claimed must be able to sign in with no connection — the
+  // whole point of the offline build. Creating an account and emailing a code
+  // both need the server, so those are held back until there's a connection.
+  const localMode = isLocalMode();
+  const [offline, setOffline] = useState(
+    typeof navigator !== "undefined" && !navigator.onLine
+  );
+  useEffect(() => {
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  const deviceClaimed = localMode && hasLocalCredential();
 
   const [screen, setScreen] = useState<Screen>("form");
   const [mode, setMode] = useState<Mode>("signin");
@@ -420,6 +442,27 @@ export default function Login() {
                 </FormField>
               )}
 
+              {mode === "signin" && method === "password" && (
+                // There is no password-reset email in this project, but a
+                // one-time code signs you in without one — which is the actual
+                // recovery route. Nobody thinks to look under a segmented
+                // control for that, so say it in the words people search for.
+                <button
+                  type="button"
+                  disabled={busy || offline}
+                  className="self-end text-xs font-medium text-brand-500 hover:text-ink cursor-pointer disabled:opacity-50"
+                  onClick={() => {
+                    setMethod("otp");
+                    setErr(null);
+                    setMsg(
+                      "No problem — we'll email you a one-time code to sign in. You can set a new password afterwards in Settings → Security."
+                    );
+                  }}
+                >
+                  Forgot password?
+                </button>
+              )}
+
               {mode === "signin" && (
                 <Segmented<Method>
                   value={method}
@@ -436,10 +479,23 @@ export default function Login() {
                 />
               )}
 
+              {localMode && offline && (
+                <Msg kind="msg">
+                  {deviceClaimed
+                    ? "You're offline. Sign in with the account already on this device — your data is here and stays here."
+                    : "You're offline. This device isn't linked to a Filey account yet, and creating one needs a connection just this once."}
+                </Msg>
+              )}
+
               {err && <Msg kind="err">{err}</Msg>}
               {msg && <Msg kind="msg">{msg}</Msg>}
 
-              <button className={CTA} disabled={busy}>
+              <button
+                className={CTA}
+                // Creating an account and emailing a code both need the server.
+                // Signing in with a password does not, on a claimed device.
+                disabled={busy || (offline && (mode === "signup" || method === "otp"))}
+              >
                 {busy && <Loader2 size={16} className="animate-spin" />}
                 {busy
                   ? "Please wait…"
