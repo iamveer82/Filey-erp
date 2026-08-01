@@ -13,7 +13,12 @@ import { CompanyAssetImage } from "./CompanyAssetImage";
  * dragging reads the parent's bounding rect, which is already scaled. */
 
 export type StampSig = {
+  /** Durable reference: a Storage path (cloud) or a data: URL (local mode).
+   *  Never a signed URL — those expire in minutes. */
   data: string;
+  /** Transient fresh signed URL, kept in memory so a just-uploaded image shows
+   *  immediately. Stripped before persisting. */
+  _previewUrl?: string;
   x: number;
   y: number;
   opacity: number;

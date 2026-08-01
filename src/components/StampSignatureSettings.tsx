@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Upload, X, Stamp, PenTool } from "lucide-react";
 import { tools } from "../lib/api";
-import { uploadCompanyAsset, companyAssetUrl } from "../lib/files";
+import { uploadCompanyAsset } from "../lib/files";
 import { STAMP_DEFAULT, SIGN_DEFAULT, type StampSig } from "./StampSignature";
 import { CompanyAssetImage } from "./CompanyAssetImage";
 
@@ -26,35 +26,39 @@ const SIGN_KEY = "company_signature";
 export const hasCompanyStampSig = (s?: CompanyStampSig | null): boolean =>
   !!s && (!!s.stamp?.data || !!s.signature?.data);
 
+/** A signed Storage URL embeds the object path: `/object/sign/{bucket}/{path}?token=…`.
+ *  Recovering it heals installs that persisted an expired URL over the path. */
+function pathFromSignedUrl(u: string): string | null {
+  const m = u.match(/\/object\/sign\/[^/]+\/(.+?)(?:\?|$)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Keep `data` a durable reference. It used to be swapped for a signed URL here,
+ *  which the settings page then saved back — and those URLs expire in 5 minutes,
+ *  so the stamp went permanently blank. Rendering resolves paths on its own
+ *  (CompanyAssetImage), so nothing needs resolving at load time. */
+function durable(parsed: Partial<StampSig>): Partial<StampSig> {
+  const { _previewUrl: _drop, ...rest } = parsed;
+  if (rest.data?.startsWith("http")) {
+    const path = pathFromSignedUrl(rest.data);
+    if (path) rest.data = path;
+  }
+  return rest;
+}
+
 export async function loadCompanyStampSig(): Promise<CompanyStampSig> {
   try {
     const rows = await tools.settings();
     const stampRow = rows.find((r) => r.key === STAMP_KEY);
     const signRow = rows.find((r) => r.key === SIGN_KEY);
     const out: CompanyStampSig = {};
-    // A data: URL (local mode) is the image itself; only a Storage path needs a
-    // fresh signed URL.
-    const isStoragePath = (d: string) =>
-      !d.startsWith("data:") && (d.startsWith("files/") || d.includes("/company/"));
     if (stampRow?.value) {
-      const parsed = JSON.parse(stampRow.value) as Partial<StampSig>;
-      if (parsed.data) {
-        if (isStoragePath(parsed.data)) {
-          const url = await companyAssetUrl(parsed.data);
-          if (url) parsed.data = url;
-        }
-        out.stamp = { ...STAMP_DEFAULT, ...parsed };
-      }
+      const parsed = durable(JSON.parse(stampRow.value) as Partial<StampSig>);
+      if (parsed.data) out.stamp = { ...STAMP_DEFAULT, ...parsed };
     }
     if (signRow?.value) {
-      const parsed = JSON.parse(signRow.value) as Partial<StampSig>;
-      if (parsed.data) {
-        if (isStoragePath(parsed.data)) {
-          const url = await companyAssetUrl(parsed.data);
-          if (url) parsed.data = url;
-        }
-        out.signature = { ...SIGN_DEFAULT, ...parsed };
-      }
+      const parsed = durable(JSON.parse(signRow.value) as Partial<StampSig>);
+      if (parsed.data) out.signature = { ...SIGN_DEFAULT, ...parsed };
     }
     return out;
   } catch (e) {
@@ -64,8 +68,15 @@ export async function loadCompanyStampSig(): Promise<CompanyStampSig> {
 }
 
 export async function saveCompanyStampSig(s: CompanyStampSig): Promise<void> {
-  await tools.setSetting(STAMP_KEY, JSON.stringify(s.stamp ?? {}));
-  await tools.setSetting(SIGN_KEY, JSON.stringify(s.signature ?? {}));
+  // _previewUrl is a short-lived signed URL — persisting it shadowed `data`
+  // with a link that had already expired by the next visit.
+  const persist = (v?: StampSig) => {
+    if (!v) return {};
+    const { _previewUrl: _drop, ...rest } = v;
+    return rest;
+  };
+  await tools.setSetting(STAMP_KEY, JSON.stringify(persist(s.stamp)));
+  await tools.setSetting(SIGN_KEY, JSON.stringify(persist(s.signature)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -94,7 +105,7 @@ function UploadCard({
     try {
       const { path, url } = await uploadCompanyAsset(f);
       // Persist the storage path in settings; keep the signed URL in memory for preview
-      onChange({ ...defaults, data: path, _previewUrl: url } as StampSig);
+      onChange({ ...defaults, data: path, _previewUrl: url });
     } catch (e) {
       console.warn(`Failed to upload ${label.toLowerCase()}`, e);
     } finally {
@@ -102,7 +113,7 @@ function UploadCard({
     }
   };
 
-  const previewUrl = (value as any)?._previewUrl || value?.data;
+  const previewUrl = value?._previewUrl || value?.data;
 
   return (
     <div className="rounded-xl border border-brand-200 p-4">
