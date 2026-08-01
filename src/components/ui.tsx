@@ -341,6 +341,7 @@ export function DataTable<T>({
   rowKey,
   bulkActions,
   onRowClick,
+  pageSize,
 }: {
   columns: {
     key: string;
@@ -365,6 +366,9 @@ export function DataTable<T>({
   /** Make rows clickable (Odoo-style drill-down). Clicks on buttons,
    *  links, inputs or menus inside the row are ignored. */
   onRowClick?: (row: T) => void;
+  /** Cap how many rows render at once, with a Prev/Next footer. Keeps the
+   *  card short enough to read without scrolling the page. */
+  pageSize?: number;
 }) {
   const showSkeleton = loading && rows.length === 0;
   const selectable = !!rowKey && !!bulkActions?.length;
@@ -393,6 +397,15 @@ export function DataTable<T>({
     setSort((s) =>
       s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
     );
+
+  // Clamped rather than reset in an effect, so filtering down to fewer pages
+  // while parked on a late page just lands on the last one.
+  const [page, setPage] = useState(0);
+  const pageCount = pageSize ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
+  const safePage = Math.min(page, pageCount - 1);
+  const paged = pageSize
+    ? sorted.slice(safePage * pageSize, safePage * pageSize + pageSize)
+    : sorted;
 
   const keyOf = (r: T) => (rowKey ? rowKey(r) : "");
   const allChecked =
@@ -527,7 +540,7 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              sorted.map((row, i) => {
+              paged.map((row, i) => {
                 const k = selectable ? keyOf(row) : i;
                 const checked = selectable && sel.has(k);
                 return (
@@ -620,6 +633,33 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+      {pageSize && sorted.length > pageSize && (
+        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2.5">
+          <span className="text-[12.5px] text-muted-foreground tabular-nums">
+            {safePage * pageSize + 1}–
+            {Math.min(sorted.length, (safePage + 1) * pageSize)} of {sorted.length}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              className="btn-ghost h-7 px-2 text-[12.5px]"
+              disabled={safePage === 0}
+              onClick={() => setPage(safePage - 1)}
+            >
+              Previous
+            </button>
+            <span className="text-[12.5px] text-muted-foreground tabular-nums">
+              {safePage + 1} / {pageCount}
+            </span>
+            <button
+              className="btn-ghost h-7 px-2 text-[12.5px]"
+              disabled={safePage >= pageCount - 1}
+              onClick={() => setPage(safePage + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

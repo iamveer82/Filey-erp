@@ -8,7 +8,6 @@ import {
   Wallet,
   Sliders,
   FileText,
-  Mail,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
@@ -302,6 +301,7 @@ export default function People() {
       <DataTable<Employee>
         rows={filtered}
         loading={loading}
+        pageSize={10}
         empty={
           emps.length === 0
             ? "No employees yet"
@@ -333,42 +333,17 @@ export default function People() {
             ),
           },
           {
-            key: "dept",
-            label: "Department",
-            sortValue: (e) => e.department ?? "",
-            render: (e) => e.department ?? "—",
-          },
-          {
-            key: "pos",
-            label: "Position",
-            sortValue: (e) => e.position ?? "",
-            render: (e) => e.position ?? "—",
-          },
-          {
-            key: "email",
-            label: "Email",
-            sortValue: (e) => e.email ?? "",
+            key: "role",
+            label: "Role",
+            sortValue: (e) => e.position ?? e.department ?? "",
             render: (e) =>
-              e.email ? (
-                <span className="flex items-center gap-1.5">
-                  <Mail size={13} className="shrink-0 text-brand-400" />
-                  {e.email}
-                </span>
-              ) : (
-                "—"
-              ),
+              [e.position, e.department].filter(Boolean).join(" · ") || "—",
           },
           {
             key: "salary",
             label: "Salary",
             sortValue: (e) => e.salary,
             render: (e) => aed(e.salary),
-          },
-          {
-            key: "hired",
-            label: "Hired",
-            sortValue: (e) => e.hire_date ?? "",
-            render: (e) => fmtDate(e.hire_date),
           },
           {
             key: "status",
