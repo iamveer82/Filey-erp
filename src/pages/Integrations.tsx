@@ -17,6 +17,7 @@ import {
 import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
 import { cn } from "../lib/format";
+import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import { hasDesktop, composioList } from "../lib/composio";
 
@@ -49,6 +50,7 @@ type Integration = {
 };
 
 export default function Integrations() {
+  const { notice } = useUI();
   const [cat, setCat] = useState("All");
   const [composioActive, setComposioActive] = useState<Set<string>>(new Set());
 
@@ -256,9 +258,16 @@ export default function Integrations() {
 
             <div className="mt-4 flex items-center gap-2 flex-wrap">
               {i.soon ? (
-                <span className="text-[12px] text-muted-foreground">
+                <button
+                  className="btn-secondary"
+                  onClick={() =>
+                    void notice({
+                      message: `${i.name} isn't available yet. Sorry for the inconvenience — we're working to improve your experience.`,
+                    })
+                  }
+                >
                   Not available yet
-                </span>
+                </button>
               ) : (
                 <>
                   {i.to && (

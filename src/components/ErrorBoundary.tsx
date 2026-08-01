@@ -34,13 +34,20 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="min-h-full grid place-items-center bg-background p-6">
         <div className="card max-w-md text-center">
-          <p className="text-lg font-medium text-ink">Something went wrong</p>
+          <p className="text-lg font-medium text-ink">Sorry for the inconvenience</p>
           <p className="text-sm text-brand-500 mt-2">
-            The app hit an unexpected error. Your data is safe — reload to continue.
+            This part of the app isn't working as it should. Your data is safe — we're
+            working to improve your experience. Try again, or reload to continue.
           </p>
-          <pre className="text-[11px] text-brand-400 bg-brand-50 rounded-xl p-3 mt-3 overflow-x-auto text-left">
-            {this.state.error.message}
-          </pre>
+          {/* Kept, but folded away: users get an apology, support still gets the cause. */}
+          <details className="mt-3 text-left">
+            <summary className="text-[11px] text-brand-400 cursor-pointer">
+              Technical details
+            </summary>
+            <pre className="text-[11px] text-brand-400 bg-brand-50 rounded-xl p-3 mt-1.5 overflow-x-auto">
+              {this.state.error.message}
+            </pre>
+          </details>
           <div className="flex gap-2 justify-center mt-4">
             <button className="btn-ghost" onClick={() => this.setState({ error: null })}>
               Try again

@@ -30,6 +30,8 @@ interface ConfirmOpts {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  /** One button only — for a notice there is nothing to cancel. */
+  hideCancel?: boolean;
 }
 interface PromptOpts {
   title: string;
@@ -49,7 +51,13 @@ interface UIValue {
   };
   confirm: (opts: ConfirmOpts) => Promise<boolean>;
   prompt: (opts: PromptOpts) => Promise<string | null>;
+  /** Apology popup for a feature that is unavailable or misbehaving. */
+  notice: (opts?: { title?: string; message?: string }) => Promise<void>;
 }
+
+export const SORRY_TITLE = "Sorry for the inconvenience";
+export const SORRY_MESSAGE =
+  "This isn't working as it should yet. We're working to improve your experience — please try again later.";
 
 const Ctx = createContext<UIValue | null>(null);
 
@@ -107,6 +115,20 @@ export function UIProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const notice = useCallback(
+    (opts?: { title?: string; message?: string }) =>
+      new Promise<void>((resolve) =>
+        setConfirmState({
+          title: opts?.title ?? SORRY_TITLE,
+          message: opts?.message ?? SORRY_MESSAGE,
+          confirmLabel: "OK",
+          hideCancel: true,
+          resolve: () => resolve(),
+        })
+      ),
+    []
+  );
+
   const closeConfirm = (v: boolean) => {
     confirmState?.resolve(v);
     setConfirmState(null);
@@ -128,7 +150,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ toast, confirm, prompt }}>
+    <Ctx.Provider value={{ toast, confirm, prompt, notice }}>
       {children}
 
       {/* toasts */}
@@ -190,9 +212,11 @@ export function UIProvider({ children }: { children: ReactNode }) {
               <p className="text-sm text-brand-500 mt-1.5">{confirmState.message}</p>
             )}
             <div className="flex justify-end gap-2 mt-5">
-              <button className="btn-ghost" onClick={() => closeConfirm(false)}>
-                {confirmState.cancelLabel ?? "Cancel"}
-              </button>
+              {!confirmState.hideCancel && (
+                <button className="btn-ghost" onClick={() => closeConfirm(false)}>
+                  {confirmState.cancelLabel ?? "Cancel"}
+                </button>
+              )}
               <button
                 className={confirmState.danger ? "btn-danger" : "btn-primary"}
                 onClick={() => closeConfirm(true)}
