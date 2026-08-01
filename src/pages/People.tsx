@@ -44,6 +44,7 @@ export default function People() {
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [editFor, setEditFor] = useState<Employee | null>(null);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
   const [payslipFor, setPayslipFor] = useState<Employee | null>(null);
   const [quickViewFor, setQuickViewFor] = useState<Employee | null>(null);
@@ -399,6 +400,7 @@ export default function People() {
             render: (e) => (
               <RowActions
                 onView={() => setQuickViewFor(e)}
+                onEdit={() => setEditFor(e)}
                 onCopy={() => duplicateEmployee(e)}
                 onSend={
                   e.phone || e.email
@@ -432,10 +434,15 @@ export default function People() {
       />
 
       <EmployeeModal
-        open={open}
-        onClose={() => setOpen(false)}
+        open={open || !!editFor}
+        employee={editFor}
+        onClose={() => {
+          setOpen(false);
+          setEditFor(null);
+        }}
         onSaved={() => {
           setOpen(false);
+          setEditFor(null);
           load();
         }}
       />
@@ -449,6 +456,11 @@ export default function People() {
       <QuickViewModal
         open={!!quickViewFor}
         onClose={() => setQuickViewFor(null)}
+        onEdit={() => {
+          const emp = quickViewFor;
+          setQuickViewFor(null);
+          setEditFor(emp);
+        }}
         data={
           quickViewFor
             ? {
@@ -650,41 +662,55 @@ function PayslipModal({
   );
 }
 
+const blankEmployeeForm = () => ({
+  employee_code: "",
+  name: "",
+  email: "",
+  phone: "",
+  department: "",
+  position: "",
+  salary: 0,
+  hire_date: todayYmd(),
+});
+
+/** Add a person, or edit one when `employee` is passed. */
 function EmployeeModal({
   open,
+  employee,
   onClose,
   onSaved,
 }: {
   open: boolean;
+  employee?: Employee | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { toast } = useUI();
-  const [f, setF] = useState({
-    employee_code: "",
-    name: "",
-    email: "",
-    phone: "",
-    department: "",
-    position: "",
-    salary: 0,
-    hire_date: todayYmd(),
-  });
+  const [f, setF] = useState(blankEmployeeForm);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open)
-      setF({
-        employee_code: "",
-        name: "",
-        email: "",
-        phone: "",
-        department: "",
-        position: "",
-        salary: 0,
-        hire_date: todayYmd(),
-      });
-  }, [open]);
+    if (!open) return;
+    setF(
+      employee
+        ? {
+            employee_code: employee.employee_code ?? "",
+            name: employee.name ?? "",
+            email: employee.email ?? "",
+            phone: employee.phone ?? "",
+            department: employee.department ?? "",
+            position: employee.position ?? "",
+            salary: employee.salary ?? 0,
+            hire_date: employee.hire_date ?? todayYmd(),
+          }
+        : blankEmployeeForm()
+    );
+  }, [open, employee]);
   return (
-    <Modal open={open} onClose={onClose} title="Add Person">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={employee ? `Edit ${employee.name}` : "Add Person"}
+    >
       <div className="grid grid-cols-2 gap-3">
         <Field label="Employee Code">
           <input
@@ -754,10 +780,11 @@ function EmployeeModal({
         </button>
         <button
           className="btn-primary"
-          disabled={!f.name.trim()}
+          disabled={!f.name.trim() || saving}
           onClick={async () => {
+            setSaving(true);
             try {
-              await hr.createEmployee({
+              const fields = {
                 employee_code: f.employee_code,
                 name: f.name,
                 email: f.email || undefined,
@@ -766,14 +793,20 @@ function EmployeeModal({
                 position: f.position || undefined,
                 salary: f.salary,
                 hire_date: f.hire_date || undefined,
-              } as Omit<Employee, "id" | "status">);
+              };
+              if (employee) await hr.updateEmployee(employee.id, fields);
+              else await hr.createEmployee(fields as Omit<Employee, "id" | "status">);
               onSaved();
             } catch (e: any) {
-              toast.error(e?.message || "Failed to create employee");
+              toast.error(
+                e?.message || `Failed to ${employee ? "update" : "create"} employee`
+              );
+            } finally {
+              setSaving(false);
             }
           }}
         >
-          Save Employee
+          {saving ? "Saving…" : employee ? "Save Changes" : "Save Employee"}
         </button>
       </div>
     </Modal>

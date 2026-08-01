@@ -1261,6 +1261,14 @@ export const hr = {
       sInsert("employees", row), -1
     );
   },
+  updateEmployee: (employeeId: number, input: Partial<Employee>) => {
+    const row = clean(input as Record<string, unknown>);
+    return write(
+      { k: "update", t: "employees", id: employeeId, row },
+      () => sUpdate("employees", employeeId, row),
+      undefined
+    );
+  },
   setEmployeeStatus: (employeeId: number, status: string) =>
     write(
       { k: "update", t: "employees", id: employeeId, row: { status } },

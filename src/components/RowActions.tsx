@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   MoreHorizontal,
   Eye,
@@ -21,6 +28,50 @@ import { cn } from "../lib/format";
  *  - onSend: { whatsapp, email, sms, copyLink } — each a callback
  *  - align: "right" | "left"
  */
+/** Row menus sit inside the DataTable wrapper, which clips (overflow-hidden +
+ *  overflow-x-auto in ui.tsx) — an absolutely-positioned dropdown was cut off
+ *  and put a scrollbar on the table instead of showing Delete. Fixed position
+ *  isn't clipped by an ancestor's overflow, so the menu is measured off its
+ *  trigger button instead. Anchored to `bottom` when the trigger sits near the
+ *  viewport floor, so the menu grows upward without having to measure it. */
+function useMenuPosition(open: boolean, anchor: RefObject<HTMLElement | null>) {
+  const [pos, setPos] = useState<{
+    top?: number;
+    bottom?: number;
+    right: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r.bottom;
+      const right = Math.max(8, window.innerWidth - r.right);
+      setPos(
+        spaceBelow < 160
+          ? { bottom: window.innerHeight - r.top + 4, right }
+          : { top: r.bottom + 4, right }
+      );
+    };
+    place();
+    // A fixed menu doesn't follow a scrolling table — close rather than drift.
+    const onScroll = () => setPos(null);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, anchor]);
+
+  return pos;
+}
+
 export function RowActions({
   onView,
   onEdit,
@@ -45,6 +96,10 @@ export function RowActions({
   const [openMore, setOpenMore] = useState(false);
   const sendRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const sendBtn = useRef<HTMLButtonElement>(null);
+  const moreBtn = useRef<HTMLButtonElement>(null);
+  const sendPos = useMenuPosition(openSend, sendBtn);
+  const morePos = useMenuPosition(openMore, moreBtn);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -109,6 +164,7 @@ export function RowActions({
       {onSend && (
         <div className="relative" ref={sendRef}>
           <button
+            ref={sendBtn}
             onClick={(e) => {
               e.stopPropagation();
               setOpenSend((v) => !v);
@@ -119,8 +175,11 @@ export function RowActions({
           >
             <Send className="h-3.5 w-3.5" />
           </button>
-          {openSend && (
-            <div className="absolute right-0 top-8 z-30 w-44 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]">
+          {openSend && sendPos && (
+            <div
+              style={sendPos}
+              className="fixed z-50 w-44 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]"
+            >
               {onSend.whatsapp && (
                 <MenuItem
                   icon={MessageCircle}
@@ -174,6 +233,7 @@ export function RowActions({
       {onDelete && (
         <div className="relative" ref={moreRef}>
           <button
+            ref={moreBtn}
             onClick={(e) => {
               e.stopPropagation();
               setOpenMore((v) => !v);
@@ -184,8 +244,11 @@ export function RowActions({
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
-          {openMore && (
-            <div className="absolute right-0 top-8 z-30 w-40 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]">
+          {openMore && morePos && (
+            <div
+              style={morePos}
+              className="fixed z-50 w-40 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]"
+            >
               <MenuItem
                 icon={Trash2}
                 label="Delete"
