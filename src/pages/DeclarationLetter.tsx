@@ -334,6 +334,7 @@ export default function DeclarationLetter() {
       </div>
 
       <DataTable<SavedDecl>
+        pageSize={10}
         rows={filtered}
         empty={
           search

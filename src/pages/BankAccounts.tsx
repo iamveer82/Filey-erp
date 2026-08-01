@@ -211,6 +211,7 @@ export default function BankAccounts() {
         />
       </div>
       <DataTable<BankAccount>
+        pageSize={10}
         rows={filtered}
         loading={syncing}
         onRowClick={setQuickView}

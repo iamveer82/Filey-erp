@@ -1318,6 +1318,7 @@ export default function CustomerDetail() {
 
       <Section title="Quotations">
         <DataTable<QuotationSummary>
+          pageSize={5}
           rows={myQuotes}
           loading={loading}
           empty="No quotations for this customer"
@@ -1368,6 +1369,7 @@ export default function CustomerDetail() {
 
       <Section title="Sales orders">
         <DataTable<Order>
+          pageSize={5}
           rows={myOrders}
           loading={loading}
           empty="No orders for this customer"
@@ -1405,6 +1407,7 @@ export default function CustomerDetail() {
       {myOpps.length > 0 && (
         <Section title="Opportunities">
           <DataTable<Opportunity>
+            pageSize={5}
             rows={myOpps}
             columns={[
               {

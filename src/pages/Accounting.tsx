@@ -389,6 +389,7 @@ export default function Accounting() {
 
       {tab === "journal" ? (
         <DataTable<Txn>
+          pageSize={10}
           rows={filteredTxns}
           loading={loading}
           empty={
@@ -462,6 +463,7 @@ export default function Accounting() {
         />
       ) : (
         <DataTable<Account>
+          pageSize={10}
           rows={filteredAccounts}
           loading={loading}
           empty={

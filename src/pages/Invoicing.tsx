@@ -1349,6 +1349,7 @@ const editInvoice = async (id: number) => {
       )}
 
       <DataTable<InvoiceDocSummary>
+        pageSize={10}
         rows={filteredDocs}
         empty={
           search || statusFilter !== "all"

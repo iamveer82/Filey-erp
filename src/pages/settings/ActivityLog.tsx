@@ -100,6 +100,7 @@ export default function ActivityLog() {
       </div>
       <DataTable<AuditEntry>
         rows={filtered}
+        pageSize={10}
         loading={loading}
         empty="No activity recorded yet"
         columns={[

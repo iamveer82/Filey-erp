@@ -295,6 +295,7 @@ export default function Orders() {
       </div>
 
       <DataTable<Order>
+        pageSize={10}
         rows={filteredOrders}
         loading={loading}
         empty="No orders yet"

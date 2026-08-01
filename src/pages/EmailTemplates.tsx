@@ -166,6 +166,7 @@ export default function EmailTemplates() {
         />
       </div>
       <DataTable<EmailTemplate>
+        pageSize={10}
         rows={templates}
         loading={loading}
         empty="No templates yet"

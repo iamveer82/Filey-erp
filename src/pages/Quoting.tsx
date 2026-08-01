@@ -2047,6 +2047,7 @@ export default function Quoting() {
       </div>
 
       <DataTable<QuotationSummary>
+        pageSize={10}
         rows={filteredDocs}
         empty={
           search ? "No quotes match your search" : "No quotes yet — create your first one"

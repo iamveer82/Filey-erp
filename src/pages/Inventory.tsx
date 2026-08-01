@@ -495,6 +495,7 @@ export default function Inventory() {
           </span>
         </div>
         <DataTable<Product>
+          pageSize={10}
           rows={filtered}
           loading={loading}
           empty="No products match your filters"

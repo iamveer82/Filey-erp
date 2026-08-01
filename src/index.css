@@ -479,6 +479,18 @@
     @apply transition-colors duration-150 hover:bg-hover;
   }
 
+  /* Pins the Actions column against the right edge of a table that is wider
+     than its card, so row menus stay reachable without scrolling sideways.
+     DataTable adds it only while the table actually overflows — otherwise the
+     hairline would read as a stray divider. Needs its own background, since a
+     sticky cell would let the scrolled rows show through. */
+  .cell-pinned-end {
+    @apply sticky right-0 z-[1] bg-card border-l border-border;
+  }
+  .row-hover:hover .cell-pinned-end {
+    @apply bg-hover;
+  }
+
   /* Joined KPI grid (reference JoinedKpi): put on a `grid grid-cols-*`
      wrapper of MetricCards — cells share hairlines inside one bordered box.
      Pair with gap-px on the wrapper (replaces gap-3). */

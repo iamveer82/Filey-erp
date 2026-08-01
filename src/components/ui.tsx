@@ -398,6 +398,22 @@ export function DataTable<T>({
       s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
     );
 
+  // Only pin the last column while the table is genuinely too wide — CSS has no
+  // "if overflowing" selector, so measure. jsdom reports 0 for both, which
+  // reads as not-overflowing and keeps the markup unpinned in tests.
+  const [overflowing, setOverflowing] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [rows.length, columns.length]);
+  const pinnedIdx = overflowing ? columns.length - 1 : -1;
+
   // Clamped rather than reset in an effect, so filtering down to fewer pages
   // while parked on a late page just lands on the last one.
   const [page, setPage] = useState(0);
@@ -481,9 +497,12 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((c) =>
+              {columns.map((c, ci) =>
                 c.sortValue ? (
-                  <th key={c.key} className="th">
+                  <th
+                    key={c.key}
+                    className={cn("th", ci === pinnedIdx && "cell-pinned-end")}
+                  >
                     <button
                       onClick={() => toggleSort(c.key)}
                       className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground"
@@ -503,7 +522,10 @@ export function DataTable<T>({
                     </button>
                   </th>
                 ) : (
-                  <th key={c.key} className="th">
+                  <th
+                    key={c.key}
+                    className={cn("th", ci === pinnedIdx && "cell-pinned-end")}
+                  >
                     {c.label}
                   </th>
                 )
@@ -576,7 +598,7 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map((c) => {
+                    {columns.map((c, ci) => {
                       const isEditing =
                         !!c.editable && editing?.row === k && editing?.col === c.key;
                       const startEdit = (e: React.MouseEvent) => {
@@ -596,7 +618,10 @@ export function DataTable<T>({
                         }
                       };
                       return (
-                        <td key={c.key} className="td">
+                        <td
+                          key={c.key}
+                          className={cn("td", ci === pinnedIdx && "cell-pinned-end")}
+                        >
                           {isEditing ? (
                             <input
                               autoFocus

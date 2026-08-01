@@ -41,3 +41,62 @@ describe("DataTable pageSize", () => {
     expect(view.queryByText("Next")).not.toBeInTheDocument();
   });
 });
+
+describe("DataTable pinned last column", () => {
+  /** jsdom has no layout, so fake the one measurement the pin depends on. */
+  const fakeWidths = (scrollWidth: number, clientWidth: number) => {
+    const props = ["scrollWidth", "clientWidth"] as const;
+    const values = { scrollWidth, clientWidth };
+    for (const p of props) {
+      Object.defineProperty(HTMLElement.prototype, p, {
+        configurable: true,
+        get: () => values[p],
+      });
+    }
+    class RO {
+      constructor(private cb: () => void) {}
+      observe() {
+        this.cb();
+      }
+      disconnect() {}
+    }
+    (globalThis as any).ResizeObserver = RO;
+    return () => {
+      for (const p of props) delete (HTMLElement.prototype as any)[p];
+      delete (globalThis as any).ResizeObserver;
+    };
+  };
+
+  const wide = (
+    <DataTable
+      rows={[{ id: 1 }]}
+      columns={[
+        { key: "id", label: "ID", render: (r) => `row-${r.id}` },
+        { key: "act", label: "Actions", render: () => "menu" },
+      ]}
+    />
+  );
+
+  it("pins Actions once the table is wider than its card", () => {
+    const restore = fakeWidths(900, 400);
+    try {
+      const view = render(wide);
+      expect(view.getByText("menu").closest("td")).toHaveClass("cell-pinned-end");
+      expect(view.getByText("ID").closest("th")).not.toHaveClass("cell-pinned-end");
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves the column unpinned when everything fits", () => {
+    const restore = fakeWidths(400, 400);
+    try {
+      const view = render(wide);
+      expect(view.getByText("menu").closest("td")).not.toHaveClass(
+        "cell-pinned-end"
+      );
+    } finally {
+      restore();
+    }
+  });
+});

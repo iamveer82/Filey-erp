@@ -420,6 +420,7 @@ export default function DeliveryChallan() {
         </div>
       </div>
       <DataTable<DcRecord>
+        pageSize={10}
         rows={filtered}
         loading={loading}
         empty={

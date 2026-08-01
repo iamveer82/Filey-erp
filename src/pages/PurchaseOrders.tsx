@@ -510,6 +510,7 @@ export default function PurchaseOrders() {
       </div>
 
       <DataTable<PoSummary>
+        pageSize={10}
         rows={filtered}
         loading={loading}
         empty={

@@ -244,6 +244,7 @@ export default function ChequeRegister() {
         </div>
       </div>
       <DataTable<Cheque>
+        pageSize={10}
         rows={filtered}
         empty={
           q || statusFilter !== "all"

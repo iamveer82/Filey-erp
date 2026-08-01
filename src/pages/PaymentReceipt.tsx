@@ -519,6 +519,7 @@ export default function PaymentReceipt() {
 
           <div className="card">
             <DataTable
+              pageSize={10}
               columns={[
                 { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
                 { key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
