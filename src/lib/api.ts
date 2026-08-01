@@ -3387,25 +3387,19 @@ export const billing = {
           .maybeSingle();
         if (error) throw error;
         if (data) {
-          const c = data as CompanyProfile;
+          // Keep every column the row has. A hand-listed whitelist here silently
+          // dropped fields as the table grew (legal_id / emirate came back blank
+          // after a save). Only the row identity is stripped — saveCompany sends
+          // this object straight back as an update.
+          const { id: _id, org_id: _org, user_id: _uid, created_at: _ca,
+            updated_at: _ua, ...rest } = data as Record<string, unknown>;
+          const c = rest as unknown as CompanyProfile;
           return {
-            name: c.name,
-            business_type: c.business_type ?? undefined,
-            address: c.address ?? undefined,
-            city: c.city ?? undefined,
-            zip: c.zip ?? undefined,
-            trn: c.trn ?? undefined,
-            vat_number: c.vat_number ?? undefined,
+            ...c,
             tax_type: c.tax_type ?? "VAT",
-            email: c.email ?? undefined,
-            phone: c.phone ?? undefined,
-            website: c.website ?? undefined,
             currency: c.currency ?? "AED",
             default_tax_rate:
               c.default_tax_rate == null ? 5 : Number(c.default_tax_rate),
-            logo: c.logo ?? undefined,
-            default_accent: c.default_accent,
-            default_template: c.default_template,
           };
         }
         return {

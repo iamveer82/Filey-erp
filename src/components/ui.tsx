@@ -646,6 +646,12 @@ export function Modal({
     full: "max-w-[95vw]",
   }[size];
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Callers pass an inline arrow for onClose, so its identity changes on every
+  // parent render. Keeping it in a ref keeps it out of the effect deps below —
+  // with it in there, the effect re-ran on each keystroke, and its cleanup
+  // yanked focus out of the field being typed in.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -661,7 +667,7 @@ export function Modal({
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        closeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -682,7 +688,8 @@ export function Modal({
       window.removeEventListener("keydown", onKey);
       prevFocus?.focus?.();
     };
-  }, [open, onClose]);
+    // Only `open`: this runs once per open/close, never per render.
+  }, [open]);
 
   if (!open) return null;
   return createPortal(
