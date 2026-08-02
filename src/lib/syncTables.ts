@@ -42,6 +42,10 @@ export const PUSH_TABLES = [
   "user_folders",
   "user_files",
   "user_assets",
+  // Opt-outs sync before campaigns: a device that has the campaign but not the
+  // suppression list must never be the one that sends.
+  "email_optouts",
+  "campaigns",
 ];
 
 export const PUSH_SET = new Set(PUSH_TABLES);

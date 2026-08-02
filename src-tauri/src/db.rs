@@ -237,6 +237,33 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             position INTEGER NOT NULL DEFAULT 0
         );
 
+        -- ===== MARKETING =====
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '',
+            subject TEXT NOT NULL DEFAULT '',
+            body_html TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft',
+            audience TEXT NOT NULL DEFAULT '{}',
+            recipients TEXT NOT NULL DEFAULT '[]',
+            sent_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            sent_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- Who asked not to be contacted. Checked before every send.
+        CREATE TABLE IF NOT EXISTS email_optouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT 'unsubscribed',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_email_optouts_unique
+            ON email_optouts (lower(email));
+
         -- ===== OFFLINE-FIRST CACHE / SYNC OUTBOX =====
         CREATE TABLE IF NOT EXISTS kv_cache (
             key TEXT PRIMARY KEY,

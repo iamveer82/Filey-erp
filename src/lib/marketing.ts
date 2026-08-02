@@ -116,6 +116,82 @@ export interface LeadStats {
  *  alphabetically, without flagging most of the book. */
 export const HOT_SCORE = 60;
 
+/** Rows for a "leads.csv" export — Scout's own output shape, so a list can go
+ *  to a spreadsheet or another tool without retyping it. */
+export function leadsToCsvRows(leads: Lead[]): Record<string, string>[] {
+  return leads.map((l) => ({
+    Name: l.customer.name,
+    Company: l.customer.company ?? "",
+    Email: l.customer.email ?? "",
+    Phone: l.customer.phone ?? "",
+    TRN: l.customer.trn ?? "",
+    Domain: l.domain ?? "",
+    Score: String(l.score),
+    Reasons: l.reasons.join("; "),
+    Invoiced: String(l.revenue),
+    Invoices: String(l.invoices),
+    Overdue: String(l.overdue),
+    "Days since last invoice":
+      l.daysSinceActivity == null ? "" : String(l.daysSinceActivity),
+  }));
+}
+
+export interface DuplicateGroup {
+  /** Why these were grouped: the exact value they share. */
+  reason: string;
+  key: string;
+  leads: Lead[];
+}
+
+/** Normalised for comparison: case, punctuation and the company suffixes that
+ *  the same business gets written with and without. */
+function nameKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(
+      /\b(llc|l\.l\.c|fzc|fze|fz-llc|ltd|limited|co|company|est|establishment|trading|general|the)\b/g,
+      ""
+    )
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+/**
+ * Find customer records that look like the same business — the same address
+ * invoiced twice, or "Acme LLC" and "Acme L.L.C." living as separate rows.
+ * Reports rather than merges: which of two records is the real one is a
+ * judgement call, and a wrong automatic merge loses invoice history.
+ */
+export function findDuplicates(leads: Lead[]): DuplicateGroup[] {
+  const groups: DuplicateGroup[] = [];
+  const group = (reason: string, keyOf: (l: Lead) => string) => {
+    const by = new Map<string, Lead[]>();
+    for (const l of leads) {
+      const k = keyOf(l);
+      if (!k) continue;
+      by.set(k, [...(by.get(k) ?? []), l]);
+    }
+    for (const [key, list] of by)
+      if (list.length > 1) groups.push({ reason, key, leads: list });
+  };
+
+  group("Same email address", (l) => (l.customer.email ?? "").trim().toLowerCase());
+  group("Same TRN", (l) => (l.customer.trn ?? "").replace(/\D/g, ""));
+  group("Similar company name", (l) => nameKey(l.customer.name ?? ""));
+
+  // A pair caught by both email and name should be reported once, by the
+  // stronger signal — email and TRN are identifiers, a name is a guess.
+  const claimed = new Set<number>();
+  const deduped: DuplicateGroup[] = [];
+  for (const g of groups) {
+    const ids = g.leads.map((l) => l.customer.id);
+    if (ids.every((id) => claimed.has(id))) continue;
+    ids.forEach((id) => claimed.add(id));
+    deduped.push(g);
+  }
+  return deduped;
+}
+
 export function leadStats(leads: Lead[]): LeadStats {
   return {
     total: leads.length,

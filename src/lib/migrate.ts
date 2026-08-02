@@ -59,6 +59,8 @@ const TABLES = [
   "user_folders",
   "user_files",
   "user_assets",
+  "email_optouts",
+  "campaigns",
 ];
 
 const FILES_BUCKET = "files";

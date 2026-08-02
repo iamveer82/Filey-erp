@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildLeads, leadStats, HOT_SCORE } from "../marketing";
+import {
+  buildLeads,
+  leadStats,
+  findDuplicates,
+  leadsToCsvRows,
+  HOT_SCORE,
+} from "../marketing";
 import { companyDomainFromEmail } from "../scout";
 import type { CrmCustomer, InvoiceDocSummary } from "../api";
 
@@ -38,7 +44,13 @@ describe("companyDomainFromEmail", () => {
 
 describe("buildLeads", () => {
   const customers = [
-    customer({ id: 1, name: "Acme Trading", email: "sales@acme.ae", phone: "0501", trn: "1" }),
+    customer({
+      id: 1,
+      name: "Acme Trading",
+      email: "sales@acme.ae",
+      phone: "0501",
+      trn: "1",
+    }),
     customer({ id: 2, name: "Quiet Co", email: "info@quiet.ae" }),
     customer({ id: 3, name: "Nobody" }),
   ];
@@ -48,7 +60,12 @@ describe("buildLeads", () => {
     invoice({ customer_name: "Acme Trading", total: 20_000, issue_date: "2026-06-01" }),
     invoice({ customer_name: "Quiet Co", total: 900, issue_date: "2024-01-01" }),
     // Drafts are not trading history — they were never sent.
-    invoice({ customer_name: "Nobody", total: 999_999, status: "draft", issue_date: TODAY }),
+    invoice({
+      customer_name: "Nobody",
+      total: 999_999,
+      status: "draft",
+      issue_date: TODAY,
+    }),
   ];
 
   it("ranks the active paying customer first and the empty record last", () => {
@@ -125,5 +142,81 @@ describe("buildLeads", () => {
     const b = customer({ id: 2, name: "Alpha", email: "a@a.ae", phone: "1" });
     const leads = buildLeads([a, b], [], TODAY);
     expect(leads.map((l) => l.customer.name)).toEqual(["Alpha", "Bravo"]);
+  });
+});
+
+describe("findDuplicates", () => {
+  const leads = (cs: Partial<CrmCustomer>[]) =>
+    buildLeads(
+      cs.map((c, i) => customer({ id: i + 1, name: "X", ...c } as any)),
+      [],
+      TODAY
+    );
+
+  it("groups records sharing an email address", () => {
+    const groups = findDuplicates(
+      leads([
+        { id: 1, name: "Acme", email: "same@acme.ae" },
+        { id: 2, name: "Acme Dubai", email: "same@acme.ae" },
+      ])
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].reason).toMatch(/email/i);
+    expect(groups[0].leads).toHaveLength(2);
+  });
+
+  it("groups records sharing a TRN even when written differently", () => {
+    const groups = findDuplicates(
+      leads([
+        { id: 1, name: "Alpha", trn: "100123456700003" },
+        { id: 2, name: "Beta", trn: "100 1234 5670 0003" },
+      ])
+    );
+    expect(groups.some((g) => /TRN/i.test(g.reason))).toBe(true);
+  });
+
+  it("sees through company suffixes and punctuation on the name", () => {
+    const groups = findDuplicates(
+      leads([
+        { id: 1, name: "Acme Trading L.L.C." },
+        { id: 2, name: "ACME  llc" },
+      ])
+    );
+    expect(groups.some((g) => /name/i.test(g.reason))).toBe(true);
+  });
+
+  it("reports a pair once, by the strongest signal", () => {
+    // Same email AND same normalised name — should not appear twice.
+    const groups = findDuplicates(
+      leads([
+        { id: 1, name: "Acme LLC", email: "a@acme.ae" },
+        { id: 2, name: "Acme", email: "a@acme.ae" },
+      ])
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].reason).toMatch(/email/i);
+  });
+
+  it("does not group distinct businesses", () => {
+    expect(
+      findDuplicates(
+        leads([
+          { id: 1, name: "Acme", email: "a@acme.ae" },
+          { id: 2, name: "Globex", email: "g@globex.ae" },
+        ])
+      )
+    ).toEqual([]);
+  });
+});
+
+describe("leadsToCsvRows", () => {
+  it("exports the columns a spreadsheet needs, with blanks not undefined", () => {
+    const rows = leadsToCsvRows(
+      buildLeads([customer({ id: 1, name: "Acme", email: "a@acme.ae" })], [], TODAY)
+    );
+    expect(rows[0].Name).toBe("Acme");
+    expect(rows[0].Domain).toBe("acme.ae");
+    expect(rows[0].Phone).toBe("");
+    expect(Object.values(rows[0]).every((v) => typeof v === "string")).toBe(true);
   });
 });

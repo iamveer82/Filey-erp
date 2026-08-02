@@ -215,6 +215,39 @@ export interface CrmCustomer {
   shared?: boolean;
   created_at: string;
 }
+export interface EmailOptOut {
+  id: number;
+  email: string;
+  reason: "unsubscribed" | "bounced" | "manual";
+  created_at?: string;
+}
+
+export interface CampaignRecipient {
+  customer_id: number;
+  name: string;
+  email: string;
+  /** pending → sent | failed | skipped (opted out, or no address). */
+  status: "pending" | "sent" | "failed" | "skipped";
+  error?: string;
+  sent_at?: string;
+}
+
+export interface Campaign {
+  id: number;
+  name: string;
+  subject: string;
+  body_html: string;
+  status: "draft" | "sending" | "sent" | "paused";
+  /** How the list was picked, kept so a past send can be explained. */
+  audience: { filter?: string; min_score?: number };
+  recipients: CampaignRecipient[];
+  sent_count: number;
+  failed_count: number;
+  sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 /** Anything a note, task or activity can be attached to. Stored as
  *  (target_type, target_id) so one timeline query serves every record type. */
 export type CrmTargetType =
@@ -779,6 +812,20 @@ async function shareWithItems(
     .update({ shared })
     .eq(fk, id);
   if (error) throw error;
+}
+
+/** Read a jsonb column that the cloud returns already parsed and the local
+ *  SQLite shim returns as TEXT. Falls back rather than throwing — a malformed
+ *  recipients blob should show an empty campaign, not break the whole page. */
+function parseJsonCol<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    console.error("Could not parse JSON column; using fallback");
+    return fallback;
+  }
 }
 
 const clean = <T extends Record<string, unknown>>(o: T) =>
@@ -2141,6 +2188,75 @@ export const crm = {
   deleteCustomer: (customerId: number) =>
     write({ k: "delete", t: "crm_customers", id: customerId }, () =>
       sDelete("crm_customers", customerId), undefined
+    ),
+  /** Addresses that must never receive a campaign. Read on every send. */
+  optOuts: () =>
+    readCached<EmailOptOut[]>(
+      "email_optouts",
+      () => sList<EmailOptOut>("email_optouts", [{ col: "id", asc: false }]),
+      []
+    ),
+  addOptOut: (email: string, reason: EmailOptOut["reason"] = "manual") => {
+    const row = clean({ email: email.trim().toLowerCase(), reason });
+    return write({ k: "insert", t: "email_optouts", row }, () =>
+      sInsert("email_optouts", row), -1
+    );
+  },
+  /** Only for an address added by mistake — an unsubscribe is not undoable by
+   *  the business, and the UI does not offer it for those. */
+  removeOptOut: (id: number) =>
+    write({ k: "delete", t: "email_optouts", id }, () =>
+      sDelete("email_optouts", id), undefined
+    ),
+  campaigns: () =>
+    readCached<Campaign[]>(
+      "campaigns",
+      async () => {
+        const rows = await sList<Record<string, unknown>>("campaigns", [
+          { col: "id", asc: false },
+        ]);
+        // The local SQLite shim stores jsonb columns as TEXT, so both shapes
+        // have to be tolerated on read.
+        return rows.map((r) => ({
+          ...(r as unknown as Campaign),
+          audience: parseJsonCol(r.audience, {}),
+          recipients: parseJsonCol(r.recipients, [] as CampaignRecipient[]),
+        }));
+      },
+      []
+    ),
+  createCampaign: (input: {
+    name: string;
+    subject: string;
+    body_html: string;
+    audience: Campaign["audience"];
+    recipients: CampaignRecipient[];
+  }) => {
+    const row = clean({
+      name: input.name,
+      subject: input.subject,
+      body_html: input.body_html,
+      status: "draft",
+      audience: JSON.stringify(input.audience),
+      recipients: JSON.stringify(input.recipients),
+    });
+    return write({ k: "insert", t: "campaigns", row }, () =>
+      sInsert("campaigns", row), -1
+    );
+  },
+  updateCampaign: (id: number, patch: Partial<Campaign>) => {
+    const row = clean({
+      ...patch,
+      ...(patch.audience ? { audience: JSON.stringify(patch.audience) } : {}),
+      ...(patch.recipients ? { recipients: JSON.stringify(patch.recipients) } : {}),
+    } as Record<string, unknown>);
+    return write({ k: "update", t: "campaigns", id, row }, () =>
+      sUpdate("campaigns", id, row), undefined
+    );
+  },
+  deleteCampaign: (id: number) =>
+    write({ k: "delete", t: "campaigns", id }, () =>
+      sDelete("campaigns", id), undefined
     ),
   opportunities: () =>
     readCached<Opportunity[]>(

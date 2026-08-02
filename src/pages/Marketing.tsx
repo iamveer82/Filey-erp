@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Flame, Globe, Sparkles, UserSearch, Users } from "lucide-react";
+import { Copy, Download, Flame, Globe, Sparkles, UserSearch, Users } from "lucide-react";
 
 import { crm, billing, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
-import { buildLeads, leadStats, HOT_SCORE, type Lead } from "../lib/marketing";
+import {
+  buildLeads,
+  leadStats,
+  leadsToCsvRows,
+  findDuplicates,
+  HOT_SCORE,
+  type Lead,
+} from "../lib/marketing";
+import { downloadCsv } from "../lib/csv";
+import CampaignsPanel from "../components/CampaignsPanel";
+import OptOutsPanel from "../components/OptOutsPanel";
 import { enrichFromWebsite, type CompanyDetails } from "../lib/scout";
 import { reachReady } from "../lib/reach";
 import { useUI } from "../lib/ui";
@@ -36,6 +46,7 @@ export default function Marketing() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "hot" | "incomplete">("all");
   const [enrichFor, setEnrichFor] = useState<Lead | null>(null);
+  const [tab, setTab] = useState<"leads" | "campaigns" | "optouts">("leads");
 
   const load = () => {
     setError("");
@@ -55,6 +66,7 @@ export default function Marketing() {
     [customers, invoices]
   );
   const stats = useMemo(() => leadStats(leads), [leads]);
+  const duplicates = useMemo(() => findDuplicates(leads), [leads]);
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -74,11 +86,34 @@ export default function Marketing() {
         title="Marketing"
         subtitle="Who to contact next, ranked from your own trading history"
         action={
-          <Link to="/integrations/lead-enrichment" className="btn-ghost">
-            <UserSearch size={15} /> Lead enrichment
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn-ghost"
+              disabled={!leads.length}
+              onClick={() => downloadCsv("leads", leadsToCsvRows(shown))}
+            >
+              <Download size={15} /> Export CSV
+            </button>
+            <Link to="/integrations/lead-enrichment" className="btn-ghost">
+              <UserSearch size={15} /> Lead enrichment
+            </Link>
+          </div>
         }
       />
+
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {(
+          [
+            ["leads", `Leads (${stats.total})`],
+            ["campaigns", "Campaigns"],
+            ["optouts", "Opt-outs"],
+          ] as const
+        ).map(([id, label]) => (
+          <FilterChip key={id} active={tab === id} onClick={() => setTab(id)}>
+            {label}
+          </FilterChip>
+        ))}
+      </div>
 
       {error && (
         <div className="mb-4">
@@ -86,162 +121,200 @@ export default function Marketing() {
         </div>
       )}
 
-      {!reachReady() && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-          <Globe size={16} className="text-brand-400" />
-          <span className="text-sm text-foreground">
-            Ranking works offline. Turn on web access to also fill in missing contact
-            details from a company's own site.
-          </span>
-          <Link to="/integrations/lead-enrichment" className="btn-secondary ml-auto">
-            Connect
-          </Link>
-        </div>
-      )}
+      {tab === "campaigns" && <CampaignsPanel leads={leads} />}
+      {tab === "optouts" && <OptOutsPanel />}
 
-      <StatStrip
-        className="mb-4"
-        items={[
-          { label: "Leads", value: String(stats.total), icon: <Users size={14} /> },
-          {
-            label: `Hot (${HOT_SCORE}+)`,
-            value: String(stats.hot),
-            icon: <Flame size={14} />,
-            tone: "positive",
-          },
-          {
-            label: "Missing contact",
-            value: String(stats.incomplete),
-            tone: stats.incomplete ? "negative" : "neutral",
-          },
-          {
-            label: "Enrichable",
-            value: String(stats.enrichable),
-            icon: <Sparkles size={14} />,
-          },
-        ]}
-      />
-
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search leads by name, company, email or domain…"
-          className="w-full sm:max-w-xs"
-        />
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FilterChip
-            active={filter === "all"}
-            onClick={() => setFilter("all")}
-            count={stats.total}
-          >
-            All
-          </FilterChip>
-          <FilterChip
-            active={filter === "hot"}
-            tone="success"
-            onClick={() => setFilter(filter === "hot" ? "all" : "hot")}
-            count={stats.hot}
-          >
-            Hot
-          </FilterChip>
-          <FilterChip
-            active={filter === "incomplete"}
-            tone="warn"
-            onClick={() => setFilter(filter === "incomplete" ? "all" : "incomplete")}
-            count={stats.incomplete}
-          >
-            Missing contact
-          </FilterChip>
-        </div>
-      </div>
-
-      <DataTable<Lead>
-        rows={shown}
-        loading={loading}
-        pageSize={10}
-        rowKey={(l) => l.customer.id}
-        empty={
-          customers.length === 0
-            ? "No customers yet — add one and they'll be ranked here"
-            : "No leads match your search or filters"
-        }
-        onRowClick={(l) => nav(`/customers/${l.customer.id}`)}
-        columns={[
-          {
-            key: "name",
-            label: "Lead",
-            sortValue: (l) => l.customer.name,
-            render: (l) => (
-              <div>
-                <p className="font-medium text-ink">{l.customer.name}</p>
-                <p className="text-[11px] text-brand-400">
-                  {l.customer.email || l.customer.phone || "No contact on file"}
-                </p>
-              </div>
-            ),
-          },
-          {
-            key: "score",
-            label: "Score",
-            sortValue: (l) => l.score,
-            render: (l) => (
-              <span title={l.reasons.join(" · ") || "Nothing on file yet"}>
-                <Badge tone={tone(l.score)}>{l.score}</Badge>
+      {tab === "leads" && (
+        <>
+          {!reachReady() && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <Globe size={16} className="text-brand-400" />
+              <span className="text-sm text-foreground">
+                Ranking works offline. Turn on web access to also fill in missing contact
+                details from a company's own site.
               </span>
-            ),
-          },
-          {
-            key: "why",
-            label: "Why",
-            render: (l) => (
-              <span className="text-[12.5px] text-brand-500">
-                {l.reasons[0] ?? "No trading history yet"}
-              </span>
-            ),
-          },
-          {
-            key: "revenue",
-            label: "Invoiced",
-            sortValue: (l) => l.revenue,
-            render: (l) => (l.revenue ? aed(l.revenue) : "—"),
-          },
-          {
-            key: "seen",
-            label: "Last invoice",
-            sortValue: (l) => l.daysSinceActivity ?? 99_999,
-            render: (l) =>
-              l.daysSinceActivity == null
-                ? "Never"
-                : l.daysSinceActivity === 0
-                  ? "Today"
-                  : `${l.daysSinceActivity}d ago`,
-          },
-          {
-            key: "act",
-            label: "Actions",
-            render: (l) => (
-              <button
-                className="btn-ghost h-7 px-2 text-[12.5px]"
-                disabled={!l.domain || !reachReady()}
-                title={
-                  !reachReady()
-                    ? "Turn on web access in Integrations"
-                    : !l.domain
-                      ? "No company domain — their email is personal or missing"
-                      : `Read ${l.domain}`
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEnrichFor(l);
-                }}
+              <Link to="/integrations/lead-enrichment" className="btn-secondary ml-auto">
+                Connect
+              </Link>
+            </div>
+          )}
+
+          <StatStrip
+            className="mb-4"
+            items={[
+              { label: "Leads", value: String(stats.total), icon: <Users size={14} /> },
+              {
+                label: `Hot (${HOT_SCORE}+)`,
+                value: String(stats.hot),
+                icon: <Flame size={14} />,
+                tone: "positive",
+              },
+              {
+                label: "Missing contact",
+                value: String(stats.incomplete),
+                tone: stats.incomplete ? "negative" : "neutral",
+              },
+              {
+                label: "Enrichable",
+                value: String(stats.enrichable),
+                icon: <Sparkles size={14} />,
+              },
+            ]}
+          />
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search leads by name, company, email or domain…"
+              className="w-full sm:max-w-xs"
+            />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <FilterChip
+                active={filter === "all"}
+                onClick={() => setFilter("all")}
+                count={stats.total}
               >
-                <Sparkles size={13} /> Enrich
-              </button>
-            ),
-          },
-        ]}
-      />
+                All
+              </FilterChip>
+              <FilterChip
+                active={filter === "hot"}
+                tone="success"
+                onClick={() => setFilter(filter === "hot" ? "all" : "hot")}
+                count={stats.hot}
+              >
+                Hot
+              </FilterChip>
+              <FilterChip
+                active={filter === "incomplete"}
+                tone="warn"
+                onClick={() => setFilter(filter === "incomplete" ? "all" : "incomplete")}
+                count={stats.incomplete}
+              >
+                Missing contact
+              </FilterChip>
+            </div>
+          </div>
+
+          <DataTable<Lead>
+            rows={shown}
+            loading={loading}
+            pageSize={10}
+            rowKey={(l) => l.customer.id}
+            empty={
+              customers.length === 0
+                ? "No customers yet — add one and they'll be ranked here"
+                : "No leads match your search or filters"
+            }
+            onRowClick={(l) => nav(`/customers/${l.customer.id}`)}
+            columns={[
+              {
+                key: "name",
+                label: "Lead",
+                sortValue: (l) => l.customer.name,
+                render: (l) => (
+                  <div>
+                    <p className="font-medium text-ink">{l.customer.name}</p>
+                    <p className="text-[11px] text-brand-400">
+                      {l.customer.email || l.customer.phone || "No contact on file"}
+                    </p>
+                  </div>
+                ),
+              },
+              {
+                key: "score",
+                label: "Score",
+                sortValue: (l) => l.score,
+                render: (l) => (
+                  <span title={l.reasons.join(" · ") || "Nothing on file yet"}>
+                    <Badge tone={tone(l.score)}>{l.score}</Badge>
+                  </span>
+                ),
+              },
+              {
+                key: "why",
+                label: "Why",
+                render: (l) => (
+                  <span className="text-[12.5px] text-brand-500">
+                    {l.reasons[0] ?? "No trading history yet"}
+                  </span>
+                ),
+              },
+              {
+                key: "revenue",
+                label: "Invoiced",
+                sortValue: (l) => l.revenue,
+                render: (l) => (l.revenue ? aed(l.revenue) : "—"),
+              },
+              {
+                key: "seen",
+                label: "Last invoice",
+                sortValue: (l) => l.daysSinceActivity ?? 99_999,
+                render: (l) =>
+                  l.daysSinceActivity == null
+                    ? "Never"
+                    : l.daysSinceActivity === 0
+                      ? "Today"
+                      : `${l.daysSinceActivity}d ago`,
+              },
+              {
+                key: "act",
+                label: "Actions",
+                render: (l) => (
+                  <button
+                    className="btn-ghost h-7 px-2 text-[12.5px]"
+                    disabled={!l.domain || !reachReady()}
+                    title={
+                      !reachReady()
+                        ? "Turn on web access in Integrations"
+                        : !l.domain
+                          ? "No company domain — their email is personal or missing"
+                          : `Read ${l.domain}`
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEnrichFor(l);
+                    }}
+                  >
+                    <Sparkles size={13} /> Enrich
+                  </button>
+                ),
+              },
+            ]}
+          />
+
+          {duplicates.length > 0 && (
+            <div className="mt-4 rounded-xl border border-border bg-card p-4">
+              <p className="flex items-center gap-2 text-sm font-medium text-ink">
+                <Copy size={15} className="text-brand-400" />
+                {duplicates.length} possible duplicate{duplicates.length > 1 ? "s" : ""}
+              </p>
+              <p className="mt-0.5 text-[12.5px] text-brand-500">
+                Same business on more than one record — merging is left to you, since
+                picking the wrong survivor loses its invoice history.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {duplicates.slice(0, 8).map((g) => (
+                  <li key={`${g.reason}-${g.key}`} className="text-[12.5px]">
+                    <span className="text-brand-500">{g.reason}:</span>{" "}
+                    {g.leads.map((l, i) => (
+                      <span key={l.customer.id}>
+                        {i > 0 && <span className="text-brand-400"> · </span>}
+                        <button
+                          className="text-ink underline underline-offset-2 cursor-pointer"
+                          onClick={() => nav(`/customers/${l.customer.id}`)}
+                        >
+                          {l.customer.name}
+                        </button>
+                      </span>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
 
       <EnrichModal
         lead={enrichFor}
