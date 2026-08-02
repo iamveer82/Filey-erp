@@ -1,8 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured, supabase } from "./supabase";
 import { isLocalMode } from "./dataMode";
-import { quotationTotals, applyRoundOff } from "./money";
-import { splitItemMeta, docTotals as lineAwareTotals } from "./docItems";
+import { quotationTotals, applyRoundOff, r2 } from "./money";
+import {
+  splitItemMeta,
+  docTotals as lineAwareTotals,
+  netByTaxCategory,
+} from "./docItems";
 import { getExchangeRates } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
@@ -137,6 +141,9 @@ export interface VatReturn {
   rate: number;               // standard VAT rate % applied (UAE = 5)
   standardSupplyNet: number;  // FTA box 1: standard-rated supplies (net)
   outputVat: number;          // FTA box 1 / 12: output tax due
+  zeroRatedNet: number;       // FTA box 4: zero-rated supplies (net, no VAT)
+  exemptNet: number;          // FTA box 5: exempt supplies (net, no VAT)
+  reverseChargeNet: number;   // FTA box 3: supplies under reverse charge (net)
   standardExpenseNet: number; // FTA box 9: standard-rated expenses (net)
   inputVat: number;           // FTA box 9 / 13: recoverable input tax
   netVatDue: number;          // FTA box 14: net VAT payable (+) or refundable (-)
@@ -316,6 +323,9 @@ export interface InvoiceDocSummary {
   unit_price_formula?: { a: string; b?: string } | null;
   /** VAT rate (%) applied to this document — used by statement engine. */
   tax_rate?: number;
+  /** Net turnover per UAE tax category (S/Z/E/O/AE) — feeds VAT 201 boxes 4/5,
+   *  which the ledger cannot supply because those lines carry no VAT. */
+  net_by_tax_category?: Record<string, number>;
 }
 export interface InvoicePayment {
   id: number;
@@ -1469,9 +1479,29 @@ export function computeVatReturn(
   txns: Pick<Txn, "account_name" | "txn_type" | "amount" | "txn_date">[],
   ratePct: number,
   from?: string,
-  to?: string
+  to?: string,
+  /** Issued sales invoices for the same period. Boxes 4/5 (zero-rated and
+   *  exempt supplies) report net turnover that carries no VAT at all, so it
+   *  leaves no trace in the tax accounts the ledger boxes are derived from —
+   *  it has to come off the invoice lines. Omit and those boxes read zero. */
+  invoices?: Pick<
+    InvoiceDocSummary,
+    "status" | "issue_date" | "net_by_tax_category"
+  >[]
 ): VatReturn {
   const inRange = (d: string) => (!from || d >= from) && (!to || d <= to);
+  let zeroRatedNet = 0;
+  let exemptNet = 0;
+  let reverseChargeNet = 0;
+  for (const inv of invoices ?? []) {
+    // A draft has not been issued to the customer, so it is not yet a supply.
+    if (inv.status === "draft") continue;
+    if (!inv.issue_date || !inRange(inv.issue_date)) continue;
+    const byCat = inv.net_by_tax_category ?? {};
+    zeroRatedNet += byCat.Z ?? 0;
+    exemptNet += byCat.E ?? 0;
+    reverseChargeNet += byCat.AE ?? 0;
+  }
   let outputVat = 0;
   let inputVat = 0;
   for (const t of txns) {
@@ -1493,6 +1523,9 @@ export function computeVatReturn(
     rate,
     standardSupplyNet: r ? outputVat / r : 0,
     outputVat,
+    zeroRatedNet: r2(zeroRatedNet),
+    exemptNet: r2(exemptNet),
+    reverseChargeNet: r2(reverseChargeNet),
     standardExpenseNet: r ? inputVat / r : 0,
     inputVat,
     netVatDue: outputVat - inputVat,
@@ -3035,7 +3068,11 @@ export const billing = {
                 ],
                 DOC_COLS
               ),
-          sList<any>("invoice_doc_items", undefined, "invoice_id,qty,unit_price,custom"),
+          sList<any>(
+            "invoice_doc_items",
+            undefined,
+            "invoice_id,qty,unit_price,custom,tax_category"
+          ),
           sList<any>("invoice_payments", undefined, "invoice_id,amount"),
         ]);
         // Only explicit "purchase" rows are purchase invoices; everything else
@@ -3056,7 +3093,8 @@ export const billing = {
             (paidByDoc.get(p.invoice_id) ?? 0) + Number(p.amount)
           );
         return docs.map((d) => {
-          const total = docTotal(d, byDoc.get(d.id) ?? []);
+          const docLines = byDoc.get(d.id) ?? [];
+          const total = docTotal(d, docLines);
           const paid = paidByDoc.get(d.id) ?? 0;
           return {
             id: d.id,
@@ -3073,6 +3111,11 @@ export const billing = {
             shared: d.shared ?? undefined,
             updated_at: d.updated_at,
             tax_rate: d.tax_rate ?? undefined,
+            net_by_tax_category: netByTaxCategory(
+              docLineItems(docLines) as never,
+              d.discount,
+              d.unit_price_formula
+            ),
           };
         }) as InvoiceDocSummary[];
       },

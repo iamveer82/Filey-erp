@@ -284,11 +284,23 @@ export function useStatusPie(
 }
 
 /** Derived financial computations. */
-export function useFinancials(accounts: Account[], txns: Txn[]) {
+export function useFinancials(
+  accounts: Account[],
+  txns: Txn[],
+  invoices: InvoiceDocSummary[] = []
+) {
   return useMemo(() => {
     const trialBalance: TrialBalance = computeTrialBalance(accounts);
     const balanceSheet: BalanceSheet = computeBalanceSheet(accounts);
-    const vatReturn: VatReturn = computeVatReturn(txns, 5);
+    // Invoices carry the zero-rated/exempt boxes; those supplies post no VAT,
+    // so the ledger alone reports them as nothing at all.
+    const vatReturn: VatReturn = computeVatReturn(
+      txns,
+      5,
+      undefined,
+      undefined,
+      invoices
+    );
     const cashSummary: CashSummary = computeCashSummary(txns);
     const revenue = accounts
       .filter((a) => a.account_type === "revenue")
@@ -298,7 +310,7 @@ export function useFinancials(accounts: Account[], txns: Txn[]) {
       .reduce((s, a) => s + (Number(a.balance) || 0), 0);
     const netProfit = revenue - expensesTotal;
     return { trialBalance, balanceSheet, vatReturn, cashSummary, revenue, expensesTotal, netProfit };
-  }, [accounts, txns]);
+  }, [accounts, txns, invoices]);
 }
 
 /** Top customers by invoice revenue. */

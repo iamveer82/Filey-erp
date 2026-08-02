@@ -63,3 +63,37 @@ describe("computeVatReturn", () => {
     expect(r.standardSupplyNet).toBe(1000);
   });
 });
+
+const inv = (
+  status: string,
+  issue_date: string,
+  net_by_tax_category: Record<string, number>
+) => ({ status, issue_date, net_by_tax_category });
+
+describe("computeVatReturn — boxes 3/4/5 from invoices", () => {
+  it("reports zero-rated, exempt and reverse-charge net off the invoices", () => {
+    const r = computeVatReturn([], 5, "2026-01-01", "2026-03-31", [
+      inv("sent", "2026-01-15", { S: 1000, Z: 400 }),
+      inv("paid", "2026-02-02", { E: 250, AE: 100 }),
+    ]);
+    expect(r.zeroRatedNet).toBe(400);
+    expect(r.exemptNet).toBe(250);
+    expect(r.reverseChargeNet).toBe(100);
+  });
+
+  it("ignores drafts and anything outside the period", () => {
+    const r = computeVatReturn([], 5, "2026-01-01", "2026-03-31", [
+      inv("draft", "2026-01-15", { Z: 999 }), // not issued — not a supply yet
+      inv("sent", "2025-12-31", { Z: 111 }), // before the period
+      inv("sent", "2026-04-01", { Z: 222 }), // after it
+      inv("sent", "2026-03-31", { Z: 50 }), // last day counts
+    ]);
+    expect(r.zeroRatedNet).toBe(50);
+  });
+
+  it("reads zero for those boxes when no invoices are supplied", () => {
+    const r = computeVatReturn([txn("Output VAT", "credit", 50, "2026-01-15")], 5);
+    expect(r.zeroRatedNet).toBe(0);
+    expect(r.exemptNet).toBe(0);
+  });
+});

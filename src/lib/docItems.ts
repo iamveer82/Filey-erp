@@ -200,6 +200,34 @@ export function docLineAmount(
   return invoiceLineAmount(item, formula);
 }
 
+/** Net turnover split by UAE tax category (S/Z/E/O/AE), after both per-line and
+ *  document discounts. FTA VAT 201 boxes 4 and 5 report zero-rated and exempt
+ *  supplies by net amount — those lines carry no VAT, so the ledger cannot tell
+ *  them apart from each other or from standard revenue. Allocation mirrors
+ *  docTotals(): the document discount is spread pro-rata by post-line-discount
+ *  net, so summing every category returns the document's own net. */
+export function netByTaxCategory(
+  items: DocItem[],
+  discount: number,
+  formula?: { a: string; b?: string } | null
+): Record<string, number> {
+  const lineNet = (i: DocItem) =>
+    docLineGross(i, formula) * (1 - (i.discount || 0) / 100);
+  const subtotal = items.reduce((s, i) => s + docLineGross(i, formula), 0);
+  const netAfterLineDisc = items.reduce((s, i) => s + lineNet(i), 0);
+  const disc = Math.min(
+    Math.max(0, discount || 0) + (subtotal - netAfterLineDisc),
+    subtotal
+  );
+  const scale = netAfterLineDisc > 0 ? (subtotal - disc) / netAfterLineDisc : 0;
+  const out: Record<string, number> = {};
+  for (const i of items) {
+    const cat = i.tax_category ?? "S";
+    out[cat] = r2((out[cat] ?? 0) + lineNet(i) * scale);
+  }
+  return out;
+}
+
 /** Totals that respect either doc-level discount/tax or per-line discount/tax. */
 export function docTotals(
   items: DocItem[],

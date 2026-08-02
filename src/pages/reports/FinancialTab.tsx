@@ -14,7 +14,7 @@ import { ReportsData, useFinancials } from "./useReportsData";
 
 export default function FinancialTab({ data }: { data: ReportsData }) {
   const c = useChartColors();
-  const fin = useFinancials(data.accounts, data.txns);
+  const fin = useFinancials(data.accounts, data.txns, data.invoices);
 
   const tooltipStyle = {
     borderRadius: 8,
@@ -303,7 +303,8 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
             VAT Return (UAE FTA 201)
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Standard rate: {(fin.vatReturn.rate * 100).toFixed(0)}% · From ledger postings
+            Standard rate: {fin.vatReturn.rate.toFixed(0)}% · Ledger postings +
+            issued invoices
           </div>
           <div className="mt-4 space-y-2">
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
@@ -318,6 +319,28 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
                 {aed(fin.vatReturn.outputVat)}
               </span>
             </div>
+            <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
+              <span className="text-muted-foreground">Zero-rated supplies (Box 4)</span>
+              <span className="text-foreground tabular-nums font-medium">
+                {aed(fin.vatReturn.zeroRatedNet)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
+              <span className="text-muted-foreground">Exempt supplies (Box 5)</span>
+              <span className="text-foreground tabular-nums font-medium">
+                {aed(fin.vatReturn.exemptNet)}
+              </span>
+            </div>
+            {fin.vatReturn.reverseChargeNet !== 0 && (
+              <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
+                <span className="text-muted-foreground">
+                  Reverse-charge supplies (Box 3)
+                </span>
+                <span className="text-foreground tabular-nums font-medium">
+                  {aed(fin.vatReturn.reverseChargeNet)}
+                </span>
+              </div>
+            )}
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
               <span className="text-muted-foreground">Standard-rated expenses (net)</span>
               <span className="text-foreground tabular-nums font-medium">
