@@ -35,6 +35,7 @@ const PayslipPage = lazy(() => import("./pages/PayslipPage"));
 const EmployeeDetail = lazy(() => import("./pages/EmployeeDetail"));
 const PortalView = lazy(() => import("./pages/PortalView"));
 const ModernOverview = lazy(() => import("./pages/ModernOverview"));
+const IntegrationConnect = lazy(() => import("./pages/IntegrationConnect"));
 
 function Splash() {
   return <FileyLoader />;
@@ -74,6 +75,9 @@ function AppRoutes() {
           );
         })}
         <Route path="/my-files" element={<Navigate to="/files" replace />} />
+        {/* declared after the module routes so /integrations itself still
+            resolves to the directory page */}
+        <Route path="/integrations/:app" element={<IntegrationConnect />} />
         <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/suppliers/:id" element={<SupplierDetail />} />
         {/* payslip is declared first so it isn't swallowed by /people/:id */}

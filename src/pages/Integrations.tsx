@@ -11,6 +11,8 @@ import {
   Send,
   ShoppingBag,
   Sparkles,
+  Globe,
+  UserSearch,
   Users,
   Zap,
 } from "lucide-react";
@@ -20,6 +22,7 @@ import { cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import { hasDesktop, composioList } from "../lib/composio";
+import { reachReady } from "../lib/reach";
 
 /* ── Integrations directory (Filey-DEMO parity) ────────────────────────────
  * Only surfaces what Filey can really do: every actionable card deep-links to
@@ -53,6 +56,8 @@ export default function Integrations() {
   const { notice } = useUI();
   const [cat, setCat] = useState("All");
   const [composioActive, setComposioActive] = useState<Set<string>>(new Set());
+  // Filey-native web tools: connected state is just the local opt-in.
+  const reachOn = reachReady();
 
   useEffect(() => {
     // Live connection states — desktop-only stores, no-op on web.
@@ -128,6 +133,24 @@ export default function Integrations() {
         action: "Configure",
       },
       {
+        name: "Web research",
+        desc: "Let the Filey AI read and search public web pages to answer questions the books can't.",
+        category: "AI",
+        icon: <Globe className="h-5 w-5" />,
+        to: "/integrations/web-research",
+        action: reachOn ? "Configure" : "Connect",
+        connected: reachOn,
+      },
+      {
+        name: "Lead enrichment",
+        desc: "Fill in a company's contact details and TRN from their own website, and rank leads from your trading history.",
+        category: "CRM",
+        icon: <UserSearch className="h-5 w-5" />,
+        to: "/integrations/lead-enrichment",
+        action: reachOn ? "Configure" : "Connect",
+        connected: reachOn,
+      },
+      {
         name: "PDF Tools",
         desc: "Merge, split, compress and convert PDFs on-device — no network needed.",
         category: "Documents",
@@ -196,7 +219,7 @@ export default function Integrations() {
         soon: true,
       },
     ],
-    [composioActive]
+    [composioActive, reachOn]
   );
 
   const categories = useMemo(
@@ -276,9 +299,7 @@ export default function Integrations() {
                     </Link>
                   )}
                   {i.note && (
-                    <span className="text-[12px] text-muted-foreground">
-                      {i.note}
-                    </span>
+                    <span className="text-[12px] text-muted-foreground">{i.note}</span>
                   )}
                   {i.desktopOnly && !hasDesktop && (
                     <span className="text-[12px] text-muted-foreground">

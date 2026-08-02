@@ -15,6 +15,8 @@ import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { findSkill, loadSkills } from "./agentSkills";
 import { isToolAllowed } from "./capabilities";
+import { readUrl, searchWeb, asUntrustedContext } from "./reach";
+import { enrichFromWebsite, scoreLead } from "./scout";
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
  * finance agent. Reads everything; writes are creates/updates only (no deletes,
@@ -570,7 +572,10 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: {} },
     run: async () => {
       const f = getAttachment();
-      if (!f) return { error: "No file attached — ask the user to attach a PDF or image first." };
+      if (!f)
+        return {
+          error: "No file attached — ask the user to attach a PDF or image first.",
+        };
       if (f.type.startsWith("image/"))
         return {
           note: "The attached image is already visible to you in this conversation — read it directly.",
@@ -580,7 +585,10 @@ export const TOOLS: ToolDef[] = [
       const first = Array.isArray(out) ? out[0] : out;
       if (!first?.bytes) return { error: "Could not extract text from this file." };
       const text = new TextDecoder().decode(first.bytes).trim();
-      if (!text) return { note: "No selectable text found (the PDF may be scanned — use run_file_tool pdf_to_images then read it as an image)." };
+      if (!text)
+        return {
+          note: "No selectable text found (the PDF may be scanned — use run_file_tool pdf_to_images then read it as an image).",
+        };
       const LIMIT = 8000;
       return {
         text: text.length > LIMIT ? `${text.slice(0, LIMIT)}\n…[truncated]` : text,
@@ -768,7 +776,10 @@ export const TOOLS: ToolDef[] = [
       let full: Record<string, unknown> | null = null;
       let lookupFailed = false;
       try {
-        full = (await billing.getDoc(Number(d.id))) as unknown as Record<string, unknown> | null;
+        full = (await billing.getDoc(Number(d.id))) as unknown as Record<
+          string,
+          unknown
+        > | null;
       } catch {
         lookupFailed = true;
       }
@@ -793,10 +804,7 @@ export const TOOLS: ToolDef[] = [
     description: "Show today's attendance — who's present, absent, on leave.",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const records = (await hr.attendance()) as unknown as Record<
-        string,
-        unknown
-      >[];
+      const records = (await hr.attendance()) as unknown as Record<string, unknown>[];
       const t = today();
       const todayRecords = records.filter((r) => str(r.date) === t);
       return {
@@ -889,10 +897,7 @@ export const TOOLS: ToolDef[] = [
       required: ["tool_slug"],
     },
     run: async (a) =>
-      composioExecute(
-        str(a.tool_slug),
-        (a.arguments as Record<string, unknown>) || {}
-      ),
+      composioExecute(str(a.tool_slug), (a.arguments as Record<string, unknown>) || {}),
   },
 
   // ---------- skills (reusable procedures, loaded on demand) ----------
@@ -923,6 +928,90 @@ export const TOOLS: ToolDef[] = [
         };
       return { name: s.name, instructions: s.instructions };
     },
+  },
+
+  /* ── Web reach ──────────────────────────────────────────────────────────
+   * Reading is not "sensitive" in the confirm-before-running sense — it moves
+   * no money and sends nothing out — but what comes back is attacker-writable
+   * text, so it is returned wrapped as untrusted quoted material. */
+  {
+    name: "read_web_page",
+    description:
+      "Read a public web page and return its text — a supplier's site, a tender notice, a customer's contact page. Use it when the answer is not in the books.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string", description: "Full http(s) URL" } },
+      required: ["url"],
+    },
+    run: async (a) => {
+      const page = await readUrl(str(a.url));
+      return {
+        url: page.url,
+        title: page.title,
+        truncated: page.truncated,
+        content: asUntrustedContext(page.url, page.text),
+      };
+    },
+  },
+  {
+    name: "search_web",
+    description:
+      "Search the public web and return the top results with titles, URLs and snippets. Follow up with read_web_page for the full text of one.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", description: "Max results, default 5" },
+      },
+      required: ["query"],
+    },
+    run: async (a) => {
+      const { hits } = await searchWeb(str(a.query), {
+        limit: Math.min(10, numOf(a.limit) || 5),
+      });
+      return { results: hits };
+    },
+  },
+  {
+    name: "enrich_company_website",
+    description:
+      "Read a company's own website and return the contact details, address and TRN it publishes there. Returns the source URL — always show it to the user before saving anything.",
+    parameters: {
+      type: "object",
+      properties: {
+        website: { type: "string", description: "Domain or full URL" },
+      },
+      required: ["website"],
+    },
+    run: async (a) => enrichFromWebsite(str(a.website)),
+  },
+  {
+    name: "score_lead",
+    description:
+      "Rank a customer or lead 0-100 from their trading history, with the reasons. Offline and deterministic — pass what you know from the books.",
+    parameters: {
+      type: "object",
+      properties: {
+        invoices: { type: "number" },
+        revenue: { type: "number" },
+        overdue: { type: "number" },
+        days_since_activity: { type: "number" },
+        has_email: { type: "boolean" },
+        has_phone: { type: "boolean" },
+        has_trn: { type: "boolean" },
+      },
+    },
+    run: async (a) =>
+      scoreLead({
+        invoices: numOf(a.invoices),
+        revenue: numOf(a.revenue),
+        overdue: numOf(a.overdue),
+        daysSinceActivity:
+          a.days_since_activity == null ? undefined : numOf(a.days_since_activity),
+        hasEmail: !!a.has_email,
+        hasPhone: !!a.has_phone,
+        hasTrn: !!a.has_trn,
+      }),
   },
 ];
 
