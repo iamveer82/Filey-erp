@@ -24,7 +24,7 @@ const PRESETS: Preset[] = [
     label: "Anthropic (Claude) — recommended",
     provider: "anthropic",
     baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-opus-4-8",
+    model: "claude-opus-5",
   },
   {
     label: "OpenAI",
@@ -210,7 +210,7 @@ export default function AiSettings() {
             className="input"
             value={cfg.model}
             onChange={(e) => update({ model: e.target.value })}
-            placeholder="claude-opus-4-8"
+            placeholder="claude-opus-5"
           />
         </div>
       </div>
