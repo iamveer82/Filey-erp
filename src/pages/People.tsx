@@ -8,14 +8,25 @@ import {
   Wallet,
   Sliders,
   FileText,
+  Banknote,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, billing, Employee, HrSummary, CompanyProfile } from "../lib/api";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num, fmtDate, numInput, cn, errMsg, getDisplayCurrency, todayYmd } from "../lib/format";
+import {
+  aed,
+  num,
+  fmtDate,
+  numInput,
+  cn,
+  errMsg,
+  getDisplayCurrency,
+  todayYmd,
+} from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
+import WpsExportModal from "../components/WpsExportModal";
 import {
   PageHeader,
   MetricCard,
@@ -29,11 +40,7 @@ import {
   SearchInput,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
-import {
-  RowActions,
-  QuickViewModal,
-  shareVia,
-} from "../components/RowActions";
+import { RowActions, QuickViewModal, shareVia } from "../components/RowActions";
 import MultiDatePicker from "../components/MultiDatePicker";
 
 export default function People() {
@@ -43,6 +50,7 @@ export default function People() {
   const [sum, setSum] = useState<HrSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [wpsOpen, setWpsOpen] = useState(false);
   const [editFor, setEditFor] = useState<Employee | null>(null);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
   const [payslipFor, setPayslipFor] = useState<Employee | null>(null);
@@ -58,7 +66,10 @@ export default function People() {
     return Promise.all([
       hr.employees().then(setEmps),
       hr.summary().then(setSum),
-      billing.getCompany().then(setCompany).catch(() => {}),
+      billing
+        .getCompany()
+        .then(setCompany)
+        .catch(() => {}),
     ])
       .catch((e) =>
         setError(`Could not load people: ${e instanceof Error ? e.message : e}`)
@@ -71,15 +82,13 @@ export default function People() {
   useLiveSync(load);
 
   const statuses = useMemo(
-    () =>
-      Array.from(new Set(emps.map((e) => e.status || "active"))).sort(),
+    () => Array.from(new Set(emps.map((e) => e.status || "active"))).sort(),
     [emps]
   );
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return emps.filter((e) => {
-      if (statusFilter !== "all" && (e.status || "active") !== statusFilter)
-        return false;
+      if (statusFilter !== "all" && (e.status || "active") !== statusFilter) return false;
       if (!q) return true;
       return [e.name, e.employee_code, e.email, e.phone, e.department, e.position]
         .filter(Boolean)
@@ -143,6 +152,9 @@ export default function People() {
         subtitle="Employees and contacts on your team"
         action={
           <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" onClick={() => setWpsOpen(true)}>
+              <Banknote size={15} /> WPS file
+            </button>
             <button className="btn-ghost" onClick={() => setManageOpen(true)}>
               <Sliders size={15} /> Customize fields
             </button>
@@ -152,6 +164,8 @@ export default function People() {
           </div>
         }
       />
+      <WpsExportModal open={wpsOpen} employees={emps} onClose={() => setWpsOpen(false)} />
+
       <CustomFieldsManager
         open={manageOpen}
         onOpenChange={setManageOpen}
@@ -336,8 +350,7 @@ export default function People() {
             key: "role",
             label: "Role",
             sortValue: (e) => e.position ?? e.department ?? "",
-            render: (e) =>
-              [e.position, e.department].filter(Boolean).join(" · ") || "—",
+            render: (e) => [e.position, e.department].filter(Boolean).join(" · ") || "—",
           },
           {
             key: "salary",
@@ -386,9 +399,7 @@ export default function People() {
                               sms: () => shareEmployee("sms", e),
                             }
                           : {}),
-                        ...(e.email
-                          ? { email: () => shareEmployee("email", e) }
-                          : {}),
+                        ...(e.email ? { email: () => shareEmployee("email", e) } : {}),
                       }
                     : undefined
                 }
@@ -461,9 +472,7 @@ export default function People() {
                   { label: "Salary", value: aed(quickViewFor.salary) },
                   {
                     label: "Hire date",
-                    value: quickViewFor.hire_date
-                      ? fmtDate(quickViewFor.hire_date)
-                      : "—",
+                    value: quickViewFor.hire_date ? fmtDate(quickViewFor.hire_date) : "—",
                   },
                 ],
                 footer: (
@@ -572,7 +581,9 @@ function PayslipModal({
               {company?.address && (
                 <p className="text-xs text-gray-500">{company.address}</p>
               )}
-              {company?.trn && <p className="text-xs text-gray-500">TRN: {company.trn}</p>}
+              {company?.trn && (
+                <p className="text-xs text-gray-500">TRN: {company.trn}</p>
+              )}
             </div>
             <div className="text-right">
               <p className="font-semibold tracking-wide">PAYSLIP</p>
@@ -646,6 +657,10 @@ const blankEmployeeForm = () => ({
   position: "",
   salary: 0,
   hire_date: todayYmd(),
+  // Only needed to file a UAE WPS salary file; blank is fine otherwise.
+  labour_card_no: "",
+  iban: "",
+  bank_routing_code: "",
 });
 
 /** Add a person, or edit one when `employee` is passed. */
@@ -676,6 +691,9 @@ function EmployeeModal({
             position: employee.position ?? "",
             salary: employee.salary ?? 0,
             hire_date: employee.hire_date ?? todayYmd(),
+            labour_card_no: employee.labour_card_no ?? "",
+            iban: employee.iban ?? "",
+            bank_routing_code: employee.bank_routing_code ?? "",
           }
         : blankEmployeeForm()
     );
@@ -749,6 +767,44 @@ function EmployeeModal({
           />
         </Field>
       </div>
+
+      {/* Only needed to file a UAE WPS salary file — left blank, nothing here
+          affects the rest of the app. */}
+      <details className="mt-4 group">
+        <summary className="cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground">
+          Payroll (WPS) details — optional
+        </summary>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Field label="Labour card no. (14 digits)">
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder="12345678901234"
+              value={f.labour_card_no}
+              onChange={(e) => setF({ ...f, labour_card_no: e.target.value })}
+            />
+          </Field>
+          <Field label="Bank routing code (9 digits)">
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder="033112345"
+              value={f.bank_routing_code}
+              onChange={(e) => setF({ ...f, bank_routing_code: e.target.value })}
+            />
+          </Field>
+          <div className="col-span-2">
+            <Field label="Salary IBAN">
+              <input
+                className="input"
+                placeholder="AE07 0331 2345 6789 0123 456"
+                value={f.iban}
+                onChange={(e) => setF({ ...f, iban: e.target.value })}
+              />
+            </Field>
+          </div>
+        </div>
+      </details>
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
@@ -768,6 +824,9 @@ function EmployeeModal({
                 position: f.position || undefined,
                 salary: f.salary,
                 hire_date: f.hire_date || undefined,
+                labour_card_no: f.labour_card_no.replace(/\s+/g, "") || undefined,
+                iban: f.iban.replace(/\s+/g, "").toUpperCase() || undefined,
+                bank_routing_code: f.bank_routing_code.replace(/\s+/g, "") || undefined,
               };
               if (employee) await hr.updateEmployee(employee.id, fields);
               else await hr.createEmployee(fields as Omit<Employee, "id" | "status">);

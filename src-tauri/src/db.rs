@@ -252,10 +252,39 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         "#,
     )?;
 
+    migrate(conn)?;
     seed(conn)?;
     seed_crm(conn)?;
     seed_billing(conn)?;
     Ok(())
+}
+
+/// Columns added after a release shipped. `CREATE TABLE IF NOT EXISTS` above
+/// only builds the current shape on a *fresh* database — an install that already
+/// has the old table keeps it, so new columns have to be added here or the
+/// desktop app queries a column its own SQLite doesn't have.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // WPS payroll identifiers (2026-08-02) — mirrors
+    // supabase/2026-08-02-wps-payroll-fields.sql on the cloud side.
+    add_column(conn, "employees", "labour_card_no", "TEXT")?;
+    add_column(conn, "employees", "iban", "TEXT")?;
+    add_column(conn, "employees", "bank_routing_code", "TEXT")?;
+    add_column(conn, "company_profile", "mol_establishment_id", "TEXT")?;
+    add_column(conn, "company_profile", "wps_bank_code", "TEXT")?;
+    Ok(())
+}
+
+/// SQLite has no `ADD COLUMN IF NOT EXISTS`, so ask first. Checking beats
+/// swallowing the error: a genuine failure still surfaces.
+fn add_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let existing: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<rusqlite::Result<_>>()?;
+    if existing.iter().any(|c| c == column) {
+        return Ok(());
+    }
+    conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl};"))
 }
 
 fn seed(conn: &Connection) -> rusqlite::Result<()> {

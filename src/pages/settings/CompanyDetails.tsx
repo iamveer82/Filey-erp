@@ -2,7 +2,16 @@ import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
-import { Building2, Upload, X, Check, Landmark, FileText, Stamp, Hash } from "lucide-react";
+import {
+  Building2,
+  Upload,
+  X,
+  Check,
+  Landmark,
+  FileText,
+  Stamp,
+  Hash,
+} from "lucide-react";
 import { numInput } from "../../lib/format";
 import { loadInvoiceFormat, saveInvoiceFormat } from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
@@ -72,7 +81,9 @@ export default function CompanyDetails() {
     billing
       .getCompany()
       .then((d) =>
-        setC(d ? { ...d, country_subdivision: normalizeEmirate(d.country_subdivision) } : d)
+        setC(
+          d ? { ...d, country_subdivision: normalizeEmirate(d.country_subdivision) } : d
+        )
       )
       .catch(console.error);
     loadBankInfo()
@@ -278,6 +289,34 @@ export default function CompanyDetails() {
             </select>
           </FormField>
         </div>
+        {/* Employer half of a UAE WPS salary file. Blank unless payroll is
+            filed through WPS — nothing else reads these. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField
+            label="MOHRE establishment ID"
+            hint="13 digits — for the WPS salary file"
+          >
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder="1234567890123"
+              value={c.mol_establishment_id ?? ""}
+              onChange={(e) => set("mol_establishment_id", e.target.value)}
+            />
+          </FormField>
+          <FormField
+            label="WPS bank routing code"
+            hint="9 digits — from your paying bank"
+          >
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder="033112345"
+              value={c.wps_bank_code ?? ""}
+              onChange={(e) => set("wps_bank_code", e.target.value)}
+            />
+          </FormField>
+        </div>
         <FormField label="Address" error={fieldErrors.address} required>
           <>
             <input
@@ -398,9 +437,8 @@ export default function CompanyDetails() {
           <Stamp size={16} /> Stamp & Signature
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Upload once here. Then toggle “Stamp” and “Signature” on any invoice,
-          quotation, purchase order, declaration letter or delivery challan to
-          print them.
+          Upload once here. Then toggle “Stamp” and “Signature” on any invoice, quotation,
+          purchase order, declaration letter or delivery challan to print them.
         </p>
         <StampSignatureSettings
           value={stampSig}
@@ -457,13 +495,12 @@ export default function CompanyDetails() {
           <Hash size={16} /> Invoice Numbering
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Set how new invoice numbers are generated. Put the part that should
-          count up inside braces — its digits set the width and the starting
-          value, so <span className="font-mono">{"{001}"}</span> means 001, 002,
-          003… Everything outside the braces stays fixed. Use{" "}
-          <span className="font-mono">{"{YY}"}</span> or{" "}
-          <span className="font-mono">{"{YYYY}"}</span> for the year. Leave blank
-          to keep the default INV-2026-0001 scheme.
+          Set how new invoice numbers are generated. Put the part that should count up
+          inside braces — its digits set the width and the starting value, so{" "}
+          <span className="font-mono">{"{001}"}</span> means 001, 002, 003… Everything
+          outside the braces stays fixed. Use <span className="font-mono">{"{YY}"}</span>{" "}
+          or <span className="font-mono">{"{YYYY}"}</span> for the year. Leave blank to
+          keep the default INV-2026-0001 scheme.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Format">

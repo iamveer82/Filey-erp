@@ -70,6 +70,13 @@ export interface Employee {
   salary: number;
   hire_date?: string;
   status: string;
+  // --- UAE WPS payroll (only needed to file a salary file) ---
+  /** MOHRE labour card / personal number, 14 digits. */
+  labour_card_no?: string;
+  /** Salary account IBAN — where WPS pays them. */
+  iban?: string;
+  /** Receiving bank's routing code, 9 digits. */
+  bank_routing_code?: string;
 }
 export interface Attendance {
   id: number;
@@ -421,6 +428,11 @@ export interface CompanyProfile {
   logo?: string;
   default_accent: string;
   default_template: string;
+  // --- UAE WPS payroll: the employer half of a salary file ---
+  /** MOHRE establishment ID, 13 digits. */
+  mol_establishment_id?: string;
+  /** Paying bank's routing code, 9 digits. */
+  wps_bank_code?: string;
 }
 
 // ===================================================================
