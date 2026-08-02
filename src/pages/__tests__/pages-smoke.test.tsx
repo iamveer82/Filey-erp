@@ -88,6 +88,7 @@ import Accounting from "../Accounting";
 import Reports from "../reports/Reports";
 import EmailTemplates from "../EmailTemplates";
 import Integrations from "../Integrations";
+import Marketing from "../Marketing";
 import DeliveryChallan from "../DeliveryChallan";
 import PaymentReceipt from "../PaymentReceipt";
 import DeclarationLetter from "../DeclarationLetter";
@@ -121,6 +122,7 @@ const pages: [string, () => ReactElement][] = [
   ["Reports", () => <Reports />],
   ["EmailTemplates", () => <EmailTemplates />],
   ["Integrations", () => <Integrations />],
+  ["Marketing", () => <Marketing />],
   ["DeliveryChallan", () => <DeliveryChallan />],
   ["PaymentReceipt", () => <PaymentReceipt />],
   ["DeclarationLetter", () => <DeclarationLetter />],

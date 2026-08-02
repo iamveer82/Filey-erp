@@ -88,6 +88,40 @@ function firstMeaningfulLine(text: string): string | undefined {
   return undefined;
 }
 
+/** Mailbox providers, not employers. An address at one of these says nothing
+ *  about a company website, so there is nothing to enrich from. */
+const FREE_MAIL = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "yahoo.com",
+  "ymail.com",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+  "zoho.com",
+  "mail.com",
+  "gmx.com",
+  "yandex.com",
+]);
+
+/** The company domain implied by a work email — `sales@acme.ae` → `acme.ae`.
+ *  Null for personal mailboxes and anything unparseable, so a customer who
+ *  signed up with a Gmail address is simply not enrichable rather than sending
+ *  us off to read gmail.com. */
+export function companyDomainFromEmail(email?: string | null): string | null {
+  const at = (email ?? "").trim().toLowerCase().split("@");
+  if (at.length !== 2) return null;
+  const domain = at[1].replace(/[>,;\s].*$/, "");
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return null;
+  return FREE_MAIL.has(domain) ? null : domain;
+}
+
 /** Read a company's own website and return what it publishes about itself. */
 export async function enrichFromWebsite(
   site: string,

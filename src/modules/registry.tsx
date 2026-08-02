@@ -24,6 +24,7 @@ const ToolsPage = lazy(() => import("../pages/PdfTools"));
 const MyFilesPage = lazy(() => import("../pages/MyFiles"));
 const Settings = lazy(() => import("../pages/Tools"));
 const Integrations = lazy(() => import("../pages/Integrations"));
+const Marketing = lazy(() => import("../pages/Marketing"));
 const DeliveryChallan = lazy(() => import("../pages/DeliveryChallan"));
 const PaymentReceipt = lazy(() => import("../pages/PaymentReceipt"));
 const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
@@ -217,6 +218,15 @@ export const MODULES: AppModule[] = [
     to: "/settings",
     Component: Settings,
     core: true,
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    short: "Marketing",
+    desc: "Rank leads from your trading history and fill in their details",
+    icon: "followups",
+    to: "/marketing",
+    Component: Marketing,
   },
   {
     id: "integrations",
