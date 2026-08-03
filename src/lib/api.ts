@@ -315,6 +315,9 @@ export interface Opportunity {
   close_reason?: string;
   closed_at?: string | null;
   created_at: string;
+  /** Set by the set_updated_at trigger on every write — the "last touched"
+   *  signal the pipeline health check uses to spot a stalled deal. */
+  updated_at?: string;
 }
 export interface Activity {
   id: number;

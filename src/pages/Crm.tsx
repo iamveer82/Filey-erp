@@ -28,6 +28,7 @@ import { useChartColors } from "../lib/accent";
 import ImportCsvModal from "../components/ImportCsvModal";
 import DealDrawer from "../components/DealDrawer";
 import PipelineBoard from "../components/PipelineBoard";
+import ForecastPanel from "../components/ForecastPanel";
 import { aed, num, fmtDate, cn } from "../lib/format";
 import {
   PageHeader,
@@ -47,7 +48,7 @@ export default function Crm() {
   const nav = useNavigate();
   const { toast } = useUI();
   const c = useChartColors();
-  const [view, setView] = useState<"dashboard" | "pipeline">("pipeline");
+  const [view, setView] = useState<"dashboard" | "pipeline" | "forecast">("pipeline");
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
@@ -222,16 +223,19 @@ export default function Crm() {
 
       <Tabs
         value={view}
-        onValueChange={(v) => setView(v as "dashboard" | "pipeline")}
+        onValueChange={(v) => setView(v as "dashboard" | "pipeline" | "forecast")}
         className="mb-2"
       >
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="pipeline">Pipeline board</TabsTrigger>
+          <TabsTrigger value="forecast">Forecast</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {view === "pipeline" ? (
+      {view === "forecast" ? (
+        <ForecastPanel opps={opps} activities={acts} onOpen={setSelectedOpp} />
+      ) : view === "pipeline" ? (
         <PipelineBoard
           opps={opps}
           setOpps={setOpps}
@@ -412,16 +416,21 @@ export default function Crm() {
                         onClick={() => c.id && nav(`/customers/${c.id}`)}
                         className={cn(
                           "transition-colors duration-150",
-                          c.id &&
-                            "cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5"
+                          c.id && "cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5"
                         )}
                       >
                         <td className="py-2.5">
-                          <p className="font-semibold text-ink tracking-tight">{c.company || c.name}</p>
-                          <p className="text-[11px] text-brand-400 tracking-tight">{c.name}</p>
+                          <p className="font-semibold text-ink tracking-tight">
+                            {c.company || c.name}
+                          </p>
+                          <p className="text-[11px] text-brand-400 tracking-tight">
+                            {c.name}
+                          </p>
                         </td>
                         <td className="py-2.5 text-brand-500">{c.email ?? "—"}</td>
-                        <td className="py-2.5 text-right text-brand-500 tabular-nums">{orders}</td>
+                        <td className="py-2.5 text-right text-brand-500 tabular-nums">
+                          {orders}
+                        </td>
                         <td className="py-2.5 text-right font-semibold text-ink tabular-nums tracking-tight">
                           {aed(spent)}
                         </td>

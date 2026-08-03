@@ -5,6 +5,7 @@ import { crm, type Opportunity } from "../lib/api";
 import { aed, fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "./ActivityTimeline";
+import CrmRecordPanel from "./CrmRecordPanel";
 
 /* Twenty-style record drawer for a deal: summary, one-tap stage move, and a
  * chronological activity timeline (shared with customer records). */
@@ -126,6 +127,13 @@ export default function DealDrawer({
         <div className="flex min-h-0 flex-1 flex-col p-4">
           <p className="mb-2 text-[11px] font-medium text-brand-400">Timeline</p>
           <ActivityTimeline relatedTo={opp.title} />
+
+          {/* Notes and tasks against the deal itself. Without this a deal had
+              nowhere to hang a next step, so the pipeline health check had
+              nothing to read and every deal looked neglected. */}
+          <div className="mt-4 border-t border-brand-200 pt-4">
+            <CrmRecordPanel targetType="deal" targetId={opp.id} />
+          </div>
         </div>
 
         {/* Footer */}
