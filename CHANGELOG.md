@@ -1,5 +1,91 @@
 # Changelog
 
+## v2.4.0 — 2026-08-03
+
+Minor rather than patch: this adds a Marketing module, bulk email, UAE payroll
+filing, social publishing and CRM forecasting. Everything below has been sitting
+on `main` since v2.3.24 — including two fixes that affect anyone already using
+the app.
+
+### Fixes shipping to existing installs
+- **Stamp & signature stopped rendering.** Settings persisted the short-lived
+  signed URL over the durable storage path; those URLs expire in five minutes,
+  so the stamp went permanently blank on the next visit. `data` is now kept as a
+  path, `_previewUrl` is dropped on save, and an install that already saved an
+  expired URL heals itself by recovering the path back out of it.
+- **Fields that wouldn't save, and inputs that lost focus after one keystroke.**
+- **A crash now apologises** instead of showing a raw error, with the details
+  collapsed behind a toggle.
+
+### Marketing (new module)
+- **Lead ranking** from your own books — invoiced value, repeat business,
+  recency, reachability and overdue balance, with the reason shown beside every
+  score so the ranking is never a black box.
+- **Campaigns and bulk email.** Compose with merge fields, pick the audience by
+  score, and see exactly who is included *and who was skipped and why* before
+  anything sends. An opt-out list gates every send and is re-read at send time;
+  the unsubscribe line is appended by the sender, so a campaign cannot go out
+  without one; one address is mailed once however many records share it.
+- **Stops safely.** When a send halts on the daily cap — or because you are
+  offline — recipients stay pending rather than failed and the campaign pauses,
+  so Resume continues exactly where it stopped. Nobody retries a failure.
+- **Lead enrichment** reads a company's own website for the contact details,
+  address and TRN it publishes, and offers back only the fields you are missing.
+  **Duplicate detection** across email, TRN and normalised company name.
+  **CSV export** of the ranked list.
+
+### Payroll — UAE WPS
+- Generate the MOHRE salary file (SIF). IBANs are checked with the mod-97
+  algorithm, so a transposed digit is caught here rather than by the bank three
+  days later; duplicate labour cards, zero-pay rows and impossible date ranges
+  are all refused, with every problem listed at once.
+- ⚠️ Column order varies between banks. Confirm one generated file with your
+  bank before running a live payroll through it.
+
+### CRM
+- **Forecast** — committed, weighted and best case per month, because a single
+  pipeline total counts a 10%-probability deal the same as a signed one.
+- **Needs attention** — open deals with no next step, no movement, a close date
+  already passed, or no value set.
+- **Win/loss** — rate over *decided* deals only, average deal size, mean cycle
+  length and ranked loss reasons.
+- Deals can now hold notes and tasks of their own, which is what makes the
+  "no next step" signal mean anything.
+
+### Filey AI
+- Reads and searches the public web when the answer isn't in your books, and
+  enriches a company from its own site. Off until you switch it on; private and
+  non-http addresses are refused before any request; fetched text is treated as
+  untrusted quoted material.
+- Publishes and schedules to social accounts through Zernio. Posting is gated
+  behind the same confirmation as moving money, and captions are checked against
+  each platform's limit before sending.
+- **Summarise** on the dashboard turns the computed insights into two or three
+  plain sentences. On demand, never on load — it spends your own API key.
+
+### Reports
+- **VAT 201 boxes 4 and 5** (zero-rated and exempt supplies) now report real net
+  turnover. Those lines carry no VAT so they leave no trace in the tax accounts
+  every other box is derived from; the figure comes off the invoice lines.
+- Fixed the rate caption, which read **"500%"**.
+
+### Tables and people
+- Row actions stay reachable on every list — the last column pins itself when a
+  table is genuinely too wide, and lists paginate rather than growing forever.
+- Employees can be **edited**, not just added.
+
+### Verified
+- `tsc --noEmit` clean, `vite build` clean, **456/456** vitest, eslint 0 errors
+- Desktop SQLite migration checked against real SQLite (`src-tauri/verify_migration.py`)
+
+### Upgrading
+Run these against Supabase before or with the deploy — campaigns and WPS fail at
+runtime in cloud mode without them:
+`supabase/2026-08-02-campaigns.sql`, `supabase/2026-08-02-wps-payroll-fields.sql`,
+`supabase/2026-08-03-company-whatsapp.sql`
+
+---
+
 ## v2.2.2 — 2026-07-18
 
 ### Fixes
