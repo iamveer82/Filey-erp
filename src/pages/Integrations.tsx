@@ -13,6 +13,7 @@ import {
   Sparkles,
   Globe,
   UserSearch,
+  Megaphone,
   Users,
   Zap,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import { hasDesktop, composioList } from "../lib/composio";
 import { reachReady } from "../lib/reach";
+import { zernioReady } from "../lib/zernio";
 
 /* ── Integrations directory (Filey-DEMO parity) ────────────────────────────
  * Only surfaces what Filey can really do: every actionable card deep-links to
@@ -58,6 +60,7 @@ export default function Integrations() {
   const [composioActive, setComposioActive] = useState<Set<string>>(new Set());
   // Filey-native web tools: connected state is just the local opt-in.
   const reachOn = reachReady();
+  const socialOn = zernioReady();
 
   useEffect(() => {
     // Live connection states — desktop-only stores, no-op on web.
@@ -151,6 +154,15 @@ export default function Integrations() {
         connected: reachOn,
       },
       {
+        name: "Social publishing",
+        desc: "Post and schedule to Instagram, LinkedIn, X, TikTok and more through Zernio.",
+        category: "Messaging",
+        icon: <Megaphone className="h-5 w-5" />,
+        to: "/integrations/social-publishing",
+        action: socialOn ? "Configure" : "Connect",
+        connected: socialOn,
+      },
+      {
         name: "PDF Tools",
         desc: "Merge, split, compress and convert PDFs on-device — no network needed.",
         category: "Documents",
@@ -219,7 +231,7 @@ export default function Integrations() {
         soon: true,
       },
     ],
-    [composioActive, reachOn]
+    [composioActive, reachOn, socialOn]
   );
 
   const categories = useMemo(

@@ -289,6 +289,18 @@ export default function CompanyDetails() {
             </select>
           </FormField>
         </div>
+        <FormField
+          label="WhatsApp number"
+          hint="The number customers message — often not the same as your phone"
+        >
+          <input
+            className="input"
+            inputMode="tel"
+            placeholder="+971 52 950 5734"
+            value={c.whatsapp ?? ""}
+            onChange={(e) => set("whatsapp", e.target.value)}
+          />
+        </FormField>
         {/* Employer half of a UAE WPS salary file. Blank unless payroll is
             filed through WPS — nothing else reads these. */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

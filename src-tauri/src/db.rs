@@ -298,6 +298,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     add_column(conn, "employees", "bank_routing_code", "TEXT")?;
     add_column(conn, "company_profile", "mol_establishment_id", "TEXT")?;
     add_column(conn, "company_profile", "wps_bank_code", "TEXT")?;
+    // Business WhatsApp number (2026-08-03).
+    add_column(conn, "company_profile", "whatsapp", "TEXT")?;
     Ok(())
 }
 

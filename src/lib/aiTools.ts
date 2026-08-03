@@ -17,6 +17,12 @@ import { findSkill, loadSkills } from "./agentSkills";
 import { isToolAllowed } from "./capabilities";
 import { readUrl, searchWeb, asUntrustedContext } from "./reach";
 import { enrichFromWebsite, scoreLead } from "./scout";
+import {
+  listAccounts as listSocialAccounts,
+  listPosts as listSocialPosts,
+  createPost as createSocialPost,
+  overLimit as overSocialLimit,
+} from "./zernio";
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
  * finance agent. Reads everything; writes are creates/updates only (no deletes,
@@ -1012,6 +1018,97 @@ export const TOOLS: ToolDef[] = [
         hasPhone: !!a.has_phone,
         hasTrn: !!a.has_trn,
       }),
+  },
+
+  /* ── Social publishing (Zernio) ─────────────────────────────────────────
+   * Reading which accounts exist is harmless. Posting is not: it is public,
+   * outbound and effectively permanent, so schedule_social_post is marked
+   * sensitive and goes through the same confirm gate as sending money. */
+  {
+    name: "list_social_accounts",
+    description:
+      "List the social accounts connected through Zernio, with their platform and handle. Call this before posting so you can name the right account IDs.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const accounts = await listSocialAccounts();
+      return {
+        accounts: accounts.map((a) => ({
+          id: a.id,
+          platform: a.platform,
+          handle: a.username || a.displayName || "",
+          status: a.status,
+        })),
+      };
+    },
+  },
+  {
+    name: "schedule_social_post",
+    description:
+      "Publish or schedule a post to named social accounts. Get the account IDs from list_social_accounts first — never guess them. Omit scheduled_at to post immediately.",
+    sensitive: true,
+    parameters: {
+      type: "object",
+      properties: {
+        account_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Account IDs from list_social_accounts",
+        },
+        content: { type: "string" },
+        media_urls: { type: "array", items: { type: "string" } },
+        scheduled_at: {
+          type: "string",
+          description: "ISO 8601 timestamp; omit to publish now",
+        },
+      },
+      required: ["account_ids", "content"],
+    },
+    run: async (a) => {
+      const ids = Array.isArray(a.account_ids) ? a.account_ids.map(str) : [];
+      const content = str(a.content);
+      // Check the caption against each platform's limit here rather than
+      // letting the platform truncate it silently.
+      const accounts = await listSocialAccounts();
+      const chosen = accounts.filter((x) => ids.includes(x.id));
+      const unknown = ids.filter((id) => !accounts.some((x) => x.id === id));
+      if (unknown.length)
+        return { error: `No connected account with id ${unknown.join(", ")}.` };
+      const tooLong = overSocialLimit(content, chosen);
+      if (tooLong.length)
+        return {
+          error: tooLong
+            .map((t) => `${t.platform} allows ${t.limit} characters, this is ${t.over} over`)
+            .join("; "),
+        };
+      const post = await createSocialPost({
+        accountIds: ids,
+        content,
+        mediaUrls: Array.isArray(a.media_urls) ? a.media_urls.map(str) : undefined,
+        scheduledAt: str(a.scheduled_at) || undefined,
+      });
+      return { id: post.id, status: post.status, scheduled_at: post.scheduledAt };
+    },
+  },
+  {
+    name: "list_social_posts",
+    description: "List recent and scheduled social posts with their status.",
+    parameters: {
+      type: "object",
+      properties: { limit: { type: "number" } },
+    },
+    run: async (a) => {
+      const posts = await listSocialPosts(Math.min(50, numOf(a.limit) || 20));
+      return {
+        posts: posts.map((p) => ({
+          id: p.id,
+          status: p.status,
+          scheduled_at: p.scheduledAt,
+          published_at: p.publishedAt,
+          content: (p.content ?? "").slice(0, 200),
+          error: p.error,
+        })),
+      };
+    },
   },
 ];
 

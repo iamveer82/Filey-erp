@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Globe, ShieldCheck, Sparkles, UserSearch } from "lucide-react";
+import {
+  ArrowLeft,
+  Globe,
+  Megaphone,
+  ShieldCheck,
+  Sparkles,
+  UserSearch,
+} from "lucide-react";
 
 import { PageHeader, Badge, Field, InfoCard } from "../components/ui";
 import { useUI } from "../lib/ui";
@@ -8,12 +15,14 @@ import { errMsg } from "../lib/format";
 import { getReachConfig, setReachConfig, readUrl } from "../lib/reach";
 import { enrichFromWebsite } from "../lib/scout";
 import { CAPABILITIES } from "../lib/capabilities";
+import ZernioPanel from "../components/ZernioPanel";
 
 /* Connect pages for the Filey-native integrations — the ones Filey implements
- * itself rather than brokering through Composio. Both sit on the same web
- * reader, so they share one settings store and one route. */
+ * itself rather than brokering through Composio. The two web ones share a
+ * reader and a settings store; social publishing has its own credential and
+ * renders its own panel below. */
 
-type AppId = "web-research" | "lead-enrichment";
+type AppId = "web-research" | "lead-enrichment" | "social-publishing";
 
 const APPS: Record<
   AppId,
@@ -30,6 +39,12 @@ const APPS: Record<
     subtitle: "Fill in company details from their own website, and rank leads",
     icon: UserSearch,
     tools: ["enrich_company_website", "score_lead"],
+  },
+  "social-publishing": {
+    title: "Social publishing",
+    subtitle: "Post and schedule to your social accounts via Zernio",
+    icon: Megaphone,
+    tools: ["list_social_accounts", "schedule_social_post"],
   },
 };
 
@@ -50,6 +65,24 @@ export default function IntegrationConnect() {
         <Link to="/integrations" className="btn-secondary">
           <ArrowLeft size={15} /> Back to integrations
         </Link>
+      </div>
+    );
+
+  // Social publishing carries its own credential and compose flow, so it gets
+  // the page chrome and nothing else from here.
+  if (app === "social-publishing")
+    return (
+      <div className="animate-fade-up">
+        <PageHeader
+          title={meta.title}
+          subtitle={meta.subtitle}
+          action={
+            <Link to="/integrations" className="btn-secondary">
+              <ArrowLeft size={15} /> Integrations
+            </Link>
+          }
+        />
+        <ZernioPanel />
       </div>
     );
 

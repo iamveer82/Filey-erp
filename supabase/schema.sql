@@ -440,6 +440,8 @@ alter table company_profile add column if not exists default_tax_rate numeric(8,
 -- See supabase/2026-08-02-wps-payroll-fields.sql
 alter table company_profile add column if not exists mol_establishment_id text;
 alter table company_profile add column if not exists wps_bank_code text;
+-- Business WhatsApp number (E.164); see supabase/2026-08-03-company-whatsapp.sql
+alter table company_profile add column if not exists whatsapp text;
 alter table employees add column if not exists labour_card_no text;
 alter table employees add column if not exists iban text;
 alter table employees add column if not exists bank_routing_code text;

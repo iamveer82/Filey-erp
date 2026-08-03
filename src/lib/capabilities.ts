@@ -86,6 +86,12 @@ export const CAPABILITIES: Capability[] = [
     description: "Read and search public web pages, enrich leads from their own site",
     tools: ["read_web_page", "search_web", "enrich_company_website", "score_lead"],
   },
+  {
+    id: "social",
+    name: "Social publishing",
+    description: "Post and schedule to your connected social accounts (Zernio)",
+    tools: ["list_social_accounts", "schedule_social_post", "list_social_posts"],
+  },
 ];
 
 const KEY = "filey.agent.capabilities";

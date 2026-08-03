@@ -102,17 +102,33 @@ check(
 again = [add_column(conn, *c) for c in cols]
 check("second run is a no-op — no duplicate-column error", not any(again))
 
-# --- 3. a fresh install already has the columns ----------------------------
+# --- 3. a brand new install ends up with the same shape --------------------
+# db.rs creates the *original* table shapes and lets migrate() add everything
+# since; a fresh database therefore does run the migration. What matters is that
+# it converges on the same columns as an upgraded one, and settles after one run.
+src_for_create = DB_RS.read_text(encoding="utf-8")
 fresh = sqlite3.connect(":memory:")
-fresh_schema = OLD_SCHEMA.replace(
-    "status TEXT NOT NULL DEFAULT 'active'",
-    "status TEXT NOT NULL DEFAULT 'active',\n    labour_card_no TEXT,\n    iban TEXT,\n    bank_routing_code TEXT",
-).replace(
-    "name TEXT NOT NULL DEFAULT ''\n);",
-    "name TEXT NOT NULL DEFAULT '',\n    mol_establishment_id TEXT,\n    wps_bank_code TEXT\n);",
+for table in ("employees", "company_profile"):
+    ddl = re.search(
+        rf"CREATE TABLE IF NOT EXISTS {table} \(.*?\);", src_for_create, re.S
+    )
+    if not ddl:
+        sys.exit(f"could not find the CREATE TABLE for {table} in db.rs")
+    fresh.executescript(ddl.group(0))
+
+for c in cols:
+    add_column(fresh, *c)
+check(
+    "a fresh install converges on the same columns as an upgraded one",
+    all(
+        column in [r[1] for r in fresh.execute(f"PRAGMA table_info({table})")]
+        for table, column, _ in cols
+    ),
 )
-fresh.executescript(fresh_schema)
-check("a fresh database needs no migration", not any(add_column(fresh, *c) for c in cols))
+check(
+    "and settles — a second run on a fresh database is a no-op",
+    not any(add_column(fresh, *c) for c in cols),
+)
 
 # --- 4. the opt-out uniqueness rule actually holds -------------------------
 # Lifted from the CREATE statements in db.rs so the real index is exercised.

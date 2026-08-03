@@ -466,6 +466,9 @@ export interface CompanyProfile {
   mol_establishment_id?: string;
   /** Paying bank's routing code, 9 digits. */
   wps_bank_code?: string;
+  /** Business WhatsApp number in E.164 — the one customers message, which is
+   *  often not the same as `phone`. */
+  whatsapp?: string;
 }
 
 // ===================================================================
