@@ -18,6 +18,7 @@ import {
   isLocalSignedIn,
   rememberLocalCredential,
   setLocalSignedIn,
+  updateLocalCredentialEmail,
   verifyLocalPassword,
 } from "./localAuth";
 
@@ -389,12 +390,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // "magiclink" is for full magic-link tokens, not numeric codes.
     const type =
       c.channel === "phone" ? "sms" : purpose === "signup" ? "signup" : "email";
-    const { error } = await supabase.auth.verifyOtp({
+    const { data, error } = await supabase.auth.verifyOtp({
       ...norm(c),
       token: token.trim(),
       type,
     } as any);
     if (error) throw error;
+    if (local) {
+      // Local mode doesn't follow the cloud session — the verified code IS
+      // the sign-in. Mark the device signed in for the account behind it.
+      const uid =
+        data?.user?.id ??
+        data?.session?.user?.id ??
+        getLocalCredential()?.userId ??
+        "";
+      updateLocalCredentialEmail(c.value);
+      setLocalSignedIn(true);
+      setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
+      setProfile(loadLocalProfile());
+    }
   };
 
   const resendOtp = async (c: Credential, purpose: "signup" | "login") => {

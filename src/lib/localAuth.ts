@@ -94,16 +94,36 @@ export async function rememberLocalCredential(
   }
 }
 
-/** Check an email + password against the remembered identity. */
+/** Adopt a new account email after the identity has been proven another way
+ *  (password hash match, or a verified OTP). The account email is mutable
+ *  server-side — without this, an email change orphans the device. */
+export function updateLocalCredentialEmail(email: string): void {
+  const cred = getLocalCredential();
+  if (!cred) return;
+  const typed = email.trim().toLowerCase();
+  if (cred.email === typed) return;
+  try {
+    localStorage.setItem(CRED_KEY, JSON.stringify({ ...cred, email: typed }));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Check an email + password against the remembered identity. The password
+ *  hash is the real check — the salt is per-credential, so a different
+ *  account's password can never match. The email is just a label: if the
+ *  hash matches but the address differs (it was changed server-side), adopt
+ *  the typed address instead of locking the owner out of their own device. */
 export async function verifyLocalPassword(
   email: string,
   password: string
 ): Promise<boolean> {
   const cred = getLocalCredential();
   if (!cred) return false;
-  if (cred.email !== email.trim().toLowerCase()) return false;
   const hash = await derive(password, fromB64(cred.salt));
-  return sameHash(hash, cred.hash);
+  if (!sameHash(hash, cred.hash)) return false;
+  updateLocalCredentialEmail(email);
+  return true;
 }
 
 /** Drop the remembered identity — used when switching the device to a

@@ -54,8 +54,14 @@ describe("verifying offline", () => {
     expect(await verifyLocalPassword("owner@example.com", "hunter2hunter3")).toBe(false);
   });
 
-  it("rejects a different account, even with a valid password", async () => {
-    expect(await verifyLocalPassword("someone@else.com", "hunter2hunter2")).toBe(false);
+  it("rejects a wrong password even with the right email", async () => {
+    expect(await verifyLocalPassword("owner@example.com", "hunter2hunter3")).toBe(false);
+  });
+
+  it("accepts a changed account email when the password hash matches, and adopts it", async () => {
+    // The account email is mutable server-side; the hash is the real check.
+    expect(await verifyLocalPassword("new-owner@example.com", "hunter2hunter2")).toBe(true);
+    expect(getLocalCredential()?.email).toBe("new-owner@example.com");
   });
 
   it("rejects everything when no identity has been remembered", async () => {
