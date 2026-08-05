@@ -120,8 +120,8 @@ export default function AccountProfile() {
   const cloudAccount = cloudConfigured && !!cloudEmail;
   /** The address the cloud account actually uses. */
   const accountEmail = cloudEmail ?? profile?.email ?? "";
-  // An email change in flight: the new address plus the code from each inbox.
-  const [pending, setPending] = useState<{ next: string; cur: string; nw: string } | null>(null);
+  // An email change in flight: the new address plus the code sent to it.
+  const [pending, setPending] = useState<{ next: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
 
   const changeEmail = async () => {
@@ -139,33 +139,24 @@ export default function AccountProfile() {
       return toast.error("That is already your email address.");
     const { error } = await supabase.auth.updateUser({ email });
     if (error) return toast.error(`Could not change email: ${error.message}`);
-    // Secure email change is on, so Supabase mails a code to BOTH addresses
-    // and the change only lands once each is verified.
-    setPending({ next: email, cur: "", nw: "" });
-    toast.success("We sent a code to your current address and to the new one.");
+    // Secure email change is off — Supabase mails one code to the NEW address
+    // and the change lands once it's verified.
+    setPending({ next: email, nw: "" });
+    toast.success(`We sent a 6-digit code to ${email}.`);
   };
 
   const confirmEmailChange = async () => {
     if (!supabase || !pending || !accountEmail) return;
-    if (pending.cur.length !== 6 || pending.nw.length !== 6)
-      return toast.error("Enter both 6-digit codes.");
+    if (pending.nw.length !== 6)
+      return toast.error("Enter the 6-digit code.");
     setEmailBusy(true);
     try {
-      // Both sides must verify; the first call alone leaves the change pending.
-      for (const [addr, token] of [
-        [accountEmail, pending.cur],
-        [pending.next, pending.nw],
-      ] as const) {
-        const { error } = await supabase.auth.verifyOtp({
-          email: addr,
-          token,
-          type: "email_change",
-        });
-        // The first of the two returns "Confirmation link accepted. Please
-        // proceed to confirm link sent to the other email" — a progress
-        // message, not a failure. Only a real rejection should stop us.
-        if (error && !/proceed to confirm/i.test(error.message)) throw error;
-      }
+      const { error } = await supabase.auth.verifyOtp({
+        email: pending.next,
+        token: pending.nw,
+        type: "email_change",
+      });
+      if (error) throw error;
       // auth.users is updated by Supabase; profiles.email is ours to keep in step.
       await updateProfile({ email: pending.next });
       setCloudEmail(pending.next);
@@ -355,26 +346,9 @@ export default function AccountProfile() {
                     Confirm the change to {pending.next}
                   </p>
                   <p className="text-xs text-brand-500 mt-0.5 mb-3">
-                    We emailed a 6-digit code to each address. Both are needed, so nobody
-                    can move your account without access to your current inbox.
+                    We emailed a 6-digit code to your new address.
                   </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <FormField label={`Code sent to ${accountEmail}`}>
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        maxLength={6}
-                        placeholder="000000"
-                        value={pending.cur}
-                        onChange={(e) =>
-                          setPending({
-                            ...pending,
-                            cur: e.target.value.replace(/\D/g, "").slice(0, 6),
-                          })
-                        }
-                      />
-                    </FormField>
+                  <div>
                     <FormField label={`Code sent to ${pending.next}`}>
                       <input
                         className="input"
@@ -396,7 +370,7 @@ export default function AccountProfile() {
                     <button
                       className="btn-primary"
                       onClick={confirmEmailChange}
-                      disabled={emailBusy || pending.cur.length < 6 || pending.nw.length < 6}
+                      disabled={emailBusy || pending.nw.length < 6}
                     >
                       {emailBusy ? "Confirming…" : "Confirm change"}
                     </button>
