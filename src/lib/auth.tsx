@@ -300,11 +300,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(loadLocalProfile());
           return;
         } catch (e: any) {
-          // A refused password is a real answer — don't fall through to the
-          // device and let a stale hash accept it.
+          // In local mode the device's own credential is authoritative.
+          // If Supabase rejects (expired session, changed password, etc.),
+          // fall through to the local hash instead of locking the user out.
           const msg = e?.message ?? String(e);
-          if (/invalid login credentials|invalid email or password/i.test(msg)) throw e;
-          if (!hasLocalCredential()) throw e;
+          if (/invalid login credentials|invalid email or password/i.test(msg)) {
+            if (!hasLocalCredential()) throw e;
+            // Fall through to local verification below
+          } else if (!hasLocalCredential()) {
+            throw e;
+          }
           // Otherwise the server was unreachable: fall through to the device.
         }
       }
@@ -380,6 +385,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyOtp = async (c: Credential, token: string, purpose: "signup" | "login") => {
     if (!supabase) throw new Error("Supabase not configured");
+    // For email login: verify the 6-digit numeric OTP with type "email".
+    // "magiclink" is for full magic-link tokens, not numeric codes.
     const type =
       c.channel === "phone" ? "sms" : purpose === "signup" ? "signup" : "email";
     const { error } = await supabase.auth.verifyOtp({
