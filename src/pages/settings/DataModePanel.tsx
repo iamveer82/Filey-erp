@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Cloud, HardDrive, Check, Download, Upload, FolderOpen, RefreshCw } from "lucide-react";
 import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
-import { cloudConfigured } from "../../lib/supabase";
+import { cloudConfigured, supabase } from "../../lib/supabase";
+import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
 import {
   autoSyncEnabled,
   setAutoSyncEnabled,
@@ -403,6 +404,20 @@ export default function DataModePanel() {
     }
   };
 
+  /** Changing where data is stored must not sign anyone out. The live cloud
+   *  session is proof of who owns this device, so carry that identity across —
+   *  offline mode keeps its own signed-in flag, and nothing ever set it while
+   *  the user was in cloud mode. Password-less by design: a code sign-in never
+   *  had one either, and the server stays the authority when online. */
+  const keepSignedInLocally = async () => {
+    if (!supabase) return;
+    const { data } = await supabase.auth.getSession();
+    const u = data.session?.user;
+    if (!u?.email) return;
+    rememberLocalIdentity(u.email, u.id);
+    setLocalSignedIn(true);
+  };
+
   const switchTo = async (m: DataMode) => {
     if (m === mode) return;
     if (m === "cloud" && !cloudConfigured) return;
@@ -446,6 +461,7 @@ export default function DataModePanel() {
         }
       }
     }
+    if (m === "local") await keepSignedInLocally();
     setDataMode(m);
     window.location.reload();
   };
@@ -549,6 +565,7 @@ export default function DataModePanel() {
       if (getDataMode() !== "local") {
         setResult(await migrateCloudToLocal(setProgress));
       }
+      await keepSignedInLocally();
       setAutoSyncEnabled(false);
       setDataMode("local");
       window.location.reload();

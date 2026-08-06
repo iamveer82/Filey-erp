@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.4.2 — 2026-08-06
+
+Sign-in and settings fixes. Everything here affects existing installs.
+
+### Signing in
+- **Turning sync off signed you out.** Switching storage to "this computer
+  only" reloaded straight to the login screen: offline mode keeps its own
+  signed-in flag and nothing ever set it while you were in cloud mode, so a
+  session that was valid a second earlier was simply gone. The account is now
+  carried across the switch.
+- **A one-time code now claims the device**, in cloud mode too. Anyone who
+  signs in by code and never sets a password had no account attached to their
+  device at all, so switching that device to offline stranded them.
+- **Sign-in errors that pointed at the wrong problem.** "Invalid login
+  credentials" and "Signups not allowed for otp" are what Supabase says when
+  *no account uses that email* — read as "wrong password" and "signups are
+  off", which sends you hunting for the wrong fault. Both now say what is
+  actually wrong, and a device that already knows its account fills the address
+  in for you.
+
+### Stamp & signature
+- **An expired image link re-signs itself** instead of leaving a broken stamp
+  on a customer's invoice.
+- **A failed upload now says so.** It used to log to the console and put the
+  card back to "Upload" — indistinguishable from never having picked a file,
+  so the stamp was quietly never saved.
+- **Document-builder uploads store a durable reference.** In the cloud they
+  were kept as an inline copy that was never uploaded anywhere.
+
+### Settings
+- **Fields that said they saved and didn't.** Every failure was swallowed with
+  a note claiming the write had been queued for later; it hadn't — offline, the
+  write is refused outright. A failed save now puts the control back and tells
+  you why.
+- **A logo over 2MB is refused up front.** The card always promised "max 2MB"
+  and nothing enforced it, so the whole save failed later with a raw database
+  error.
+- Desktop bundle version had drifted behind the app version.
+
 ## v2.4.0 — 2026-08-03
 
 Minor rather than patch: this adds a Marketing module, bulk email, UAE payroll

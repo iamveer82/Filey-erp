@@ -98,22 +98,32 @@ function UploadCard({
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
 
   const handleFile = async (f?: File) => {
     if (!f) return;
     setUploading(true);
+    setErr("");
     try {
       const { path, url } = await uploadCompanyAsset(f);
       // Persist the storage path in settings; keep the signed URL in memory for preview
       onChange({ ...defaults, data: path, _previewUrl: url });
     } catch (e) {
-      console.warn(`Failed to upload ${label.toLowerCase()}`, e);
+      // A console warning left the card sitting on "Upload" — indistinguishable
+      // from never having picked a file, so the stamp was quietly never saved.
+      setErr(
+        e instanceof Error ? e.message : `Could not upload that ${label.toLowerCase()}.`
+      );
     } finally {
       setUploading(false);
     }
   };
 
-  const previewUrl = value?._previewUrl || value?.data;
+  // Prefer the durable reference (data: URL in local mode, storage path in cloud)
+  // over the transient signed URL — _previewUrl expires in 5 minutes and would
+  // show a broken image once it does. CompanyAssetImage resolves storage paths
+  // on its own, so `data` is always the safe choice.
+  const previewUrl = value?.data || value?._previewUrl;
 
   return (
     <div className="rounded-xl border border-brand-200 p-4">
@@ -164,6 +174,7 @@ function UploadCard({
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
+        {err && <p className="mt-2 text-[11px] text-danger">{err}</p>}
       </div>
     </div>
   );

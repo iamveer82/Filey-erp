@@ -15,8 +15,10 @@ import { registerCloudDevice, entitlement } from "./license";
 import {
   getLocalCredential,
   hasLocalCredential,
+  hasLocalPassword,
   isLocalSignedIn,
   rememberLocalCredential,
+  rememberLocalIdentity,
   setLocalSignedIn,
   updateLocalCredentialEmail,
   verifyLocalPassword,
@@ -305,18 +307,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // If Supabase rejects (expired session, changed password, etc.),
           // fall through to the local hash instead of locking the user out.
           const msg = e?.message ?? String(e);
-          if (/invalid login credentials|invalid email or password/i.test(msg)) {
-            if (!hasLocalCredential()) throw e;
-            // Fall through to local verification below
-          } else if (!hasLocalCredential()) {
-            throw e;
-          }
+          const rejected = /invalid login credentials|invalid email or password/i.test(msg);
+          // A server rejection can only be overridden by a password this device
+          // has actually seen. With an identity-only claim (OTP sign-in, or sync
+          // switched off) there is no hash to check, so the server is the answer.
+          if (rejected && !hasLocalPassword()) throw e;
+          if (!rejected && !hasLocalCredential()) throw e;
+          // Otherwise fall through to the device.
           // Otherwise the server was unreachable: fall through to the device.
         }
       }
       if (!hasLocalCredential())
         throw new Error(
           "This device isn't linked to a Filey account yet. Connect to the internet once to sign in or create one."
+        );
+      if (!hasLocalPassword())
+        throw new Error(
+          "This device knows your account but has never seen your password. Connect to the internet once to sign in — after that it works offline."
         );
       if (!(await verifyLocalPassword(email, password)))
         throw new Error("That email and password don't match this device's account.");
@@ -396,15 +403,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       type,
     } as any);
     if (error) throw error;
+    const uid =
+      data?.user?.id ?? data?.session?.user?.id ?? getLocalCredential()?.userId ?? "";
+    // A code is proof of identity, so claim the device with it — in CLOUD mode
+    // too. Otherwise anyone who only ever signs in by code has an unclaimed
+    // device, and switching that device to offline strands them at the login
+    // screen with no account attached.
+    if (c.channel === "email") {
+      if (hasLocalPassword()) updateLocalCredentialEmail(c.value);
+      else rememberLocalIdentity(c.value, uid);
+    }
     if (local) {
       // Local mode doesn't follow the cloud session — the verified code IS
       // the sign-in. Mark the device signed in for the account behind it.
-      const uid =
-        data?.user?.id ??
-        data?.session?.user?.id ??
-        getLocalCredential()?.userId ??
-        "";
-      updateLocalCredentialEmail(c.value);
       setLocalSignedIn(true);
       setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
       setProfile(loadLocalProfile());

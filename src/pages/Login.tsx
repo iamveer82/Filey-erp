@@ -15,7 +15,23 @@ import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
 import { isLocalMode } from "../lib/dataMode";
-import { hasLocalCredential } from "../lib/localAuth";
+import { getLocalCredential, hasLocalCredential } from "../lib/localAuth";
+
+/** Supabase answers in its own vocabulary, and two of its replies actively
+ *  mislead: a missing account reads as a wrong password, and a code request for
+ *  an unknown address reads as "signups not allowed". Say what to do instead. */
+const humanError = (e: unknown): string => {
+  const m = (e as { message?: string })?.message ?? String(e);
+  if (/signups not allowed for otp|otp_disabled/i.test(m))
+    return "No Filey account uses this email, so there's no code to send. Create an account instead.";
+  if (/invalid login credentials|invalid email or password/i.test(m))
+    return "That email and password don't match an account. If you signed up with a one-time code, sign in with “One-time code” below.";
+  if (/email not confirmed/i.test(m))
+    return "This account hasn't been confirmed yet. Use “One-time code” to get a fresh one.";
+  if (/failed to fetch|network/i.test(m))
+    return "Can't reach Filey right now. Check your connection and try again.";
+  return m;
+};
 
 /* The primary action deliberately mirrors the sign-up page on gofiley.com —
    same amber gradient, same 44px height — so signing up on the site and
@@ -113,7 +129,12 @@ export default function Login() {
   const [channel, setChannel] = useState<Channel>("email");
   const [method, setMethod] = useState<Method>("password");
 
-  const [identifier, setIdentifier] = useState("");
+  // A claimed device already knows whose it is — typing the address again is
+  // a memory test nobody should have to pass, and getting it wrong looks
+  // exactly like a wrong password.
+  const [identifier, setIdentifier] = useState(
+    () => (isLocalMode() && getLocalCredential()?.email) || ""
+  );
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [token, setToken] = useState("");
@@ -225,7 +246,7 @@ export default function Login() {
         );
       }
     } catch (e2: any) {
-      setErr(e2?.message ?? String(e2));
+      setErr(humanError(e2));
     } finally {
       setBusy(false);
     }
@@ -238,7 +259,7 @@ export default function Login() {
     try {
       await verifyOtp(cred, token, otpPurpose);
     } catch (e2: any) {
-      setErr(e2?.message ?? String(e2));
+      setErr(humanError(e2));
     } finally {
       setBusy(false);
     }
@@ -253,7 +274,7 @@ export default function Login() {
       setCooldown(60);
       setMsg("A new code is on its way.");
     } catch (e2: any) {
-      setErr(e2?.message ?? String(e2));
+      setErr(humanError(e2));
     } finally {
       setBusy(false);
     }

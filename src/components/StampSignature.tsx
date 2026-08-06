@@ -1,6 +1,7 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Upload, X } from "lucide-react";
 import { CompanyAssetImage } from "./CompanyAssetImage";
+import { uploadCompanyAsset } from "../lib/files";
 
 /* Shared stamp & signature widgets used by every document builder
  * (Invoicing, Quoting, Purchase Orders, Declaration Letter, …).
@@ -91,6 +92,8 @@ export function StampSigCard({
   onChange: (v: StampSig | undefined) => void;
   defaults: StampSig;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
   return (
     <div className="rounded-xl border border-brand-200 p-4">
       <div className="flex items-center gap-2 text-ink font-medium text-sm">
@@ -191,24 +194,43 @@ export function StampSigCard({
             </p>
           </div>
         ) : (
-          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px]">
+          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px] disabled:opacity-60">
             <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-medium text-brand-600">Upload {label}</span>
+            <span className="text-xs font-medium text-brand-600">
+              {uploading ? "Uploading…" : `Upload ${label}`}
+            </span>
             <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
             <input
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => {
+              disabled={uploading}
+              onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                const r = new FileReader();
-                r.onload = () => onChange({ ...defaults, data: String(r.result) });
-                r.readAsDataURL(f);
+                // uploadCompanyAsset already forks on data mode: a data: URL
+                // offline, a Storage path in the cloud. Either way what is
+                // stored is durable — a raw FileReader result was not, in the
+                // cloud, because nothing ever uploaded the bytes.
+                setUploading(true);
+                setErr("");
+                try {
+                  const { path } = await uploadCompanyAsset(f);
+                  onChange({ ...defaults, data: path });
+                } catch (e2) {
+                  setErr(
+                    e2 instanceof Error ? e2.message : `Could not upload that ${label.toLowerCase()}.`
+                  );
+                } finally {
+                  setUploading(false);
+                }
               }}
             />
           </label>
         )}
+        {/* A failed upload used to be a console warning: the card went back to
+            "Upload", which reads as "nothing happened", not "it didn't save". */}
+        {err && <p className="mt-2 text-[11px] text-danger">{err}</p>}
       </div>
     </div>
   );

@@ -4,7 +4,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   getLocalCredential,
   hasLocalCredential,
+  hasLocalPassword,
   rememberLocalCredential,
+  rememberLocalIdentity,
   verifyLocalPassword,
   forgetLocalCredential,
   isLocalSignedIn,
@@ -34,6 +36,36 @@ describe("remembering a verified identity", () => {
     const second = getLocalCredential();
     expect(first?.hash).not.toBe(second?.hash);
     expect(first?.salt).not.toBe(second?.salt);
+  });
+});
+
+// Signing in by code, or switching a signed-in device to offline, claims the
+// device without ever seeing a password. The device must know WHOSE it is
+// (or the user is stranded at the login screen) while refusing every offline
+// password guess (there is nothing to check them against).
+describe("claiming a device with no password", () => {
+  it("records the account and stays unusable for offline password sign-in", async () => {
+    rememberLocalIdentity("Owner@Example.com", "uid-9");
+    expect(hasLocalCredential()).toBe(true);
+    expect(hasLocalPassword()).toBe(false);
+    expect(getLocalCredential()?.email).toBe("owner@example.com");
+    expect(getLocalCredential()?.userId).toBe("uid-9");
+    expect(await verifyLocalPassword("owner@example.com", "anything at all")).toBe(false);
+  });
+
+  it("never overwrites a password this device already verified", async () => {
+    await rememberLocalCredential("owner@example.com", "uid-1", "hunter2hunter2");
+    rememberLocalIdentity("owner@example.com", "uid-1");
+    expect(hasLocalPassword()).toBe(true);
+    expect(await verifyLocalPassword("owner@example.com", "hunter2hunter2")).toBe(true);
+  });
+
+  it("re-claims the device when a different account signs in", async () => {
+    await rememberLocalCredential("old@example.com", "uid-1", "hunter2hunter2");
+    rememberLocalIdentity("new@example.com", "uid-2");
+    expect(getLocalCredential()?.userId).toBe("uid-2");
+    expect(hasLocalPassword()).toBe(false);
+    expect(await verifyLocalPassword("new@example.com", "hunter2hunter2")).toBe(false);
   });
 });
 

@@ -23,11 +23,25 @@ export function useSettings() {
   }, []);
   const get = (k: string, d = "") => map[k] ?? d;
   const set = async (k: string, v: string) => {
+    const prev = map[k];
     setMap((m) => ({ ...m, [k]: v }));
     try {
       await tools.setSetting(k, v);
-    } catch {
-      /* offline — queued by api layer */
+    } catch (e) {
+      // This used to be swallowed as "offline — queued by api layer", which is
+      // not what happens: setSetting runs through online(), and that THROWS
+      // when there's no connection rather than queueing. The switch stayed
+      // flipped, the value was never stored, and the next visit showed the old
+      // one — the "settings don't save" report. Put it back and say so.
+      setMap((m) => {
+        const next = { ...m };
+        if (prev === undefined) delete next[k];
+        else next[k] = prev;
+        return next;
+      });
+      toast.error(
+        "Couldn't save that setting: " + (e instanceof Error ? e.message : String(e))
+      );
     }
   };
   return { get, set, ready };

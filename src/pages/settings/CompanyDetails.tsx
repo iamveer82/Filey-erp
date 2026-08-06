@@ -114,6 +114,13 @@ export default function CompanyDetails() {
 
   const onLogo = (file?: File) => {
     if (!file) return;
+    // The card promises "max 2MB" but nothing enforced it: the logo is embedded
+    // as a data: URL in the company row, so an 8MB photo made the whole save
+    // fail with a raw database error and no obvious cause.
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("That logo is over 2MB. Pick a smaller image.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => set("logo", String(reader.result));
     reader.readAsDataURL(file);

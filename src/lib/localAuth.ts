@@ -22,8 +22,11 @@ export interface LocalCredential {
   email: string;
   /** The cloud account id, so a later cloud sync attaches to the right user. */
   userId: string;
-  salt: string;
-  hash: string;
+  /** Absent when the device was claimed from a live cloud session (OTP sign-in,
+   *  or flipping sync off) — we know WHO owns the device but never saw a
+   *  password, so offline password sign-in isn't available until one is used. */
+  salt?: string;
+  hash?: string;
   /** When this identity was last confirmed against the server. */
   verifiedAt: string;
 }
@@ -62,13 +65,19 @@ export function getLocalCredential(): LocalCredential | null {
     const raw = localStorage.getItem(CRED_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw) as LocalCredential;
-    return c?.email && c?.hash && c?.salt ? c : null;
+    return c?.email ? c : null;
   } catch {
     return null;
   }
 }
 
 export const hasLocalCredential = (): boolean => !!getLocalCredential();
+
+/** Whether an OFFLINE password sign-in is possible on this device. */
+export function hasLocalPassword(): boolean {
+  const c = getLocalCredential();
+  return !!(c?.salt && c?.hash);
+}
 
 /** Remember an identity that the SERVER just accepted. Only ever called after
  *  a real cloud sign-in or sign-up — never on the offline path, or the device
@@ -91,6 +100,23 @@ export async function rememberLocalCredential(
     localStorage.setItem(CRED_KEY, JSON.stringify(cred));
   } catch {
     /* best-effort — an offline sign-in simply won't be available */
+  }
+}
+
+/** Claim the device for an account the SERVER has already authenticated, when
+ *  no password was involved — a one-time code, or an existing cloud session at
+ *  the moment sync is switched off. Without this, those users land on the login
+ *  screen with an unclaimed device and no way back into their own data.
+ *  Never downgrades a credential that already has a password hash. */
+export function rememberLocalIdentity(email: string, userId: string): void {
+  const typed = email.trim().toLowerCase();
+  const cur = getLocalCredential();
+  if (cur?.hash && cur.email === typed) return;
+  const cred: LocalCredential = { email: typed, userId, verifiedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(CRED_KEY, JSON.stringify(cred));
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -119,7 +145,7 @@ export async function verifyLocalPassword(
   password: string
 ): Promise<boolean> {
   const cred = getLocalCredential();
-  if (!cred) return false;
+  if (!cred?.salt || !cred.hash) return false; // identity-only claim, no password seen
   const hash = await derive(password, fromB64(cred.salt));
   if (!sameHash(hash, cred.hash)) return false;
   updateLocalCredentialEmail(email);
