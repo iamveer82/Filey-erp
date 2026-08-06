@@ -3,7 +3,6 @@ import {
   Plus,
   Loader2,
   Zap,
-  Sparkles,
   Paperclip,
   X,
   Download,
@@ -18,6 +17,7 @@ import {
   SlidersHorizontal,
   User,
 } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 import { ErrorBanner, PageHeader } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
@@ -377,8 +377,8 @@ export default function AgentChat() {
       <div className="flex-1 space-y-6 pb-40 pt-2">
         {empty && !busy ? (
           <div className="mx-auto mt-10 max-w-xl text-center">
-            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-primary-500/15">
-              <Sparkles size={22} className="text-primary-600 dark:text-primary-400" />
+            <div className="mx-auto mb-4 grid h-16 w-16 place-items-center">
+              <ThinkingOrb size={64} state="listening" />
             </div>
             <p className="text-[22px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
             <p className="mt-2 text-[13px] text-muted-foreground">
@@ -433,7 +433,9 @@ export default function AgentChat() {
             </button>
           ))}
         </div>
-        <div className="rounded-xl border border-border bg-card p-2.5 shadow-sm transition-shadow focus-within:border-primary-400 focus-within:shadow-md">
+        {/* Minimal composer: the border states in neutral ink, no brand accent.
+            An input is not a place that needs decorating. */}
+        <div className="rounded-xl border border-border bg-card p-2.5 transition-colors focus-within:border-foreground/25">
           {/* Attachment preview card */}
           {file && (
             <div className="mb-2 flex">
@@ -525,7 +527,7 @@ export default function AgentChat() {
               onClick={() => void send(input)}
               disabled={busy || (!input.trim() && !file)}
               aria-label="Send"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-400 text-ink transition-colors hover:bg-primary-500 disabled:opacity-40"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
             >
               {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={16} />}
             </button>
@@ -743,8 +745,14 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   }
   return (
     <div className="flex gap-3">
-      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-500/15">
-        <Sparkles size={15} className="text-primary-600 dark:text-primary-400" />
+      {/* The orb spins only while the agent is actually thinking. A whole
+          transcript of animating avatars is noise, not life. */}
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted">
+        {pending ? (
+          <ThinkingOrb size={20} state="working" />
+        ) : (
+          <span className="h-1.5 w-1.5 rounded-full bg-foreground/50" />
+        )}
       </div>
       <div
         className={cn(

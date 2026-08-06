@@ -82,13 +82,20 @@ const TONE_DOT: Record<string, string> = {
   info: "bg-info",
 };
 
-/** Reference wordmark — F glyph + name. */
+/** Reference wordmark — brand mark + name. The artwork ships with its own dark
+ *  backdrop, so it is clipped to a rounded tile and reads as an app icon rather
+ *  than a floating square. */
 function Wordmark() {
   return (
     <span className="flex items-center gap-2">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-foreground">
-        <path d="M4 4h16v3H7v4h10v3H7v6H4V4z" fill="currentColor" />
-      </svg>
+      <img
+        src="/icons/filey-logo.png"
+        width={22}
+        height={22}
+        alt=""
+        draggable={false}
+        className="h-[22px] w-[22px] shrink-0 select-none rounded-md object-cover"
+      />
       <span className="text-[15px] font-semibold text-foreground tracking-tight">Filey</span>
     </span>
   );
