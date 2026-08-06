@@ -20,6 +20,17 @@ Sign-in and settings fixes. Everything here affects existing installs.
   actually wrong, and a device that already knows its account fills the address
   in for you.
 
+### One account, both modes
+- **The account email is now the same address online and offline.** The offline
+  profile kept its own empty `email`, so Settings showed a blank account
+  address on a device that knew perfectly well whose it was.
+- **Changing your password now updates this device too.** The stored offline
+  hash was the password you typed to re-authenticate, not the new one — so an
+  offline sign-in went on demanding the old password and refusing the new.
+- **Signing in as a different account re-claims the device** instead of
+  renaming the previous owner's credential, which would have handed the new
+  account the old one's offline password.
+
 ### Stamp & signature
 - **An expired image link re-signs itself** instead of leaving a broken stamp
   on a customer's invoice.

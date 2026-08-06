@@ -53,6 +53,19 @@ function localUserFrom(cred: { email: string; userId: string } | null): User {
   if (!cred) return LOCAL_USER;
   return { ...LOCAL_USER, id: cred.userId || LOCAL_USER.id, email: cred.email } as User;
 }
+/** The on-device profile carrying the account's email. One account, one
+ *  address, whichever mode the app runs in: the offline profile used to keep
+ *  its own empty `email`, so Settings showed a blank account address on a
+ *  device that knew perfectly well whose it was. */
+function localProfile(): Profile {
+  const p = loadLocalProfile();
+  const cred = getLocalCredential();
+  if (!cred?.email || p.email === cred.email) return p;
+  const merged = { ...p, id: cred.userId || p.id, email: cred.email };
+  saveLocalProfile(merged);
+  return merged;
+}
+
 function saveLocalProfile(p: Profile): void {
   try {
     localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
@@ -153,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(
-    local ? loadLocalProfile() : null
+    local ? localProfile() : null
   );
   // Whether we've actually finished checking for a profile for the current
   // user. Until then we must NOT treat a missing profile as "needs setup"
@@ -300,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (uid) await rememberLocalCredential(email, uid, password);
           setLocalSignedIn(true);
           setUser(localUserFrom({ email, userId: uid ?? "" }));
-          setProfile(loadLocalProfile());
+          setProfile(localProfile());
           return;
         } catch (e: any) {
           // In local mode the device's own credential is authoritative.
@@ -329,7 +342,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("That email and password don't match this device's account.");
       setLocalSignedIn(true);
       setUser(localUserFrom(getLocalCredential()));
-      setProfile(loadLocalProfile());
+      setProfile(localProfile());
       return;
     }
     if (!supabase) throw new Error("Supabase not configured");
@@ -375,7 +388,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (local && data.session) {
       setLocalSignedIn(true);
       setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: data.user!.id }));
-      setProfile(loadLocalProfile());
+      setProfile(localProfile());
     }
     // A session here means email confirmation is disabled → straight in.
     // Otherwise an OTP (email code / SMS) was sent and must be verified.
@@ -410,7 +423,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // device, and switching that device to offline strands them at the login
     // screen with no account attached.
     if (c.channel === "email") {
-      if (hasLocalPassword()) updateLocalCredentialEmail(c.value);
+      // Same account (an email change, or the code that confirms a signup this
+      // device just stored a password for): keep the password hash and adopt
+      // the address. A DIFFERENT account: re-claim outright, or the new owner
+      // would inherit the previous one's password for offline sign-in.
+      const cur = getLocalCredential();
+      const sameAccount = !!cur && (!cur.userId || !uid || cur.userId === uid);
+      if (sameAccount && hasLocalPassword()) updateLocalCredentialEmail(c.value);
       else rememberLocalIdentity(c.value, uid);
     }
     if (local) {
@@ -418,7 +437,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the sign-in. Mark the device signed in for the account behind it.
       setLocalSignedIn(true);
       setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
-      setProfile(loadLocalProfile());
+      setProfile(localProfile());
     }
   };
 
@@ -464,7 +483,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const np: Profile = {
         // Merge onto what is actually STORED, not onto possibly-empty state:
         // falling back to a bare object here discarded every other saved field.
-        ...loadLocalProfile(),
+        ...localProfile(),
         ...(profile ?? {}),
         name: `${firstName.trim()} ${lastName.trim()}`.trim(),
         company: company.trim(),

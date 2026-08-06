@@ -5,6 +5,7 @@ import { useUI } from "../../lib/ui";
 import { useEffect, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
+import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
 
 /* ---------------- Account & Profile ---------------- */
 
@@ -118,8 +119,11 @@ export default function AccountProfile() {
     };
   }, []);
   const cloudAccount = cloudConfigured && !!cloudEmail;
-  /** The address the cloud account actually uses. */
-  const accountEmail = cloudEmail ?? profile?.email ?? "";
+  /** The address the cloud account actually uses. Offline with no live session
+   *  there is no cloud email to read, but the device knows which account
+   *  claimed it — that is the same address, so show it rather than nothing. */
+  const accountEmail =
+    cloudEmail ?? getLocalCredential()?.email ?? profile?.email ?? "";
   // An email change in flight: the new address plus the code sent to it.
   const [pending, setPending] = useState<{ next: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -181,6 +185,14 @@ export default function AccountProfile() {
       await signInWithPassword({ channel: "email", value: accountEmail }, cur);
       const { error } = await supabase.auth.updateUser({ password: npw });
       if (error) throw error;
+      // Teach the device the NEW password. Without this the stored hash is the
+      // one just used to re-authenticate, so an offline sign-in kept demanding
+      // the old password and rejected the new one.
+      await rememberLocalCredential(
+        accountEmail,
+        user?.id ?? getLocalCredential()?.userId ?? "",
+        npw
+      );
       setPwMsg({ ok: true, t: "Password updated." });
       setCur("");
       setNpw("");

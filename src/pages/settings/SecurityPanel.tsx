@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { rememberLocalCredential } from "../../lib/localAuth";
 import { Modal, Field } from "../../components/ui";
 import { useEffect, useState, type ReactNode } from "react";
 import { Lock, KeyRound, Monitor, ChevronRight } from "lucide-react";
@@ -104,6 +105,14 @@ export function ChangePasswordModal({
     setBusy(true);
     setErr("");
     const { error } = await supabase.auth.updateUser({ password: pw });
+    if (!error) {
+      // Keep the device's offline password in step with the account's. A stale
+      // hash means this machine still wants the previous password the next time
+      // it is used without a connection.
+      const { data } = await supabase.auth.getUser();
+      if (data.user?.email)
+        await rememberLocalCredential(data.user.email, data.user.id, pw);
+    }
     setBusy(false);
     if (error) setErr(error.message);
     else {
