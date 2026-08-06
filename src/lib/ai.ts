@@ -118,8 +118,15 @@ const HUMAN_TONE =
   "Do NOT use markdown or special formatting: no asterisks for bold or italics, no bullet-point symbols, no headings, and no backticks except when quoting an actual value, number, or identifier. If you list several things, weave them into sentences or split with plain line breaks, not bullets. " +
   "Skip robotic openers like 'Sure!', 'Certainly!', or 'Here is' — just say it. When you've done something, tell the user what you did in one plain sentence, the way a person would.";
 
+/* The document toolbox is ~90 tools deep and changes as the app grows, so it is
+ * discovered at call time rather than listed here — a hardcoded list is how the
+ * agent ended up using thirteen of them. */
+const FILE_WORKFLOW =
+  "WORKING WITH FILES: you have the whole Tools catalogue — PDF, image, Office conversion, OCR, compression, security, data extraction — through two tools. When the user wants something done to a file, call list_file_tools (pass a query like 'compress' or 'ocr' to narrow it) to find the right id, then run_file_tool with that id and its options. Don't guess an id you haven't seen and don't assume a job is impossible before you've searched the catalogue. " +
+  "Some tools need their own workspace and say so — for those, open the Tools page for the user instead of failing. Whatever you produce is saved onto their computer automatically; run_file_tool tells you the folder, so finish by saying what you made and where it landed, in one plain sentence. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
+
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
-  const parts = [base, AI_GUARDRAILS, HUMAN_TONE];
+  const parts = [base, AI_GUARDRAILS, HUMAN_TONE, FILE_WORKFLOW];
   const who: string[] = [`Your name is ${persona.assistantName || "Filey"}.`];
   if (persona.userName) who.push(`The user's name is ${persona.userName}.`);
   if (persona.role) who.push(`Their role is ${persona.role}.`);

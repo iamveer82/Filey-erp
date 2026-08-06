@@ -70,11 +70,14 @@ export function getAttachment(): File | null {
   return attachment;
 }
 
-// Files produced by run_file_tool, surfaced as downloadable chips in the chat.
-// The chat UI drains this right after each turn (blob URLs live until reload).
+// Files produced by run_file_tool, surfaced as chips in the chat. The chat UI
+// drains this right after each turn (blob URLs live until reload). On the
+// desktop the file is already written to disk, so the chip carries a path to
+// reveal rather than a URL to download.
 export interface FileOutput {
   name: string;
-  url: string;
+  url?: string;
+  path?: string;
 }
 let fileOutputs: FileOutput[] = [];
 export function drainFileOutputs(): FileOutput[] {
@@ -96,6 +99,33 @@ async function findProduct(name: unknown) {
   const q = lc(name);
   return all.find((p) => lc(p.name) === q) || all.find((p) => lc(p.name).includes(q));
 }
+
+/* ---------- the file toolbox ----------
+ *
+ * The agent used to reach the toolbox through a hand-written switch of
+ * thirteen operations, while the Tools page carried eighty-eight. Every tool
+ * added since was invisible to it. Both now read the same registry, so a tool
+ * that exists on the page exists for the agent on the day it ships.
+ *
+ * Names the earlier switch accepted, kept working so saved skills and habits
+ * don't break. */
+export const LEGACY_OPS: Record<string, { id: string; params?: Record<string, string> }> = {
+  compress_pdf: { id: "compress" },
+  pdf_to_text: { id: "pdf2txt" },
+  pdf_to_images: { id: "pdf2img" },
+  image_to_pdf: { id: "img2pdf" },
+  compress_image: { id: "img-compress" },
+  convert_image_png: { id: "img-compress", params: { imgFormat: "png" } },
+  convert_image_jpeg: { id: "img-compress", params: { imgFormat: "jpeg" } },
+  convert_image_webp: { id: "img-compress", params: { imgFormat: "webp" } },
+  rotate_pdf: { id: "rotate-custom" },
+  add_page_numbers: { id: "numbers" },
+  remove_metadata: { id: "remove-meta" },
+  reverse_pdf: { id: "reverse" },
+  pdf_info: { id: "pdf-info" },
+};
+
+const loadToolbox = async () => (await import("../components/PdfToolbox")).PDF_TOOLS;
 
 const NAV_PAGES = [
   "overview",
@@ -490,13 +520,61 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "run_file_tool",
+    name: "list_file_tools",
     description:
-      "Run a PDF/image operation on the file the user attached to this chat; the result downloads to their device. operation ∈ compress_pdf | pdf_to_text | pdf_to_images | image_to_pdf | compress_image | convert_image_png | convert_image_jpeg | convert_image_webp | rotate_pdf | add_page_numbers | remove_metadata | reverse_pdf | pdf_info.",
+      "List the document tools available (the same catalogue as the Tools page: PDF, image, Office, OCR, data). Call this FIRST when the user asks for something to be done to a file and no obvious tool id comes to mind — then call run_file_tool with the id. Pass `query` to narrow the list (matched against name, description and category); omit it only when you genuinely need the whole catalogue.",
     parameters: {
       type: "object",
-      properties: { operation: { type: "string" }, degrees: { type: "number" } },
-      required: ["operation"],
+      properties: {
+        query: { type: "string" },
+        category: { type: "string" },
+      },
+    },
+    run: async (a) => {
+      const all = await loadToolbox();
+      const q = lc(a.query);
+      const cat = lc(a.category);
+      const hits = all.filter((t) => {
+        if (cat && lc(t.cat) !== cat) return false;
+        if (!q) return true;
+        return `${t.id} ${t.name} ${t.desc} ${t.cat}`.toLowerCase().includes(q);
+      });
+      return {
+        count: hits.length,
+        of: all.length,
+        tools: hits.map((t) => ({
+          id: t.id,
+          name: t.name,
+          what: t.desc,
+          category: t.cat,
+          accepts: t.accept,
+          // An interactive tool has no headless path — its run() deliberately
+          // throws and tells the user to open the workspace. Say so here so the
+          // agent offers the page instead of failing into it.
+          needs_the_user: !!t.interactive,
+          options: t.fields.map((f) => ({
+            key: f.key,
+            type: f.type,
+            default: f.default,
+            ...(f.options ? { choices: f.options.map((o) => o.value) } : {}),
+          })),
+        })),
+      };
+    },
+  },
+  {
+    name: "run_file_tool",
+    description:
+      "Run one of the document tools on the file the user attached to this chat. `tool_id` comes from list_file_tools (e.g. 'compress', 'pdf2txt', 'merge', 'ocr-pdf', 'word2pdf', 'encrypt'). Pass that tool's options as `options`, keyed exactly as list_file_tools reports them. The result is SAVED to the user's computer — the export folder from Settings, or their desktop — and the path comes back in the result; tell the user where it went.",
+    parameters: {
+      type: "object",
+      properties: {
+        tool_id: { type: "string" },
+        options: { type: "object" },
+        // Accepted for older prompts that named an operation rather than an id.
+        operation: { type: "string" },
+        degrees: { type: "number" },
+      },
     },
     run: async (a) => {
       const f = getAttachment();
@@ -504,70 +582,69 @@ export const TOOLS: ToolDef[] = [
         return {
           error: "No file attached — ask the user to attach a PDF or image first.",
         };
-      const op = lc(a.operation);
-      const pt = await import("./pdfTools");
-      type Out = { name: string; bytes: Uint8Array };
-      let out: Out | Out[];
-      switch (op) {
-        case "compress_pdf":
-          out = await pt.compressPdf(f);
-          break;
-        case "pdf_to_text":
-          out = await pt.pdfToText(f);
-          break;
-        case "pdf_to_images":
-          out = await pt.pdfToImages(f);
-          break;
-        case "image_to_pdf":
-          out = await pt.imagesToPdf([f]);
-          break;
-        case "compress_image":
-          out = await pt.compressImage(f);
-          break;
-        case "convert_image_png":
-          out = await pt.compressImage(f, "png");
-          break;
-        case "convert_image_jpeg":
-          out = await pt.compressImage(f, "jpeg");
-          break;
-        case "convert_image_webp":
-          out = await pt.compressImage(f, "webp");
-          break;
-        case "rotate_pdf":
-          out = await pt.rotatePdf(f, numOf(a.degrees) || 90);
-          break;
-        case "add_page_numbers":
-          out = await pt.addPageNumbers(f);
-          break;
-        case "remove_metadata":
-          out = await pt.removeMetadata(f);
-          break;
-        case "reverse_pdf":
-          out = await pt.reversePdf(f);
-          break;
-        case "pdf_info":
-          out = await pt.pdfInfo(f);
-          break;
-        default:
-          return { error: `Unknown operation: ${op}` };
+      const asked = str(a.tool_id) || str(a.operation);
+      const legacy = LEGACY_OPS[lc(asked)];
+      const id = legacy?.id ?? lc(asked);
+      const all = await loadToolbox();
+      const tool = all.find((t) => t.id === id);
+      if (!tool) {
+        const near = all
+          .filter((t) => `${t.id} ${t.name}`.toLowerCase().includes(id.slice(0, 6)))
+          .slice(0, 8)
+          .map((t) => t.id);
+        return {
+          error: `No tool with id "${asked}".`,
+          did_you_mean: near,
+          hint: "Call list_file_tools to see what exists.",
+        };
       }
-      const list = Array.isArray(out) ? out : [out];
-      for (const o of list) {
-        pt.downloadFile(o);
-        // Surface in-chat as a download chip (in addition to the auto-download).
-        try {
-          fileOutputs.push({
-            name: o.name,
-            url: URL.createObjectURL(new Blob([o.bytes as BlobPart])),
-          });
-        } catch {
-          /* createObjectURL unavailable (non-browser) — chip just won't show */
-        }
+
+      // Options: the tool's own defaults, then anything the caller set. Values
+      // reach a tool as strings — that is what the options panel hands it.
+      const params: Record<string, string> = {};
+      for (const fld of tool.fields) if (fld.default != null) params[fld.key] = fld.default;
+      Object.assign(params, legacy?.params ?? {});
+      const given = (a.options ?? {}) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(given))
+        if (v !== null && v !== undefined) params[k] = String(v);
+      if (a.degrees !== undefined && params.degrees === undefined)
+        params.degrees = String(numOf(a.degrees));
+
+      let out: { name: string; bytes: Uint8Array }[];
+      try {
+        out = await tool.run([f], params);
+      } catch (e) {
+        // Interactive tools throw on purpose, and a real failure reads the same
+        // way to the agent: report it, don't dress it up as success.
+        return {
+          error: e instanceof Error ? e.message : String(e),
+          ...(tool.interactive
+            ? { hint: `"${tool.name}" needs its workspace — use open_page with "tools".` }
+            : {}),
+        };
       }
+      if (!out?.length) return { error: `"${tool.name}" produced no output.` };
+
+      const { deliverFile, outputDir } = await import("./agentFiles");
+      const saved = [];
+      for (const o of out) {
+        const d = await deliverFile(o);
+        saved.push(d);
+        fileOutputs.push({ name: d.name, path: d.path, url: d.url });
+      }
+      const where = await outputDir();
+      const paths = saved.map((s) => s.path).filter(Boolean);
       return {
         ok: true,
-        downloaded: list.map((o) => o.name),
-        message: `Done — ${list.length} file(s) ready (downloaded + available in chat).`,
+        tool: tool.name,
+        files: saved.map((s) => s.name),
+        saved_to: paths.length ? paths : undefined,
+        folder: where
+          ? `${where.dir} (${where.source === "settings" ? "your export folder from Settings" : "your desktop"})`
+          : undefined,
+        message: paths.length
+          ? `Saved ${saved.length} file(s) to ${where?.dir ?? "disk"}.`
+          : `${saved.length} file(s) ready in the chat.`,
       };
     },
   },

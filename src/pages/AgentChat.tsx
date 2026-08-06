@@ -6,6 +6,7 @@ import {
   Paperclip,
   X,
   Download,
+  FolderOpen,
   Brain,
   Trash2,
   ShieldAlert,
@@ -18,6 +19,7 @@ import {
   User,
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
+import { openFolder } from "../lib/localPaths";
 import { ErrorBanner, PageHeader } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
@@ -407,17 +409,33 @@ export default function AgentChat() {
         {outputs.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground">Generated:</span>
-            {outputs.map((o, i) => (
-              <a
-                key={i}
-                href={o.url}
-                download={o.name}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
-              >
-                <Download size={12} />
-                <span className="max-w-[180px] truncate">{o.name}</span>
-              </a>
-            ))}
+            {outputs.map((o, i) =>
+              // On the desktop the file is already on disk — offer to open it
+              // where it landed rather than "download" something that is
+              // already downloaded.
+              o.path ? (
+                <button
+                  key={i}
+                  type="button"
+                  title={o.path}
+                  onClick={() => void openFolder(o.path!)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
+                >
+                  <FolderOpen size={12} />
+                  <span className="max-w-[180px] truncate">{o.name}</span>
+                </button>
+              ) : (
+                <a
+                  key={i}
+                  href={o.url}
+                  download={o.name}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
+                >
+                  <Download size={12} />
+                  <span className="max-w-[180px] truncate">{o.name}</span>
+                </a>
+              )
+            )}
           </div>
         )}
         {/* Suggestion chips — quiet pills, always one click away */}
