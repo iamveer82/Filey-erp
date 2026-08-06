@@ -39,6 +39,19 @@ Sign-in and settings fixes. Everything here affects existing installs.
   error.
 - Desktop bundle version had drifted behind the app version.
 
+### Also arriving with this update
+v2.4.0 was built but its release was left as a draft, and v2.4.1 was never
+tagged at all — so neither reached a single install. Anyone updating from
+v2.3.24 gets all of it at once: the whole v2.4.0 release below, plus three
+auth fixes that were sitting on `main` unreleased —
+
+- Changing your account email no longer orphans an offline device: the device
+  credential follows the new address instead of being left behind on the old
+  one.
+- Changing it takes one code, sent to the new address.
+- In offline mode, a Supabase rejection falls through to the device's own
+  credential rather than locking you out of data that is sitting on your disk.
+
 ## v2.4.0 — 2026-08-03
 
 Minor rather than patch: this adds a Marketing module, bulk email, UAE payroll
