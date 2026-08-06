@@ -4,6 +4,12 @@ import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
 import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
 import {
+  adoptLocalProfile,
+  getLocalProfile,
+  isProfileStub,
+  type Profile,
+} from "../../lib/auth";
+import {
   autoSyncEnabled,
   setAutoSyncEnabled,
   getSyncStatus,
@@ -416,6 +422,47 @@ export default function DataModePanel() {
     if (!u?.email) return;
     rememberLocalIdentity(u.email, u.id);
     setLocalSignedIn(true);
+    // Bring the profile down with the identity. Offline mode keeps its own
+    // copy, and an empty one means first-run setup runs a second time for
+    // somebody who filled it in months ago.
+    try {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", u.id)
+        .maybeSingle();
+      if (prof) adoptLocalProfile({ ...(prof as Partial<Profile>), email: u.email });
+    } catch {
+      /* the identity is the part that matters; a name can be re-typed */
+    }
+  };
+
+  /** The mirror of the above, going the other way: someone who set their name
+   *  and company up offline should not be walked through first-run setup again
+   *  the first time they turn sync on. Only fills a cloud profile that is still
+   *  the untouched signup stub — real cloud values are never overwritten. */
+  const keepProfileInCloud = async () => {
+    if (!supabase) return;
+    try {
+      const { data } = await supabase.auth.getSession();
+      const u = data.session?.user;
+      const mine = getLocalProfile();
+      if (!u || (!mine.name?.trim() && !mine.company?.trim())) return;
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", u.id)
+        .maybeSingle();
+      if (prof && !isProfileStub(prof as Profile)) return;
+      await supabase.from("profiles").upsert({
+        id: u.id,
+        email: u.email ?? mine.email ?? "",
+        name: mine.name,
+        company: mine.company,
+      });
+    } catch {
+      /* first-run setup can still ask; not worth blocking the switch */
+    }
   };
 
   const switchTo = async (m: DataMode) => {
@@ -462,6 +509,7 @@ export default function DataModePanel() {
       }
     }
     if (m === "local") await keepSignedInLocally();
+    else await keepProfileInCloud();
     setDataMode(m);
     window.location.reload();
   };

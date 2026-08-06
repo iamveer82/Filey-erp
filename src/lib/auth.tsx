@@ -74,6 +74,44 @@ function saveLocalProfile(p: Profile): void {
   }
 }
 
+/** Copy the account's cloud profile onto this device. The profile is created
+ *  ONCE, at signup — offline mode used to keep an entirely separate one, so a
+ *  user who set up in the cloud and then switched to offline was walked through
+ *  first-run setup a second time and greeted as "You". Cloud values win where
+ *  they exist; anything the cloud has left blank keeps what is already here. */
+/** This device's profile, whatever mode the app is in. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const getLocalProfile = (): Profile => loadLocalProfile();
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function adoptLocalProfile(p: Partial<Profile>): void {
+  const cur = loadLocalProfile();
+  const merged: Profile = {
+    ...cur,
+    ...Object.fromEntries(
+      Object.entries(p).filter(([, v]) => v !== null && v !== undefined && v !== "")
+    ),
+  } as Profile;
+  saveLocalProfile(merged);
+}
+
+/** Offline sign-in that reached the server: take the account's profile with it,
+ *  so the same person sees the same name and company in both modes and is never
+ *  asked to set up a profile they already have. Best-effort by design. */
+async function pullCloudProfile(uid: string, email: string): Promise<void> {
+  if (!uid || !supabase) return;
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", uid)
+      .maybeSingle();
+    if (data) adoptLocalProfile({ ...(data as Partial<Profile>), email });
+  } catch {
+    /* a name is not worth failing a sign-in over */
+  }
+}
+
 export type Channel = "email" | "phone";
 
 export interface Credential {
@@ -311,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (error) throw error;
           const uid = data.user?.id;
           if (uid) await rememberLocalCredential(email, uid, password);
+          if (uid) await pullCloudProfile(uid, email);
           setLocalSignedIn(true);
           setUser(localUserFrom({ email, userId: uid ?? "" }));
           setProfile(localProfile());
@@ -435,6 +474,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (local) {
       // Local mode doesn't follow the cloud session — the verified code IS
       // the sign-in. Mark the device signed in for the account behind it.
+      await pullCloudProfile(uid, c.value.trim().toLowerCase());
       setLocalSignedIn(true);
       setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
       setProfile(localProfile());

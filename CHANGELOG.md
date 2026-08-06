@@ -30,6 +30,11 @@ Sign-in and settings fixes. Everything here affects existing installs.
 - **Signing in as a different account re-claims the device** instead of
   renaming the previous owner's credential, which would have handed the new
   account the old one's offline password.
+- **Your profile is created once, not once per mode.** Offline kept a separate
+  name and company, so setting up in the cloud and later switching to offline
+  ran first-run setup a second time and greeted you as "You". The profile now
+  travels with the account in both directions — and turning sync on never
+  overwrites a real cloud profile, only an untouched signup stub.
 
 ### Stamp & signature
 - **An expired image link re-signs itself** instead of leaving a broken stamp
