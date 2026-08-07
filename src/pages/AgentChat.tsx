@@ -47,7 +47,6 @@ import {
   setAttachment,
   setToolConfirm,
   drainFileOutputs,
-  type FileOutput,
 } from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
 import {
@@ -70,13 +69,6 @@ import { cn } from "../lib/format";
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval. Never invent data — look it up. Be concise and practical.";
 
-const SUGGESTIONS = [
-  "What's overdue right now?",
-  "Draft an invoice for Acme: 10 widgets at 25 AED",
-  "Remember our VAT is 5% and we bill in AED",
-  "Which products are low on stock?",
-];
-
 export default function AgentChat() {
   const [chat, setChat] = useState<Chat>(() => {
     const all = loadChats();
@@ -88,7 +80,6 @@ export default function AgentChat() {
   const [err, setErr] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [outputs, setOutputs] = useState<FileOutput[]>([]);
   const [pendingConfirm, setPendingConfirm] = useState<{
     name: string;
     args: Record<string, unknown>;
@@ -186,7 +177,6 @@ export default function AgentChat() {
     setChat(withUser);
     setBusy(true);
     setStreaming(auto ? "Planning…" : "");
-    setOutputs([]);
 
     // Make the file available to run_file_tool; convert images for vision.
     setAttachment(attached);
@@ -230,8 +220,17 @@ export default function AgentChat() {
         if (images?.length) messages[messages.length - 1].images = images;
         reply = await aiAgent(messages, { maxTokens: 1200 });
       }
-      setChat((c) => ({ ...c, turns: [...c.turns, { role: "assistant", text: reply }] }));
-      setOutputs(drainFileOutputs());
+      // Files belong to the message that produced them. They used to live in
+      // one shared slot above the composer, so asking a second question threw
+      // away the first answer's output.
+      const made = drainFileOutputs();
+      setChat((c) => ({
+        ...c,
+        turns: [
+          ...c.turns,
+          { role: "assistant", text: reply, ...(made.length ? { files: made } : {}) },
+        ],
+      }));
     } catch (e) {
       setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
     } finally {
@@ -406,51 +405,6 @@ export default function AgentChat() {
 
       {/* Composer */}
       <div className="sticky bottom-0 -mx-1 bg-background/80 px-1 pb-4 pt-2 backdrop-blur">
-        {outputs.length > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">Generated:</span>
-            {outputs.map((o, i) =>
-              // On the desktop the file is already on disk — offer to open it
-              // where it landed rather than "download" something that is
-              // already downloaded.
-              o.path ? (
-                <button
-                  key={i}
-                  type="button"
-                  title={o.path}
-                  onClick={() => void openFolder(o.path!)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
-                >
-                  <FolderOpen size={12} />
-                  <span className="max-w-[180px] truncate">{o.name}</span>
-                </button>
-              ) : (
-                <a
-                  key={i}
-                  href={o.url}
-                  download={o.name}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
-                >
-                  <Download size={12} />
-                  <span className="max-w-[180px] truncate">{o.name}</span>
-                </a>
-              )
-            )}
-          </div>
-        )}
-        {/* Suggestion chips — quiet pills, always one click away */}
-        <div className="mb-2 flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => void send(s)}
-              className="rounded-full border border-border px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
         {/* Minimal composer: the border states in neutral ink, no brand accent.
             An input is not a place that needs decorating. */}
         <div className="rounded-xl border border-border bg-card p-2.5 transition-colors focus-within:border-foreground/25">
@@ -767,23 +721,52 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   }
   return (
     <div className="flex gap-3">
-      {/* The orb spins only while the agent is actually thinking. A whole
-          transcript of animating avatars is noise, not life. */}
-      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted">
-        {pending ? (
-          <ThinkingOrb size={20} state="working" />
-        ) : (
-          <span className="h-1.5 w-1.5 rounded-full bg-foreground/50" />
-        )}
+      {/* The orb is the assistant's face, so it stays alive whatever the agent
+          is doing — working while a turn is in flight, listening once it has
+          answered. */}
+      <div className="grid h-8 w-8 shrink-0 place-items-center">
+        <ThinkingOrb size={20} state={pending ? "working" : "listening"} />
       </div>
-      <div
-        className={cn(
-          "min-w-0 max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
-          pending && "text-muted-foreground"
+      <div className="min-w-0 max-w-[85%]">
+        <div
+          className={cn(
+            "whitespace-pre-wrap rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
+            pending && "text-muted-foreground"
+          )}
+        >
+          {turn.text}
+          {pending && <span className="ml-1 inline-block animate-pulse">▍</span>}
+        </div>
+        {!!turn.files?.length && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {turn.files.map((f, i) =>
+              // Desktop: the file is already on disk, so open it where it
+              // landed. Browser: hand over the blob as a real download.
+              f.path ? (
+                <button
+                  key={i}
+                  type="button"
+                  title={f.path}
+                  onClick={() => void openFolder(f.path!)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
+                >
+                  <FolderOpen size={12} />
+                  <span className="max-w-[200px] truncate">{f.name}</span>
+                </button>
+              ) : f.url ? (
+                <a
+                  key={i}
+                  href={f.url}
+                  download={f.name}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-hover"
+                >
+                  <Download size={12} />
+                  <span className="max-w-[200px] truncate">{f.name}</span>
+                </a>
+              ) : null
+            )}
+          </div>
         )}
-      >
-        {turn.text}
-        {pending && <span className="ml-1 inline-block animate-pulse">▍</span>}
       </div>
     </div>
   );

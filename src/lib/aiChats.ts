@@ -4,6 +4,9 @@
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
+  /** Files the agent produced on this turn, kept with the message that made
+   *  them so they stay reachable instead of vanishing at the next question. */
+  files?: { name: string; path?: string; url?: string }[];
 }
 export interface Chat {
   id: string;
@@ -63,7 +66,18 @@ export function loadChats(): Chat[] {
 
 export function saveChats(chats: Chat[]): void {
   try {
-    localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+    // A blob URL dies with the page that made it, so persisting one leaves a
+    // download chip that silently does nothing tomorrow. Paths survive; URLs
+    // are dropped on the way to disk and simply aren't offered after a reload.
+    const clean = chats.map((c) => ({
+      ...c,
+      turns: c.turns.map((t) =>
+        t.files
+          ? { ...t, files: t.files.map(({ name, path }) => ({ name, path })).filter((f) => f.path) }
+          : t
+      ),
+    }));
+    localStorage.setItem(CHATS_KEY, JSON.stringify(clean));
   } catch {
     console.error("Failed to save chats to localStorage");
   }
