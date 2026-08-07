@@ -7,6 +7,10 @@ import {
   followups,
   hr,
   pos,
+  computeVatReturn,
+  computeTrialBalance,
+  computeBalanceSheet,
+  computeCashSummary,
   type InvoiceDocInput,
 } from "./api";
 import { sendEmail, emailShell, esc } from "./email";
@@ -171,6 +175,174 @@ export const TOOLS: ToolDef[] = [
         invoices: inv.length,
         quotes: q.length,
         overdue_invoices: overdue,
+      };
+    },
+  },
+  {
+    name: "financial_summary",
+    description:
+      "The business's financial position right now: assets, liabilities, equity, revenue, expenses, net profit and cash. Use this for 'how are we doing', 'what's our profit', 'how much cash do we have'.",
+    parameters: { type: "object", properties: {} },
+    run: async () => fin.report(),
+  },
+  {
+    name: "vat_return",
+    description:
+      "The UAE VAT 201 figures for a period: standard-rated supplies and output tax, zero-rated and exempt supplies, reverse charge, recoverable input tax and the net VAT payable or refundable. Dates are YYYY-MM-DD; omit them for all time. This is a calculation from the books, not a filing — say so.",
+    parameters: {
+      type: "object",
+      properties: { from: { type: "string" }, to: { type: "string" } },
+    },
+    run: async (a) => {
+      const [txns, invoices, company] = await Promise.all([
+        fin.transactions(),
+        billing.listDocs(),
+        billing.getCompany(),
+      ]);
+      const rate = numOf(company?.default_tax_rate) || 5;
+      return computeVatReturn(txns, rate, str(a.from) || undefined, str(a.to) || undefined, invoices);
+    },
+  },
+  {
+    name: "financial_statements",
+    description:
+      "Trial balance and balance sheet from the ledger, plus cash in/out for an optional period (YYYY-MM-DD). Use for 'are the books balanced', 'show me the balance sheet', 'how much came in last month'.",
+    parameters: {
+      type: "object",
+      properties: { from: { type: "string" }, to: { type: "string" } },
+    },
+    run: async (a) => {
+      const [accounts, txns] = await Promise.all([fin.accounts(), fin.transactions()]);
+      return {
+        trial_balance: computeTrialBalance(accounts),
+        balance_sheet: computeBalanceSheet(accounts),
+        cash: computeCashSummary(txns, str(a.from) || undefined, str(a.to) || undefined),
+      };
+    },
+  },
+  {
+    name: "receivables_aging",
+    description:
+      "Who owes money and for how long — outstanding invoices bucketed by how overdue they are (current, 1-30, 31-60, 61-90, 90+ days), with a per-customer total. Use for 'who owes us', 'what's overdue', 'chase the late payers'.",
+    parameters: { type: "object", properties: { customer: { type: "string" } } },
+    run: async (a) => {
+      const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
+      const t = today();
+      const days = (due: string) =>
+        Math.floor((Date.parse(t) - Date.parse(due)) / 86_400_000);
+      const bucketOf = (d: number) =>
+        d <= 0 ? "current" : d <= 30 ? "1-30" : d <= 60 ? "31-60" : d <= 90 ? "61-90" : "90+";
+      const q = lc(a.customer);
+      const buckets: Record<string, number> = {
+        current: 0,
+        "1-30": 0,
+        "31-60": 0,
+        "61-90": 0,
+        "90+": 0,
+      };
+      const byCustomer: Record<string, number> = {};
+      const items: Record<string, unknown>[] = [];
+      for (const d of docs) {
+        const status = lc(d.status);
+        if (status === "draft" || status === "paid" || status === "cancelled") continue;
+        // balance is what the doc itself reports; fall back to total less paid
+        // so a document written before balances were tracked still counts.
+        const due = numOf(d.balance) || numOf(d.total) - numOf(d.paid);
+        if (due <= 0.005) continue;
+        const name = str(d.customer_name);
+        if (q && !lc(name).includes(q)) continue;
+        const overdueBy = d.due_date ? days(str(d.due_date)) : 0;
+        const bucket = bucketOf(overdueBy);
+        buckets[bucket] += due;
+        byCustomer[name] = (byCustomer[name] ?? 0) + due;
+        items.push({
+          number: d.number,
+          customer: name,
+          due_date: d.due_date ?? null,
+          days_overdue: Math.max(0, overdueBy),
+          outstanding: due,
+          bucket,
+        });
+      }
+      items.sort((x, y) => numOf(y.days_overdue) - numOf(x.days_overdue));
+      return {
+        total_outstanding: Object.values(buckets).reduce((s, v) => s + v, 0),
+        buckets,
+        by_customer: byCustomer,
+        invoices: items.slice(0, 40),
+        counted: items.length,
+      };
+    },
+  },
+  {
+    name: "list_transactions",
+    description:
+      "Ledger entries, newest first — optionally filtered by account name and date range (YYYY-MM-DD). Use to explain a balance or trace where a number came from.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: { type: "string" },
+        from: { type: "string" },
+        to: { type: "string" },
+        limit: { type: "number" },
+      },
+    },
+    run: async (a) => {
+      const rows = (await fin.transactions()) as unknown as Record<string, unknown>[];
+      const acct = lc(a.account);
+      const from = str(a.from);
+      const to = str(a.to);
+      const hits = rows.filter((r) => {
+        if (acct && !lc(r.account_name).includes(acct)) return false;
+        const d = str(r.txn_date);
+        return (!from || d >= from) && (!to || d <= to);
+      });
+      return {
+        count: hits.length,
+        transactions: hits.slice(0, Math.min(numOf(a.limit) || 50, 200)).map((r) => ({
+          date: r.txn_date,
+          account: r.account_name,
+          type: r.txn_type,
+          amount: r.amount,
+          description: r.description ?? null,
+          reference: r.reference ?? null,
+        })),
+      };
+    },
+  },
+  {
+    name: "list_expenses",
+    description:
+      "Recorded expenses, newest first, optionally within a date range (YYYY-MM-DD). Use for 'what did we spend on X', 'expenses last month'.",
+    parameters: {
+      type: "object",
+      properties: {
+        from: { type: "string" },
+        to: { type: "string" },
+        category: { type: "string" },
+        limit: { type: "number" },
+      },
+    },
+    run: async (a) => {
+      const rows = (await fin.expenses()) as unknown as Record<string, unknown>[];
+      const from = str(a.from);
+      const to = str(a.to);
+      const cat = lc(a.category);
+      const hits = rows.filter((r) => {
+        const d = str(r.expense_date);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return !cat || lc(r.category).includes(cat);
+      });
+      return {
+        count: hits.length,
+        total: hits.reduce((s, r) => s + numOf(r.amount), 0),
+        expenses: hits.slice(0, Math.min(numOf(a.limit) || 50, 200)).map((r) => ({
+          date: r.expense_date,
+          category: r.category,
+          description: r.description ?? null,
+          amount: r.amount,
+        })),
       };
     },
   },
