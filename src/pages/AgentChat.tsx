@@ -293,8 +293,8 @@ export default function AgentChat() {
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-primary-400 bg-background/85 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-2 text-primary-600 dark:text-primary-400">
+        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 text-foreground">
             <Paperclip size={28} />
             <p className="text-sm font-semibold text-foreground">Drop a PDF or image to attach</p>
           </div>
@@ -505,7 +505,11 @@ export default function AgentChat() {
                 void send(input);
               }
             }}
-            className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+            // No focus ring on the composer: the global :focus-visible rule
+            // paints an amber ring, and a textarea matches it on every click —
+            // a yellow box around the thing you type in, all the time. Focus is
+            // still shown, by the wrapper's border darkening.
+            className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
             autoFocus
           />
 
