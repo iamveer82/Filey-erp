@@ -131,6 +131,28 @@ export const LEGACY_OPS: Record<string, { id: string; params?: Record<string, st
 
 const loadToolbox = async () => (await import("../components/PdfToolbox")).PDF_TOOLS;
 
+/* Cheques, bank accounts and email templates have no table of their own: each
+ * page keeps a JSON array in app_settings under one key. Reading and writing
+ * them through the same key is what keeps the agent and the page looking at the
+ * same list. */
+async function readSettingList(key: string): Promise<Record<string, unknown>[]> {
+  const { tools } = await import("./api");
+  const rows = await tools.settings();
+  const raw = rows.find((r) => r.key === key)?.value;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeSettingList(key: string, list: unknown[]): Promise<void> {
+  const { tools } = await import("./api");
+  await tools.setSetting(key, JSON.stringify(list));
+}
+
 const NAV_PAGES = [
   "overview",
   "inventory",
@@ -1617,6 +1639,303 @@ export const TOOLS: ToolDef[] = [
         number,
         amount,
         message: `Receipt ${number} issued — open Payment Receipts to print or send it.`,
+      };
+    },
+  },
+  {
+    name: "list_payroll",
+    description:
+      "Payroll runs, newest first — who was paid, for which period, and whether it has been marked paid. Filter by period (e.g. 2026-07) or employee name.",
+    parameters: {
+      type: "object",
+      properties: {
+        period: { type: "string" },
+        employee: { type: "string" },
+        limit: { type: "number" },
+      },
+    },
+    run: async (a) => {
+      const rows = (await hr.payroll()) as unknown as Record<string, unknown>[];
+      const period = lc(a.period);
+      const emp = lc(a.employee);
+      const hits = rows.filter(
+        (r) =>
+          (!period || lc(r.period).includes(period)) &&
+          (!emp || lc(r.employee_name).includes(emp))
+      );
+      return {
+        count: hits.length,
+        total_net: hits.reduce((s, r) => s + numOf(r.net_pay), 0),
+        runs: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((r) => ({
+          employee: r.employee_name,
+          period: r.period,
+          basic: r.basic,
+          allowances: r.allowances,
+          deductions: r.deductions,
+          net_pay: r.net_pay,
+          status: r.status,
+        })),
+      };
+    },
+  },
+  {
+    name: "run_payroll",
+    sensitive: true,
+    description:
+      "Create a payroll run for one employee and period (e.g. 2026-07). Net pay is basic + allowances - deductions. This posts a salary liability, so it always asks the user first.",
+    parameters: {
+      type: "object",
+      properties: {
+        employee_name: { type: "string" },
+        period: { type: "string" },
+        basic: { type: "number" },
+        allowances: { type: "number" },
+        deductions: { type: "number" },
+      },
+      required: ["employee_name", "period", "basic"],
+    },
+    run: async (a) => {
+      const staff = (await hr.employees()) as unknown as Record<string, unknown>[];
+      const q = lc(a.employee_name);
+      const who = staff.find((e) => lc(e.name) === q) ?? staff.find((e) => lc(e.name).includes(q));
+      if (!who) return { error: `No employee matching "${str(a.employee_name)}".` };
+      const basic = numOf(a.basic);
+      const allow = numOf(a.allowances);
+      const ded = numOf(a.deductions);
+      await hr.runPayroll(numOf(who.id), str(a.period), basic, allow, ded);
+      return {
+        ok: true,
+        employee: who.name,
+        period: str(a.period),
+        net_pay: basic + allow - ded,
+        message: "Payroll run created — mark it paid in People once the money leaves.",
+      };
+    },
+  },
+  {
+    name: "generate_wps_file",
+    description:
+      "Build the UAE WPS salary file (SIF) for a period and save it to the user's computer, from the company's MOL establishment ID and bank code plus each active employee's labour card, IBAN and salary. Dates are YYYY-MM-DD. If anything required is missing it reports exactly what, rather than writing a file the bank will reject.",
+    parameters: {
+      type: "object",
+      properties: { from: { type: "string" }, to: { type: "string" } },
+      required: ["from", "to"],
+    },
+    run: async (a) => {
+      const [{ buildSif, validateWps }, company, staff] = await Promise.all([
+        import("./wps"),
+        billing.getCompany(),
+        hr.employees(),
+      ]);
+      const from = str(a.from);
+      const to = str(a.to);
+      const days = Math.max(
+        1,
+        Math.min(31, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1)
+      );
+      // Leavers on the file get it rejected, so only active staff are paid.
+      const active = (staff as unknown as Record<string, unknown>[]).filter(
+        (e) => (str(e.status) || "active") === "active"
+      );
+      const input = {
+        employer: {
+          molEstablishmentId: str(company?.mol_establishment_id),
+          bankCode: str(company?.wps_bank_code),
+        },
+        employees: active.map((e) => ({
+          name: str(e.name),
+          labourCardNo: str(e.labour_card_no),
+          iban: str(e.iban),
+          bankCode: str(e.bank_routing_code),
+          fixedAmount: numOf(e.salary),
+          daysInPeriod: days,
+        })),
+        periodStart: from,
+        periodEnd: to,
+      };
+      const problems = validateWps(input as never);
+      if (problems.length)
+        return {
+          error: "The salary file isn't valid yet.",
+          problems,
+          hint: "Employee identifiers live on each person's record; the employer ones are in Company Details.",
+        };
+      const file = buildSif(input as never);
+      const { deliverFile, outputDir } = await import("./agentFiles");
+      const bytes = new TextEncoder().encode(file.content);
+      const saved = await deliverFile({ name: file.filename, bytes });
+      fileOutputs.push({ name: saved.name, path: saved.path, url: saved.url });
+      const where = await outputDir();
+      return {
+        ok: true,
+        file: file.filename,
+        employees: file.employeeCount,
+        total: file.totalAmount,
+        saved_to: saved.path,
+        folder: where?.dir,
+        message: `WPS file for ${file.employeeCount} employee(s) saved.`,
+      };
+    },
+  },
+  {
+    name: "list_campaigns",
+    description:
+      "Marketing campaigns with their status and audience. Sending is done from the Marketing page — bulk email is never fired from chat.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const rows = (await crm.campaigns()) as unknown as Record<string, unknown>[];
+      return {
+        count: rows.length,
+        campaigns: rows.slice(0, 40).map((c) => ({
+          id: c.id,
+          name: c.name,
+          subject: c.subject ?? null,
+          status: c.status,
+          sent: c.sent_count ?? 0,
+          created_at: c.created_at,
+        })),
+      };
+    },
+  },
+  {
+    name: "create_campaign",
+    description:
+      "Draft a marketing campaign — name, subject and body. Merge fields like {{name}} and {{company}} are filled per recipient. It is created as a draft; the user picks the audience and sends it from the Marketing page.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        subject: { type: "string" },
+        body: { type: "string" },
+      },
+      required: ["name", "subject", "body"],
+    },
+    run: async (a) => {
+      const id = await crm.createCampaign({
+        name: str(a.name),
+        subject: str(a.subject),
+        body: str(a.body),
+        status: "draft",
+      } as never);
+      return {
+        ok: true,
+        id,
+        message: `Campaign "${str(a.name)}" drafted — open Marketing to choose who gets it and send.`,
+      };
+    },
+  },
+  {
+    name: "list_cheques",
+    description:
+      "The cheque register — issued and received cheques with their due dates and status (pending, cleared, bounced, cancelled). Use for 'which cheques clear this week', 'any bounced cheques'.",
+    parameters: {
+      type: "object",
+      properties: { status: { type: "string" }, type: { type: "string" } },
+    },
+    run: async (a) => {
+      const list = await readSettingList("cheque_register");
+      const st = lc(a.status);
+      const kind = lc(a.type);
+      const hits = list.filter(
+        (c) => (!st || lc(c.status) === st) && (!kind || lc(c.type) === kind)
+      );
+      return {
+        count: hits.length,
+        pending_total: hits
+          .filter((c) => lc(c.status) === "pending")
+          .reduce((s, c) => s + numOf(c.amount), 0),
+        cheques: hits.slice(0, 50).map((c) => ({
+          cheque_no: c.cheque_no,
+          type: c.type,
+          party: c.party,
+          bank: c.bank,
+          amount: c.amount,
+          due_date: c.due_date,
+          status: c.status,
+        })),
+      };
+    },
+  },
+  {
+    name: "record_cheque",
+    description:
+      "Add a cheque to the register. type is 'issued' (you wrote it) or 'received' (you were given it). Status starts pending.",
+    parameters: {
+      type: "object",
+      properties: {
+        cheque_no: { type: "string" },
+        type: { type: "string" },
+        party: { type: "string" },
+        bank: { type: "string" },
+        amount: { type: "number" },
+        issue_date: { type: "string" },
+        due_date: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["cheque_no", "type", "party", "amount"],
+    },
+    run: async (a) => {
+      const kind = lc(a.type);
+      if (kind !== "issued" && kind !== "received")
+        return { error: "type must be 'issued' or 'received'." };
+      const list = await readSettingList("cheque_register");
+      const row = {
+        id: Date.now(),
+        cheque_no: str(a.cheque_no),
+        type: kind,
+        party: str(a.party),
+        bank: str(a.bank),
+        amount: numOf(a.amount),
+        issue_date: str(a.issue_date) || today(),
+        due_date: str(a.due_date) || str(a.issue_date) || today(),
+        status: "pending",
+        notes: str(a.notes),
+        created_at: new Date().toISOString(),
+      };
+      await writeSettingList("cheque_register", [row, ...list]);
+      return { ok: true, cheque_no: row.cheque_no, message: "Cheque recorded." };
+    },
+  },
+  {
+    name: "list_bank_accounts",
+    description:
+      "The company's bank accounts with their balances, so you can answer 'which account has the money' or quote an IBAN onto a document.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const list = await readSettingList("bank_accounts");
+      return {
+        count: list.length,
+        total_balance: list.reduce((s, b) => s + numOf(b.current_balance), 0),
+        accounts: list.map((b) => ({
+          bank: b.bank_name,
+          account_name: b.account_name,
+          account_number: b.account_number,
+          iban: b.iban,
+          currency: b.currency,
+          balance: b.current_balance,
+        })),
+      };
+    },
+  },
+  {
+    name: "list_email_templates",
+    description:
+      "Saved email templates — name, category and subject, plus the body so you can reuse the company's own wording instead of inventing it.",
+    parameters: { type: "object", properties: { query: { type: "string" } } },
+    run: async (a) => {
+      const list = await readSettingList("email_templates");
+      const q = lc(a.query);
+      return {
+        count: list.length,
+        templates: list
+          .filter((t) => !q || `${lc(t.name)} ${lc(t.category)} ${lc(t.subject)}`.includes(q))
+          .slice(0, 25)
+          .map((t) => ({
+            name: t.name,
+            category: t.category,
+            subject: t.subject,
+            body: str(t.body).slice(0, 1200),
+          })),
       };
     },
   },
