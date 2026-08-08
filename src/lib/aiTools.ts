@@ -743,6 +743,9 @@ export const TOOLS: ToolDef[] = [
       properties: {
         tool_id: { type: "string" },
         options: { type: "object" },
+        /** Also file the result in My Files, so it lives in the app and not
+         *  only on this one computer. */
+        save_to_app: { type: "boolean" },
         // Accepted for older prompts that named an operation rather than an id.
         operation: { type: "string" },
         degrees: { type: "number" },
@@ -799,10 +802,19 @@ export const TOOLS: ToolDef[] = [
 
       const { deliverFile, outputDir } = await import("./agentFiles");
       const saved = [];
+      let filedInApp = 0;
       for (const o of out) {
         const d = await deliverFile(o);
         saved.push(d);
         fileOutputs.push({ name: d.name, path: d.path, url: d.url });
+        if (a.save_to_app) {
+          try {
+            await (await import("./files")).saveOutput(o, tool.name);
+            filedInApp++;
+          } catch {
+            /* the file is already on disk — failing to also file it is not fatal */
+          }
+        }
       }
       const where = await outputDir();
       const paths = saved.map((s) => s.path).filter(Boolean);
@@ -814,9 +826,73 @@ export const TOOLS: ToolDef[] = [
         folder: where
           ? `${where.dir} (${where.source === "settings" ? "your export folder from Settings" : "your desktop"})`
           : undefined,
+        filed_in_my_files: a.save_to_app ? filedInApp : undefined,
         message: paths.length
           ? `Saved ${saved.length} file(s) to ${where?.dir ?? "disk"}.`
           : `${saved.length} file(s) ready in the chat.`,
+      };
+    },
+  },
+  {
+    name: "list_my_files",
+    description:
+      "Files saved in the app's My Files, newest first — optionally filtered by name. These are the user's stored documents, separate from whatever is attached to this chat.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" }, limit: { type: "number" } },
+    },
+    run: async (a) => {
+      const { listFiles } = await import("./files");
+      const files = await listFiles();
+      const q = lc(a.query);
+      const hits = files.filter((f) => !q || f.name.toLowerCase().includes(q));
+      return {
+        count: hits.length,
+        files: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((f) => ({
+          name: f.name,
+          size_kb: Math.max(1, Math.round(f.size / 1024)),
+          type: f.mime,
+          made_by: f.tool ?? null,
+          saved_at: new Date(f.createdAt).toISOString().slice(0, 10),
+        })),
+      };
+    },
+  },
+  {
+    name: "use_saved_file",
+    description:
+      "Pick a file out of My Files and make it the file this chat is working on, exactly as if the user had just attached it — then run_file_tool and read_attached_document act on it. Use for 'compress the quote I saved last week'. Match by name; find_it first with list_my_files if unsure.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const { listFiles, fileBytes } = await import("./files");
+      const q = lc(a.name);
+      if (!q) return { error: "Which file? Give me its name." };
+      const files = await listFiles();
+      const hit =
+        files.find((f) => f.name.toLowerCase() === q) ??
+        files.find((f) => f.name.toLowerCase().includes(q));
+      if (!hit)
+        return {
+          error: `No saved file matching "${str(a.name)}".`,
+          hint: "Call list_my_files to see what is there.",
+        };
+      const bytes = await fileBytes(hit);
+      if (!bytes) return { error: `Could not read "${hit.name}" back out of storage.` };
+      // A File, not a Blob: the tools read .name for the output filename and
+      // .type to decide whether they are looking at a PDF or an image.
+      setAttachment(
+        new File([bytes as BlobPart], hit.name, {
+          type: hit.mime || "application/octet-stream",
+        })
+      );
+      return {
+        ok: true,
+        name: hit.name,
+        message: `Working on ${hit.name} from My Files.`,
       };
     },
   },

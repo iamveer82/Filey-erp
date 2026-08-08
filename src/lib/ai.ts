@@ -123,7 +123,7 @@ const HUMAN_TONE =
  * agent ended up using thirteen of them. */
 const FILE_WORKFLOW =
   "WORKING WITH FILES: you have the whole Tools catalogue — PDF, image, Office conversion, OCR, compression, security, data extraction — through two tools. When the user wants something done to a file, call list_file_tools (pass a query like 'compress' or 'ocr' to narrow it) to find the right id, then run_file_tool with that id and its options. Don't guess an id you haven't seen and don't assume a job is impossible before you've searched the catalogue. " +
-  "Some tools need their own workspace and say so — for those, open the Tools page for the user instead of failing. Whatever you produce is saved onto their computer automatically; run_file_tool tells you the folder, so finish by saying what you made and where it landed, in one plain sentence. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
+  "Some tools need their own workspace and say so — for those, open the Tools page for the user instead of failing. Whatever you produce is saved onto their computer automatically; run_file_tool tells you the folder, so finish by saying what you made and where it landed, in one plain sentence. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
 
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
   const parts = [base, AI_GUARDRAILS, HUMAN_TONE, FILE_WORKFLOW];
