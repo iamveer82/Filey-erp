@@ -132,6 +132,62 @@ describe("totals across currencies", () => {
     expect(bal(/cash|bank/i)).toBeCloseTo(3672.5, 2);
   });
 
+  it("books the difference when a euro invoice settles at another rate", async () => {
+    // Raised at 4.00, and the live fallback rate for EUR in this environment is
+    // also 4.00 — so to exercise the gain path the invoice is frozen LOW, as it
+    // would be if the euro had strengthened since the invoice date.
+    const id = (await billing.saveDoc({
+      number: "INV-EUR",
+      status: "sent",
+      currency: "EUR",
+      fx_rate: 3.9,
+      tax_rate: 0,
+      discount: 0,
+      customer_name: "Berlin GmbH",
+      items: [{ description: "consulting", qty: 1, unit_price: 1000 }],
+    } as never)) as number;
+
+    await billing.addPayment(id, 1000, "bank transfer", "2026-08-08");
+
+    const accounts = await fin.accounts();
+    const bal = (re: RegExp) =>
+      accounts.find((a) => re.test(a.name))?.balance ?? 0;
+    // AR is relieved at the rate it was raised at, so it still reaches zero.
+    expect(bal(/receivable/i)).toBeCloseTo(0, 2);
+    // Cash is worth what arrived on the day, and the gap is a recorded gain
+    // rather than a hole in the trial balance.
+    const cash = bal(/cash|bank/i);
+    const fx = bal(/foreign exchange/i);
+    expect(cash - 3900).toBeCloseTo(-fx, 2);
+    // And it really happened — the euro's spot rate is above the frozen 3.90,
+    // so this must be a non-zero gain, not two zeros agreeing with each other.
+    expect(cash).toBeGreaterThan(3900);
+    expect(fx).toBeLessThan(0);
+  });
+
+  it("posts no exchange difference for a currency it has no rate for", async () => {
+    const id = (await billing.saveDoc({
+      number: "INV-XYZ",
+      status: "sent",
+      currency: "XYZ",
+      fx_rate: 2,
+      tax_rate: 0,
+      discount: 0,
+      customer_name: "Nowhere Ltd",
+      items: [{ description: "work", qty: 1, unit_price: 100 }],
+    } as never)) as number;
+    await billing.addPayment(id, 100, "cash", "2026-08-08");
+
+    const accounts = await fin.accounts();
+    const bal = (re: RegExp) =>
+      accounts.find((a) => re.test(a.name))?.balance ?? 0;
+    // Without a rate, "spot" would pass the raw 100 through and invent a 100
+    // loss against a 200 receivable. Nothing should be posted at all.
+    expect(bal(/foreign exchange/i)).toBe(0);
+    expect(bal(/receivable/i)).toBeCloseTo(0, 2);
+    expect(bal(/cash|bank/i)).toBeCloseTo(200, 2);
+  });
+
   it("values stock bought in dollars at what it actually cost in dirhams", async () => {
     // The nastiest version of this bug: buy a part at $10 and the books record
     // it as costing 10 dirhams, so every margin and COGS figure downstream is

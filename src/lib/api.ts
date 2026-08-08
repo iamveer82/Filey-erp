@@ -7,7 +7,7 @@ import {
   docTotals as lineAwareTotals,
   netByTaxCategory,
 } from "./docItems";
-import { getExchangeRates, docAmountInAed } from "./exchange-rates";
+import { getExchangeRates, docAmountInAed, unratedCurrency } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
 import { localYmd, todayYmd } from "./format";
@@ -2717,6 +2717,20 @@ async function findOrCreateCashAccount(): Promise<number> {
   );
 }
 
+/** Where the difference goes when a foreign invoice settles at a rate other
+ *  than the one it was raised at. Held as an expense account carrying both
+ *  directions: a loss adds to it, a gain nets against it. Only ever created
+ *  when a difference actually arises, so a business billing in pegged dollars
+ *  never sees it. */
+async function findOrCreateFxAccount(): Promise<number> {
+  return findOrCreateAccount(
+    "expense",
+    "5900",
+    "Foreign Exchange Gain/Loss",
+    /foreign exchange|fx gain|exchange (gain|loss)/i
+  );
+}
+
 async function findOrCreateExpenseAccount(): Promise<number> {
   const { data } = await sb()
     .from("accounts")
@@ -3545,12 +3559,23 @@ export const billing = {
       // 1,836 for the same $500 — so the receivable never cleared however much
       // the customer paid, and cash was understated by the exchange rate.
       const payRates = await getExchangeRates().catch(() => ({}));
-      const amountBase = docAmountInAed(
-        amount,
-        (docRow as { currency?: string } | null)?.currency,
-        (docRow as { fx_rate?: number } | null)?.fx_rate,
-        payRates
-      );
+      const docCurrency = (docRow as { currency?: string } | null)?.currency;
+      const docFx = (docRow as { fx_rate?: number } | null)?.fx_rate;
+      // AR was raised at the rate on the date of supply, so it must be RELIEVED
+      // at that same rate or the receivable never reaches zero.
+      const amountBase = docAmountInAed(amount, docCurrency, docFx, payRates);
+      // Cash, though, is worth what it was worth on the day it arrived. When
+      // those differ the gap is a real gain or loss, not a rounding artefact —
+      // it posts to Foreign Exchange Gain/Loss so the books still balance.
+      // Pegged currencies produce zero here and no account is ever created.
+      // …but only when a spot rate actually exists. Without one, converting
+      // "spot" passes the raw number through, which would read as a loss the
+      // size of the whole invoice. No rate means no opinion: settle at the
+      // document's own rate and post no difference.
+      const amountSpot = unratedCurrency(docCurrency, null, payRates)
+        ? amountBase
+        : docAmountInAed(amount, docCurrency, null, payRates);
+      const fxDiff = Number((amountSpot - amountBase).toFixed(2));
       const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
       const cashId = await findOrCreateCashAccount();
       const arId = await findOrCreateArAccount();
@@ -3558,14 +3583,37 @@ export const billing = {
         await sInsert("transactions", {
           account_id: cashId,
           txn_type: "debit",
-          amount: amountBase,
+          amount: amountSpot,
           description: `${ref} — Cash/Bank`,
           ref,
           source: "payment",
           invoice_id: invoiceId,
           txn_date: paidAt,
         });
-        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amountBase));
+        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amountSpot));
+      }
+      if (Math.abs(fxDiff) >= 0.01) {
+        // Cash came in worth more than the receivable (gain, credit) or less
+        // (loss, debit). Either way this is the entry that keeps debits and
+        // credits equal once the two legs are valued at different rates.
+        const fxId = await findOrCreateFxAccount();
+        if (fxId > 0) {
+          const gain = fxDiff > 0;
+          await sInsert("transactions", {
+            account_id: fxId,
+            txn_type: gain ? "credit" : "debit",
+            amount: Math.abs(fxDiff),
+            description: `${ref} — exchange ${gain ? "gain" : "loss"}`,
+            ref,
+            source: "payment",
+            invoice_id: invoiceId,
+            txn_date: paidAt,
+          });
+          await adjustAccountBalance(
+            fxId,
+            ledgerDelta("expense", gain ? "credit" : "debit", Math.abs(fxDiff))
+          );
+        }
       }
       if (arId > 0) {
         await sInsert("transactions", {
