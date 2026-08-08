@@ -1013,6 +1013,289 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "find_suppliers",
+    description:
+      "Search suppliers by name (omit query to list them all). The agent could raise a purchase order but had no way to look up who it was for.",
+    parameters: { type: "object", properties: { query: { type: "string" } } },
+    run: async ({ query }) => {
+      const all = (await (await import("./api")).suppliers.list()) as unknown as Record<
+        string,
+        unknown
+      >[];
+      const q = lc(query);
+      return all
+        .filter((s) => !q || lc(s.name).includes(q))
+        .slice(0, 25)
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          contact: s.contact_person ?? null,
+          email: s.email ?? null,
+          phone: s.phone ?? null,
+          trn: s.tax_id ?? null,
+        }));
+    },
+  },
+  {
+    name: "create_supplier",
+    description: "Add a supplier. Name is required; everything else is optional.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        contact_person: { type: "string" },
+        email: { type: "string" },
+        phone: { type: "string" },
+        address: { type: "string" },
+        tax_id: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const name = str(a.name).trim();
+      if (!name) return { error: "A supplier needs a name." };
+      const { suppliers } = await import("./api");
+      const id = await suppliers.create({
+        name,
+        contact_person: str(a.contact_person) || undefined,
+        email: str(a.email) || undefined,
+        phone: str(a.phone) || undefined,
+        address: str(a.address) || undefined,
+        tax_id: str(a.tax_id) || undefined,
+        notes: str(a.notes) || undefined,
+      } as never);
+      return { ok: true, id, name, message: `Added ${name} to Suppliers.` };
+    },
+  },
+  {
+    name: "list_purchase_invoices",
+    description:
+      "Supplier bills (purchase invoices), newest first — optionally filtered by supplier name or status. Separate from sales invoices; use list_invoices for what you billed OUT.",
+    parameters: {
+      type: "object",
+      properties: {
+        supplier: { type: "string" },
+        status: { type: "string" },
+        limit: { type: "number" },
+      },
+    },
+    run: async (a) => {
+      const docs = (await billing.listDocs("purchase")) as unknown as Record<
+        string,
+        unknown
+      >[];
+      const sup = lc(a.supplier);
+      const st = lc(a.status);
+      const hits = docs.filter(
+        (d) =>
+          (!sup || lc(d.customer_name).includes(sup)) && (!st || lc(d.status) === st)
+      );
+      return {
+        count: hits.length,
+        bills: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((d) => ({
+          number: d.number,
+          supplier: d.customer_name,
+          status: d.status,
+          total: d.total,
+          outstanding: numOf(d.balance) || numOf(d.total) - numOf(d.paid),
+          issue_date: d.issue_date ?? null,
+          due_date: d.due_date ?? null,
+        })),
+      };
+    },
+  },
+  {
+    name: "create_purchase_invoice_draft",
+    description:
+      "Record a supplier bill as a DRAFT the user reviews. Use after reading an attached supplier invoice, or when the user dictates one. Finalising it (which receives stock and posts to Payables) stays a human decision.",
+    parameters: {
+      type: "object",
+      properties: {
+        supplier_name: { type: "string" },
+        currency: { type: "string" },
+        issue_date: { type: "string" },
+        due_date: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              description: { type: "string" },
+              qty: { type: "number" },
+              unit_price: { type: "number" },
+            },
+            required: ["description", "qty", "unit_price"],
+          },
+        },
+      },
+      required: ["supplier_name", "items"],
+    },
+    run: async (a) => {
+      const co = await billing.getCompany();
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+      const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
+      if (!items.length) return { error: "A bill needs at least one line." };
+      const input = {
+        number: `BILL-${stamp}`,
+        status: "draft",
+        // doc_type is what separates a supplier bill from a sales invoice —
+        // without it the bill lands in Invoicing as money owed TO the company.
+        doc_type: "purchase",
+        template: co?.default_template || "minimal",
+        accent: co?.default_accent || "#FFD600",
+        currency: str(a.currency) || getDisplayCurrency(),
+        seller_name: co?.name || "",
+        seller_trn: co?.trn,
+        customer_name: str(a.supplier_name),
+        issue_date: str(a.issue_date) || today(),
+        due_date: str(a.due_date) || undefined,
+        tax_rate: co?.default_tax_rate ?? 0,
+        discount: 0,
+        items: items.map((it) => ({
+          description: str(it.description),
+          qty: numOf(it.qty) || 1,
+          unit_price: numOf(it.unit_price),
+        })),
+      } as unknown as InvoiceDocInput;
+      await billing.saveDoc(input);
+      return {
+        ok: true,
+        number: input.number,
+        message: "Draft bill recorded — open Purchase Invoices to review it.",
+      };
+    },
+  },
+  {
+    name: "payables_aging",
+    description:
+      "What the business owes and for how long — unpaid supplier bills bucketed by how overdue they are, with a per-supplier total. The mirror of receivables_aging.",
+    parameters: { type: "object", properties: { supplier: { type: "string" } } },
+    run: async (a) => {
+      const docs = (await billing.listDocs("purchase")) as unknown as Record<
+        string,
+        unknown
+      >[];
+      const t = today();
+      const bucketOf = (d: number) =>
+        d <= 0 ? "current" : d <= 30 ? "1-30" : d <= 60 ? "31-60" : d <= 90 ? "61-90" : "90+";
+      const q = lc(a.supplier);
+      const buckets: Record<string, number> = {
+        current: 0,
+        "1-30": 0,
+        "31-60": 0,
+        "61-90": 0,
+        "90+": 0,
+      };
+      const bySupplier: Record<string, number> = {};
+      const items: Record<string, unknown>[] = [];
+      for (const d of docs) {
+        const status = lc(d.status);
+        if (status === "draft" || status === "paid" || status === "cancelled") continue;
+        const owed = numOf(d.balance) || numOf(d.total) - numOf(d.paid);
+        if (owed <= 0.005) continue;
+        const name = str(d.customer_name);
+        if (q && !lc(name).includes(q)) continue;
+        const late = d.due_date
+          ? Math.floor((Date.parse(t) - Date.parse(str(d.due_date))) / 86_400_000)
+          : 0;
+        const bucket = bucketOf(late);
+        buckets[bucket] += owed;
+        bySupplier[name] = (bySupplier[name] ?? 0) + owed;
+        items.push({
+          number: d.number,
+          supplier: name,
+          due_date: d.due_date ?? null,
+          days_overdue: Math.max(0, late),
+          outstanding: owed,
+          bucket,
+        });
+      }
+      items.sort((x, y) => numOf(y.days_overdue) - numOf(x.days_overdue));
+      return {
+        total_owed: Object.values(buckets).reduce((s, v) => s + v, 0),
+        buckets,
+        by_supplier: bySupplier,
+        bills: items.slice(0, 40),
+        counted: items.length,
+      };
+    },
+  },
+  {
+    name: "list_payment_receipts",
+    description:
+      "Payment receipts issued to customers, newest first — optionally filtered by customer name.",
+    parameters: {
+      type: "object",
+      properties: { customer: { type: "string" }, limit: { type: "number" } },
+    },
+    run: async (a) => {
+      const rows = (await (await import("./api")).receipts.list()) as unknown as Record<
+        string,
+        unknown
+      >[];
+      const q = lc(a.customer);
+      const hits = rows.filter((r) => !q || lc(r.customer_name).includes(q));
+      return {
+        count: hits.length,
+        total: hits.reduce((s, r) => s + numOf(r.amount), 0),
+        receipts: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((r) => ({
+          number: r.number,
+          customer: r.customer_name,
+          amount: r.amount,
+          method: r.payment_method ?? null,
+          date: r.payment_date ?? null,
+          status: r.status,
+        })),
+      };
+    },
+  },
+  {
+    name: "create_payment_receipt",
+    description:
+      "Issue a payment receipt to a customer for money received. Amount and customer are required; method is e.g. cash, bank transfer, cheque, card.",
+    parameters: {
+      type: "object",
+      properties: {
+        customer_name: { type: "string" },
+        amount: { type: "number" },
+        payment_method: { type: "string" },
+        payment_date: { type: "string" },
+        for_description: { type: "string" },
+        ref_number: { type: "string" },
+      },
+      required: ["customer_name", "amount"],
+    },
+    run: async (a) => {
+      const amount = numOf(a.amount);
+      if (amount <= 0) return { error: "A receipt needs an amount greater than zero." };
+      const [co, { receipts }] = await Promise.all([billing.getCompany(), import("./api")]);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+      const number = `RCPT-${stamp}`;
+      await receipts.save({
+        number,
+        status: "issued",
+        template: co?.default_template || "minimal",
+        accent: co?.default_accent || "#FFD600",
+        currency: getDisplayCurrency(),
+        seller_name: co?.name || "",
+        seller_trn: co?.trn,
+        customer_name: str(a.customer_name),
+        issue_date: str(a.payment_date) || today(),
+        amount,
+        payment_method: str(a.payment_method) || undefined,
+        ref_number: str(a.ref_number) || undefined,
+        for_description: str(a.for_description) || undefined,
+      } as never);
+      return {
+        ok: true,
+        number,
+        amount,
+        message: `Receipt ${number} issued — open Payment Receipts to print or send it.`,
+      };
+    },
+  },
+  {
     name: "email_invoice",
     sensitive: true,
     description:
