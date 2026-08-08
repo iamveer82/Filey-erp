@@ -7,7 +7,7 @@ import {
   docTotals as lineAwareTotals,
   netByTaxCategory,
 } from "./docItems";
-import { getExchangeRates } from "./exchange-rates";
+import { getExchangeRates, docAmountInAed } from "./exchange-rates";
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
 import { localYmd, todayYmd } from "./format";
@@ -366,6 +366,9 @@ export interface InvoiceDocSummary {
   unit_price_formula?: { a: string; b?: string } | null;
   /** VAT rate (%) applied to this document — used by statement engine. */
   tax_rate?: number;
+  /** AED per unit of `currency`, frozen when the document was first saved.
+   *  Aggregates convert with this so a total never mixes currencies. */
+  fx_rate?: number | null;
   /** Net turnover per UAE tax category (S/Z/E/O/AE) — feeds VAT 201 boxes 4/5,
    *  which the ledger cannot supply because those lines carry no VAT. */
   net_by_tax_category?: Record<string, number>;
@@ -1295,9 +1298,22 @@ export const erp = {
           a.push(it);
           byDoc.set(it.invoice_id, a);
         }
+        // Convert before summing: a $1,000 invoice added straight onto a
+        // AED 1,000 one produces 2,000 of no currency at all.
+        const rates = await getExchangeRates().catch(() => ({}));
         const unpaid = docs
           .filter((d) => d.status !== "paid")
-          .reduce((s, d) => s + docTotal(d, byDoc.get(d.id) ?? []), 0);
+          .reduce(
+            (s, d) =>
+              s +
+              docAmountInAed(
+                docTotal(d, byDoc.get(d.id) ?? []),
+                d.currency,
+                d.fx_rate,
+                rates
+              ),
+            0
+          );
         return {
           total_products: products.length,
           low_stock: products.filter((p) => p.quantity <= p.reorder_level)
@@ -3178,7 +3194,7 @@ export const billing = {
         // (The local shim ignores the column list and returns whole rows, which
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
-          "id,number,customer_name,status,template,currency,issue_date,due_date," +
+          "id,number,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
           "shared,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
@@ -3238,6 +3254,10 @@ export const billing = {
             template: d.template,
             total,
             currency: d.currency ?? "AED",
+            // The rate frozen when this document was saved. Without it every
+            // list total has to guess at today's rate, and last quarter's
+            // figures move every time the market does.
+            fx_rate: d.fx_rate ?? undefined,
             paid,
             balance: Math.max(0, total - paid),
             issue_date: d.issue_date ?? undefined,

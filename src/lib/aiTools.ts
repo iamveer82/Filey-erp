@@ -15,6 +15,7 @@ import {
 } from "./api";
 import { sendEmail, emailShell, esc } from "./email";
 import { getDisplayCurrency, todayYmd } from "./format";
+import { getExchangeRates, docAmountInAed } from "./exchange-rates";
 import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { findSkill, loadSkills } from "./agentSkills";
@@ -248,7 +249,10 @@ export const TOOLS: ToolDef[] = [
       "Who owes money and for how long — outstanding invoices bucketed by how overdue they are (current, 1-30, 31-60, 61-90, 90+ days), with a per-customer total. Use for 'who owes us', 'what's overdue', 'chase the late payers'.",
     parameters: { type: "object", properties: { customer: { type: "string" } } },
     run: async (a) => {
-      const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
+      const [docs, rates] = (await Promise.all([
+        billing.listDocs(),
+        getExchangeRates().catch(() => ({})),
+      ])) as unknown as [Record<string, unknown>[], Record<string, number>];
       const t = today();
       const days = (due: string) =>
         Math.floor((Date.parse(t) - Date.parse(due)) / 86_400_000);
@@ -275,19 +279,25 @@ export const TOOLS: ToolDef[] = [
         if (q && !lc(name).includes(q)) continue;
         const overdueBy = d.due_date ? days(str(d.due_date)) : 0;
         const bucket = bucketOf(overdueBy);
-        buckets[bucket] += due;
-        byCustomer[name] = (byCustomer[name] ?? 0) + due;
+        // Totals are in AED at each document's own frozen rate — adding a USD
+        // invoice to an AED one at face value answers the question wrongly.
+        const dueAed = docAmountInAed(due, str(d.currency), numOf(d.fx_rate), rates);
+        buckets[bucket] += dueAed;
+        byCustomer[name] = (byCustomer[name] ?? 0) + dueAed;
         items.push({
           number: d.number,
           customer: name,
           due_date: d.due_date ?? null,
           days_overdue: Math.max(0, overdueBy),
           outstanding: due,
+          currency: d.currency ?? "AED",
+          outstanding_aed: dueAed,
           bucket,
         });
       }
       items.sort((x, y) => numOf(y.days_overdue) - numOf(x.days_overdue));
       return {
+        currency: "AED",
         total_outstanding: Object.values(buckets).reduce((s, v) => s + v, 0),
         buckets,
         by_customer: byCustomer,
@@ -1519,10 +1529,10 @@ export const TOOLS: ToolDef[] = [
       "What the business owes and for how long — unpaid supplier bills bucketed by how overdue they are, with a per-supplier total. The mirror of receivables_aging.",
     parameters: { type: "object", properties: { supplier: { type: "string" } } },
     run: async (a) => {
-      const docs = (await billing.listDocs("purchase")) as unknown as Record<
-        string,
-        unknown
-      >[];
+      const [docs, rates] = (await Promise.all([
+        billing.listDocs("purchase"),
+        getExchangeRates().catch(() => ({})),
+      ])) as unknown as [Record<string, unknown>[], Record<string, number>];
       const t = today();
       const bucketOf = (d: number) =>
         d <= 0 ? "current" : d <= 30 ? "1-30" : d <= 60 ? "31-60" : d <= 90 ? "61-90" : "90+";
@@ -1547,19 +1557,23 @@ export const TOOLS: ToolDef[] = [
           ? Math.floor((Date.parse(t) - Date.parse(str(d.due_date))) / 86_400_000)
           : 0;
         const bucket = bucketOf(late);
-        buckets[bucket] += owed;
-        bySupplier[name] = (bySupplier[name] ?? 0) + owed;
+        const owedAed = docAmountInAed(owed, str(d.currency), numOf(d.fx_rate), rates);
+        buckets[bucket] += owedAed;
+        bySupplier[name] = (bySupplier[name] ?? 0) + owedAed;
         items.push({
           number: d.number,
           supplier: name,
           due_date: d.due_date ?? null,
           days_overdue: Math.max(0, late),
           outstanding: owed,
+          currency: d.currency ?? "AED",
+          outstanding_aed: owedAed,
           bucket,
         });
       }
       items.sort((x, y) => numOf(y.days_overdue) - numOf(x.days_overdue));
       return {
+        currency: "AED",
         total_owed: Object.values(buckets).reduce((s, v) => s + v, 0),
         buckets,
         by_supplier: bySupplier,

@@ -110,6 +110,42 @@ export function convertToAed(amount: number, fromCurrency: string, rates: Rates)
   return amount * rate;
 }
 
+/** A document's amount in AED, for adding up alongside other documents.
+ *
+ *  Totals that ignore currency are worse than useless: a $1,000 invoice added
+ *  straight onto a AED 1,000 one reads as 2,000 of nothing. Every aggregate
+ *  goes through here.
+ *
+ *  The document's OWN frozen rate wins when it has one — that is the rate that
+ *  applied on the day it was issued, which is what the FTA expects and what
+ *  keeps last quarter's numbers from moving when today's rate does. Live rates
+ *  are only a fallback for documents saved before the freeze existed. */
+export function docAmountInAed(
+  amount: number,
+  currency: string | null | undefined,
+  fxRate: number | null | undefined,
+  rates: Rates = {}
+): number {
+  const cur = (currency || "AED").toUpperCase();
+  if (cur === "AED") return amount;
+  if (fxRate && fxRate > 0) return amount * fxRate;
+  return convertToAed(amount, cur, rates);
+}
+
+/** True when a document is in a foreign currency we cannot value in AED —
+ *  no frozen rate and no live rate. The caller should say so rather than
+ *  silently fold the raw number into a total. */
+export function unratedCurrency(
+  currency: string | null | undefined,
+  fxRate: number | null | undefined,
+  rates: Rates = {}
+): boolean {
+  const cur = (currency || "AED").toUpperCase();
+  if (cur === "AED") return false;
+  if (fxRate && fxRate > 0) return false;
+  return !(rates[cur] > 0);
+}
+
 /** Convert amount from AED to target currency. */
 export function convertFromAed(amount: number, toCurrency: string, rates: Rates): number {
   if (toCurrency === "AED") return amount;
