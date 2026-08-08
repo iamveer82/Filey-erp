@@ -1013,6 +1013,255 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "crm_pipeline",
+    description:
+      "The sales pipeline: open deals by stage with values, a month-by-month forecast weighted by probability, win/loss rates, and which deals have gone quiet. Use for 'how's the pipeline', 'what will we close this quarter', 'which deals am I neglecting'.",
+    parameters: { type: "object", properties: { months_ahead: { type: "number" } } },
+    run: async (a) => {
+      const pl = await import("./pipeline");
+      const [opps, acts, tasks] = await Promise.all([
+        crm.opportunities(),
+        crm.activities(),
+        crm.tasks(),
+      ]);
+      const t = today();
+      const health = pl.dealHealth(opps, acts, tasks, t);
+      return {
+        summary: await crm.summary(),
+        stages: pl.stageBreakdown(opps),
+        forecast: pl.forecast(opps, t, Math.min(numOf(a.months_ahead) || 6, 12)),
+        win_loss: pl.winLoss(opps),
+        // Only the deals carrying a risk — a full health dump is noise the
+        // model would have to filter anyway.
+        needs_attention: health
+          .filter((h) => h.risks.length)
+          .slice(0, 15)
+          .map((h) => ({
+            id: h.opportunity.id,
+            title: h.opportunity.title,
+            customer: h.opportunity.customer_name,
+            stage: h.opportunity.stage,
+            value: h.opportunity.value,
+            risks: h.risks,
+            days_since_touched: h.daysSinceTouched,
+            has_next_step: h.hasNextStep,
+          })),
+      };
+    },
+  },
+  {
+    name: "list_deals",
+    description:
+      "Open (or all) deals in the pipeline, optionally filtered by stage or by customer/title text. Stages: qualification, proposal, negotiation, won, lost.",
+    parameters: {
+      type: "object",
+      properties: {
+        stage: { type: "string" },
+        query: { type: "string" },
+        include_closed: { type: "boolean" },
+        limit: { type: "number" },
+      },
+    },
+    run: async (a) => {
+      const all = (await crm.opportunities()) as unknown as Record<string, unknown>[];
+      const stage = lc(a.stage);
+      const q = lc(a.query);
+      const closed = new Set(["won", "lost"]);
+      const hits = all.filter((o) => {
+        if (stage && lc(o.stage) !== stage) return false;
+        if (!a.include_closed && !stage && closed.has(lc(o.stage))) return false;
+        return !q || `${lc(o.title)} ${lc(o.customer_name)}`.includes(q);
+      });
+      return {
+        count: hits.length,
+        open_value: hits
+          .filter((o) => !closed.has(lc(o.stage)))
+          .reduce((s, o) => s + numOf(o.value), 0),
+        deals: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((o) => ({
+          id: o.id,
+          title: o.title,
+          customer: o.customer_name,
+          stage: o.stage,
+          value: o.value,
+          probability: o.probability,
+          expected_close: o.expected_close ?? null,
+          owner: o.owner ?? null,
+        })),
+      };
+    },
+  },
+  {
+    name: "create_deal",
+    description:
+      "Open a deal in the pipeline for a customer. Stage defaults to qualification; the probability follows the stage automatically.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        customer_name: { type: "string" },
+        value: { type: "number" },
+        stage: { type: "string" },
+        expected_close: { type: "string" },
+        owner: { type: "string" },
+      },
+      required: ["title", "customer_name"],
+    },
+    run: async (a) => {
+      const stage = lc(a.stage) || "qualification";
+      const prob: Record<string, number> = {
+        qualification: 20,
+        proposal: 45,
+        negotiation: 70,
+        won: 100,
+        lost: 0,
+      };
+      const id = await crm.createOpportunity({
+        title: str(a.title),
+        customer_name: str(a.customer_name),
+        stage,
+        value: numOf(a.value),
+        probability: prob[stage] ?? 30,
+        expected_close: str(a.expected_close) || undefined,
+        owner: str(a.owner) || undefined,
+      } as never);
+      return { ok: true, id, message: `Deal "${str(a.title)}" opened at ${stage}.` };
+    },
+  },
+  {
+    name: "set_deal_stage",
+    description:
+      "Move a deal to another stage (qualification, proposal, negotiation, won, lost). Find the id with list_deals first. Marking a deal won or lost closes it.",
+    parameters: {
+      type: "object",
+      properties: { deal_id: { type: "number" }, stage: { type: "string" } },
+      required: ["deal_id", "stage"],
+    },
+    run: async (a) => {
+      const stage = lc(a.stage);
+      const valid = ["qualification", "proposal", "negotiation", "won", "lost"];
+      if (!valid.includes(stage))
+        return { error: `Stage must be one of: ${valid.join(", ")}.` };
+      await crm.setOppStage(numOf(a.deal_id), stage);
+      return { ok: true, message: `Deal moved to ${stage}.` };
+    },
+  },
+  {
+    name: "log_activity",
+    description:
+      "Record a call, meeting, email or note against a deal or customer, so the pipeline knows it was touched. kind: call | meeting | email | note | task.",
+    parameters: {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        subject: { type: "string" },
+        related_to: { type: "string" },
+        deal_id: { type: "number" },
+        due_date: { type: "string" },
+      },
+      required: ["kind", "subject"],
+    },
+    run: async (a) => {
+      const id = await crm.createActivity({
+        kind: lc(a.kind) || "note",
+        subject: str(a.subject),
+        related_to: str(a.related_to) || undefined,
+        // A deal is addressed as target_type "deal" — the same wiring the
+        // neglect detector reads, so a logged call actually revives a deal.
+        ...(a.deal_id ? { target_type: "deal", target_id: numOf(a.deal_id) } : {}),
+        due_date: str(a.due_date) || undefined,
+      } as never);
+      return { ok: true, id, message: "Logged." };
+    },
+  },
+  {
+    name: "list_activities",
+    description:
+      "Recent CRM activity — calls, meetings, emails and notes — newest first, optionally for one deal.",
+    parameters: {
+      type: "object",
+      properties: { deal_id: { type: "number" }, limit: { type: "number" } },
+    },
+    run: async (a) => {
+      const all = (await crm.activities()) as unknown as Record<string, unknown>[];
+      const dealId = numOf(a.deal_id);
+      const hits = dealId
+        ? all.filter((x) => lc(x.target_type) === "deal" && numOf(x.target_id) === dealId)
+        : all;
+      return {
+        count: hits.length,
+        activities: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((x) => ({
+          kind: x.kind,
+          subject: x.subject,
+          related_to: x.related_to ?? null,
+          due_date: x.due_date ?? null,
+          done: x.done,
+          created_at: x.created_at,
+        })),
+      };
+    },
+  },
+  {
+    name: "find_leads",
+    description:
+      "Search leads by name, company or email; optionally filter by status. Use convert_lead once one turns into a real customer.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" }, status: { type: "string" } },
+    },
+    run: async (a) => {
+      const all = (await crm.leads()) as unknown as Record<string, unknown>[];
+      const q = lc(a.query);
+      const st = lc(a.status);
+      return {
+        leads: all
+          .filter((l) => {
+            if (st && lc(l.status) !== st) return false;
+            return !q || `${lc(l.name)} ${lc(l.company)} ${lc(l.email)}`.includes(q);
+          })
+          .slice(0, 25)
+          .map((l) => ({
+            id: l.id,
+            name: l.name,
+            company: l.company ?? null,
+            email: l.email ?? null,
+            phone: l.phone ?? null,
+            status: l.status,
+            est_value: l.est_value,
+            source: l.source ?? null,
+          })),
+      };
+    },
+  },
+  {
+    name: "create_lead",
+    description: "Add a lead to the CRM. Name is required.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        company: { type: "string" },
+        email: { type: "string" },
+        phone: { type: "string" },
+        source: { type: "string" },
+        est_value: { type: "number" },
+      },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const name = str(a.name).trim();
+      if (!name) return { error: "A lead needs a name." };
+      const id = await crm.createLead({
+        name,
+        company: str(a.company) || undefined,
+        email: str(a.email) || undefined,
+        phone: str(a.phone) || undefined,
+        source: str(a.source) || undefined,
+        est_value: numOf(a.est_value),
+      } as never);
+      return { ok: true, id, message: `Lead ${name} added.` };
+    },
+  },
+  {
     name: "find_suppliers",
     description:
       "Search suppliers by name (omit query to list them all). The agent could raise a purchase order but had no way to look up who it was for.",
