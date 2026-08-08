@@ -52,6 +52,7 @@ import {
   todayYmd,
   localYmd,
 } from "../lib/format";
+import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import { nextDocNumber } from "../lib/docNumber";
 import { sendEmail, emailShell, esc, sendShareEmail } from "../lib/email";
 import FitPreview from "../components/FitPreview";
@@ -194,6 +195,13 @@ export default function Quoting() {
   const [params, setParams] = useSearchParams();
 
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  // Fallback only — a quote saved since the FX freeze carries its own rate.
+  const [fxRates, setFxRates] = useState<Record<string, number>>({});
+  useEffect(() => {
+    void getExchangeRates()
+      .then(setFxRates)
+      .catch(() => setFxRates({}));
+  }, []);
   const [docs, setDocs] = useState<QuotationSummary[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -412,7 +420,12 @@ export default function Quoting() {
     : docs;
 
   const statCcy = company?.currency || "AED";
-  const totalValue = docs.reduce((s, d) => s + (d.total || 0), 0);
+  // One KPI, one currency: each quote is converted at its own frozen rate
+  // before it joins the total.
+  const totalValue = docs.reduce(
+    (s, d) => s + docAmountInAed(d.total || 0, d.currency, d.fx_rate, fxRates),
+    0
+  );
   const sentCount = docs.filter((d) => d.status === "sent").length;
   const acceptedCount = docs.filter((d) => d.status === "accepted").length;
 
@@ -2141,7 +2154,7 @@ export default function Quoting() {
             label: "Amount",
             sortValue: (d) => d.total,
             render: (d) => (
-              <span className="font-medium">{money(d.total, statCcy)}</span>
+              <span className="font-medium">{money(d.total, d.currency || statCcy)}</span>
             ),
           },
           {

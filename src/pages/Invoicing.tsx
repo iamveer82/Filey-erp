@@ -59,6 +59,7 @@ import {
   todayYmd,
   localYmd,
 } from "../lib/format";
+import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals } from "../lib/docItems";
@@ -390,6 +391,14 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const partyLabel = isPurchase ? "Supplier" : "Customer";
   const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  // Rates are only a fallback: a document saved since the FX freeze carries its
+  // own. Cached for four hours, so this costs nothing on most loads.
+  const [fxRates, setFxRates] = useState<Record<string, number>>({});
+  useEffect(() => {
+    void getExchangeRates()
+      .then(setFxRates)
+      .catch(() => setFxRates({}));
+  }, []);
   const [numFmt, setNumFmt] = useState("");
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -895,16 +904,21 @@ const editInvoice = async (id: number) => {
     d.status !== "paid";
   // KPI strip: billed = non-draft totals; outstanding splits into pending
   // (not past due) and overdue (past due with a balance).
+  // Every KPI below is stated in ONE currency (statCcy), so each document is
+  // converted at its own frozen rate first. Summing face values put a $1,000
+  // invoice and a AED 1,000 invoice into the same 2,000.
+  const inStatCcy = (amount: number, d: InvoiceDocSummary) =>
+    docAmountInAed(amount, d.currency, d.fx_rate, fxRates);
   const billedTotal = docs
     .filter((d) => d.status !== "draft")
-    .reduce((s, d) => s + d.total, 0);
-  const paidTotal = docs.reduce((s, d) => s + (d.paid ?? 0), 0);
+    .reduce((s, d) => s + inStatCcy(d.total, d), 0);
+  const paidTotal = docs.reduce((s, d) => s + inStatCcy(d.paid ?? 0, d), 0);
   const overdueTotal = docs
     .filter(isOverdueDoc)
-    .reduce((s, d) => s + (d.balance ?? 0), 0);
+    .reduce((s, d) => s + inStatCcy(d.balance ?? 0, d), 0);
   const pendingTotal = docs
     .filter((d) => d.status !== "draft" && !isOverdueDoc(d))
-    .reduce((s, d) => s + (d.balance ?? 0), 0);
+    .reduce((s, d) => s + inStatCcy(d.balance ?? 0, d), 0);
   const filteredDocs = docs.filter((d) => {
     if (statusFilter === "overdue") {
       if (!isOverdueDoc(d)) return false;
@@ -921,8 +935,11 @@ const editInvoice = async (id: number) => {
 
   // Totals for the current search/filter — shown on top when filtering so the
   // user sees a customer's invoiced / collected / outstanding at a glance.
-  const fPaid = filteredDocs.reduce((s, d) => s + (d.paid ?? 0), 0);
-  const fOutstanding = filteredDocs.reduce((s, d) => s + (d.balance ?? 0), 0);
+  const fPaid = filteredDocs.reduce((s, d) => s + inStatCcy(d.paid ?? 0, d), 0);
+  const fOutstanding = filteredDocs.reduce(
+    (s, d) => s + inStatCcy(d.balance ?? 0, d),
+    0
+  );
   const fInvoiced = fPaid + fOutstanding;
 
   // ----- DEMO parity: quick view, per-row send/share, reminders -----

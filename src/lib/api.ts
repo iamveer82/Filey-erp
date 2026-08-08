@@ -2893,11 +2893,18 @@ async function propagateInvoice(
 
     if (isPurchase) {
       // Purchase invoice (supplier bill): stock IN, debit Purchases, credit AP.
+      // products.cost_price is held in the base currency, so a bill in USD has
+      // to be converted before it touches the moving average — otherwise a
+      // $10 part is booked as costing 10 dirhams and every margin, COGS figure
+      // and stock valuation downstream is wrong by the exchange rate.
+      const billRates = await getExchangeRates().catch(() => ({}));
+      const toBase = (v: number) =>
+        docAmountInAed(v, doc.currency as string, doc.fx_rate as number, billRates);
       for (const it of items) {
         if (!it.product_id || !it.qty) continue;
         const qty = Math.abs(Number(it.qty));
         // Moving average first — needs the pre-receipt on-hand quantity.
-        await applyMovingAverageCost(it.product_id, qty, Number(it.unit_price) || 0);
+        await applyMovingAverageCost(it.product_id, qty, toBase(Number(it.unit_price) || 0));
         await adjustProductStock(it.product_id, qty, { type: "purchase", ref });
       }
       if (total > 0) {
@@ -3690,6 +3697,10 @@ export interface QuotationSummary {
   status: string;
   template: string;
   total: number;
+  /** The quote's own currency — not the company's. */
+  currency?: string;
+  /** AED per unit of `currency`, frozen when the quote was saved. */
+  fx_rate?: number | null;
   quote_date?: string;
   valid_until?: string;
   shared?: boolean;
@@ -3896,6 +3907,11 @@ export const quotes = {
           template: d.template,
           shared: d.shared ?? false,
           total: quoteTotal(byDoc.get(d.id) ?? []),
+          // The list used to render every quote's total in the COMPANY's
+          // currency, so a quote written in dollars was displayed as dirhams
+          // at the same number.
+          currency: d.currency ?? "AED",
+          fx_rate: d.fx_rate ?? undefined,
           quote_date: d.quote_date ?? undefined,
           valid_until: d.valid_until ?? undefined,
           updated_at: d.updated_at,
@@ -4463,11 +4479,20 @@ export const pos = {
   receive: (poId: number) =>
     online(async () => {
       const po = await pos.get(poId);
+      // Same rule as a supplier bill: stock is valued in the base currency, so
+      // a PO raised in USD converts before it moves the average cost.
+      const poRates = await getExchangeRates().catch(() => ({}));
+      const poCurrency = (po as unknown as { currency?: string }).currency;
+      const poFx = (po as unknown as { fx_rate?: number }).fx_rate;
       for (const it of po.items) {
         if (!it.product_id) continue;
         const qty = Math.abs(Number(it.quantity));
         // Moving average first — needs the pre-receipt on-hand quantity.
-        await applyMovingAverageCost(it.product_id, qty, Number(it.unit_cost) || 0);
+        await applyMovingAverageCost(
+          it.product_id,
+          qty,
+          docAmountInAed(Number(it.unit_cost) || 0, poCurrency, poFx, poRates)
+        );
         await adjustProductStock(it.product_id, qty, {
           type: "purchase",
           ref: po.po_number ? `PO ${po.po_number}` : `PO #${poId}`,

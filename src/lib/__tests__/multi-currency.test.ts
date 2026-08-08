@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { billing, erp } from "../api";
+import { billing, erp, pos } from "../api";
 import { docAmountInAed, unratedCurrency } from "../exchange-rates";
 import { TOOLS } from "../aiTools";
 
@@ -85,6 +85,65 @@ describe("totals across currencies", () => {
     const usd = r.invoices.find((i) => i.currency === "USD");
     expect(usd?.outstanding).toBe(1000);
     expect(usd?.outstanding_aed).toBeCloseTo(3672.5, 2);
+  });
+
+  it("values stock bought in dollars at what it actually cost in dirhams", async () => {
+    // The nastiest version of this bug: buy a part at $10 and the books record
+    // it as costing 10 dirhams, so every margin and COGS figure downstream is
+    // wrong by the exchange rate and nothing on screen looks broken.
+    const productId = (await erp.createProduct({
+      sku: "IMP-1",
+      name: "Imported part",
+      quantity: 0,
+      cost_price: 0,
+      price: 50,
+      reorder_level: 1,
+    } as never)) as number;
+
+    await billing.saveDoc({
+      number: "BILL-USD",
+      status: "sent",
+      doc_type: "purchase",
+      currency: "USD",
+      fx_rate: 3.6725,
+      tax_rate: 0,
+      discount: 0,
+      customer_name: "Overseas Supplier",
+      items: [
+        { description: "Imported part", qty: 10, unit_price: 10, product_id: productId },
+      ],
+    } as never);
+
+    const product = (await erp.products()).find((p) => p.id === productId);
+    expect(product?.quantity).toBe(10);
+    expect(product?.cost_price).toBeCloseTo(36.725, 2); // not 10
+  });
+
+  it("does the same when a purchase order is received", async () => {
+    const productId = (await erp.createProduct({
+      sku: "IMP-2",
+      name: "Another part",
+      quantity: 0,
+      cost_price: 0,
+      price: 50,
+      reorder_level: 1,
+    } as never)) as number;
+
+    const poId = (await pos.save({
+      po_number: "PO-USD",
+      status: "draft",
+      currency: "USD",
+      fx_rate: 3.6725,
+      supplier_name: "Overseas Supplier",
+      items: [
+        { description: "Another part", quantity: 5, unit_cost: 20, product_id: productId },
+      ],
+    } as never)) as number;
+    await pos.receive(poId);
+
+    const product = (await erp.products()).find((p) => p.id === productId);
+    expect(product?.quantity).toBe(5);
+    expect(product?.cost_price).toBeCloseTo(73.45, 2); // 20 USD, not 20 AED
   });
 
   it("counts unpaid invoices in one currency on the dashboard", async () => {
