@@ -2874,7 +2874,7 @@ async function propagateInvoice(
     const prior = await reverseInvoiceTransactions(id || undefined, ref);
     if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
 
-    const { net, tax, total } = docTotals(
+    const { net: netDoc, tax: taxDoc, total: totalDoc } = docTotals(
       {
         tax_rate: Number(doc.tax_rate ?? 0),
         discount: Number(doc.discount ?? 0),
@@ -2889,6 +2889,18 @@ async function propagateInvoice(
       },
       items
     );
+    // The ledger is kept in ONE currency. A document written in dollars must be
+    // posted at its dirham value or the trial balance stops balancing against
+    // reality, the P&L reports dollars as dirhams, and the VAT return — which
+    // is derived from the tax accounts — under-reports by the exchange rate.
+    // The document's own frozen rate is the one that applied on the date of
+    // supply, which is what the FTA asks for.
+    const ledgerRates = await getExchangeRates().catch(() => ({}));
+    const toBase = (v: number) =>
+      docAmountInAed(v, doc.currency as string, doc.fx_rate as number, ledgerRates);
+    const net = toBase(netDoc);
+    const tax = toBase(taxDoc);
+    const total = toBase(totalDoc);
     const txnDate = (doc.issue_date as string) || todayYmd();
 
     if (isPurchase) {
@@ -2897,9 +2909,6 @@ async function propagateInvoice(
       // to be converted before it touches the moving average — otherwise a
       // $10 part is booked as costing 10 dirhams and every margin, COGS figure
       // and stock valuation downstream is wrong by the exchange rate.
-      const billRates = await getExchangeRates().catch(() => ({}));
-      const toBase = (v: number) =>
-        docAmountInAed(v, doc.currency as string, doc.fx_rate as number, billRates);
       for (const it of items) {
         if (!it.product_id || !it.qty) continue;
         const qty = Math.abs(Number(it.qty));
@@ -3531,6 +3540,17 @@ export const billing = {
         await sUpdate("invoice_docs", invoiceId, { status });
 
       // Post the cash receipt to accounting: debit Cash/Bank, credit AR.
+      // The payment is entered in the INVOICE's currency, and the ledger is in
+      // the base one. Posting face value credited AR by 500 against a debit of
+      // 1,836 for the same $500 — so the receivable never cleared however much
+      // the customer paid, and cash was understated by the exchange rate.
+      const payRates = await getExchangeRates().catch(() => ({}));
+      const amountBase = docAmountInAed(
+        amount,
+        (docRow as { currency?: string } | null)?.currency,
+        (docRow as { fx_rate?: number } | null)?.fx_rate,
+        payRates
+      );
       const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
       const cashId = await findOrCreateCashAccount();
       const arId = await findOrCreateArAccount();
@@ -3538,27 +3558,27 @@ export const billing = {
         await sInsert("transactions", {
           account_id: cashId,
           txn_type: "debit",
-          amount,
+          amount: amountBase,
           description: `${ref} — Cash/Bank`,
           ref,
           source: "payment",
           invoice_id: invoiceId,
           txn_date: paidAt,
         });
-        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amount));
+        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amountBase));
       }
       if (arId > 0) {
         await sInsert("transactions", {
           account_id: arId,
           txn_type: "credit",
-          amount,
+          amount: amountBase,
           description: `${ref} — AR reduction`,
           ref,
           source: "payment",
           invoice_id: invoiceId,
           txn_date: paidAt,
         });
-        await adjustAccountBalance(arId, ledgerDelta("asset", "credit", amount));
+        await adjustAccountBalance(arId, ledgerDelta("asset", "credit", amountBase));
       }
       return paymentId;
     }),

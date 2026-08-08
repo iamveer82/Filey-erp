@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { billing, erp, pos } from "../api";
+import { billing, erp, fin, pos } from "../api";
 import { docAmountInAed, unratedCurrency } from "../exchange-rates";
 import { TOOLS } from "../aiTools";
 
@@ -85,6 +85,51 @@ describe("totals across currencies", () => {
     const usd = r.invoices.find((i) => i.currency === "USD");
     expect(usd?.outstanding).toBe(1000);
     expect(usd?.outstanding_aed).toBeCloseTo(3672.5, 2);
+  });
+
+  it("posts a dollar invoice to the ledger at its dirham value", async () => {
+    // The ledger is single-currency. Posting face value would report dollars as
+    // dirhams in the P&L and under-report VAT by the exchange rate.
+    await billing.saveDoc({
+      number: "INV-LEDGER-USD",
+      status: "sent",
+      currency: "USD",
+      fx_rate: 3.6725,
+      tax_rate: 0,
+      discount: 0,
+      customer_name: "Export Co",
+      items: [{ description: "consulting", qty: 1, unit_price: 1000 }],
+    } as never);
+
+    const accounts = await fin.accounts();
+    const bal = (re: RegExp) =>
+      accounts.find((a) => re.test(a.name))?.balance ?? 0;
+    expect(bal(/receivable/i)).toBeCloseTo(3672.5, 2); // not 1000
+    expect(bal(/sales|revenue/i)).toBeCloseTo(3672.5, 2);
+  });
+
+  it("clears the receivable when a dollar invoice is paid", async () => {
+    const id = (await billing.saveDoc({
+      number: "INV-PAY-USD",
+      status: "sent",
+      currency: "USD",
+      fx_rate: 3.6725,
+      tax_rate: 0,
+      discount: 0,
+      customer_name: "Export Co",
+      items: [{ description: "consulting", qty: 1, unit_price: 1000 }],
+    } as never)) as number;
+
+    // Paid in full, in the invoice's own currency.
+    await billing.addPayment(id, 1000, "bank transfer", "2026-08-08");
+
+    const accounts = await fin.accounts();
+    const bal = (re: RegExp) =>
+      accounts.find((a) => re.test(a.name))?.balance ?? 0;
+    // AR debited 3672.50 by the invoice, credited 3672.50 by the payment.
+    // Posting the payment at face value left 2672.50 sitting there forever.
+    expect(bal(/receivable/i)).toBeCloseTo(0, 2);
+    expect(bal(/cash|bank/i)).toBeCloseTo(3672.5, 2);
   });
 
   it("values stock bought in dollars at what it actually cost in dirhams", async () => {
