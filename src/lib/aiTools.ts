@@ -2080,6 +2080,54 @@ export const TOOLS: ToolDef[] = [
       }),
   },
   {
+    name: "generate_image",
+    description:
+      "Create an image from a description — a product shot, a social graphic, a header for a campaign. Say what should be IN it and how it should look; you are writing the brief, so be specific about subject, style, colours and mood rather than passing the user's words through unchanged. The image is saved to the user's computer, and to My Files when save_to_app is set. Use it before schedule_social_post when a post needs a picture.",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        size: { type: "string" },
+        save_to_app: { type: "boolean" },
+      },
+      required: ["prompt"],
+    },
+    run: async (a) => {
+      const { generateImage } = await import("./aiImage");
+      let made;
+      try {
+        made = await generateImage(str(a.prompt), { size: str(a.size) || undefined });
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+      const { deliverFile, outputDir } = await import("./agentFiles");
+      const saved = await deliverFile({ name: made.name, bytes: made.bytes });
+      fileOutputs.push({ name: saved.name, path: saved.path, url: saved.url });
+      let filed = false;
+      if (a.save_to_app) {
+        try {
+          await (await import("./files")).saveOutput(
+            { name: made.name, bytes: made.bytes },
+            "AI image"
+          );
+          filed = true;
+        } catch {
+          /* it is already on disk; filing it too is a bonus, not the job */
+        }
+      }
+      const where = await outputDir();
+      return {
+        ok: true,
+        file: saved.name,
+        saved_to: saved.path,
+        folder: where?.dir,
+        filed_in_my_files: filed,
+        prompt_used: made.prompt,
+        message: `Image saved${where ? ` to ${where.dir}` : ""}.`,
+      };
+    },
+  },
+  {
     name: "list_connected_apps",
     description:
       "The third-party apps this user has actually connected (Gmail, Slack, HubSpot, Notion, Sheets, whatever they linked) and the actions available on each. Call this BEFORE composio_run instead of guessing a slug — the catalogue is the user's, not a fixed list, so what exists here changes per customer. Pass `app` to narrow to one toolkit.",

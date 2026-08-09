@@ -236,6 +236,18 @@ async function composio(
     );
   }
 
+  if (action === "toolkits") {
+    // The full catalogue, so a customer can connect the app they actually use
+    // rather than only the ones we thought to list.
+    const q = String(payload.query ?? "").trim();
+    const n = Number(payload.limit ?? 20);
+    return callJson(
+      `${COMPOSIO_BASE}/toolkits?limit=${n}${q ? `&search=${encodeURIComponent(q)}` : ""}`,
+      { headers },
+      "Could not search apps"
+    );
+  }
+
   if (action === "tools") {
     // What can this customer actually do right now — the tools belonging to the
     // apps they have connected.

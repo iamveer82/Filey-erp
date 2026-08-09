@@ -11,7 +11,9 @@ import {
   composioStatus,
   composioList,
   composioKeySource,
+  composioSearchToolkits,
   COMPOSIO_TOOLKITS,
+  type ToolkitInfo,
 } from "../../lib/composio";
 import {
   getZernioConfig,
@@ -142,6 +144,31 @@ function ZernioCard() {
   );
 }
 
+/** An app's real logo. Composio serves one per toolkit, which beats drawing
+ *  fourteen of them by hand and then not having the fifteenth. Falls back to
+ *  the bundled brand icon, then to a plug, so a row never renders empty. */
+function AppIcon({ slug, logo }: { slug: string; logo?: string }) {
+  const [broken, setBroken] = useState(false);
+  const src = logo || `https://logos.composio.dev/api/${slug}`;
+  return (
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-100 text-ink dark:bg-white/10">
+      {broken ? (
+        <BrandIcon name={slug} className="h-5 w-5" />
+      ) : (
+        <img
+          src={src}
+          alt=""
+          width={20}
+          height={20}
+          loading="lazy"
+          className="h-5 w-5 rounded object-contain"
+          onError={() => setBroken(true)}
+        />
+      )}
+    </span>
+  );
+}
+
 /** Says who is paying, in the words a customer would use. */
 function SourceBadge({ source, own }: { source: KeySource; own: boolean }) {
   if (own)
@@ -174,7 +201,24 @@ function ComposioCard() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [active, setActive] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<KeySource>("none");
+  const [search, setSearch] = useState("");
+  const [found, setFound] = useState<ToolkitInfo[]>([]);
+  const [searching, setSearching] = useState(false);
   const [msg, setMsg] = useState("");
+
+  const runSearch = async () => {
+    const q = search.trim();
+    if (!q) return setFound([]);
+    setSearching(true);
+    setMsg("");
+    try {
+      setFound(await composioSearchToolkits(q, 12));
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSearching(false);
+    }
+  };
 
   useEffect(() => {
     getComposioKey().then((k) => setHasKey(!!k.trim()));
@@ -338,9 +382,59 @@ function ComposioCard() {
         )}
       </details>
 
+      {/* Any app, not just the shortlist below */}
+      <div className="mt-4 flex gap-2">
+        <input
+          className="input flex-1"
+          placeholder="Search every app — Instagram, Zoho, Xero, Shopify…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void runSearch()}
+        />
+        <button className="btn-ghost" onClick={runSearch} disabled={searching}>
+          {searching ? <Loader2 size={15} className="animate-spin" /> : "Search"}
+        </button>
+      </div>
+      {found.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {found.map((tk) => (
+            <div
+              key={tk.slug}
+              className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
+            >
+              <AppIcon slug={tk.slug} logo={tk.meta?.logo} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-ink">{tk.name ?? tk.slug}</p>
+                <p className="truncate text-[11px] text-brand-400">
+                  {tk.meta?.description ?? tk.slug}
+                </p>
+              </div>
+              {active.has(tk.slug) ? (
+                <Badge tone="success">
+                  <Check size={11} /> Connected
+                </Badge>
+              ) : (
+                <button
+                  className="btn-ghost h-9 px-3 text-xs"
+                  onClick={() => connect(tk.slug)}
+                  disabled={source === "none" || connecting === tk.slug}
+                >
+                  {connecting === tk.slug ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <ExternalLink size={13} />
+                  )}
+                  Connect
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Toolkits */}
       <div className="mt-4 flex items-center justify-between">
-        <p className="label !mb-0">Services</p>
+        <p className="label !mb-0">Popular</p>
         <button
           className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-500 hover:text-ink"
           onClick={refresh}
@@ -357,9 +451,7 @@ function ComposioCard() {
               key={tk.slug}
               className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
             >
-              <span className="rounded-xl bg-primary-100 text-ink p-2 dark:bg-white/10">
-                <BrandIcon name={tk.slug} className="h-5 w-5" />
-              </span>
+              <AppIcon slug={tk.slug} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-ink">{tk.name}</p>
                 <p className="truncate text-[11px] text-brand-400">{tk.desc}</p>

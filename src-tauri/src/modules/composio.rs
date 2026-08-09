@@ -169,6 +169,23 @@ pub fn composio_list_connections(db: State<Db>) -> AppResult<Value> {
     call(&key, "GET", &format!("{BASE}/connected_accounts?limit=50"), None)
 }
 
+/// Search the whole app catalogue. The shortlist on screen is a starting point,
+/// not the limit of what a customer may connect.
+#[tauri::command]
+pub fn composio_search_toolkits(
+    db: State<Db>,
+    query: Option<String>,
+    limit: Option<u32>,
+) -> AppResult<Value> {
+    let key = api_key(&db)?;
+    let n = limit.unwrap_or(20).min(50);
+    let url = match query.as_deref().filter(|s| !s.is_empty()) {
+        Some(q) => format!("{BASE}/toolkits?limit={n}&search={q}"),
+        None => format!("{BASE}/toolkits?limit={n}"),
+    };
+    call(&key, "GET", &url, None)
+}
+
 /// The actions available on the connected apps, so the agent can discover what
 /// it may do instead of being shipped a fixed list that goes stale.
 #[tauri::command]

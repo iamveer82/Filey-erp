@@ -120,6 +120,34 @@ export async function composioList(): Promise<ConnectionList> {
   return invoke<ConnectionList>("composio_list_connections");
 }
 
+export interface ToolkitInfo {
+  slug: string;
+  name?: string;
+  meta?: { description?: string; logo?: string };
+}
+
+/** Search Composio's whole catalogue, not the shortlist in COMPOSIO_TOOLKITS.
+ *  The shortlist is what we put on screen by default; this is how a user
+ *  connects the app they actually use, which we were never going to guess. */
+export async function composioSearchToolkits(
+  query: string,
+  limit = 20
+): Promise<ToolkitInfo[]> {
+  const res = await (usingOwnKey()
+    .then((own) =>
+      own
+        ? invoke<{ items?: ToolkitInfo[] }>("composio_search_toolkits", {
+            query,
+            limit,
+          })
+        : platformCall<{ items?: ToolkitInfo[] }>("composio", "toolkits", {
+            query,
+            limit,
+          })
+    ));
+  return res.items ?? [];
+}
+
 export interface ToolInfo {
   slug?: string;
   name?: string;

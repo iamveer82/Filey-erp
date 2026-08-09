@@ -44,6 +44,7 @@ pub fn run() {
             modules::composio::composio_connection_status,
             modules::composio::composio_list_connections,
             modules::composio::composio_list_tools,
+            modules::composio::composio_search_toolkits,
             modules::composio::composio_execute,
             // Storage locations + backup/restore
             modules::storage::get_data_dir,
