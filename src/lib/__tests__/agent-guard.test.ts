@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGuard, isReadOnly } from "../agentGuard";
+import { createGuard, isReadOnly, coachResult } from "../agentGuard";
 
 // The duplicate-write case is the one that reaches a customer: a model that
 // second-guesses its first result and calls send_invoice again. Everything else
@@ -50,6 +50,30 @@ describe("repeated calls", () => {
     g.after("send_invoice", { a: 1, b: 2 }, { ok: true });
     const again = g.before("send_invoice", { b: 2, a: 1 });
     expect(again.short).toBeTruthy();
+  });
+});
+
+describe("coaching a failure", () => {
+  it("leaves a success untouched", () => {
+    const ok = { ok: true, number: "INV-1" };
+    expect(coachResult(ok, 5)).toBe(ok);
+  });
+
+  it("tells the model to adapt, and how much room it has left", () => {
+    const r = coachResult({ error: "No such customer" }, 6) as {
+      error: string;
+      steps_remaining: number;
+      what_to_do: string;
+    };
+    expect(r.error).toBe("No such customer");
+    expect(r.steps_remaining).toBe(6);
+    expect(r.what_to_do).toMatch(/DIFFERENT approach/);
+    expect(r.what_to_do).not.toMatch(/last step/);
+  });
+
+  it("switches to wrapping up on the final step", () => {
+    const r = coachResult({ error: "nope" }, 1) as { what_to_do: string };
+    expect(r.what_to_do).toMatch(/last step/i);
   });
 });
 

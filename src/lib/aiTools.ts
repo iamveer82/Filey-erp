@@ -91,6 +91,46 @@ export function drainFileOutputs(): FileOutput[] {
   return out;
 }
 
+/** Warn when a document is being raised for a party nobody has heard of.
+ *
+ *  Not an error: invoicing a brand-new customer is ordinary. But the agent
+ *  confidently drafting for "Acme Trading" when the books say "ACME Trading
+ *  LLC" produces a document that looks right and reconciles against nothing,
+ *  and neither the model nor the user notices until someone chases the payment.
+ *  Naming the near-miss is what turns a silent wrong into a question. */
+async function partyCheck(
+  kind: "customer" | "supplier",
+  name: unknown
+): Promise<{ warning: string; did_you_mean?: string[] } | null> {
+  const typed = str(name).trim();
+  if (!typed) return null;
+  const q = typed.toLowerCase();
+  let names: string[] = [];
+  try {
+    if (kind === "customer") {
+      const rows = (await crm.customers()) as unknown as Record<string, unknown>[];
+      names = rows.map((c) => str(c.name)).filter(Boolean);
+    } else {
+      const { suppliers } = await import("./api");
+      const rows = (await suppliers.list()) as unknown as Record<string, unknown>[];
+      names = rows.map((s) => str(s.name)).filter(Boolean);
+    }
+  } catch {
+    return null; // a lookup failure must not block the draft
+  }
+  if (names.some((n) => n.toLowerCase() === q)) return null;
+  const near = names.filter((n) => {
+    const l = n.toLowerCase();
+    return l.includes(q) || q.includes(l);
+  });
+  return {
+    warning: `No ${kind} named "${typed}" is on file${
+      near.length ? " — but these look close" : ""
+    }. The document was created with the name as given; confirm it with the user before sending anything.`,
+    ...(near.length ? { did_you_mean: near.slice(0, 5) } : {}),
+  };
+}
+
 async function findInvoice(numberOrId: unknown) {
   const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
   const q = lc(numberOrId);
@@ -616,9 +656,11 @@ export const TOOLS: ToolDef[] = [
         })),
       };
       await billing.saveDoc(input);
+      const unknownParty = await partyCheck("customer", args.customer_name);
       return {
         ok: true,
         number: input.number,
+        ...(unknownParty ?? {}),
         message: "Draft invoice created — open Invoicing to review/send.",
       };
     },
@@ -1516,9 +1558,11 @@ export const TOOLS: ToolDef[] = [
         })),
       } as unknown as InvoiceDocInput;
       await billing.saveDoc(input);
+      const unknownParty = await partyCheck("supplier", a.supplier_name);
       return {
         ok: true,
         number: input.number,
+        ...(unknownParty ?? {}),
         message: "Draft bill recorded — open Purchase Invoices to review it.",
       };
     },

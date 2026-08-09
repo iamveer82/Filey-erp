@@ -12,7 +12,7 @@
  */
 
 import { TOOLS, runTool } from "./aiTools";
-import { createGuard } from "./agentGuard";
+import { createGuard, coachResult } from "./agentGuard";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 
@@ -126,8 +126,15 @@ const FILE_WORKFLOW =
   "WORKING WITH FILES: you have the whole Tools catalogue — PDF, image, Office conversion, OCR, compression, security, data extraction — through two tools. When the user wants something done to a file, call list_file_tools (pass a query like 'compress' or 'ocr' to narrow it) to find the right id, then run_file_tool with that id and its options. Don't guess an id you haven't seen and don't assume a job is impossible before you've searched the catalogue. " +
   "Some tools need their own workspace and say so — for those, open the Tools page for the user instead of failing. Whatever you produce is saved onto their computer automatically; run_file_tool tells you the folder, so finish by saying what you made and where it landed, in one plain sentence. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
 
+/* Two failure modes worth naming explicitly, because the model does not infer
+ * them: acting on an assumed fact, and treating one refusal as the end. */
+const WORKING_RULES =
+  "HOW TO WORK: look things up before you act on them. If the user names a customer, supplier, product, invoice or file, find it first — do not create a document for a name you have not confirmed exists, and do not quote a number you have not read. When a lookup comes back empty, say so and ask, rather than proceeding with the name as given; inventing the record is worse than pausing. " +
+  "Report only what the tools actually returned. If a tool failed, the thing did not happen — never describe a result you did not receive, and never round a failure up to a success. " +
+  "A failed call is normal and is not the end of the task. Try a different route: another tool, different arguments, or look up the thing you assumed. You will be told how many steps remain; use them rather than stopping at the first refusal. Only stop early if you are genuinely blocked on something only the user can decide, and then say exactly what you need.";
+
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
-  const parts = [base, AI_GUARDRAILS, HUMAN_TONE, FILE_WORKFLOW];
+  const parts = [base, AI_GUARDRAILS, HUMAN_TONE, WORKING_RULES, FILE_WORKFLOW];
   const who: string[] = [`Your name is ${persona.assistantName || "Filey"}.`];
   if (persona.userName) who.push(`The user's name is ${persona.userName}.`);
   if (persona.role) who.push(`Their role is ${persona.role}.`);
@@ -353,7 +360,11 @@ export async function aiFetch(
 
 /* ── Agentic chat: the model can call the read/draft tools in lib/aiTools ──── */
 
-const MAX_TOOL_ROUNDS = 8;
+// Eight was too few and it showed as "gives up early": discovering a file tool,
+// running it, filing the result and reporting is already four, before anything
+// goes wrong once. A round is one model call, so the cost of the extra headroom
+// is only paid by tasks that actually use it.
+const MAX_TOOL_ROUNDS = 16;
 
 export async function aiAgent(messages: AiMessage[], opts: AgentOpts = {}): Promise<string> {
   const cfg = getAiConfig();
@@ -425,9 +436,10 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts
         // reads return the earlier answer, writes are refused. Without it the
         // same invoice gets emailed twice when the model second-guesses itself.
         const decided = guard.before(name, args);
-        const result =
+        const raw =
           "short" in decided ? decided.short : await runTool(name, args);
-        if (!("short" in decided)) guard.after(name, args, result);
+        if (!("short" in decided)) guard.after(name, args, raw);
+        const result = coachResult(raw, maxRounds - round - 1);
         convo.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -510,9 +522,10 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
             return String(block.input?.summary ?? textOut ?? "Task complete.").trim();
           const input = block.input || {};
           const decided = guard.before(block.name, input);
-          const result =
+          const raw =
             "short" in decided ? decided.short : await runTool(block.name, input);
-          if (!("short" in decided)) guard.after(block.name, input, result);
+          if (!("short" in decided)) guard.after(block.name, input, raw);
+          const result = coachResult(raw, maxRounds - round - 1);
           results.push({
             type: "tool_result",
             tool_use_id: block.id,

@@ -75,6 +75,28 @@ const shortNote = (name: string, result: unknown): string => {
   return `${name}: done`;
 };
 
+/** Wrap a tool result so a failure reads as "try another way", not "stop".
+ *
+ *  A bare {error: "..."} is what made the agent give up on the first refusal:
+ *  it looks terminal. Telling it how many steps remain, and that adapting is
+ *  expected, is the difference between one failed call ending the task and the
+ *  agent routing around it. */
+export function coachResult(
+  result: unknown,
+  roundsLeft: number
+): unknown {
+  const err = (result as { error?: string } | null)?.error;
+  if (!err) return result;
+  return {
+    ...(result as Record<string, unknown>),
+    steps_remaining: roundsLeft,
+    what_to_do:
+      roundsLeft <= 1
+        ? "This was the last step. Tell the user plainly what worked, what didn't, and what you'd try next."
+        : "This attempt failed — that is normal, not a reason to stop. Try a DIFFERENT approach: another tool, different arguments, or look up the thing you assumed. Repeating this identical call will be refused.",
+  };
+}
+
 export function createGuard(): AgentGuard {
   const seen = new Map<string, unknown>();
   const log: Step[] = [];
