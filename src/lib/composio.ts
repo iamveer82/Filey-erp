@@ -6,6 +6,7 @@
  * back into the browser or used for API calls from here. Desktop-only.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { platformCall, platformAvailable, type KeySource } from "./integrations";
 
 export const hasDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -15,10 +16,25 @@ const KEY = "composio_api_key";
 export const COMPOSIO_USER = "default";
 
 /** Toolkits we surface in Settings → Integrations. */
+/* The apps offered in Settings → Integrations. Chosen for what an SMB running
+ * this software actually uses to find and keep customers — the agent reaches
+ * every action of whatever is connected here (see list_connected_apps), so
+ * each entry widens what it can do rather than adding one button. */
 export const COMPOSIO_TOOLKITS = [
-  { slug: "gmail", name: "Gmail", desc: "Send email from your Gmail" },
-  { slug: "slack", name: "Slack", desc: "Post messages to Slack" },
+  { slug: "gmail", name: "Gmail", desc: "Read and send from your Gmail" },
+  { slug: "googlecalendar", name: "Google Calendar", desc: "Book and check meetings" },
+  { slug: "googlesheets", name: "Google Sheets", desc: "Read and write spreadsheets" },
+  { slug: "googledrive", name: "Google Drive", desc: "Find and file documents" },
+  { slug: "outlook", name: "Outlook", desc: "Read and send from Outlook" },
+  { slug: "slack", name: "Slack", desc: "Post and read messages in Slack" },
   { slug: "telegram", name: "Telegram", desc: "Message via a Telegram bot" },
+  { slug: "whatsapp", name: "WhatsApp", desc: "Message customers on WhatsApp" },
+  { slug: "hubspot", name: "HubSpot", desc: "Sync contacts and deals" },
+  { slug: "linkedin", name: "LinkedIn", desc: "Publish and research prospects" },
+  { slug: "notion", name: "Notion", desc: "Read and write pages" },
+  { slug: "typeform", name: "Typeform", desc: "Pull form responses as leads" },
+  { slug: "calendly", name: "Calendly", desc: "See what's been booked" },
+  { slug: "mailchimp", name: "Mailchimp", desc: "Sync audiences and campaigns" },
 ] as const;
 
 export async function getComposioKey(): Promise<string> {
@@ -38,8 +54,22 @@ export async function setComposioKey(value: string): Promise<void> {
   await invoke("cache_set", { key: KEY, value: value.trim() });
 }
 
-export async function composioReady(): Promise<boolean> {
+/** True when this install has its OWN key and should bypass the platform. */
+export async function usingOwnKey(): Promise<boolean> {
   return !!(await getComposioKey()).trim();
+}
+
+/** Integrations are usable at all: either the customer's own key, or Filey's
+ *  (which needs a cloud session, since that is what the proxy authenticates). */
+export async function composioReady(): Promise<boolean> {
+  if (await usingOwnKey()) return true;
+  return platformAvailable();
+}
+
+/** Which key is paying for this install's integrations. */
+export async function composioKeySource(): Promise<KeySource> {
+  if (await usingOwnKey()) return "own";
+  return (await platformAvailable()) ? "platform" : "none";
 }
 
 export interface ConnectLink {
@@ -55,6 +85,8 @@ export async function composioConnect(
   toolkit: string,
   userId?: string
 ): Promise<ConnectLink> {
+  if (!(await usingOwnKey()))
+    return platformCall<ConnectLink>("composio", "connect", { toolkit });
   return invoke<ConnectLink>("composio_connect", { toolkit, userId });
 }
 
@@ -68,6 +100,10 @@ export interface ConnectionStatus {
 export async function composioStatus(
   connectedAccountId: string
 ): Promise<ConnectionStatus> {
+  if (!(await usingOwnKey()))
+    return platformCall<ConnectionStatus>("composio", "status", {
+      connected_account_id: connectedAccountId,
+    });
   return invoke<ConnectionStatus>("composio_connection_status", {
     connectedAccountId,
   });
@@ -79,7 +115,35 @@ export interface ConnectionList {
 }
 
 export async function composioList(): Promise<ConnectionList> {
+  if (!(await usingOwnKey()))
+    return platformCall<ConnectionList>("composio", "list");
   return invoke<ConnectionList>("composio_list_connections");
+}
+
+export interface ToolInfo {
+  slug?: string;
+  name?: string;
+  description?: string;
+  toolkit?: { slug?: string };
+  input_parameters?: Record<string, unknown>;
+}
+
+/** The tools available for the apps this customer has connected. Discovery,
+ *  not a hardcoded list — the agent asks what it can do rather than being told
+ *  once at build time and going stale. */
+export async function composioTools(
+  toolkits?: string,
+  limit = 40
+): Promise<{ items?: ToolInfo[] }> {
+  if (!(await usingOwnKey()))
+    return platformCall<{ items?: ToolInfo[] }>("composio", "tools", {
+      toolkits,
+      limit,
+    });
+  return invoke<{ items?: ToolInfo[] }>("composio_list_tools", {
+    toolkits: toolkits ?? null,
+    limit,
+  });
 }
 
 export interface ExecuteResult {
@@ -95,6 +159,11 @@ export async function composioExecute(
   args: Record<string, unknown>,
   userId?: string
 ): Promise<ExecuteResult> {
+  if (!(await usingOwnKey()))
+    return platformCall<ExecuteResult>("composio", "execute", {
+      tool_slug: toolSlug,
+      arguments: args,
+    });
   return invoke<ExecuteResult>("composio_execute", {
     toolSlug,
     arguments: args,

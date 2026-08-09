@@ -10,6 +10,7 @@ const {
   createPost,
   setZernioConfig,
   zernioReady,
+  usingOwnZernioKey,
   getZernioConfig,
 } = await import("../zernio");
 
@@ -23,18 +24,29 @@ beforeEach(() => {
 });
 
 describe("config", () => {
-  it("is off until both the switch and a key are present", () => {
+  it("uses the customer's OWN key only when both the switch and a key are set", () => {
     localStorage.clear();
-    expect(zernioReady()).toBe(false);
+    expect(usingOwnZernioKey()).toBe(false);
     setZernioConfig({ enabled: true });
-    expect(zernioReady()).toBe(false); // no key
+    expect(usingOwnZernioKey()).toBe(false); // no key
     setZernioConfig({ apiKey: "sk_x" });
-    expect(zernioReady()).toBe(true);
+    expect(usingOwnZernioKey()).toBe(true);
   });
 
-  it("refuses to call the API before it is configured", async () => {
+  it("still counts as ready with no key, because the plan's key covers it", () => {
+    // zernioReady answers "can this install publish at all", and since the
+    // platform proxy exists the answer is yes without any configuration. What
+    // an unconfigured install must NOT do is call zernio.com directly.
     localStorage.clear();
-    await expect(listAccounts()).rejects.toThrow(/Integrations/i);
+    expect(zernioReady()).toBe(true);
+    expect(usingOwnZernioKey()).toBe(false);
+  });
+
+  it("never calls the provider directly without the customer's own key", async () => {
+    localStorage.clear();
+    // No cloud session in tests, so the platform path refuses too — the point
+    // here is that the key-bearing direct call is not attempted.
+    await expect(listAccounts()).rejects.toThrow();
     expect(aiFetch).not.toHaveBeenCalled();
   });
 

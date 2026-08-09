@@ -169,6 +169,23 @@ pub fn composio_list_connections(db: State<Db>) -> AppResult<Value> {
     call(&key, "GET", &format!("{BASE}/connected_accounts?limit=50"), None)
 }
 
+/// The actions available on the connected apps, so the agent can discover what
+/// it may do instead of being shipped a fixed list that goes stale.
+#[tauri::command]
+pub fn composio_list_tools(
+    db: State<Db>,
+    toolkits: Option<String>,
+    limit: Option<u32>,
+) -> AppResult<Value> {
+    let key = api_key(&db)?;
+    let n = limit.unwrap_or(40).min(100);
+    let url = match toolkits.as_deref().filter(|s| !s.is_empty()) {
+        Some(slugs) => format!("{BASE}/tools?limit={n}&toolkit_slug={slugs}"),
+        None => format!("{BASE}/tools?limit={n}"),
+    };
+    call(&key, "GET", &url, None)
+}
+
 /// Execute a Composio tool (e.g. GMAIL_SEND_EMAIL) for a user's connected account.
 #[tauri::command]
 pub fn composio_execute(

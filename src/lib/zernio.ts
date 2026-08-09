@@ -12,6 +12,8 @@
 // is never synced, never committed, and never sent anywhere but zernio.com.
 
 import { aiFetch } from "./ai";
+import { cloudConfigured } from "./supabase";
+import { platformCall, platformAvailable, type KeySource } from "./integrations";
 
 const STORE_KEY = "filey_zernio_config";
 const BASE = "https://zernio.com/api/v1";
@@ -42,20 +44,43 @@ export function setZernioConfig(patch: Partial<ZernioConfig>): ZernioConfig {
   return next;
 }
 
-export function zernioReady(cfg: ZernioConfig = getZernioConfig()): boolean {
+/** This install has its OWN Zernio key and bypasses Filey's. */
+export function usingOwnZernioKey(cfg: ZernioConfig = getZernioConfig()): boolean {
   return cfg.enabled && !!cfg.apiKey.trim();
 }
 
+/** Kept for the many callers that only ask "can I publish": own key, or
+ *  Filey's via the proxy. Synchronous, so the platform answer is optimistic —
+ *  a call without a session fails with a message telling the user to sign in. */
+export function zernioReady(cfg: ZernioConfig = getZernioConfig()): boolean {
+  return usingOwnZernioKey(cfg) || cloudConfigured;
+}
+
+/** Which key pays for this install's publishing. */
+export async function zernioKeySource(): Promise<KeySource> {
+  if (usingOwnZernioKey()) return "own";
+  return (await platformAvailable()) ? "platform" : "none";
+}
+
 export class ZernioError extends Error {}
+
+/** Route a read/write through Filey's key when the user hasn't supplied one.
+ *  Returns undefined when the caller should fall through to the direct path. */
+async function viaPlatform<T>(
+  action: string,
+  payload: Record<string, unknown> = {}
+): Promise<T> {
+  return platformCall<T>("zernio", action, payload);
+}
 
 async function call<T>(
   path: string,
   init: RequestInit = {},
   cfg: ZernioConfig = getZernioConfig()
 ): Promise<T> {
-  if (!zernioReady(cfg))
+  if (!usingOwnZernioKey(cfg))
     throw new ZernioError(
-      "Social publishing is off. Add your Zernio key in Integrations → Social publishing."
+      "Social publishing is off. Add your Zernio key in Settings → Integrations."
     );
   const res = await aiFetch(`${BASE}${path}`, {
     ...init,
@@ -105,27 +130,32 @@ export interface ZernioPost {
 /** The accounts the user has connected. Read-only, safe to call on load. */
 export async function listAccounts(profileId?: string): Promise<ZernioAccount[]> {
   const q = profileId ? `?profileId=${encodeURIComponent(profileId)}` : "";
-  const data = await call<{ accounts?: ZernioAccount[] } | ZernioAccount[]>(
-    `/accounts${q}`
-  );
+  const data = usingOwnZernioKey()
+    ? await call<{ accounts?: ZernioAccount[] } | ZernioAccount[]>(`/accounts${q}`)
+    : await viaPlatform<{ accounts?: ZernioAccount[] } | ZernioAccount[]>("accounts");
   return Array.isArray(data) ? data : (data.accounts ?? []);
 }
 
 export async function listProfiles(): Promise<ZernioProfile[]> {
-  const data = await call<{ profiles?: ZernioProfile[] } | ZernioProfile[]>("/profiles");
+  const data = usingOwnZernioKey()
+    ? await call<{ profiles?: ZernioProfile[] } | ZernioProfile[]>("/profiles")
+    : await viaPlatform<{ profiles?: ZernioProfile[] } | ZernioProfile[]>("profiles");
   return Array.isArray(data) ? data : (data.profiles ?? []);
 }
 
 export async function listPosts(limit = 20): Promise<ZernioPost[]> {
-  const data = await call<{ posts?: ZernioPost[] } | ZernioPost[]>(
-    `/posts?limit=${Math.max(1, Math.min(100, limit))}`
-  );
+  const n = Math.max(1, Math.min(100, limit));
+  const data = usingOwnZernioKey()
+    ? await call<{ posts?: ZernioPost[] } | ZernioPost[]>(`/posts?limit=${n}`)
+    : await viaPlatform<{ posts?: ZernioPost[] } | ZernioPost[]>("posts", { limit: n });
   return Array.isArray(data) ? data : (data.posts ?? []);
 }
 
 /** Quota and spend, so the UI can show what a plan has left. */
 export async function usageStats(): Promise<Record<string, unknown>> {
-  return call<Record<string, unknown>>("/usage-stats");
+  return usingOwnZernioKey()
+    ? call<Record<string, unknown>>("/usage-stats")
+    : viaPlatform<Record<string, unknown>>("usage");
 }
 
 export interface CreatePostInput {
@@ -150,21 +180,23 @@ export async function createPost(input: CreatePostInput): Promise<ZernioPost> {
     throw new ZernioError("Pick at least one account to post to.");
   if (!input.content.trim() && !input.mediaUrls?.length)
     throw new ZernioError("A post needs text or media.");
-  return call<ZernioPost>("/posts", {
-    method: "POST",
-    body: JSON.stringify({
-      accountIds: input.accountIds,
-      content: input.content,
-      ...(input.mediaUrls?.length ? { mediaUrls: input.mediaUrls } : {}),
-      ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
-    }),
-  });
+  const body = {
+    accountIds: input.accountIds,
+    content: input.content,
+    ...(input.mediaUrls?.length ? { mediaUrls: input.mediaUrls } : {}),
+    ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
+  };
+  return usingOwnZernioKey()
+    ? call<ZernioPost>("/posts", { method: "POST", body: JSON.stringify(body) })
+    : viaPlatform<ZernioPost>("create_post", { input: body });
 }
 
 /** Delete a post that hasn't gone out yet. Published posts are not deletable
  *  through the API — that is the platform's business, not ours. */
 export async function deletePost(postId: string): Promise<void> {
-  await call<void>(`/posts/${encodeURIComponent(postId)}`, { method: "DELETE" });
+  if (usingOwnZernioKey())
+    await call<void>(`/posts/${encodeURIComponent(postId)}`, { method: "DELETE" });
+  else await viaPlatform<void>("delete_post", { post_id: postId });
 }
 
 /** Per-platform caption limits, so a post can be checked before it is sent

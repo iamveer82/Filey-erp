@@ -2080,10 +2080,47 @@ export const TOOLS: ToolDef[] = [
       }),
   },
   {
+    name: "list_connected_apps",
+    description:
+      "The third-party apps this user has actually connected (Gmail, Slack, HubSpot, Notion, Sheets, whatever they linked) and the actions available on each. Call this BEFORE composio_run instead of guessing a slug — the catalogue is the user's, not a fixed list, so what exists here changes per customer. Pass `app` to narrow to one toolkit.",
+    parameters: {
+      type: "object",
+      properties: { app: { type: "string" }, limit: { type: "number" } },
+    },
+    run: async (a) => {
+      const { composioList, composioTools } = await import("./composio");
+      const conns = await composioList();
+      const connected = (conns.items ?? [])
+        .filter((c) => (c.status ?? "").toUpperCase() === "ACTIVE")
+        .map((c) => c.toolkit?.slug)
+        .filter(Boolean) as string[];
+      if (!connected.length)
+        return {
+          connected: [],
+          hint: "Nothing is connected yet — the user links apps in Settings → Integrations.",
+        };
+      const want = lc(a.app);
+      const slugs = want ? connected.filter((s) => s.includes(want)) : connected;
+      const tools = await composioTools(
+        slugs.join(","),
+        Math.min(numOf(a.limit) || 40, 100)
+      );
+      return {
+        connected: [...new Set(connected)],
+        actions: (tools.items ?? []).map((t) => ({
+          slug: t.slug,
+          app: t.toolkit?.slug,
+          what: t.description,
+          arguments: t.input_parameters ?? undefined,
+        })),
+      };
+    },
+  },
+  {
     name: "composio_run",
     sensitive: true,
     description:
-      "Run any connected Composio tool by its exact slug (e.g. a SLACK_… or TELEGRAM_… action) with an arguments object. Only use when the integration is connected in Settings → Integrations and you know the slug.",
+      "Run one of the user's connected app actions by its exact slug, with an arguments object. Get the slug from list_connected_apps — do not guess it. Reaches whatever they linked: send a Gmail, post to Slack, add a HubSpot contact, append a row to Sheets.",
     parameters: {
       type: "object",
       properties: {

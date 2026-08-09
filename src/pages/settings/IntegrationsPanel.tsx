@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plug, Loader2, ExternalLink, RefreshCw, Check } from "lucide-react";
+import { Plug, Loader2, ExternalLink, RefreshCw, Check, Share2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import BrandIcon from "../../components/BrandIcon";
 import { Badge } from "../../components/ui";
@@ -10,15 +10,159 @@ import {
   composioConnect,
   composioStatus,
   composioList,
+  composioKeySource,
   COMPOSIO_TOOLKITS,
 } from "../../lib/composio";
+import {
+  getZernioConfig,
+  setZernioConfig,
+  usingOwnZernioKey,
+  zernioKeySource,
+  listAccounts,
+  type ZernioConfig,
+} from "../../lib/zernio";
+import type { KeySource } from "../../lib/integrations";
 
 export default function IntegrationsPanel() {
   return (
     <div className="space-y-4">
       <ComposioCard />
+      <ZernioCard />
       <ServicesCard />
     </div>
+  );
+}
+
+/* ── Social publishing (Zernio) ──────────────────────────────────────────
+ * The key used to live behind a card on /integrations/:app, which is a strange
+ * place to keep a credential. Both providers now sit together, and both say
+ * plainly whose key is paying. */
+function ZernioCard() {
+  const [cfg, setCfg] = useState<ZernioConfig>(() => getZernioConfig());
+  const [key, setKey] = useState("");
+  const [source, setSource] = useState<KeySource>("none");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    void zernioKeySource().then(setSource);
+  }, [cfg]);
+
+  const own = usingOwnZernioKey(cfg);
+
+  const saveOwn = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const next = setZernioConfig({ apiKey: key.trim(), enabled: true });
+      setCfg(next);
+      setKey("");
+      // Prove the key before saying it works: one cheap authenticated read.
+      const accounts = await listAccounts();
+      setMsg(`Key works — ${accounts.length} account(s) connected.`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const check = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      const accounts = await listAccounts();
+      setMsg(
+        accounts.length
+          ? `Working — ${accounts.length} account(s) connected.`
+          : "Working, but no social accounts are linked at zernio.com yet."
+      );
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeOwn = () => {
+    setCfg(setZernioConfig({ apiKey: "", enabled: false }));
+    setMsg("Your key was removed — publishing falls back to your Filey plan.");
+  };
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-1">
+        <Share2 size={18} className="text-primary-500" />
+        <p className="font-medium text-ink">Social publishing</p>
+      </div>
+      <p className="text-sm text-brand-500 mt-0.5 mb-4">
+        Post and schedule to Instagram, LinkedIn, X, TikTok and more. Link the
+        accounts themselves at zernio.com; this is only about which key pays.
+      </p>
+
+      <SourceBadge source={source} own={own} />
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-medium text-brand-500 hover:text-ink">
+          Use my own Zernio key instead
+        </summary>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="field flex-1">
+            <span className="label">Zernio API key</span>
+            <input
+              type="password"
+              className="input"
+              placeholder={own ? "•••••••• (saved — paste to replace)" : "sk_…"}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+            />
+          </div>
+          <button className="btn-primary" onClick={saveOwn} disabled={busy || !key.trim()}>
+            {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+          </button>
+        </div>
+        {own && (
+          <div className="mt-2 flex gap-3">
+            <button className="btn-ghost h-8 px-3 text-xs" onClick={check} disabled={busy}>
+              <RefreshCw size={12} /> Check key
+            </button>
+            <button
+              className="h-8 px-3 text-xs font-medium text-danger hover:underline"
+              onClick={removeOwn}
+              disabled={busy}
+            >
+              Remove key
+            </button>
+          </div>
+        )}
+      </details>
+
+      {msg && <p className="mt-3 text-xs font-medium text-brand-500">{msg}</p>}
+    </div>
+  );
+}
+
+/** Says who is paying, in the words a customer would use. */
+function SourceBadge({ source, own }: { source: KeySource; own: boolean }) {
+  if (own)
+    return (
+      <p className="text-xs font-medium text-brand-600 bg-hover rounded-xl px-3 py-2">
+        Running on <b>your own key</b> — calls go straight to the provider and
+        aren't metered by Filey.
+      </p>
+    );
+  if (source === "platform")
+    return (
+      <p className="text-xs font-medium text-success bg-success/10 rounded-xl px-3 py-2">
+        <Check size={11} className="inline" /> Included in your Filey plan —
+        nothing to configure. Daily limits apply on the free tier.
+      </p>
+    );
+  return (
+    <p className="text-xs font-medium text-warning bg-warning/10 rounded-xl px-3 py-2">
+      Sign in to your Filey account to use the built-in integrations, or add your
+      own key below.
+    </p>
   );
 }
 
@@ -29,15 +173,16 @@ function ComposioCard() {
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [active, setActive] = useState<Set<string>>(new Set());
+  const [source, setSource] = useState<KeySource>("none");
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
     getComposioKey().then((k) => setHasKey(!!k.trim()));
+    void composioKeySource().then(setSource);
     void refresh();
   }, []);
 
   const refresh = async () => {
-    if (!hasDesktop) return;
     try {
       const list = await composioList();
       const on = new Set<string>();
@@ -57,7 +202,44 @@ function ComposioCard() {
       await setComposioKey(key);
       setHasKey(true);
       setKey("");
-      setMsg("Saved. Now connect a service below.");
+      // Saving used to claim success without ever asking the provider whether
+      // the key was real, so a typo surfaced later as "integrations are broken".
+      await composioList();
+      setMsg("Key works. Connect the apps you want below.");
+      await refresh();
+    } catch (e) {
+      setMsg(
+        `That key didn't work: ${e instanceof Error ? e.message : String(e)}`
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const check = async () => {
+    setSaving(true);
+    setMsg("");
+    try {
+      const list = await composioList();
+      const n = (list.items ?? []).filter(
+        (c) => (c.status ?? "").toUpperCase() === "ACTIVE"
+      ).length;
+      setMsg(`Working — ${n} app(s) connected.`);
+      await refresh();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeKey = async () => {
+    setSaving(true);
+    setMsg("");
+    try {
+      await setComposioKey("");
+      setHasKey(false);
+      setMsg("Your key was removed — integrations fall back to your Filey plan.");
       await refresh();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -101,43 +283,60 @@ function ComposioCard() {
         <p className="font-medium text-ink">AI agent integrations (Composio)</p>
       </div>
       <p className="text-sm text-brand-500 mt-0.5 mb-4">
-        Connect Gmail, Slack or Telegram so the Filey AI agent can send messages
-        on your behalf. Your Composio API key is stored in this device's encrypted
-        store — never synced, never in the browser.
+        Connect the apps you already use, and the Filey AI agent can work in
+        them — read a form response into a lead, book the meeting, send the
+        follow-up, update the deal.
       </p>
 
-      {!hasDesktop && (
-        <p className="text-xs font-medium text-warning bg-warning/10 rounded-xl px-3 py-2 mb-4">
-          Integrations run from the Filey desktop app only.
-        </p>
-      )}
+      <SourceBadge source={source} own={hasKey} />
 
-      {/* API key */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="field flex-1">
-          <span className="label">Composio API key</span>
-          <input
-            type="password"
-            className="input"
-            placeholder={hasKey ? "•••••••• (saved — paste to replace)" : "ak_…"}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            disabled={!hasDesktop}
-          />
-        </div>
-        <button
-          className="btn-primary"
-          onClick={save}
-          disabled={saving || !key.trim() || !hasDesktop}
-        >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : "Save key"}
-        </button>
-      </div>
-      {hasKey && (
-        <p className="mt-1.5 text-[11px] text-brand-400">
-          Key saved. Tip: rotate it in the Composio dashboard if it's ever exposed.
-        </p>
-      )}
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-medium text-brand-500 hover:text-ink">
+          Use my own Composio key instead
+        </summary>
+        {!hasDesktop ? (
+          <p className="mt-2 text-xs font-medium text-warning bg-warning/10 rounded-xl px-3 py-2">
+            Your own key can only be stored by the desktop app, which keeps it in
+            the device's encrypted store rather than the browser.
+          </p>
+        ) : (
+          <>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="field flex-1">
+                <span className="label">Composio API key</span>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder={hasKey ? "•••••••• (saved — paste to replace)" : "ak_…"}
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+              </div>
+              <button
+                className="btn-primary"
+                onClick={save}
+                disabled={saving || !key.trim()}
+              >
+                {saving ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+              </button>
+            </div>
+            {hasKey && (
+              <div className="mt-2 flex gap-3">
+                <button className="btn-ghost h-8 px-3 text-xs" onClick={check} disabled={saving}>
+                  <RefreshCw size={12} /> Check key
+                </button>
+                <button
+                  className="h-8 px-3 text-xs font-medium text-danger hover:underline"
+                  onClick={removeKey}
+                  disabled={saving}
+                >
+                  Remove key
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </details>
 
       {/* Toolkits */}
       <div className="mt-4 flex items-center justify-between">
@@ -173,7 +372,9 @@ function ComposioCard() {
                 <button
                   className="btn-ghost h-9 px-3 text-xs"
                   onClick={() => connect(tk.slug)}
-                  disabled={!hasKey || !hasDesktop || connecting === tk.slug}
+                  // Connectable on the plan's key too — requiring an own key
+                  // here was what made integrations look desktop-only.
+                  disabled={source === "none" || connecting === tk.slug}
                 >
                   {connecting === tk.slug ? (
                     <Loader2 size={13} className="animate-spin" />
