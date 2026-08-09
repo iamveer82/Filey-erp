@@ -12,6 +12,7 @@
  */
 
 import { TOOLS, runTool } from "./aiTools";
+import { createGuard } from "./agentGuard";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 
@@ -387,6 +388,7 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts
     function: { name: t.name, description: t.description, parameters: t.parameters },
   }));
   const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
+  const guard = createGuard();
 
   for (let round = 0; round < maxRounds; round++) {
     const res = await aiFetch(url, {
@@ -418,7 +420,14 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts
         }
         if (opts.finishToolName && tc.function?.name === opts.finishToolName)
           return String(args.summary ?? msg.content ?? "Task complete.").trim();
-        const result = await runTool(tc.function?.name, args);
+        const name = tc.function?.name;
+        // A repeat of an identical call is answered from this run's memory —
+        // reads return the earlier answer, writes are refused. Without it the
+        // same invoice gets emailed twice when the model second-guesses itself.
+        const decided = guard.before(name, args);
+        const result =
+          "short" in decided ? decided.short : await runTool(name, args);
+        if (!("short" in decided)) guard.after(name, args, result);
         convo.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -429,7 +438,12 @@ async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts
     }
     return (msg.content ?? "").toString().trim();
   }
-  return "I ran several steps but couldn't finish — try rephrasing.";
+  // Running out of rounds used to produce an apology and nothing else. What
+  // was actually done matters more — especially if some of it changed data.
+  const done = guard.summary();
+  return done
+    ? `I got part of the way but ran out of steps. ${done}. Tell me how to continue.`
+    : "I ran several steps but couldn't finish — try rephrasing.";
 }
 
 async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts): Promise<string> {
@@ -458,6 +472,7 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
     input_schema: t.parameters,
   }));
   const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
+  const guard = createGuard();
 
   for (let round = 0; round < maxRounds; round++) {
     const res = await aiFetch(`${base}/messages`, {
@@ -493,7 +508,11 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
         if (block.type === "tool_use") {
           if (opts.finishToolName && block.name === opts.finishToolName)
             return String(block.input?.summary ?? textOut ?? "Task complete.").trim();
-          const result = await runTool(block.name, block.input || {});
+          const input = block.input || {};
+          const decided = guard.before(block.name, input);
+          const result =
+            "short" in decided ? decided.short : await runTool(block.name, input);
+          if (!("short" in decided)) guard.after(block.name, input, result);
           results.push({
             type: "tool_result",
             tool_use_id: block.id,
@@ -506,7 +525,12 @@ async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentO
     }
     return textOut;
   }
-  return "I ran several steps but couldn't finish — try rephrasing.";
+  // Running out of rounds used to produce an apology and nothing else. What
+  // was actually done matters more — especially if some of it changed data.
+  const done = guard.summary();
+  return done
+    ? `I got part of the way but ran out of steps. ${done}. Tell me how to continue.`
+    : "I ran several steps but couldn't finish — try rephrasing.";
 }
 
 /* ── Autonomous agent: plan → act → observe → verify → finish ─────────────── */
