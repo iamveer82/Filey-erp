@@ -150,6 +150,22 @@ function ZernioCard() {
 function AppIcon({ slug, logo }: { slug: string; logo?: string }) {
   const [broken, setBroken] = useState(false);
   const src = logo || `https://logos.composio.dev/api/${slug}`;
+
+  // A CSP block fires NO error event — the image simply never completes — so
+  // onError alone left an empty circle forever. Give it a beat, then fall back
+  // to the bundled icon. This is also what a customer on a plane sees.
+  useEffect(() => {
+    setBroken(false);
+    const t = setTimeout(() => {
+      const img = new Image();
+      img.onload = () => setBroken(false);
+      img.onerror = () => setBroken(true);
+      img.src = src;
+      if (!img.complete) setTimeout(() => !img.naturalWidth && setBroken(true), 2500);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [src]);
+
   return (
     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-100 text-ink dark:bg-white/10">
       {broken ? (
@@ -160,7 +176,9 @@ function AppIcon({ slug, logo }: { slug: string; logo?: string }) {
           alt=""
           width={20}
           height={20}
-          loading="lazy"
+          // NOT lazy: fourteen 128px icons in a settings list are cheaper to
+          // fetch than they are to leave blank, and lazy ones inside this
+          // scroll container were never triggering at all.
           className="h-5 w-5 rounded object-contain"
           onError={() => setBroken(true)}
         />
