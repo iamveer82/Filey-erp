@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Plug, Loader2, ExternalLink, RefreshCw, Check, Share2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import BrandIcon from "../../components/BrandIcon";
@@ -140,6 +140,73 @@ function ZernioCard() {
       </details>
 
       {msg && <p className="mt-3 text-xs font-medium text-brand-500">{msg}</p>}
+    </div>
+  );
+}
+
+/* ── App gallery ─────────────────────────────────────────────────────────
+ * A catalogue is browsed, not read top to bottom, so it is laid out as a grid
+ * of cards rather than a stack of rows: logo, name, and a couple of lines of
+ * what the app is. Four or five across on a wide screen, folding to two and
+ * then one — a settings pane is narrower than a marketing page, so the columns
+ * are driven by available width rather than a fixed count. */
+function AppGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-2 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">
+      {children}
+    </div>
+  );
+}
+
+function AppCard({
+  slug,
+  name,
+  desc,
+  logo,
+  connected,
+  connecting,
+  disabled,
+  onConnect,
+}: {
+  slug: string;
+  name: string;
+  desc: string;
+  logo?: string;
+  connected: boolean;
+  connecting: boolean;
+  disabled: boolean;
+  onConnect: () => void;
+}) {
+  return (
+    <div className="flex flex-col rounded-xl border border-brand-200 p-4 transition-colors hover:border-brand-300">
+      <div className="flex items-start justify-between gap-2">
+        <AppIcon slug={slug} logo={logo} />
+        {connected && (
+          <Badge tone="success">
+            <Check size={11} /> Connected
+          </Badge>
+        )}
+      </div>
+      <p className="mt-3 text-sm font-medium text-ink">{name}</p>
+      {/* Two lines, then ellipsis — descriptions arrive from Composio at wildly
+          different lengths and a ragged grid reads as broken. */}
+      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-brand-400">
+        {desc}
+      </p>
+      {!connected && (
+        <button
+          className="btn-ghost mt-3 h-8 w-full text-xs"
+          onClick={onConnect}
+          disabled={disabled || connecting}
+        >
+          {connecting ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <ExternalLink size={13} />
+          )}
+          Connect
+        </button>
+      )}
     </div>
   );
 }
@@ -414,39 +481,23 @@ function ComposioCard() {
         </button>
       </div>
       {found.length > 0 && (
-        <div className="mt-2 space-y-2">
-          {found.map((tk) => (
-            <div
-              key={tk.slug}
-              className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
-            >
-              <AppIcon slug={tk.slug} logo={tk.meta?.logo} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink">{tk.name ?? tk.slug}</p>
-                <p className="truncate text-[11px] text-brand-400">
-                  {tk.meta?.description ?? tk.slug}
-                </p>
-              </div>
-              {active.has(tk.slug) ? (
-                <Badge tone="success">
-                  <Check size={11} /> Connected
-                </Badge>
-              ) : (
-                <button
-                  className="btn-ghost h-9 px-3 text-xs"
-                  onClick={() => connect(tk.slug)}
-                  disabled={source === "none" || connecting === tk.slug}
-                >
-                  {connecting === tk.slug ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : (
-                    <ExternalLink size={13} />
-                  )}
-                  Connect
-                </button>
-              )}
-            </div>
-          ))}
+        <div className="mt-3">
+          <p className="label">Search results</p>
+          <AppGrid>
+            {found.map((tk) => (
+              <AppCard
+                key={tk.slug}
+                slug={tk.slug}
+                name={tk.name ?? tk.slug}
+                desc={tk.meta?.description ?? tk.slug}
+                logo={tk.meta?.logo}
+                connected={active.has(tk.slug)}
+                connecting={connecting === tk.slug}
+                disabled={source === "none"}
+                onConnect={() => connect(tk.slug)}
+              />
+            ))}
+          </AppGrid>
         </div>
       )}
 
@@ -461,43 +512,22 @@ function ComposioCard() {
           <RefreshCw size={12} /> Refresh
         </button>
       </div>
-      <div className="mt-2 space-y-2">
-        {COMPOSIO_TOOLKITS.map((tk) => {
-          const on = active.has(tk.slug);
-          return (
-            <div
-              key={tk.slug}
-              className="flex items-center gap-3 rounded-xl border border-brand-200 px-4 py-3"
-            >
-              <AppIcon slug={tk.slug} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink">{tk.name}</p>
-                <p className="truncate text-[11px] text-brand-400">{tk.desc}</p>
-              </div>
-              {on ? (
-                <Badge tone="success">
-                  <Check size={11} /> Connected
-                </Badge>
-              ) : (
-                <button
-                  className="btn-ghost h-9 px-3 text-xs"
-                  onClick={() => connect(tk.slug)}
-                  // Connectable on the plan's key too — requiring an own key
-                  // here was what made integrations look desktop-only.
-                  disabled={source === "none" || connecting === tk.slug}
-                >
-                  {connecting === tk.slug ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : (
-                    <ExternalLink size={13} />
-                  )}
-                  Connect
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <AppGrid>
+        {COMPOSIO_TOOLKITS.map((tk) => (
+          <AppCard
+            key={tk.slug}
+            slug={tk.slug}
+            name={tk.name}
+            desc={tk.desc}
+            connected={active.has(tk.slug)}
+            connecting={connecting === tk.slug}
+            // Connectable on the plan's key too — requiring an own key here was
+            // what made integrations look desktop-only.
+            disabled={source === "none"}
+            onConnect={() => connect(tk.slug)}
+          />
+        ))}
+      </AppGrid>
 
       {msg && <p className="mt-3 text-xs font-medium text-brand-500">{msg}</p>}
     </div>
