@@ -61,6 +61,7 @@ import {
   localYmd,
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
+import { DOC_TEMPLATES } from "../lib/docTemplates";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
@@ -108,6 +109,7 @@ import {
 } from "../components/BankDetails";
 import {
   loadCompanyStampSig,
+  durableStampSig,
   EMPTY_STAMP_SIG,
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
@@ -204,24 +206,7 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   aed_exchange_rate?: number | null;
 };
 
-const TEMPLATES = [
-  { id: "minimal", name: "Minimal" },
-  { id: "fta", name: "UAE FTA Tax Invoice" },
-  { id: "classic", name: "Classic" },
-  { id: "modern", name: "Modern" },
-  { id: "corporate", name: "Corporate" },
-  { id: "elegant", name: "Elegant" },
-  { id: "bold", name: "Bold" },
-  { id: "tech", name: "Tech" },
-  { id: "creative", name: "Creative" },
-  { id: "receipt", name: "Receipt" },
-  { id: "monogram", name: "Monogram" },
-  { id: "green-gold", name: "Green Gold" },
-  { id: "uae", name: "UAE Professional" },
-  { id: "industrial", name: "Industrial" },
-  { id: "executive", name: "Executive" },
-  { id: "fresh", name: "Fresh" },
-];
+const TEMPLATES = DOC_TEMPLATES;
 
 const today = () => todayYmd();
 const addDays = (n: number) =>
@@ -518,7 +503,7 @@ const editInvoice = async (id: number) => {
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
         stamp: d.stamp
           ? {
-              data: d.stamp.data,
+              data: durableStampSig(d.stamp).data,
               x: d.stamp.x ?? 75,
               y: d.stamp.y ?? 70,
               opacity: d.stamp.opacity ?? 30,
@@ -532,7 +517,7 @@ const editInvoice = async (id: number) => {
           : undefined,
         signature: d.signature
           ? {
-              data: d.signature.data,
+              data: durableStampSig(d.signature).data,
               x: d.signature.x ?? 75,
               y: d.signature.y ?? 85,
               opacity: d.signature.opacity ?? 35,
@@ -623,7 +608,7 @@ const editInvoice = async (id: number) => {
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
         stamp: d.stamp
           ? {
-              data: d.stamp.data,
+              data: durableStampSig(d.stamp).data,
               x: d.stamp.x ?? 75,
               y: d.stamp.y ?? 70,
               opacity: d.stamp.opacity ?? 30,
@@ -637,7 +622,7 @@ const editInvoice = async (id: number) => {
           : undefined,
         signature: d.signature
           ? {
-              data: d.signature.data,
+              data: durableStampSig(d.signature).data,
               x: d.signature.x ?? 75,
               y: d.signature.y ?? 85,
               opacity: d.signature.opacity ?? 35,

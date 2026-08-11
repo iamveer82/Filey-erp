@@ -46,6 +46,19 @@ function durable(parsed: Partial<StampSig>): Partial<StampSig> {
   return rest;
 }
 
+/** Heal a stamp/signature stored ON A DOCUMENT.
+ *
+ *  Invoices keep their own snapshot of the stamp, and documents saved before
+ *  the settings page stopped persisting signed URLs hold a link that expired
+ *  five minutes later — so those invoices print blank while newer ones are
+ *  fine. Recovering the storage path lets the renderer sign it afresh. Data
+ *  URLs and plain paths pass through untouched. */
+export function durableStampSig<T extends { data?: string } | undefined>(v: T): T {
+  if (!v?.data?.startsWith("http")) return v;
+  const path = pathFromSignedUrl(v.data);
+  return path ? ({ ...v, data: path } as T) : v;
+}
+
 export async function loadCompanyStampSig(): Promise<CompanyStampSig> {
   try {
     const rows = await tools.settings();
