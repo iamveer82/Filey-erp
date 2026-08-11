@@ -7,6 +7,7 @@ import {
   followups,
   hr,
   pos,
+  quotes,
   computeVatReturn,
   computeTrialBalance,
   computeBalanceSheet,
@@ -20,6 +21,7 @@ import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { findSkill, loadSkills } from "./agentSkills";
 import { isToolAllowed } from "./capabilities";
+import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
 import { readUrl, searchWeb, asUntrustedContext } from "./reach";
 import { enrichFromWebsite, scoreLead } from "./scout";
 import {
@@ -145,6 +147,74 @@ async function findProduct(name: unknown) {
   return all.find((p) => lc(p.name) === q) || all.find((p) => lc(p.name).includes(q));
 }
 
+/* ---------- sending what the agent produced ----------
+ *
+ * A document the agent creates is only useful once it can leave the app. Two
+ * primitives cover every destination: the rendered PDF (for email, where an
+ * attachment is expected) and a public link (for everything else — Slack,
+ * WhatsApp, Drive, a social post — because third-party actions carry text far
+ * more reliably than they carry binaries).
+ *
+ * Both are loaded on demand: the export sheet pulls in the whole document
+ * renderer, which has no business being in the agent's start-up cost. */
+
+export type ShareableDoc = "invoice" | "quotation" | "purchase_order" | "receipt";
+
+/** A public, tokenised link to a stored document. Also flips the document's
+ *  shared flag, which is what makes the portal serve it. */
+async function documentLink(kind: ShareableDoc, id: number): Promise<string> {
+  const token =
+    kind === "quotation"
+      ? await quotes.publicLink(id)
+      : kind === "purchase_order"
+        ? await pos.publicLink(id)
+        : await billing.publicLink(id);
+  return `${location.origin}${location.pathname}#/portal/${token}`;
+}
+
+/** Render a stored invoice to a PDF attachment, the same sheet the Send button
+ *  uses so the customer receives an identical document either way. */
+async function renderInvoicePdf(
+  id: number,
+  number: string
+): Promise<{ filename: string; content: string }[]> {
+  const [{ default: InvoiceExportSheet }, { reactToPdfBytes }, { bytesToBase64 }, React] =
+    await Promise.all([
+      import("../components/InvoiceExportSheet"),
+      import("./reactPdf"),
+      import("./email"),
+      import("react"),
+    ]);
+  const { loadCompanyStampSig, EMPTY_STAMP_SIG } = await import(
+    "../components/StampSignatureSettings"
+  );
+  const { loadBankInfo, EMPTY_BANK } = await import("../components/BankDetails");
+  const { splitItemMeta } = await import("./docItems");
+
+  const doc = (await billing.getDoc(id)) as unknown as Record<string, unknown>;
+  const [stampSig, bank] = await Promise.all([
+    loadCompanyStampSig().catch(() => EMPTY_STAMP_SIG),
+    loadBankInfo().catch(() => EMPTY_BANK),
+  ]);
+  // The stored items keep their per-line meta packed in `custom`; the sheet
+  // expects it unpacked, exactly as the editor hands it over.
+  const items = (doc.items as { custom?: Record<string, string> | null }[]).map((i) => ({
+    ...i,
+    ...splitItemMeta(i.custom),
+  }));
+  const base = number || `invoice-${id}`;
+  const pdf = await reactToPdfBytes(
+    React.createElement(InvoiceExportSheet, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      form: { ...doc, items } as any,
+      companyStampSig: stampSig,
+      bank,
+    }),
+    base
+  );
+  return [{ filename: `${base}.pdf`, content: bytesToBase64(pdf.bytes) }];
+}
+
 /* ---------- the file toolbox ----------
  *
  * The agent used to reach the toolbox through a hand-written switch of
@@ -194,6 +264,14 @@ async function writeSettingList(key: string, list: unknown[]): Promise<void> {
   await tools.setSetting(key, JSON.stringify(list));
 }
 
+/** Every page the agent may navigate to.
+ *
+ *  This listed 14 of the app's 28 modules, so the agent could not reach
+ *  cheques, receipts, files, follow-ups, bank accounts or settings at all —
+ *  it would answer "unknown page" for half the product. Kept as plain strings
+ *  rather than derived from the module registry, which would drag every lazy
+ *  page component into this module; `nav-pages.test.ts` fails if a module is
+ *  added to the registry without being exposed here. */
 const NAV_PAGES = [
   "overview",
   "inventory",
@@ -204,10 +282,22 @@ const NAV_PAGES = [
   "customers",
   "suppliers",
   "purchase",
+  "purchase-invoices",
   "purchase-orders",
   "reports",
   "people",
   "accounting",
+  "bank-accounts",
+  "cheques",
+  "payment-receipts",
+  "declaration",
+  "delivery-challans",
+  "follow-ups",
+  "email-templates",
+  "marketing",
+  "files",
+  "integrations",
+  "settings",
   "tools",
 ];
 
@@ -603,12 +693,16 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_invoice_draft",
     description:
-      "Create a DRAFT invoice for a customer with line items (always a draft the user reviews).",
+      "Create a DRAFT invoice for a customer with line items (always a draft the user reviews). Pass `template` to choose the design (e.g. corporate, elegant, fta) — call list_templates if unsure; omitted, the company default is used.",
     parameters: {
       type: "object",
       properties: {
         customer_name: { type: "string" },
         currency: { type: "string" },
+        template: {
+          type: "string",
+          description: "Design id or name, e.g. corporate. Omit for the company default.",
+        },
         items: {
           type: "array",
           items: {
@@ -636,7 +730,10 @@ export const TOOLS: ToolDef[] = [
       const input: InvoiceDocInput = {
         number: `DRAFT-${stamp}`,
         status: "draft",
-        template: co?.default_template || "minimal",
+        template:
+          (str(args.template) ? resolveTemplate(str(args.template)) : undefined) ||
+          co?.default_template ||
+          "minimal",
         accent: co?.default_accent || "#FFD600",
         currency: str(args.currency) || getDisplayCurrency(),
         seller_name: co?.name || "",
@@ -2030,13 +2127,139 @@ export const TOOLS: ToolDef[] = [
             ? "Could not load that invoice to find the customer's email — try again."
             : "This invoice has no customer email on file. Add an email to the customer record first.",
         };
-      const body = `<p>Your invoice <strong>${esc(d.number)}</strong> for ${esc(d.currency || "AED")} ${numOf(d.total)} is ready.</p>`;
+      // Attach the rendered invoice, exactly as the Send button does. Without
+      // this the agent's email was a bare one-line summary while the same
+      // action from the UI arrived with the document on it.
+      let attachments: { filename: string; content: string }[] | undefined;
+      let portalUrl = "";
+      try {
+        portalUrl = await documentLink("invoice", Number(d.id));
+      } catch {
+        /* the link is a bonus; the attachment is the point */
+      }
+      try {
+        attachments = await renderInvoicePdf(Number(d.id), str(d.number));
+      } catch (e) {
+        console.warn("Invoice PDF render failed; sending summary only", e);
+      }
+      const body =
+        `<p>Your invoice <strong>${esc(d.number)}</strong> for ${esc(d.currency || "AED")} ${numOf(d.total)} is ready.</p>` +
+        (portalUrl
+          ? `<p><a href="${portalUrl}">View &amp; pay online</a></p>`
+          : "");
       await sendEmail({
         to: email,
         subject: `Invoice ${d.number} from Filey`,
         html: emailShell(`Invoice ${d.number}`, body),
+        attachments,
       });
-      return { ok: true, message: `Invoice ${d.number} emailed to ${email}.` };
+      return {
+        ok: true,
+        attached: !!attachments,
+        link: portalUrl || undefined,
+        message: `Invoice ${d.number} emailed to ${email}${attachments ? " with the PDF attached" : " (summary only — the PDF could not be rendered)"}.`,
+      };
+    },
+  },
+  {
+    name: "list_templates",
+    description:
+      "The invoice/quotation designs available in this app, with the id to pass to create_invoice_draft or set_invoice_template. Call this when the user names a look ('corporate', 'something elegant') so you use a real design instead of telling them it cannot be changed.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const co = await billing.getCompany().catch(() => null);
+      return {
+        templates: DOC_TEMPLATES,
+        company_default: co?.default_template || "minimal",
+      };
+    },
+  },
+  {
+    name: "set_invoice_template",
+    description:
+      "Change the design of an existing invoice, and optionally make it the default for future documents. Accepts an id or a name the user said, e.g. 'corporate'.",
+    parameters: {
+      type: "object",
+      properties: {
+        invoice_number: { type: "string" },
+        template: { type: "string" },
+        set_as_default: {
+          type: "boolean",
+          description: "Also use this design for new documents from now on.",
+        },
+      },
+      required: ["invoice_number", "template"],
+    },
+    run: async (a) => {
+      const wanted = resolveTemplate(str(a.template));
+      if (!wanted)
+        return {
+          error: `No template matching "${str(a.template)}".`,
+          available: DOC_TEMPLATES,
+        };
+      const d = await findInvoice(a.invoice_number);
+      if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
+      const doc = (await billing.getDoc(Number(d.id))) as unknown as Record<string, unknown>;
+      // saveDoc replaces the document, so the existing one is passed straight
+      // back through with only the design changed.
+      await billing.saveDoc({
+        ...(doc as unknown as InvoiceDocInput),
+        id: Number(d.id),
+        template: wanted,
+      });
+      if (a.set_as_default) {
+        try {
+          const co = await billing.getCompany();
+          await billing.saveCompany({ ...co, default_template: wanted });
+        } catch (e) {
+          console.warn("Could not set the company default template", e);
+        }
+      }
+      return {
+        ok: true,
+        message: `Invoice ${str(d.number)} now uses the ${wanted} design${a.set_as_default ? ", and new documents will too" : ""}.`,
+      };
+    },
+  },
+  {
+    name: "share_document_link",
+    sensitive: true,
+    description:
+      "Get a public, shareable link to a document (invoice, quotation or purchase order) so it can be sent anywhere — pasted into a Slack or WhatsApp message via composio_run, attached to a social post, or given to the customer directly. The link opens the real document in a browser with no login. Sensitive because publishing it makes the document readable by anyone holding the link. To email a document with the PDF attached, use email_invoice instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          description: "invoice | quotation | purchase_order",
+        },
+        number: { type: "string", description: "The document number, e.g. INV-2026-0001" },
+      },
+      required: ["kind", "number"],
+    },
+    run: async (a) => {
+      const kind = lc(a.kind).replace(/[\s-]+/g, "_") as ShareableDoc;
+      if (kind === "invoice") {
+        const d = await findInvoice(a.number);
+        if (!d) return { error: `No invoice matching "${str(a.number)}"` };
+        return { url: await documentLink("invoice", Number(d.id)), number: d.number };
+      }
+      if (kind === "quotation") {
+        const all = (await quotes.listDocs()) as unknown as Record<string, unknown>[];
+        const q = lc(a.number);
+        const d = all.find((x) => lc(x.number) === q) || all.find((x) => lc(x.number).includes(q));
+        if (!d) return { error: `No quotation matching "${str(a.number)}"` };
+        return { url: await documentLink("quotation", Number(d.id)), number: d.number };
+      }
+      if (kind === "purchase_order") {
+        const all = (await pos.list()) as unknown as Record<string, unknown>[];
+        const q = lc(a.number);
+        const d =
+          all.find((x) => lc(x.po_number) === q) || all.find((x) => lc(x.po_number).includes(q));
+        if (!d) return { error: `No purchase order matching "${str(a.number)}"` };
+        return { url: await documentLink("purchase_order", Number(d.id)), number: d.po_number };
+      }
+      return { error: "kind must be invoice, quotation or purchase_order" };
     },
   },
   {
