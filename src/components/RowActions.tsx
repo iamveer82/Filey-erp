@@ -3,9 +3,11 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   MoreHorizontal,
   Eye,
@@ -33,7 +35,13 @@ import { cn } from "../lib/format";
  *  and put a scrollbar on the table instead of showing Delete. Fixed position
  *  isn't clipped by an ancestor's overflow, so the menu is measured off its
  *  trigger button instead. Anchored to `bottom` when the trigger sits near the
- *  viewport floor, so the menu grows upward without having to measure it. */
+ *  viewport floor, so the menu grows upward without having to measure it.
+ *
+ *  The menu is also rendered through a portal (see MenuSurface). Position
+ *  fixed alone was not enough on the desktop build: WebView2 composited the
+ *  menu into the scrolling table's layer and then only repainted the first
+ *  row of it, so Send appeared to offer WhatsApp and nothing else — the Email
+ *  and SMS entries were laid out at full size but never painted. */
 function useMenuPosition(open: boolean, anchor: RefObject<HTMLElement | null>) {
   const [pos, setPos] = useState<{
     top?: number;
@@ -98,14 +106,29 @@ export function RowActions({
   const moreRef = useRef<HTMLDivElement>(null);
   const sendBtn = useRef<HTMLButtonElement>(null);
   const moreBtn = useRef<HTMLButtonElement>(null);
+  // The menus render in a portal, so they are no longer inside sendRef/moreRef
+  // in the DOM. Without their own refs the mousedown below would count a click
+  // on a menu item as "outside", unmount the menu, and the click would never
+  // reach the item — the action would silently do nothing.
+  const sendMenu = useRef<HTMLDivElement>(null);
+  const moreMenu = useRef<HTMLDivElement>(null);
   const sendPos = useMenuPosition(openSend, sendBtn);
   const morePos = useMenuPosition(openMore, moreBtn);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (sendRef.current && !sendRef.current.contains(e.target as Node))
+      const t = e.target as Node;
+      if (
+        sendRef.current &&
+        !sendRef.current.contains(t) &&
+        !sendMenu.current?.contains(t)
+      )
         setOpenSend(false);
-      if (moreRef.current && !moreRef.current.contains(e.target as Node))
+      if (
+        moreRef.current &&
+        !moreRef.current.contains(t) &&
+        !moreMenu.current?.contains(t)
+      )
         setOpenMore(false);
     }
     document.addEventListener("mousedown", onDoc);
@@ -176,10 +199,7 @@ export function RowActions({
             <Send className="h-3.5 w-3.5" />
           </button>
           {openSend && sendPos && (
-            <div
-              style={sendPos}
-              className="fixed z-50 w-44 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]"
-            >
+            <MenuSurface style={sendPos} width="w-44" ref={sendMenu}>
               {onSend.whatsapp && (
                 <MenuItem
                   icon={MessageCircle}
@@ -226,7 +246,7 @@ export function RowActions({
                   />
                 </>
               )}
-            </div>
+            </MenuSurface>
           )}
         </div>
       )}
@@ -245,10 +265,7 @@ export function RowActions({
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
           {openMore && morePos && (
-            <div
-              style={morePos}
-              className="fixed z-50 w-40 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]"
-            >
+            <MenuSurface style={morePos} width="w-40" ref={moreMenu}>
               <MenuItem
                 icon={Trash2}
                 label="Delete"
@@ -259,11 +276,40 @@ export function RowActions({
                 iconClass="text-red-500"
                 labelClass="text-red-500"
               />
-            </div>
+            </MenuSurface>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+/** The floating menu panel, rendered into <body> so no ancestor's overflow or
+ *  compositing layer owns it. The theme class lives on <html>, so the portal
+ *  keeps dark mode. */
+function MenuSurface({
+  style,
+  width,
+  ref,
+  children,
+}: {
+  style: CSSProperties;
+  width: string;
+  ref: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}) {
+  return createPortal(
+    <div
+      ref={ref}
+      style={style}
+      className={cn(
+        "fixed z-50 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]",
+        width
+      )}
+    >
+      {children}
+    </div>,
+    document.body
   );
 }
 
@@ -296,7 +342,11 @@ export type QuickViewData = {
   subtitle?: string;
   badge?: ReactNode;
   meta?: { label: string; value: ReactNode }[];
-  items?: { desc: string; qty: number; price: number }[];
+  /** `amount` is the line's real total — it is not qty × price whenever the
+   *  line carries a manual amount, a formula or a per-line discount. Callers
+   *  reading a stored document should pass storedLineAmount(); the fallback
+   *  only holds for plain lines. */
+  items?: { desc: string; qty: number; price: number; amount?: number }[];
   total?: number;
   currency?: string;
   notes?: string;
@@ -411,7 +461,7 @@ export function QuickViewModal({
                       Qty
                     </th>
                     <th className="px-4 py-2 font-medium text-[11.5px] w-24 text-right">
-                      Unit
+                      Unit price
                     </th>
                     <th className="px-4 py-2 font-medium text-[11.5px] w-28 text-right">
                       Amount
@@ -429,7 +479,9 @@ export function QuickViewModal({
                         {Number(it.price || 0).toFixed(2)}
                       </td>
                       <td className="px-4 py-2 text-right text-foreground">
-                        {(Number(it.qty || 0) * Number(it.price || 0)).toFixed(2)}
+                        {Number(
+                          it.amount ?? Number(it.qty || 0) * Number(it.price || 0)
+                        ).toFixed(2)}
                       </td>
                     </tr>
                   ))}

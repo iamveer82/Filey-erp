@@ -39,6 +39,8 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
+import { storedLineAmount } from "../lib/docItems";
+import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
 import PartyBankDetails from "../components/PartyBankDetails";
@@ -460,6 +462,10 @@ export default function SupplierDetail() {
           desc: i.description,
           qty: i.quantity,
           price: i.unit_cost,
+          amount: storedLineAmount(
+            { qty: i.quantity, unit_price: i.unit_cost, custom: i.custom },
+            poDoc.unit_price_formula
+          ),
         })),
         total: poDoc.total,
         currency: poDoc.currency || "AED",
@@ -475,6 +481,14 @@ export default function SupplierDetail() {
       const token = await pos.publicLink(o.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
       const text = `Purchase order ${o.po_number} — ${aed(o.total)}. View online: ${url}`;
+      // Email sends through Resend, not the OS mail client: a mailto never
+      // opens anything in the desktop build, so the share silently did nothing.
+      if (kind === "email") {
+        await sendShareEmail(supplier?.email || "", `Purchase Order ${o.po_number}`, text);
+        toast.success(`Purchase order emailed to ${supplier?.email}`);
+        reload();
+        return;
+      }
       shareVia(kind, {
         phone: supplier?.phone,
         email: supplier?.email,

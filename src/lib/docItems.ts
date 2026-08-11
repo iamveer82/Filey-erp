@@ -200,6 +200,46 @@ export function docLineAmount(
   return invoiceLineAmount(item, formula);
 }
 
+/** Line amount for an item read straight back out of the database, where the
+ *  per-line meta (calc mode, manual amount, per-line formula, discount %) is
+ *  still packed into the `custom` jsonb.
+ *
+ *  The editors hold items with that meta already unpacked, so they can call
+ *  docLineAmount() directly. Anything rendering a *stored* document — the
+ *  quick-view modals — cannot, and multiplying qty × unit_price there printed
+ *  the wrong amount for every line with a manual amount, a formula or a
+ *  discount: the figure disagreed with the invoice itself and with the total
+ *  shown directly beneath it. */
+export function storedLineAmount(
+  it: {
+    qty: number;
+    unit_price: number;
+    custom?: Record<string, string> | null;
+    /** Quotation items keep discount/tax in real columns rather than in the
+     *  `custom` meta, so both sources have to be honoured. */
+    discount?: number;
+    tax?: number;
+  },
+  formula?: { a: string; b?: string } | null
+): number {
+  const { custom, calcMode, amount, itemFormula, discount, tax } = splitItemMeta(
+    it.custom
+  );
+  return docLineAmount(
+    {
+      description: "",
+      ...it,
+      custom,
+      calcMode,
+      amount,
+      itemFormula,
+      discount: discount ?? it.discount,
+      tax: tax ?? it.tax,
+    },
+    formula
+  );
+}
+
 /** Net turnover split by UAE tax category (S/Z/E/O/AE), after both per-line and
  *  document discounts. FTA VAT 201 boxes 4 and 5 report zero-rated and exempt
  *  supplies by net amount — those lines carry no VAT, so the ledger cannot tell

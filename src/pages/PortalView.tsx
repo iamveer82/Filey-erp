@@ -114,16 +114,27 @@ export default function PortalView() {
     discount: typeof d.discount === "number" ? d.discount : 0,
     notes: d.notes ? String(d.notes) : null,
     terms: d.terms ? String(d.terms) : null,
+    // The doc-level formula and round-off drive both the line amounts and the
+    // Total the customer is asked to pay, so they have to survive the trip
+    // through the share RPC (which returns the whole row) into DocView.
+    unit_price_formula:
+      (d.unit_price_formula as { a: string; b: string } | null) || null,
+    round_off: typeof d.round_off === "boolean" ? d.round_off : false,
     items: shared.items.map((it) => {
-      const { calcMode, amount, itemFormula } = splitItemMeta(it.custom);
+      const { custom, calcMode, amount, itemFormula, discount, tax } = splitItemMeta(
+        it.custom
+      );
       return {
         description: it.description,
         qty: Number(it.qty),
         unit_price: Number(it.unit_price),
         unit: it.unit,
-        discount: it.discount,
-        tax: it.tax,
-        custom: it.custom,
+        // Invoices keep the per-line discount in the `custom` meta; quotations
+        // keep it in a real column. Dropping the meta side billed the customer
+        // for the undiscounted line.
+        discount: discount ?? it.discount,
+        tax: tax ?? it.tax,
+        custom,
         calcMode,
         amount,
         itemFormula,
@@ -137,7 +148,12 @@ export default function PortalView() {
   // enabled) — the Pay label must match the document's Total, not the gross
   // pre-tax subtotal.
   const totals = applyRoundOff(
-    docTotals(form.items, form.discount || 0, form.tax_rate || 0),
+    docTotals(
+      form.items,
+      form.discount || 0,
+      form.tax_rate || 0,
+      form.unit_price_formula
+    ),
     !!form.round_off
   );
 

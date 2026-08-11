@@ -49,6 +49,8 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
+import { storedLineAmount } from "../lib/docItems";
+import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
 import CustomerNotes from "../components/CustomerNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -588,6 +590,7 @@ export default function CustomerDetail() {
           desc: i.description,
           qty: i.qty,
           price: i.unit_price,
+          amount: storedLineAmount(i, doc.unit_price_formula),
         })),
         total: d.total,
         currency: doc.currency || "AED",
@@ -615,6 +618,16 @@ export default function CustomerDetail() {
           desc: i.product,
           qty: i.qty,
           price: i.rate,
+          amount: storedLineAmount(
+            {
+              qty: i.qty,
+              unit_price: i.rate,
+              custom: i.custom,
+              discount: i.discount,
+              tax: i.tax,
+            },
+            doc.unit_price_formula
+          ),
         })),
         total: q.total,
         currency: doc.currency || "AED",
@@ -630,6 +643,14 @@ export default function CustomerDetail() {
       const token = await billing.publicLink(d.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
       const text = `Invoice ${d.number} — ${aed(d.total)}. View & pay online: ${url}`;
+      // Email sends through Resend, not the OS mail client: a mailto never
+      // opens anything in the desktop build, so the share silently did nothing.
+      if (kind === "email") {
+        await sendShareEmail(customer?.email || "", `Invoice ${d.number}`, text);
+        toast.success(`Invoice emailed to ${customer?.email}`);
+        reload();
+        return;
+      }
       shareVia(kind, {
         phone: customer?.phone_e164 || customer?.phone,
         email: customer?.email,
@@ -648,6 +669,12 @@ export default function CustomerDetail() {
       const token = await quotes.publicLink(q.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
       const text = `Quotation ${q.number} — ${aed(q.total)}. View online: ${url}`;
+      if (kind === "email") {
+        await sendShareEmail(customer?.email || "", `Quotation ${q.number}`, text);
+        toast.success(`Quotation emailed to ${customer?.email}`);
+        reload();
+        return;
+      }
       shareVia(kind, {
         phone: customer?.phone_e164 || customer?.phone,
         email: customer?.email,
