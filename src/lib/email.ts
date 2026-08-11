@@ -25,6 +25,29 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+/** The real reason a send failed.
+ *
+ *  A non-2xx from an Edge Function arrives as a FunctionsHttpError whose
+ *  message is only "Edge Function returned a non-2xx status code" — the useful
+ *  part is the JSON body, which `send-email` fills with something written for
+ *  the user to read: "Daily email limit reached (10/day)", "attachments too
+ *  large", "RESEND_API_KEY not configured", or Resend's own refusal.
+ *
+ *  This used to be discarded and replaced with a guess about the function not
+ *  being deployed, which sent everyone looking in the wrong place — a customer
+ *  who had simply hit their daily cap was told to go check a deployment. */
+async function edgeErrorMessage(error: unknown): Promise<string> {
+  const ctx = (error as { context?: { json?: () => Promise<unknown> } }).context;
+  try {
+    const body = (await ctx?.json?.()) as { error?: string } | undefined;
+    if (body?.error) return body.error;
+  } catch {
+    /* body already consumed or not JSON — fall back to the transport message */
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return `Could not send email. ${msg}`;
+}
+
 /** Send one HTML email through Resend via the Supabase `send-email` Edge
  * Function (from noreply@gofiley.com). The API key stays server-side. Every
  * user — free-cloud and paid-offline alike — has cloud API access, so this is
@@ -38,19 +61,20 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
   // send-email edge fn).
   await checkEmailDailyCap();
 
-  const { error } = (await invokeFn(supabase, "send-email", {
+  const { data, error } = (await invokeFn(supabase, "send-email", {
     body: {
       to: msg.to,
       subject: msg.subject,
       html: msg.html,
       attachments: msg.attachments,
     },
-  })) as { error: { message: string } | null };
-  if (error)
-    throw new Error(
-      "Could not send email. Make sure the send-email function is deployed " +
-        `and RESEND_API_KEY is set. (${error.message})`
-    );
+  })) as { data: { error?: string } | null; error: unknown };
+
+  if (error) throw new Error(await edgeErrorMessage(error));
+  // A non-2xx arrives as `error`, but the function can also answer 200 with an
+  // error body; treat that as a failure rather than reporting a phantom send.
+  if (data?.error) throw new Error(data.error);
+
   await bumpEmailCount();
 }
 
