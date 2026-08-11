@@ -50,6 +50,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import {
+  aed,
   fmtDate,
   money,
   num,
@@ -62,7 +63,7 @@ import {
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import ColorPicker from "../components/ColorPicker";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
-import { docLineAmount, docTotals } from "../lib/docItems";
+import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
 import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
 import { loadInvoiceFormat } from "../lib/numberFormat";
@@ -894,7 +895,6 @@ const editInvoice = async (id: number) => {
   }
 
   const statToday = todayYmd();
-  const statCcy = company?.currency || "AED";
   // Overdue = unpaid balance past the due date — same predicate as the Status
   // column and the Overdue KPI card.
   const isOverdueDoc = (d: InvoiceDocSummary) =>
@@ -980,6 +980,7 @@ const editInvoice = async (id: number) => {
             desc: i.description,
             qty: i.qty,
             price: i.unit_price,
+            amount: storedLineAmount(i, doc.unit_price_formula),
           })),
           total: d.total,
           currency: ccy,
@@ -1214,25 +1215,25 @@ const editInvoice = async (id: number) => {
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
           label="Total billed"
-          value={money(billedTotal, statCcy)}
+          value={aed(billedTotal)}
           change={`${num(docs.filter((d) => d.status !== "draft").length)} invoices`}
           changeTone="up"
         />
         <MetricCard
           label="Paid"
-          value={money(paidTotal, statCcy)}
+          value={aed(paidTotal)}
           change="Collected"
           changeTone="up"
         />
         <MetricCard
           label="Pending"
-          value={money(pendingTotal, statCcy)}
+          value={aed(pendingTotal)}
           change={pendingTotal > 0 ? "Awaiting payment" : "All settled"}
           changeTone={pendingTotal > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Overdue"
-          value={money(overdueTotal, statCcy)}
+          value={aed(overdueTotal)}
           change={
             overdueTotal > 0
               ? `${num(docs.filter(isOverdueDoc).length)} past due date`
@@ -1347,17 +1348,17 @@ const editInvoice = async (id: number) => {
               },
               {
                 label: "Invoiced",
-                value: money(fInvoiced, statCcy),
+                value: aed(fInvoiced),
                 icon: <FileText size={16} />,
               },
               {
                 label: "Collected",
-                value: money(fPaid, statCcy),
+                value: aed(fPaid),
                 icon: <CheckCircle2 size={16} />,
               },
               {
                 label: "Outstanding",
-                value: money(fOutstanding, statCcy),
+                value: aed(fOutstanding),
                 icon: <Wallet size={16} />,
               },
             ]}
@@ -2672,6 +2673,19 @@ function Editor({
                     clearable={false}
                   />
                 </Field>
+                <Field label="Currency">
+                  <select
+                    className="select"
+                    value={form.currency || "AED"}
+                    onChange={(e) => set("currency", e.target.value)}
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} — {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Payment Terms">
                   <select
                     className="select"
@@ -2722,19 +2736,6 @@ function Editor({
                     value={form.po_date ?? ""}
                     onChange={(v) => set("po_date", v)}
                   />
-                </Field>
-                <Field label="Currency">
-                  <select
-                    className="select"
-                    value={form.currency || "AED"}
-                    onChange={(e) => set("currency", e.target.value)}
-                  >
-                    {CURRENCIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.code} — {c.name}
-                      </option>
-                    ))}
-                  </select>
                 </Field>
                 <Field label="Invoice Type Code (e-invoice)">
                   <select

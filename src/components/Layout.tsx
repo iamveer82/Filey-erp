@@ -16,6 +16,7 @@ import {
   Menu,
   PanelLeft,
   ChevronsUpDown,
+  ChevronDown,
   LifeBuoy,
   BookOpen,
   Languages,
@@ -23,7 +24,8 @@ import {
 import AppIcon from "./AppIcon";
 import ErrorBoundary from "./ErrorBoundary";
 import { PageContextProvider } from "../lib/pageContext";
-import { cn, setDisplayCurrency, todayYmd } from "../lib/format";
+import { cn, todayYmd, CURRENCIES } from "../lib/format";
+import { initDisplayCurrency, useDisplayCurrency } from "../lib/displayCurrency";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
@@ -135,15 +137,19 @@ export default function Layout({ children }: { children: ReactNode }) {
         ? modules.find((m) => m.id === "suppliers")
         : undefined);
 
-  // Keep the org's display currency in sync for dashboards/aggregates.
+  // Keep the org's display currency in sync for dashboards/aggregates. The
+  // company profile is only the default here — a currency picked from the
+  // topbar switcher on this device wins, and initDisplayCurrency knows that.
   const syncCurrency = () => {
     billing
       .getCompany()
-      .then((c) => setDisplayCurrency(c.currency))
+      .then((c) => initDisplayCurrency(c.currency))
       .catch((e) => console.error("Failed to sync display currency:", e));
   };
   useEffect(syncCurrency, []);
   useLiveSync(syncCurrency);
+  // Re-key the route container when the display currency changes (see below).
+  const { currency: displayCcy } = useDisplayCurrency();
   const initials = name
     .split(" ")
     .map((s) => s[0])
@@ -603,6 +609,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                 )}
               </div>
 
+              {/* Display currency — restates every total on every page. */}
+              <CurrencySwitcher />
+
               {/* Light / dark theme toggle */}
               <AnimatedThemeToggler />
 
@@ -730,7 +739,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div ref={scrollContentRef}>
               {/* Route container — pages are content-only; padding lives here
                   (reference: px-6 pt-6 page gutter). */}
-              <div key={pathname} className="fade-in px-4 sm:px-6 py-6">
+              {/* Currency is part of the key: pages arrive here as a `children`
+                  prop, so a state change in Layout alone does not re-render
+                  them — React sees the same element and bails out, and every
+                  total stayed in the old currency. Remounting on switch is
+                  heavier than a re-render, but it is a deliberate, occasional
+                  action and it restates the whole page correctly. */}
+              <div key={`${pathname}:${displayCcy}`} className="fade-in px-4 sm:px-6 py-6">
                 <ErrorBoundary>{children}</ErrorBoundary>
               </div>
             </div>
@@ -738,5 +753,31 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </div>
     </PageContextProvider>
+  );
+}
+
+/** Topbar display-currency switcher. Restates every aggregate in the app —
+ *  KPI strips, dashboards, list totals — by pointing the shared formatter at a
+ *  different currency. Document currency is untouched: an invoice raised in USD
+ *  still prints, sends and charges in USD. */
+function CurrencySwitcher() {
+  const { currency, setCurrency } = useDisplayCurrency();
+  return (
+    <label className="relative hidden sm:block">
+      <span className="sr-only">Display currency</span>
+      <select
+        value={currency}
+        onChange={(e) => setCurrency(e.target.value)}
+        title="Currency used for totals and dashboards"
+        className="h-8 cursor-pointer appearance-none rounded-md border border-transparent bg-transparent pl-2 pr-6 text-[12.5px] font-medium text-foreground hover:bg-hover hover:border-border focus:outline-none"
+      >
+        {CURRENCIES.map((c) => (
+          <option key={c.code} value={c.code}>
+            {c.code}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+    </label>
   );
 }

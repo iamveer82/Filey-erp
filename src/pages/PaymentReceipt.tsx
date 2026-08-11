@@ -734,6 +734,19 @@ export default function PaymentReceipt() {
                       </Field>
 
                       <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Currency">
+                          <select
+                            className="select"
+                            value={form.currency || "AED"}
+                            onChange={(e) => update({ currency: e.target.value })}
+                          >
+                            {CURRENCIES.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code} — {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
                         <Field label="Amount">
                           <input
                             className="input"
@@ -769,19 +782,6 @@ export default function PaymentReceipt() {
                       </div>
 
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <Field label="Currency">
-                          <select
-                            className="select"
-                            value={form.currency || "AED"}
-                            onChange={(e) => update({ currency: e.target.value })}
-                          >
-                            {CURRENCIES.map((c) => (
-                              <option key={c.code} value={c.code}>
-                                {c.code} — {c.name}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
                         <Field label="Notes">
                           <textarea
                             className="textarea"

@@ -43,6 +43,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import {
+  aed,
   fmtDate,
   money,
   num,
@@ -61,6 +62,7 @@ import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
 import {
   docLineAmount,
+  storedLineAmount,
   docTotals,
   paginateItems,
   splitPageBreak,
@@ -2032,7 +2034,7 @@ export default function Quoting() {
         />
         <MetricCard
           label="Total Value"
-          value={money(totalValue, statCcy)}
+          value={aed(totalValue)}
           icon={<Check size={20} />}
           iconClass="bg-primary-100 text-ink"
         />
@@ -2259,7 +2261,21 @@ export default function Quoting() {
                 ],
                 items: quickView.doc?.items
                   .filter((i) => i.product.trim())
-                  .map((i) => ({ desc: i.product, qty: i.qty, price: i.rate })),
+                  .map((i) => ({
+                    desc: i.product,
+                    qty: i.qty,
+                    price: i.rate,
+                    amount: storedLineAmount(
+                      {
+                        qty: i.qty,
+                        unit_price: i.rate,
+                        custom: i.custom,
+                        discount: i.discount,
+                        tax: i.tax,
+                      },
+                      quickView.doc?.unit_price_formula
+                    ),
+                  })),
                 total: quickView.d.total,
                 currency: quickView.doc?.currency || statCcy,
                 notes: quickView.doc?.notes || undefined,

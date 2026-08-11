@@ -8,13 +8,24 @@ export function cn(...inputs: ClassValue[]) {
 // UAE standard VAT rate (Federal Decree-Law No. 8 of 2017)
 export const UAE_VAT_RATE = 0.05;
 
-// Org-wide display currency for dashboards & aggregate figures. Set from
-// the company profile (see setDisplayCurrency). Per-document currencies
-// (invoices, quotes) are formatted explicitly with money(value, currency).
+// Org-wide display currency for dashboards & aggregate figures. Set from the
+// company profile, or from the topbar switcher (see lib/displayCurrency).
+// Per-document currencies (invoices, quotes) are formatted explicitly with
+// money(value, currency).
+//
+// Aggregates everywhere are computed in AED — every document is converted at
+// its own frozen rate first (docAmountInAed) so a $1,000 and a AED 1,000
+// invoice don't add up to 2,000 of nothing. `displayRate` is what turns that
+// AED figure back into the currency being displayed. Relabelling without
+// dividing is the bug this pair exists to prevent: it showed AED amounts
+// under a "$" whenever the company currency wasn't AED.
 let displayCurrency = "AED";
+/** AED per 1 unit of displayCurrency (1 when displaying AED). */
+let displayRate = 1;
 
-export function setDisplayCurrency(c?: string | null): void {
+export function setDisplayCurrency(c?: string | null, aedPerUnit = 1): void {
   displayCurrency = c && c.trim() ? c : "AED";
+  displayRate = aedPerUnit > 0 ? aedPerUnit : 1;
 }
 
 /** The org's current display currency (synced from the company profile). */
@@ -32,10 +43,10 @@ export const CURRENCIES: { code: string; name: string }[] = [
   { code: "SAR", name: "Saudi Riyal" },
 ];
 
-/** Format a value in the org's display currency. Name kept for history;
- * it is no longer AED-only. */
+/** Format an AED-denominated value in the org's display currency, converting
+ *  on the way. Name kept for history; it is no longer AED-only. */
 export function aed(value: number): string {
-  return money(value, displayCurrency);
+  return money((value || 0) / displayRate, displayCurrency);
 }
 
 export function num(value: number): string {

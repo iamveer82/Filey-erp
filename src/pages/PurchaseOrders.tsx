@@ -40,10 +40,11 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd } from "../lib/format";
+import { aed, fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import {
   docLineAmount,
   docTotals,
+  storedLineAmount,
   paginateItems,
   splitPageBreak,
   mergePageBreak,
@@ -351,6 +352,10 @@ export default function PurchaseOrders() {
             desc: i.description,
             qty: i.quantity,
             price: i.unit_cost,
+            amount: storedLineAmount(
+              { qty: i.quantity, unit_price: i.unit_cost, custom: i.custom },
+              doc.unit_price_formula
+            ),
           })),
           total: r.total,
           currency: ccy,
@@ -443,7 +448,7 @@ export default function PurchaseOrders() {
         />
         <MetricCard
           label="Total Value"
-          value={money(totalValue, statCcy)}
+          value={aed(totalValue)}
           icon={<Wallet size={20} />}
           iconClass="bg-info/15 text-info"
         />
@@ -587,8 +592,9 @@ export default function PurchaseOrders() {
             key: "total",
             label: "Total",
             sortValue: (r) => r.total,
+            // A PO raised in USD is a USD figure — label it as its own.
             render: (r) => (
-              <span className="font-medium">{money(r.total, statCcy)}</span>
+              <span className="font-medium">{money(r.total, r.currency || statCcy)}</span>
             ),
           },
           {
