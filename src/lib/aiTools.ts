@@ -2101,12 +2101,12 @@ export const TOOLS: ToolDef[] = [
     },
   },
 
-  // ---------- messaging via Composio (connect in Settings → Integrations) ----------
+  // ---------- messaging via Composio (connect on the Integrations page) ----------
   {
     name: "send_gmail",
     sensitive: true,
     description:
-      "Send an email from the user's connected Gmail via Composio. Requires Gmail connected in Settings → Integrations. Args: recipient_email, subject, body.",
+      "Send an email from the user's connected Gmail via Composio. Requires Gmail connected on the Integrations page. Args: recipient_email, subject, body.",
     parameters: {
       type: "object",
       properties: {
@@ -2189,7 +2189,7 @@ export const TOOLS: ToolDef[] = [
       if (!connected.length)
         return {
           connected: [],
-          hint: "Nothing is connected yet — the user links apps in Settings → Integrations.",
+          hint: "Nothing is connected yet — the user links apps on the Integrations page (sidebar → Integrations).",
         };
       const want = lc(a.app);
       const slugs = want ? connected.filter((s) => s.includes(want)) : connected;

@@ -80,7 +80,7 @@ async function call<T>(
 ): Promise<T> {
   if (!usingOwnZernioKey(cfg))
     throw new ZernioError(
-      "Social publishing is off. Add your Zernio key in Settings → Integrations."
+      "Social publishing is off. Add your Zernio key on the Integrations page."
     );
   const res = await aiFetch(`${BASE}${path}`, {
     ...init,

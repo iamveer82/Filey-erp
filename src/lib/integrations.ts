@@ -30,7 +30,7 @@ export async function platformCall<T>(
   const { data: sess } = await supabase.auth.getSession();
   if (!sess.session)
     throw new IntegrationError(
-      "Sign in to use the built-in integrations, or add your own key in Settings → Integrations."
+      "Sign in to use the built-in integrations, or add your own key on the Integrations page."
     );
   const { data, error } = await invokeFn(supabase, "integrations", {
     body: { provider, action, payload },

@@ -15,8 +15,8 @@ const KEY = "composio_api_key";
 /** Single-tenant desktop: one Composio entity for this install. */
 export const COMPOSIO_USER = "default";
 
-/** Toolkits we surface in Settings → Integrations. */
-/* The apps offered in Settings → Integrations. Chosen for what an SMB running
+/** Toolkits we surface on the Integrations page. */
+/* The apps offered on the Integrations page. Chosen for what an SMB running
  * this software actually uses to find and keep customers — the agent reaches
  * every action of whatever is connected here (see list_connected_apps), so
  * each entry widens what it can do rather than adding one button. */

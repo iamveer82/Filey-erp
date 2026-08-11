@@ -13,7 +13,6 @@ import {
   Grid3x3,
   Palette,
   Lock,
-  Cable,
   Activity,
   KeyRound,
 } from "lucide-react";
@@ -31,7 +30,6 @@ import AppearancePanel from "./AppearancePanel";
 import PreferencesPanel from "./PreferencesPanel";
 import NotificationsPanel from "./NotificationsPanel";
 import BillingPanel from "./BillingPanel";
-import IntegrationsPanel from "./IntegrationsPanel";
 import BackupPanel from "./BackupPanel";
 import DataModePanel from "./DataModePanel";
 import LicensePanel from "./LicensePanel";
@@ -48,7 +46,6 @@ type Section =
   | "security"
   | "notifications"
   | "sms"
-  | "integrations"
   | "backup"
   | "datamode"
   | "activity"
@@ -68,7 +65,6 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "security", label: "Security", icon: Lock },
   { id: "notifications", label: "Notifications", icon: Bell },
   // { id: "sms", label: "SMS", icon: MessageSquare },
-  { id: "integrations", label: "Integrations", icon: Cable },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "datamode", label: "Data & Storage", icon: HardDrive },
   { id: "activity", label: "Activity Log", icon: Activity },
@@ -140,7 +136,6 @@ export default function Settings() {
         {section === "license" && <LicensePanel />}
         {section === "notifications" && <NotificationsPanel />}
         {/* {section === "sms" && <SmsPanel />} */}
-        {section === "integrations" && <IntegrationsPanel />}
         {section === "backup" && <BackupPanel />}
         {section === "datamode" && <DataModePanel />}
       </div>
