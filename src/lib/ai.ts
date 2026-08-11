@@ -11,8 +11,7 @@
  *  - "anthropic" → Claude Messages API (native).
  */
 
-import { TOOLS, runTool } from "./aiTools";
-import { createGuard, coachResult } from "./agentGuard";
+import { runAgentStream, type AgentEvent } from "./agentHarness";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 
@@ -360,190 +359,32 @@ export async function aiFetch(
 
 /* ── Agentic chat: the model can call the read/draft tools in lib/aiTools ──── */
 
-// Eight was too few and it showed as "gives up early": discovering a file tool,
-// running it, filing the result and reporting is already four, before anything
-// goes wrong once. A round is one model call, so the cost of the extra headroom
-// is only paid by tasks that actually use it.
-const MAX_TOOL_ROUNDS = 16;
-
+/**
+ * Run the agent and return its final answer.
+ *
+ * The loop itself lives in agentHarness — one implementation shared by every
+ * provider. This is the drain-it-for-the-answer caller; anything that wants to
+ * render the steps as they happen should use aiAgentStream instead of parsing
+ * progress text.
+ */
 export async function aiAgent(messages: AiMessage[], opts: AgentOpts = {}): Promise<string> {
+  const stream = aiAgentStream(messages, opts);
+  for (;;) {
+    const step = await stream.next();
+    if (step.done) return step.value;
+    if (step.value.type === "text") opts.onProgress?.(step.value.text);
+  }
+}
+
+/** The same run, as a stream of typed steps: text, tool_call, tool_result, done. */
+export function aiAgentStream(
+  messages: AiMessage[],
+  opts: AgentOpts = {}
+): AsyncGenerator<AgentEvent, string, void> {
   const cfg = getAiConfig();
   if (!aiReady(cfg))
     throw new AiError("No AI model connected. Add your key in Settings → AI Assistant.");
-  return cfg.provider === "anthropic"
-    ? anthropicAgent(cfg, messages, opts)
-    : openaiAgent(cfg, messages, opts);
-}
-
-async function openaiAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts): Promise<string> {
-  const url = `${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`;
-  const sys = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convo: any[] = [];
-  if (sys) convo.push({ role: "system", content: sys });
-  for (const m of messages.filter((m) => m.role !== "system"))
-    convo.push({
-      role: m.role,
-      content: m.images?.length
-        ? [
-            { type: "text", text: m.text },
-            ...m.images.map((im) => ({
-              type: "image_url",
-              image_url: { url: `data:${im.mediaType};base64,${im.dataBase64}` },
-            })),
-          ]
-        : m.text,
-    });
-  const tools = [...TOOLS, ...(opts.extraTools ?? [])].map((t) => ({
-    type: "function",
-    function: { name: t.name, description: t.description, parameters: t.parameters },
-  }));
-  const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
-  const guard = createGuard();
-
-  for (let round = 0; round < maxRounds; round++) {
-    const res = await aiFetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        max_tokens: opts.maxTokens ?? 2048,
-        temperature: opts.temperature ?? 0.3,
-        messages: convo,
-        tools,
-      }),
-      signal: opts.signal,
-    });
-    const data = await res.json();
-    const msg = data?.choices?.[0]?.message;
-    if (!msg) return "";
-    convo.push(msg);
-    if (msg.content) opts.onProgress?.(String(msg.content).trim());
-    const calls = msg.tool_calls;
-    if (Array.isArray(calls) && calls.length) {
-      for (const tc of calls) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(tc.function?.arguments || "{}");
-        } catch {
-          console.error("Failed to parse tool call arguments");
-          /* keep {} */
-        }
-        if (opts.finishToolName && tc.function?.name === opts.finishToolName)
-          return String(args.summary ?? msg.content ?? "Task complete.").trim();
-        const name = tc.function?.name;
-        // A repeat of an identical call is answered from this run's memory —
-        // reads return the earlier answer, writes are refused. Without it the
-        // same invoice gets emailed twice when the model second-guesses itself.
-        const decided = guard.before(name, args);
-        const raw =
-          "short" in decided ? decided.short : await runTool(name, args);
-        if (!("short" in decided)) guard.after(name, args, raw);
-        const result = coachResult(raw, maxRounds - round - 1);
-        convo.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(result).slice(0, 6000),
-        });
-      }
-      continue;
-    }
-    return (msg.content ?? "").toString().trim();
-  }
-  // Running out of rounds used to produce an apology and nothing else. What
-  // was actually done matters more — especially if some of it changed data.
-  const done = guard.summary();
-  return done
-    ? `I got part of the way but ran out of steps. ${done}. Tell me how to continue.`
-    : "I ran several steps but couldn't finish — try rephrasing.";
-}
-
-async function anthropicAgent(cfg: AiConfig, messages: AiMessage[], opts: AgentOpts): Promise<string> {
-  const base = cfg.baseUrl.includes("anthropic")
-    ? cfg.baseUrl.replace(/\/+$/, "")
-    : "https://api.anthropic.com/v1";
-  const system = messages.filter((m) => m.role === "system").map((m) => m.text).join("\n\n");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const convo: any[] = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role,
-      content: m.images?.length
-        ? [
-            { type: "text", text: m.text },
-            ...m.images.map((im) => ({
-              type: "image",
-              source: { type: "base64", media_type: im.mediaType, data: im.dataBase64 },
-            })),
-          ]
-        : m.text,
-    }));
-  const tools = [...TOOLS, ...(opts.extraTools ?? [])].map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.parameters,
-  }));
-  const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
-  const guard = createGuard();
-
-  for (let round = 0; round < maxRounds; round++) {
-    const res = await aiFetch(`${base}/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": cfg.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        max_tokens: opts.maxTokens ?? 2048,
-        system: system || undefined,
-        messages: convo,
-        tools,
-      }),
-      signal: opts.signal,
-    });
-    const data = await res.json();
-    const content = data?.content ?? [];
-    convo.push({ role: "assistant", content });
-    const textOut = (content as { type?: string; text?: string }[])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("")
-      .trim();
-    if (textOut) opts.onProgress?.(textOut);
-    if (data?.stop_reason === "tool_use") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const results: any[] = [];
-      for (const block of content) {
-        if (block.type === "tool_use") {
-          if (opts.finishToolName && block.name === opts.finishToolName)
-            return String(block.input?.summary ?? textOut ?? "Task complete.").trim();
-          const input = block.input || {};
-          const decided = guard.before(block.name, input);
-          const raw =
-            "short" in decided ? decided.short : await runTool(block.name, input);
-          if (!("short" in decided)) guard.after(block.name, input, raw);
-          const result = coachResult(raw, maxRounds - round - 1);
-          results.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: JSON.stringify(result).slice(0, 6000),
-          });
-        }
-      }
-      convo.push({ role: "user", content: results });
-      continue;
-    }
-    return textOut;
-  }
-  // Running out of rounds used to produce an apology and nothing else. What
-  // was actually done matters more — especially if some of it changed data.
-  const done = guard.summary();
-  return done
-    ? `I got part of the way but ran out of steps. ${done}. Tell me how to continue.`
-    : "I ran several steps but couldn't finish — try rephrasing.";
+  return runAgentStream(messages, opts, { cfg, fetchFn: aiFetch });
 }
 
 /* ── Autonomous agent: plan → act → observe → verify → finish ─────────────── */
