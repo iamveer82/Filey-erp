@@ -89,8 +89,10 @@ export async function canSaveFiles(): Promise<boolean> {
   return (await userId()) !== null;
 }
 
-/** Upload a tool output to the user's account. */
-export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
+/** Upload a tool output to the user's account. Returns the saved file's id so
+ *  a caller can reference it later (a cheque photo, for instance, is attached
+ *  to its record by id rather than re-found by name). */
+export async function saveOutput(out: OutFile, tool?: string): Promise<string> {
   const uid = await userId();
   if (!uid || !isConfigured) throw new Error("Sign in to save files to your account.");
   const id = newId();
@@ -115,6 +117,7 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<void> {
     await sb().storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
+  return id;
 }
 
 /** Auto-save a generated document (invoice, receipt, challan, …) to My Files.

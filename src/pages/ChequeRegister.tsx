@@ -5,9 +5,10 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   CheckCircle2,
+  Paperclip,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { aed, fmtDate, numInput, todayYmd } from "../lib/format";
+import { aed, fmtDate, numInput, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -26,6 +27,7 @@ import {
 } from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 import { tools } from "../lib/api";
+import { saveOutput, listFiles, fileObjectUrl } from "../lib/files";
 
 /* ------------------------------------------------------------------ */
 /*  Cheque Register — issued & received cheques                        */
@@ -46,6 +48,11 @@ interface Cheque {
   status: "pending" | "cleared" | "bounced" | "cancelled";
   notes: string;
   created_at: string;
+  /** Scan or photo of the physical cheque, held in My Files and referenced by
+   *  id. The register itself is a JSON app-setting that syncs between devices,
+   *  so the image deliberately does not live inside the record — a few cheque
+   *  photos inlined as data URLs would be carried on every sync. */
+  attachment?: { id: string; name: string };
 }
 
 function loadCheques(): Cheque[] {
@@ -512,6 +519,12 @@ function ChequeModal({
           />
         </Field>
       </div>
+
+      <ChequeAttachment
+        value={f.attachment}
+        chequeNo={f.cheque_no}
+        onChange={(attachment) => setF({ ...f, attachment })}
+      />
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
@@ -525,5 +538,112 @@ function ChequeModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+/** Upload and preview the cheque's scan.
+ *
+ *  The file goes to My Files (the same store the PDF tools and generated
+ *  documents use, which works in both cloud and offline mode), and the record
+ *  keeps only its id. Accepts a photo or a scanned PDF, which is what actually
+ *  arrives — a phone picture of a cheque, or a bank's PDF advice. */
+function ChequeAttachment({
+  value,
+  chequeNo,
+  onChange,
+}: {
+  value?: { id: string; name: string };
+  chequeNo: string;
+  onChange: (v: { id: string; name: string } | undefined) => void;
+}) {
+  const { toast } = useUI();
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // Resolve the stored id to a viewable URL. Storage links are signed and
+  // short-lived, so this resolves on open rather than being persisted.
+  useEffect(() => {
+    let alive = true;
+    setPreview(null);
+    if (!value?.id) return;
+    void (async () => {
+      try {
+        const file = (await listFiles()).find((x) => x.id === value.id);
+        const url = file ? await fileObjectUrl(file) : null;
+        if (alive) setPreview(url);
+      } catch {
+        /* the link is a convenience — the record is still attached */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [value?.id]);
+
+  const pick = async (file: File) => {
+    setBusy(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const ext = file.name.split(".").pop() || "jpg";
+      const name = `cheque-${(chequeNo || "scan").replace(/[^\w-]+/g, "")}-${Date.now()}.${ext}`;
+      const id = await saveOutput({ name, bytes }, "Cheque");
+      onChange({ id, name });
+      toast.success("Cheque scan attached.");
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <span className="label">Cheque scan (image or PDF)</span>
+      {value ? (
+        <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+          {preview ? (
+            <a href={preview} target="_blank" rel="noreferrer" className="shrink-0">
+              <img
+                src={preview}
+                alt=""
+                className="h-12 w-16 rounded object-cover border border-border"
+                // A PDF has no thumbnail; fall back to the file chip alone.
+                onError={(e) => (e.currentTarget.style.display = "none")}
+              />
+            </a>
+          ) : null}
+          <span className="flex-1 min-w-0 truncate text-[13px] text-foreground">
+            {value.name}
+          </span>
+          {preview && (
+            <a href={preview} target="_blank" rel="noreferrer" className="btn-ghost h-8 px-3 text-xs">
+              View
+            </a>
+          )}
+          <button
+            className="h-8 px-3 text-xs font-medium text-danger hover:underline"
+            onClick={() => onChange(undefined)}
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground hover:border-brand-300 hover:text-foreground">
+          <Paperclip size={15} />
+          {busy ? "Uploading…" : "Attach a photo or PDF of the cheque"}
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void pick(file);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      )}
+    </div>
   );
 }
