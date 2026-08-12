@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Plus,
   Trash2,
@@ -1075,7 +1076,9 @@ function DcEditor({
         }
       />
 
-      {viewOpen && (
+      {/* Portaled out of <main>'s scrolling subtree — WebView2 half-paints a
+          `fixed` overlay that stays inside it. */}
+      {viewOpen && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4"
           onClick={() => setViewOpen(false)}
@@ -1098,7 +1101,8 @@ function DcEditor({
             </div>
             <DcPreview form={form} companyStampSig={companyStampSig} />
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

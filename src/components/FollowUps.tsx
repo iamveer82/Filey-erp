@@ -29,18 +29,27 @@ const relDue = (d: string): string => {
   return fmtDate(d);
 };
 
-type CustomerOpt = { id: number; name: string; company?: string };
+type PartyOpt = { id: number; name: string; company?: string };
 
 /** Follow-ups / reminders. Scoped to one customer when `customerId` is set,
- * otherwise global (pass `customers` to attach a reminder to one). */
+ * otherwise global (pass `parties` to attach a reminder to one).
+ *
+ * `party` picks which side of the book this board keeps: a supplier board
+ * writes supplier_id and lists only supplier rows, a customer board writes
+ * customer_id and lists everything else — including unlinked reminders, which
+ * would otherwise belong to no section at all. */
 export default function FollowUps({
   customerId,
   customerName,
-  customers,
+  parties,
+  party = "customer",
+  heading,
 }: {
   customerId?: number;
   customerName?: string;
-  customers?: CustomerOpt[];
+  parties?: PartyOpt[];
+  party?: "customer" | "supplier";
+  heading?: string;
 }) {
   const { toast, confirm } = useUI();
   const [items, setItems] = useState<FollowUp[]>([]);
@@ -71,11 +80,13 @@ export default function FollowUps({
     }
     setBusy(true);
     try {
-      const selected = customers?.find((c) => c.id === cust);
+      const selected = parties?.find((c) => c.id === cust);
+      const partyId = customerId ?? (cust === "" ? null : Number(cust));
       await followups.create({
         title: title.trim(),
         due_date: due,
-        customer_id: customerId ?? (cust === "" ? null : Number(cust)),
+        customer_id: party === "supplier" ? null : partyId,
+        supplier_id: party === "supplier" ? partyId : null,
         customer_name: customerName ?? selected?.company ?? selected?.name ?? "",
         repeat,
       });
@@ -124,6 +135,15 @@ export default function FollowUps({
   };
 
   const today = todayISO();
+
+  // A per-customer board is already filtered by the query. The standing boards
+  // share one list, so each shows only the rows naming its own kind of party.
+  const visible =
+    customerId != null
+      ? items
+      : items.filter((f) =>
+          party === "supplier" ? f.supplier_id != null : f.supplier_id == null
+        );
 
   type RowStatus = "overdue" | "today" | "upcoming" | "done";
   const statusPill: Record<RowStatus, ReactNode> = {
@@ -191,7 +211,7 @@ export default function FollowUps({
     <div className="card">
       <div className="mb-3 flex items-center gap-2">
         <AlarmClock size={16} className="text-primary-600" />
-        <p className="font-medium text-ink">Follow-ups &amp; reminders</p>
+        <p className="font-medium text-ink">{heading ?? "Follow-ups & reminders"}</p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-2">
@@ -205,14 +225,17 @@ export default function FollowUps({
           }}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
-        {!customerId && customers && (
+        {!customerId && parties && (
           <select
             className="select w-auto"
+            aria-label={party === "supplier" ? "Supplier" : "Customer"}
             value={cust}
             onChange={(e) => setCust(e.target.value === "" ? "" : Number(e.target.value))}
           >
-            <option value="">No customer</option>
-            {customers.map((c) => (
+            <option value="">
+              {party === "supplier" ? "No supplier" : "No customer"}
+            </option>
+            {parties.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.company || c.name}
               </option>
@@ -247,7 +270,7 @@ export default function FollowUps({
         </p>
       )}
 
-      {items.length === 0 && (
+      {visible.length === 0 && (
         <div className="empty-gradient rounded-xl p-8 flex flex-col items-center gap-4 text-center">
           <svg
             width="100"
@@ -330,7 +353,7 @@ export default function FollowUps({
         </div>
       )}
 
-      {items.length > 0 && <ul>{items.map((f) => Row(f, statusOf(f)))}</ul>}
+      {visible.length > 0 && <ul>{visible.map((f) => Row(f, statusOf(f)))}</ul>}
     </div>
   );
 }

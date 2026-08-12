@@ -32,12 +32,23 @@ const newId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
 
-/** A small drag-and-drop sticky-note board for a customer. Notes are
- *  stored locally (per customer) so they persist across reloads without
- *  a backend table. Add, edit and delete; drag to reposition. */
-export default function CustomerNotes({ customerId }: { customerId: string }) {
+/** A small drag-and-drop sticky-note board. `scope` names the board — one per
+ *  customer ("customer:12"), or a standing board like "followups:supplier".
+ *  Notes are stored locally per scope so they persist across reloads without a
+ *  backend table, which also means they stay on this device. Add, edit and
+ *  delete; drag to reposition. */
+export default function StickyNotes({
+  scope,
+  title = "Notes",
+}: {
+  scope: string;
+  title?: string;
+}) {
   const { confirm } = useUI();
-  const key = `notes:customer:${customerId}`;
+  // Key shape predates the rename — "notes:customer:<id>" is what existing
+  // customer boards are saved under, so scope carries the "customer:" prefix
+  // rather than this template growing a special case.
+  const key = `notes:${scope}`;
   const [notes, setNotes] = useState<Note[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +57,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
       const raw = localStorage.getItem(key);
       setNotes(raw ? (JSON.parse(raw) as Note[]) : []);
     } catch {
-      console.error("Failed to parse customer notes from localStorage");
+      console.error("Failed to parse sticky notes from localStorage");
       setNotes([]);
     }
   }, [key]);
@@ -56,7 +67,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
     try {
       localStorage.setItem(key, JSON.stringify(next));
     } catch {
-      console.error("Failed to save customer notes to localStorage");
+      console.error("Failed to save sticky notes to localStorage");
       /* storage full / unavailable — keep in-memory */
     }
   };
@@ -95,7 +106,7 @@ export default function CustomerNotes({ customerId }: { customerId: string }) {
   return (
     <section className="mb-5">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-bold text-ink">Notes</h2>
+        <h2 className="text-sm font-bold text-ink">{title}</h2>
         <button onClick={addNote} className="btn-ghost h-8 text-xs">
           <Plus size={14} /> Add note
         </button>

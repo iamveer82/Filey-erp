@@ -2516,6 +2516,11 @@ export type FollowUpRepeat = "none" | "daily" | "weekly" | "monthly";
 export interface FollowUp {
   id: number;
   customer_id?: number | null;
+  /** Set when the reminder is about a supplier instead of a customer — the two
+   *  are mutually exclusive, and the Follow-ups page splits its sections on
+   *  this. Unlinked reminders (neither id) count as customer-side. */
+  supplier_id?: number | null;
+  /** Display name of whichever party the row points at, customer or supplier. */
   customer_name?: string;
   title: string;
   due_date: string; // YYYY-MM-DD
@@ -2574,6 +2579,7 @@ export const followups = {
     title: string;
     due_date: string;
     customer_id?: number | null;
+    supplier_id?: number | null;
     customer_name?: string;
     repeat?: FollowUpRepeat;
   }) => {

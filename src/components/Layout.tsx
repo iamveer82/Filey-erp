@@ -745,7 +745,12 @@ export default function Layout({ children }: { children: ReactNode }) {
                   total stayed in the old currency. Remounting on switch is
                   heavier than a re-render, but it is a deliberate, occasional
                   action and it restates the whole page correctly. */}
-              <div key={`${pathname}:${displayCcy}`} className="fade-in px-4 sm:px-6 py-6">
+              {/* pb-16, not py-6: the last thing on a list page is the pagination
+                  bar, and it sat flush against the bottom of the scroll range —
+                  where WebView2's table scrollbar (which appears after Lenis has
+                  measured) was enough to clip "Next" in half. The gutter keeps
+                  the footer above the fold whatever the scroller does. */}
+              <div key={`${pathname}:${displayCcy}`} className="fade-in px-4 sm:px-6 pt-6 pb-16">
                 <ErrorBoundary>{children}</ErrorBoundary>
               </div>
             </div>

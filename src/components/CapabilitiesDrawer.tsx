@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, SlidersHorizontal } from "lucide-react";
 import {
   CAPABILITIES,
@@ -33,7 +34,9 @@ export default function CapabilitiesDrawer({
     setState((p) => ({ ...p, [id]: v }));
   };
 
-  return (
+  // Portaled out of <main>: see SkillsDrawer — WebView2 half-paints a `fixed`
+  // overlay that sits inside a scrolling ancestor.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/40"
       role="dialog"
@@ -93,6 +96,7 @@ export default function CapabilitiesDrawer({
           navigation, memory and skills are always allowed.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

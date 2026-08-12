@@ -15,8 +15,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // our domain. Counted in audit_log (action='email_send') via the service-role
 // client — no extra table. Tiered to mirror src/lib/license.ts:
 //   free  → 10/day (must match EMAIL_DAILY_LIMIT.free)
-//   paid  → effectively unlimited; a high safety ceiling still guards our
-//           Resend quota if a paid account is compromised.
+//   paid  → cloud plan OR an active one-time desktop licence; effectively
+//           unlimited, but a high safety ceiling still guards our Resend
+//           quota if a paid account is compromised.
 const FREE_DAILY_LIMIT = 10;
 const PAID_DAILY_CEILING = 5000;
 
@@ -99,6 +100,20 @@ serve(async (req) => {
         !!plan &&
         plan !== "free" &&
         (status === "active" || status === "trialing" || status === "past_due");
+    }
+    // A one-time desktop (Lite) licence counts as paid. Offline users send
+    // through this same function but their org is usually 'default'/free, so
+    // without this they sat on the 10/day free-cloud cap they already paid to
+    // be out of.
+    if (!paid) {
+      const { data: lic } = await supa
+        .from("licenses")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .limit(1)
+        .maybeSingle();
+      paid = !!lic;
     }
     const limit = paid ? PAID_DAILY_CEILING : FREE_DAILY_LIMIT;
 

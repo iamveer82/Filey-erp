@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -2197,8 +2198,9 @@ function Editor({
         );
       })()}
 
-      {/* Full-screen view modal */}
-      {viewOpen && (
+      {/* Full-screen view modal. Portaled out of <main>'s scrolling subtree —
+          WebView2 half-paints a `fixed` overlay that stays inside it. */}
+      {viewOpen && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
           onClick={() => setViewOpen(false)}
@@ -2278,7 +2280,8 @@ function Editor({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

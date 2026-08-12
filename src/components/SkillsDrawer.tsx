@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Plus, Trash2, BookOpen } from "lucide-react";
 import {
   loadSkills,
@@ -53,7 +54,11 @@ export default function SkillsDrawer({
     toastRef.current?.success("Skill added");
   };
 
-  return (
+  // Mounted from the AgentChat page, i.e. inside <main>, which scrolls. On the
+  // desktop build WebView2 composites a `fixed` overlay into its scrolling
+  // ancestor's layer and repaints only part of it, so the drawer has to leave
+  // that subtree via a portal.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/40"
       role="dialog"
@@ -158,6 +163,7 @@ export default function SkillsDrawer({
           on demand with the use_skill tool.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -16,6 +16,15 @@ create table if not exists public.follow_ups (
   updated_at timestamptz not null default now()
 );
 
+-- A follow-up hangs off a customer or a supplier, never both. supplier_id is
+-- the discriminator the Follow-ups page splits its two sections on: null means
+-- the customer side (which is also where unlinked, general reminders live).
+-- customer_name doubles as the supplier's display name — one label column for
+-- whichever party the row points at.
+alter table public.follow_ups
+  add column if not exists supplier_id bigint
+  references public.suppliers(id) on delete set null;
+
 alter table public.follow_ups enable row level security;
 
 drop policy if exists follow_ups_own on public.follow_ups;

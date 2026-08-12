@@ -344,11 +344,12 @@ export async function checkFreeInvoiceCap(
 /* ---------------- email daily cap (per tier) ---------------- */
 
 /** Emails a user may send per day, by tier. Free is also enforced server-side
- *  in the send-email edge function (mirror these numbers there); lite/pro use
- *  their own SMTP so the local counter below is authoritative for them. */
+ *  in the send-email edge function (mirror these numbers there). Paid tiers are
+ *  uncapped here — the edge function's PAID_DAILY_CEILING is the only guard
+ *  they get, which is the point: a paid licence bought its way out of the cap. */
 export const EMAIL_DAILY_LIMIT: Record<Tier, number> = {
   free: 10,
-  lite: 500,
+  lite: Infinity,
   pro: Infinity,
 };
 

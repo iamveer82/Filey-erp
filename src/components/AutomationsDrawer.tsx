@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Plus, Play, Trash2, Loader2, Timer, AlertTriangle } from "lucide-react";
 import {
   loadTasks,
@@ -90,7 +91,9 @@ export default function AutomationsDrawer({
     }
   };
 
-  return (
+  // Portaled out of <main>: see SkillsDrawer — WebView2 half-paints a `fixed`
+  // overlay that sits inside a scrolling ancestor.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/40"
       role="dialog"
@@ -261,6 +264,7 @@ export default function AutomationsDrawer({
           ask for approval — best for summaries & reports.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

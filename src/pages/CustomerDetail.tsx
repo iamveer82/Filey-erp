@@ -52,7 +52,7 @@ import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { storedLineAmount } from "../lib/docItems";
 import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
-import CustomerNotes from "../components/CustomerNotes";
+import StickyNotes from "../components/StickyNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
 import CrmRecordPanel from "../components/CrmRecordPanel";
 import ContactsPanel from "../components/ContactsPanel";
@@ -1341,7 +1341,7 @@ export default function CustomerDetail() {
         </Section>
       )}
 
-      {id && <CustomerNotes customerId={id} />}
+      {id && <StickyNotes scope={`customer:${id}`} />}
 
       <Section title="Quotations">
         <DataTable<QuotationSummary>

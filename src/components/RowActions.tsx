@@ -381,7 +381,10 @@ export function QuickViewModal({
   }, [open, onClose]);
 
   if (!open || !data) return null;
-  return (
+  // Portaled for the same reason as the row menu above: this dialog is rendered
+  // from inside the table, and WebView2 composites a `fixed` overlay into the
+  // scrolling table's layer and then only repaints part of it.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4 print:hidden"
       onClick={onClose}
@@ -517,7 +520,8 @@ export function QuickViewModal({
           {data.footer}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

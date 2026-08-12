@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -3753,7 +3754,10 @@ function Editor({
         />
       </div>
 
-      {viewOpen && (
+      {/* Portaled: the page renders inside <main>, which scrolls, and WebView2
+          composites a `fixed` overlay into its scrolling ancestor's layer and
+          then repaints only part of it. */}
+      {viewOpen && createPortal(
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
           onClick={() => setViewOpen(false)}
@@ -3863,7 +3867,8 @@ function Editor({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

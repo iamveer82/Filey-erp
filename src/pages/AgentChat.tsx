@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Plus,
   Loader2,
@@ -516,8 +517,11 @@ export default function AgentChat() {
         </p>
       </div>
 
-      {/* Sensitive-action approval (replaces the native confirm dialog) */}
-      {pendingConfirm && (
+      {/* Sensitive-action approval (replaces the native confirm dialog).
+          Portaled, like the two overlays below it: this page renders inside
+          <main>, and WebView2 composites a `fixed` overlay into its scrolling
+          ancestor's layer and then repaints only part of it. */}
+      {pendingConfirm && createPortal(
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
           role="dialog"
@@ -559,11 +563,12 @@ export default function AgentChat() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Memory viewer */}
-      {memOpen && (
+      {memOpen && createPortal(
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
           role="dialog"
@@ -629,10 +634,11 @@ export default function AgentChat() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {/* Chat history drawer */}
-      {histOpen && (
+      {histOpen && createPortal(
         <div
           className="fixed inset-0 z-50 bg-black/40"
           role="dialog"
@@ -697,7 +703,8 @@ export default function AgentChat() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       <AutomationsDrawer open={autoOpen} onClose={() => setAutoOpen(false)} />
       <SkillsDrawer open={skillsOpen} onClose={() => setSkillsOpen(false)} />
