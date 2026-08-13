@@ -9,8 +9,8 @@ import {
   type PlanCard,
   type Subscription,
 } from "../../lib/subscription";
-import { startLiteCheckout } from "../../lib/license";
 import { Check } from "lucide-react";
+import FreedomContactModal from "../../components/FreedomContactModal";
 import { billing, erp, crm, quotes } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
@@ -24,6 +24,7 @@ export default function BillingPanel() {
   const [stats, setStats] = useState<Record<string, number>>({});
   const [sub, setSub] = useState<Subscription>({ plan: "free" });
   const [busy, setBusy] = useState<string | null>(null);
+  const [leadOpen, setLeadOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -61,10 +62,16 @@ export default function BillingPanel() {
   }, []);
 
   const buy = async (p: PlanCard) => {
+    // Freedom is sold by conversation while Stripe is out of the loop — the
+    // button collects a name and a number and emails us, rather than opening a
+    // checkout that cannot take the money.
+    if (p.kind === "license") {
+      setLeadOpen(true);
+      return;
+    }
     setBusy(p.id);
     try {
-      if (p.kind === "license") await startLiteCheckout();
-      else if (p.kind === "subscription") await startCheckout(p.id as "pro");
+      if (p.kind === "subscription") await startCheckout(p.id as "pro");
       else if (p.kind === "contact") window.location.href = ENTERPRISE_MAILTO;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -144,7 +151,9 @@ export default function BillingPanel() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+      {/* Two plans now, so two columns — a 4-up grid left them stranded at
+          half width on desktop. */}
+      <div className="grid gap-4 sm:grid-cols-2 items-stretch">
         {PLANS.map((p) => (
           <div
             key={p.id}
@@ -203,7 +212,9 @@ export default function BillingPanel() {
                     ? "Redirecting…"
                     : p.kind === "contact"
                       ? "Contact sales"
-                      : `Get ${p.name}`}
+                      : p.kind === "license"
+                        ? `Get ${p.name} — ${p.price}`
+                        : `Get ${p.name}`}
                 </button>
               )}
             </div>
@@ -222,6 +233,8 @@ export default function BillingPanel() {
           ))}
         </div>
       </div>
+
+      <FreedomContactModal open={leadOpen} onClose={() => setLeadOpen(false)} />
     </div>
   );
 }

@@ -42,8 +42,9 @@ export const PLANS: PlanCard[] = [
     id: "lite",
     kind: "license",
     name: "Freedom",
-    price: "AED 499",
+    price: "AED 1,499",
     period: " one-time",
+    recommended: true,
     blurb: "Own it outright — yours, on your machine.",
     features: [
       "Unlimited invoices — no monthly cap",
@@ -54,43 +55,21 @@ export const PLANS: PlanCard[] = [
       "No watermark",
     ],
   },
-  {
-    id: "pro",
-    kind: "subscription",
-    name: "Pro",
-    price: "AED 29",
-    period: "/month",
-    blurb: "Cloud sync for growing businesses.",
-    recommended: true,
-    features: [
-      "Everything in Freedom",
-      "Cloud sync, backup & multi-device",
-      "Up to 5 devices, team included",
-      "Recurring invoices",
-      "Priority support",
-    ],
-  },
-  {
-    id: "enterprise",
-    kind: "contact",
-    name: "Enterprise",
-    price: "Custom",
-    blurb: "For teams that run on Filey.",
-    features: [
-      "Everything in Pro",
-      "Team seats & roles",
-      "Customer portal",
-      "Highest limits",
-      "Priority onboarding",
-    ],
-  },
 ];
 
-/** Map an org's stored plan value onto its display card (legacy "business"
- *  subscribers show as Enterprise). */
+/* Pro and Enterprise were withdrawn from sale: two plans, one of them free and
+ * one bought outright. The Plan type below still carries "pro" / "business" /
+ * "enterprise" on purpose — those values exist on real organizations rows, and
+ * narrowing the type would make the app fail to read its own database. Anyone
+ * already on one keeps every entitlement they had; resolveTier() in license.ts
+ * is untouched, so nothing they can do today stops working. */
+
+/** Map an org's stored plan value onto its display card. A plan that is no
+ *  longer sold has no card of its own, so it shows as Freedom — the closest
+ *  thing still on the menu, and never a downgrade in what it implies. */
 export function planCardFor(orgPlan: string | null | undefined): PlanCard {
-  if (orgPlan === "business" || orgPlan === "enterprise")
-    return PLANS.find((p) => p.id === "enterprise")!;
+  if (orgPlan === "pro" || orgPlan === "business" || orgPlan === "enterprise")
+    return PLANS.find((p) => p.id === "lite")!;
   return PLANS.find((p) => p.id === orgPlan) ?? PLANS[0];
 }
 

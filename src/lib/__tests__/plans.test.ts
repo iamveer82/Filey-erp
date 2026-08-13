@@ -33,27 +33,39 @@ describe("resolveTier", () => {
 });
 
 describe("planCardFor", () => {
-  it("maps legacy business orgs onto the Enterprise card", () => {
-    expect(planCardFor("business").id).toBe("enterprise");
-    expect(planCardFor("enterprise").id).toBe("enterprise");
+  // Pro and Enterprise were withdrawn from sale. Orgs still carry those plan
+  // values, so the mapping must keep answering for them — a card lookup that
+  // returned undefined would crash the billing panel of the very customers who
+  // paid the most.
+  it("still answers for plans that are no longer sold", () => {
+    for (const legacy of ["pro", "business", "enterprise"]) {
+      expect(planCardFor(legacy).id).toBe("lite");
+    }
   });
 
-  it("maps free/pro to their own cards and defaults to Free", () => {
-    expect(planCardFor("pro").id).toBe("pro");
+  it("maps free to its own card and defaults to Free", () => {
     expect(planCardFor("free").id).toBe("free");
     expect(planCardFor(undefined).id).toBe("free");
     expect(planCardFor(null).id).toBe("free");
   });
 
-  it("exposes exactly the four tiers, with enterprise as contact-only", () => {
-    expect(PLANS.map((p) => p.id)).toEqual(["free", "lite", "pro", "enterprise"]);
-    expect(PLANS.find((p) => p.id === "enterprise")?.kind).toBe("contact");
+  it("sells exactly two plans: Free, and Freedom as a one-time licence", () => {
+    expect(PLANS.map((p) => p.id)).toEqual(["free", "lite"]);
     expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
+    expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 
-  it("carries the launch prices (AED)", () => {
+  it("carries the current prices (AED)", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 499");
-    expect(PLANS.find((p) => p.id === "pro")?.price).toBe("AED 29");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 1,499");
+  });
+});
+
+describe("withdrawn plans keep their entitlements", () => {
+  // Removing a plan from the price list must never remove access from someone
+  // already on it — that would look like a billing failure to a paying user.
+  it("still resolves an existing pro/business org to the pro tier", () => {
+    expect(resolveTier(false, "pro", "active")).toBe("pro");
+    expect(resolveTier(false, "business", "active")).toBe("pro");
   });
 });

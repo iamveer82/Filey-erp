@@ -11,8 +11,10 @@ import {
   Download,
   type LucideIcon,
 } from "lucide-react";
+import { useState } from "react";
 import Logo from "../components/Logo";
 import { PLANS } from "../lib/subscription";
+import FreedomContactModal from "../components/FreedomContactModal";
 
 /** Latest desktop installer (GitHub Releases — Windows + Linux artifacts). */
 const DOWNLOAD_URL = "https://github.com/iamveer82/Filey-erp/releases/latest";
@@ -62,6 +64,9 @@ const STATS: { value: string; label: string }[] = [
 ];
 
 export default function Landing({ onGetStarted }: { onGetStarted: () => void }) {
+  // Freedom has no checkout to open while Stripe is out of the loop — the CTA
+  // takes a name and a number and emails us instead.
+  const [leadOpen, setLeadOpen] = useState(false);
   return (
     <div className="min-h-full overflow-y-auto bg-canvas text-ink font-sans">
       {/* ───────── Nav ───────── */}
@@ -227,11 +232,11 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-3xl font-medium sm:text-4xl">Simple, honest pricing</h2>
           <p className="mt-3 text-brand-500">
-            Start free. Own it outright, or grow with cloud sync.
+            Start free, or own it outright — one payment, yours for good.
           </p>
         </div>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+        <div className="mx-auto mt-10 grid max-w-3xl gap-4 sm:grid-cols-2 items-stretch">
           {PLANS.map((p) => (
             <div
               key={p.id}
@@ -271,7 +276,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                   </a>
                 ) : (
                   <button
-                    onClick={onGetStarted}
+                    onClick={() => (p.kind === "license" ? setLeadOpen(true) : onGetStarted())}
                     className={p.recommended ? "btn-primary w-full" : "btn-ghost w-full"}
                   >
                     {p.id === "free" ? "Get started free" : `Get ${p.name}`}
@@ -327,6 +332,8 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           <p>© {new Date().getFullYear()} Filey. All rights reserved.</p>
         </div>
       </footer>
+
+      <FreedomContactModal open={leadOpen} onClose={() => setLeadOpen(false)} />
     </div>
   );
 }
