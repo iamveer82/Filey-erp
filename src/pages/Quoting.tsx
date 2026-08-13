@@ -62,14 +62,15 @@ import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
+import { r2, applyRoundOff, type CalcMode } from "../lib/money";
 import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
 import {
   docLineAmount,
   storedLineAmount,
   docTotals,
   paginateItems,
-  splitPageBreak,
-  mergePageBreak,
+  splitItemMeta,
+  mergeItemMeta,
   PB_KEY,
   sanitizeCustomColumns,
   RESERVED_ITEM_COLUMNS,
@@ -118,7 +119,19 @@ import TemplateDesigner, { syncCustomTemplates } from "../components/TemplateDes
 
 type CustomColumn = { key: string; label: string };
 
-type Item = QuotationItem & { pageBreakBefore?: boolean };
+/* A quotation line carries the same per-line calculation tools an invoice line
+ * has. QuotationItem has no columns for them, so — exactly as invoices do —
+ * they ride in the item's `custom` jsonb and are unpacked here. Without this
+ * the editor could only ever compute qty × rate: a line set to a manual amount
+ * or a formula silently reverted, and the quote totalled to the wrong number. */
+type Item = QuotationItem & {
+  pageBreakBefore?: boolean;
+  calcMode?: CalcMode;
+  /** Directly-entered amount when calcMode === "manual". */
+  amount?: number;
+  /** Per-line formula, overriding the doc-level one. */
+  itemFormula?: { a: string; b?: string } | null;
+};
 
 type Form = Omit<QuotationInput, "items" | "custom_columns" | "doc_type"> & {
   items: Item[];
@@ -160,6 +173,7 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
       "1. This quotation is valid until the date mentioned above.\n2. Prices are subject to applicable taxes.\n3. Payment terms as agreed.",
     discount: 0,
     tax_rate: 0,
+    round_off: false,
     items: [
       {
         product: "",
@@ -182,6 +196,7 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
 
 const asDocItem = (it: Item): DocItem => ({
   description: it.product,
+  product_id: it.product_id,
   unit_price: it.rate,
   qty: it.qty,
   unit: it.unit,
@@ -189,10 +204,21 @@ const asDocItem = (it: Item): DocItem => ({
   discount: it.discount,
   tax: it.tax,
   pageBreakBefore: it.pageBreakBefore,
+  // These three are what docLineAmount() consults before falling back to
+  // qty × unit_price. Dropping them here was the whole bug.
+  calcMode: it.calcMode,
+  amount: it.amount,
+  itemFormula: it.itemFormula,
 });
 
 const totals = (f: Form) =>
-  docTotals(f.items.map(asDocItem), f.discount || 0, f.tax_rate || 0, f.unit_price_formula);
+  // applyRoundOff, like invoices: this is the single place a quote's total is
+  // computed, so the editor, the preview, the PDF and the emailed copy cannot
+  // disagree about the figure.
+  applyRoundOff(
+    docTotals(f.items.map(asDocItem), f.discount || 0, f.tax_rate || 0, f.unit_price_formula),
+    !!f.round_off
+  );
 
 export default function Quoting() {
   const { toast, confirm } = useUI();
@@ -291,9 +317,21 @@ export default function Quoting() {
         terms: d.terms,
         discount: d.discount ?? 0,
         tax_rate: d.tax_rate ?? 0,
+        round_off: d.round_off ?? false,
         items: d.items.map((i) => {
-          const { custom, pageBreakBefore } = splitPageBreak(i.custom);
-          return { ...i, custom, pageBreakBefore };
+          // splitItemMeta, not splitPageBreak: a saved quote's calc mode,
+          // manual amount and per-line formula live in the same jsonb and were
+          // being thrown away on load. discount/tax stay on their real columns.
+          const { custom, pageBreakBefore, calcMode, amount, itemFormula } =
+            splitItemMeta(i.custom);
+          return {
+            ...i,
+            custom,
+            pageBreakBefore,
+            calcMode: calcMode || "auto",
+            amount,
+            itemFormula,
+          };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
         show_stamp: d.show_stamp ?? false,
@@ -320,8 +358,16 @@ export default function Quoting() {
           ...newBase,
           id: undefined,
           items: d.items.map((i) => {
-            const { custom, pageBreakBefore } = splitPageBreak(i.custom);
-            return { ...i, custom, pageBreakBefore };
+            const { custom, pageBreakBefore, calcMode, amount, itemFormula } =
+              splitItemMeta(i.custom);
+            return {
+              ...i,
+              custom,
+              pageBreakBefore,
+              calcMode: calcMode || "auto",
+              amount,
+              itemFormula,
+            };
           }),
           customColumns: sanitizeCustomColumns(d.custom_columns || []),
           show_stamp: d.show_stamp ?? false,
@@ -377,7 +423,16 @@ export default function Quoting() {
           discount: it.discount,
           tax: it.tax,
           unit: it.unit,
-          custom: mergePageBreak(it as unknown as DocItem),
+          // discount/tax are deliberately omitted: quotations keep them in real
+          // columns, and letting mergeItemMeta also write them into `custom`
+          // would store the same percentage twice, in two places free to drift.
+          custom: mergeItemMeta({
+            custom: it.custom,
+            pageBreakBefore: it.pageBreakBefore,
+            calcMode: it.calcMode,
+            amount: it.amount,
+            itemFormula: it.itemFormula,
+          }),
         })),
         quote_date: form.quote_date || undefined,
         valid_until: form.valid_until || undefined,
@@ -388,6 +443,7 @@ export default function Quoting() {
       payload.show_signature = form.show_signature ?? false;
       payload.discount = form.discount || 0;
       payload.tax_rate = form.tax_rate || 0;
+      payload.round_off = !!form.round_off;
 
       const id = await quotes.saveDoc(payload as QuotationInput);
       const next = { ...form, id, status: targetStatus ?? form.status };
@@ -807,6 +863,11 @@ export default function Quoting() {
           custom: it.custom,
           discount: it.discount,
           tax: it.tax,
+          // Without these the printed document recomputes qty × rate and
+          // disagrees with the editor on every manual or formula line.
+          calcMode: it.calcMode,
+          amount: it.amount,
+          itemFormula: it.itemFormula,
         })
       ),
       issue_date: form.quote_date,
@@ -1186,6 +1247,7 @@ export default function Quoting() {
                           <th className="py-2 px-2">Description</th>
                           <th className="py-2 px-2 w-20 text-right">Qty</th>
                           <th className="py-2 px-2 w-20 text-right">Unit</th>
+                          <th className="py-2 px-2 w-24 text-right">Calc</th>
                           {form.customColumns.map((col, idx) => (
                             <th
                               key={col.key}
@@ -1260,7 +1322,20 @@ export default function Quoting() {
                                 className="input text-right !px-2"
                                 value={it.qty || ""}
                                 placeholder="0"
-                                onChange={(e) => setItem(i, { qty: numInput(e.target.value) })}
+                                onChange={(e) => {
+                                  const qty = numInput(e.target.value);
+                                  // On a manual line the amount is what the user
+                                  // typed; changing qty re-derives the rate so
+                                  // the printed line still reads consistently.
+                                  if (it.calcMode === "manual") {
+                                    setItem(i, {
+                                      qty,
+                                      rate: qty ? r2((it.amount || 0) / qty) : it.amount || 0,
+                                    });
+                                  } else {
+                                    setItem(i, { qty });
+                                  }
+                                }}
                               />
                             </td>
                             <td className="py-2 px-2">
@@ -1271,6 +1346,63 @@ export default function Quoting() {
                                 list="unit-suggestions"
                                 onChange={(e) => setItem(i, { unit: e.target.value })}
                               />
+                            </td>
+                            <td className="py-2 px-2">
+                              <select
+                                className="input text-right !px-2 !py-1 text-xs"
+                                aria-label="How this line is calculated"
+                                value={
+                                  it.calcMode === "manual"
+                                    ? "manual"
+                                    : it.calcMode === "formula" && it.itemFormula?.a
+                                      ? it.itemFormula.a === "qty"
+                                        ? "qty"
+                                        : `formula:${it.itemFormula.a}`
+                                      : "auto"
+                                }
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (v === "auto") {
+                                    setItem(i, { calcMode: "auto", itemFormula: null });
+                                  } else if (v === "manual") {
+                                    // Seed the manual amount with what the line
+                                    // shows now, so switching mode never changes
+                                    // the total on its own.
+                                    const amount = docLineAmount(
+                                      asDocItem(it),
+                                      form.unit_price_formula
+                                    );
+                                    setItem(i, {
+                                      calcMode: "manual",
+                                      amount,
+                                      rate: it.qty ? r2(amount / it.qty) : amount,
+                                      itemFormula: null,
+                                    });
+                                  } else if (v === "qty") {
+                                    setItem(i, {
+                                      calcMode: "formula",
+                                      itemFormula: { a: "qty", b: "unit_price" },
+                                    });
+                                  } else if (v.startsWith("formula:")) {
+                                    setItem(i, {
+                                      calcMode: "formula",
+                                      itemFormula: {
+                                        a: v.slice("formula:".length),
+                                        b: "unit_price",
+                                      },
+                                    });
+                                  }
+                                }}
+                              >
+                                <option value="auto">Auto</option>
+                                <option value="manual">Manual</option>
+                                <option value="qty">Formula: Qty</option>
+                                {form.customColumns.map((c) => (
+                                  <option key={c.key} value={`formula:${c.key}`}>
+                                    Formula: {c.label}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
                             {form.customColumns.map((col) => (
                               <td key={col.key} className="py-2 px-2">
@@ -1316,7 +1448,23 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2 text-right font-medium text-ink">
-                              {m(docLineAmount(asDocItem(it), form.unit_price_formula))}
+                              {it.calcMode === "manual" ? (
+                                <input
+                                  type="number"
+                                  className="input text-right !px-2"
+                                  placeholder="0"
+                                  value={it.amount || ""}
+                                  onChange={(e) => {
+                                    const amount = numInput(e.target.value);
+                                    setItem(i, {
+                                      amount,
+                                      rate: it.qty ? r2(amount / it.qty) : amount,
+                                    });
+                                  }}
+                                />
+                              ) : (
+                                m(docLineAmount(asDocItem(it), form.unit_price_formula))
+                              )}
                             </td>
                             <td className="py-2">
                               <div className="flex items-center gap-0.5">
@@ -1408,6 +1556,17 @@ export default function Quoting() {
                       ))}
                     </div>
                   )}
+
+                  {/* Same switch invoices carry, so a quote and the invoice it
+                      becomes agree on the figure the customer signs off. */}
+                  <label className="mt-3 flex items-center gap-2 text-sm text-ink cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!form.round_off}
+                      onChange={(e) => setForm({ ...form, round_off: e.target.checked })}
+                    />
+                    Round off total to whole {form.currency || "AED"}
+                  </label>
 
                   <div className="flex flex-wrap gap-2 mt-3">
                     <button className="btn-primary" onClick={addItem}>
@@ -1666,6 +1825,9 @@ export default function Quoting() {
                               custom: it.custom,
                               discount: it.discount,
                               tax: it.tax,
+                              calcMode: it.calcMode,
+                              amount: it.amount,
+                              itemFormula: it.itemFormula,
                             })
                           )}
                           itemStartIndex={pageStartIndex}
@@ -1765,6 +1927,9 @@ export default function Quoting() {
                                       custom: it.custom,
                                       discount: it.discount,
                                       tax: it.tax,
+                                      calcMode: it.calcMode,
+                                      amount: it.amount,
+                                      itemFormula: it.itemFormula,
                                     })
                                   )}
                                   itemStartIndex={startIdx}
@@ -1978,6 +2143,9 @@ export default function Quoting() {
                               custom: it.custom,
                               discount: it.discount,
                               tax: it.tax,
+                              calcMode: it.calcMode,
+                              amount: it.amount,
+                              itemFormula: it.itemFormula,
                             })
                           )}
                           itemStartIndex={viewPageStart}

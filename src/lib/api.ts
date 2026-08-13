@@ -4,6 +4,8 @@ import { isLocalMode } from "./dataMode";
 import { quotationTotals, applyRoundOff, r2 } from "./money";
 import {
   splitItemMeta,
+  mergeItemMeta,
+  docLineAmount,
   docTotals as lineAwareTotals,
   netByTaxCategory,
 } from "./docItems";
@@ -3802,6 +3804,8 @@ export interface QuotationDoc {
   unit_price_formula?: { a: string; b: string } | null;
   discount?: number;
   tax_rate?: number;
+  /** Round the grand total to a whole unit of currency, as invoices can. */
+  round_off?: boolean;
   shared?: boolean;
   share_token?: string;
   logo?: string;
@@ -3954,6 +3958,40 @@ export const recurrences = {
 
 const quoteTotal = (items: QuotationItem[]) =>
   quotationTotals(items).total;
+
+/** One quotation line, converted for an invoice. Returns the money fields only
+ *  — the caller owns identity and position.
+ *
+ *  A quotation line can be a manual amount or a formula, both of which live in
+ *  the item's `custom` jsonb. Recomputing qty × rate on conversion therefore
+ *  produced an invoice that disagreed with the quote the customer signed. The
+ *  accepted figure is pinned as a manual amount instead, and `unit_price` is
+ *  back-derived so a per-unit price still prints sensibly. */
+function convertedLine(
+  it: { qty: number; rate: number; discount?: number; tax?: number; custom?: Record<string, string> | null },
+  formula?: { a: string; b: string } | null
+): { unit_price: number; custom: Record<string, string> | undefined } {
+  const { custom, calcMode, amount, itemFormula } = splitItemMeta(it.custom);
+  const line = docLineAmount(
+    {
+      description: "",
+      qty: Number(it.qty) || 0,
+      unit_price: Number(it.rate) || 0,
+      custom,
+      calcMode,
+      amount,
+      itemFormula,
+      discount: Number(it.discount || 0),
+      tax: Number(it.tax || 0),
+    },
+    formula
+  );
+  const qty = Number(it.qty) || 0;
+  return {
+    unit_price: qty ? r2(line / qty) : line,
+    custom: mergeItemMeta({ custom, calcMode: "manual", amount: line }),
+  };
+}
 
 export const quotes = {
   listDocs: () =>
@@ -4156,8 +4194,14 @@ export const quotes = {
                 ? `${it.product} (${it.sku})`
                 : it.product,
               qty: it.qty,
-              unit_price:
-                Number(it.rate) * (1 - Number(it.discount || 0) / 100),
+              unit: it.unit ?? null,
+              // The invoice must bill exactly what the customer accepted on the
+              // quote. This used to recompute qty × rate × (1 - discount),
+              // which silently changed the figure on any line the quote had set
+              // to a manual amount or a formula. Carrying the computed line
+              // across as a manual amount keeps the two documents in agreement,
+              // and keeps the customer's own custom columns with it.
+              ...convertedLine(it, qd.unit_price_formula),
               position: i,
             }))
           );
