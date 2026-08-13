@@ -316,3 +316,95 @@ export async function runWriteTool(
       return { error: `unknown tool: ${name}` };
   }
 }
+
+/** connect_channel { provider, token, ... } — propose wiring up a NEW chat
+ *  channel. Nothing is written to agent_channels here: this only parks the
+ *  credentials on a pending action, because connecting a channel decides who
+ *  can talk to the books and must cross the same APPROVE gate as sending money
+ *  out. The approval handler in index.ts does the real work. */
+// deno-lint-ignore no-explicit-any
+export async function proposeConnectChannel(client: any, ownerId: string, input: any): Promise<unknown> {
+  const provider = String(input?.provider ?? "").trim().toLowerCase();
+  if (!["telegram", "whatsapp", "slack"].includes(provider))
+    return { error: "provider must be telegram, whatsapp or slack" };
+  const token = String(input?.token ?? "").trim();
+  if (!token) return { error: "token is required" };
+  if (provider === "whatsapp" && !String(input?.phone_number_id ?? "").trim())
+    return { error: "whatsapp also needs phone_number_id" };
+
+  const code = String(Math.floor(Math.random() * 9000) + 1000);
+  const { error } = await client.from("agent_pending_actions").insert({
+    user_id: ownerId,
+    org_id: "default",
+    code,
+    action: "connect_channel",
+    payload: {
+      provider,
+      token,
+      phone_number_id: String(input?.phone_number_id ?? "").trim() || null,
+      signing_secret: String(input?.signing_secret ?? "").trim() || null,
+    },
+  });
+  if (error) return { error: error.message };
+  return {
+    proposed: "connect_channel",
+    provider,
+    code,
+    note:
+      `Nothing is connected yet. Tell the owner to reply "APPROVE ${code}" ` +
+      `to wire up ${provider}.`,
+  };
+}
+
+/** send_message { channel, to | customer_name, text } — propose sending a chat
+ *  message out to someone who is NOT the owner. Confirm-gated for the obvious
+ *  reason: this is the agent talking to your customers in your name, and a
+ *  wrong number or a wrong draft is not retractable once delivered. */
+// deno-lint-ignore no-explicit-any
+export async function proposeSendMessage(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
+  const channel = String(input?.channel ?? "").trim().toLowerCase();
+  if (!["whatsapp", "telegram", "slack"].includes(channel))
+    return { error: "channel must be whatsapp, telegram or slack" };
+  const text = String(input?.text ?? "").trim().slice(0, 4000);
+  if (!text) return { error: "text is required" };
+
+  let to = String(input?.to ?? "").trim();
+  let who = to;
+  const lookup = String(input?.customer_name ?? "").trim();
+  if (!to && lookup) {
+    const { data, error } = await client
+      .from("crm_customers")
+      .select("name,company,phone")
+      .eq("org_id", org)
+      .ilike("name", `%${lookup.replace(/[%_,()]/g, "")}%`)
+      .limit(2);
+    if (error) return { error: error.message };
+    if (!data?.length) return { error: `no customer matching "${lookup}"` };
+    if (data.length > 1)
+      return { error: `"${lookup}" matches more than one customer — be specific or pass \`to\`` };
+    if (!data[0].phone)
+      return { error: `${data[0].company || data[0].name} has no phone on file` };
+    to = String(data[0].phone);
+    who = `${data[0].company || data[0].name} (${to})`;
+  }
+  if (!to) return { error: "give either `to` or `customer_name`" };
+
+  const code = String(Math.floor(Math.random() * 9000) + 1000);
+  const { error } = await client.from("agent_pending_actions").insert({
+    user_id: ownerId,
+    org_id: org,
+    code,
+    action: "send_message",
+    payload: { channel, to, who, text },
+  });
+  if (error) return { error: error.message };
+  return {
+    proposed: "send_message",
+    channel,
+    to: who,
+    code,
+    note:
+      `Nothing sent yet. Show the owner the exact text and recipient, then ` +
+      `tell them to reply "APPROVE ${code}" to send it.`,
+  };
+}

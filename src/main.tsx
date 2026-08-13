@@ -19,12 +19,17 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
+import { autoStartBridge } from "./lib/waBridge";
 
 applyTheme();
 applyAccent();
 initMonitoring();
 installExtensionBannerGuard();
 startAutoSync();
+// WhatsApp comes up with the app when the owner has asked for it, so the
+// channel is simply live after launch rather than something to go and start.
+// Never awaited: a bridge that won't start must not hold up the UI.
+void autoStartBridge();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

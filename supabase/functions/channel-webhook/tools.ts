@@ -234,6 +234,59 @@ export const CONFIRM_TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "send_message",
+    description:
+      "Propose sending a chat message OUT to someone — a customer, a supplier, " +
+      "any number or chat id — on a connected channel (whatsapp, telegram, " +
+      "slack). Give either `to` (phone / chat id / slack channel) or " +
+      "`customer_name` to look the number up from the CRM. This does NOT send " +
+      "anything: it returns an approval code the owner must reply with " +
+      "(APPROVE <code>) before the message goes out.",
+    input_schema: {
+      type: "object",
+      properties: {
+        channel: { type: "string", enum: ["whatsapp", "telegram", "slack"] },
+        to: { type: "string", description: "Phone (any format), chat id, or Slack channel." },
+        customer_name: { type: "string", description: "Look the phone up from the CRM instead." },
+        text: { type: "string", description: "The message body to send." },
+      },
+      required: ["channel", "text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "connect_channel",
+    description:
+      "Propose connecting a NEW chat channel (telegram, whatsapp or slack) so " +
+      "the owner can also reach you there. Takes the credentials the owner " +
+      "pasted into this conversation. This does NOT connect anything — it " +
+      "returns an approval code the owner must reply with (APPROVE <code>). " +
+      "After approval you hand back a PAIR code to send from the new channel, " +
+      "which is what proves the new account belongs to the owner.",
+    input_schema: {
+      type: "object",
+      properties: {
+        provider: { type: "string", enum: ["telegram", "whatsapp", "slack"] },
+        token: {
+          type: "string",
+          description:
+            "Telegram: the @BotFather bot token. Slack: the xoxb- bot token. " +
+            "WhatsApp: the Meta permanent access token.",
+        },
+        phone_number_id: {
+          type: "string",
+          description: "WhatsApp only: the phone number id from the Meta app.",
+        },
+        signing_secret: {
+          type: "string",
+          description: "Slack only: the app's signing secret.",
+        },
+      },
+      required: ["provider", "token"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /** Durable agent memory — the agent's long-term memory of facts, preferences
@@ -281,6 +334,8 @@ export const MEMORY_TOOLS: ToolDef[] = [
 export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...WRITE_TOOLS, ...CONFIRM_TOOLS, ...MEMORY_TOOLS];
 
 import {
+  proposeConnectChannel,
+  proposeSendMessage,
   proposePaymentReminder,
   recallMemories,
   rememberMemory,
@@ -310,6 +365,14 @@ export async function runTool(
   if (name === "request_payment_reminder") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
     return proposePaymentReminder(client, org, ownerId, input);
+  }
+  if (name === "connect_channel") {
+    if (!ownerId) return { error: "actions are not configured (no owner)" };
+    return proposeConnectChannel(client, ownerId, input);
+  }
+  if (name === "send_message") {
+    if (!ownerId) return { error: "actions are not configured (no owner)" };
+    return proposeSendMessage(client, org, ownerId, input);
   }
 
   // ---- durable memory ----

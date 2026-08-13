@@ -60,3 +60,59 @@ export async function platformAvailable(): Promise<boolean> {
   const { data } = await supabase.auth.getSession();
   return !!data.session;
 }
+
+/* ---------------- bring-your-own key, for cloud users ----------------
+ *
+ * The desktop keeps a customer's own key in Rust's encrypted store and calls
+ * the provider directly. A browser has nowhere safe for a secret, so the key
+ * goes to `integration_keys` instead, where `authenticated` may write it and
+ * see that it exists but has no SELECT grant on the column itself — only the
+ * service role behind the `integrations` function can read it back. Calls keep
+ * going through that function; it just spends the customer's key instead of
+ * ours, and skips the platform's daily ceiling because it isn't our bill. */
+
+export type KeyProvider = "composio" | "zernio";
+
+async function uid(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? null;
+}
+
+/** True when this signed-in user has stored their own key for `provider`.
+ *  Reads the non-secret columns — the key itself is not selectable. */
+export async function hasCloudKey(provider: KeyProvider): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = await supabase
+    .from("integration_keys")
+    .select("provider")
+    .eq("provider", provider)
+    .maybeSingle();
+  if (error) return false;
+  return !!data;
+}
+
+export async function saveCloudKey(
+  provider: KeyProvider,
+  apiKey: string
+): Promise<void> {
+  if (!supabase) throw new IntegrationError("Cloud isn't configured in this build.");
+  const user_id = await uid();
+  if (!user_id) throw new IntegrationError("Sign in to save your own key.");
+  const { error } = await supabase
+    .from("integration_keys")
+    .upsert(
+      { user_id, provider, api_key: apiKey.trim(), updated_at: new Date().toISOString() },
+      { onConflict: "user_id,provider" }
+    );
+  if (error) throw new IntegrationError(error.message);
+}
+
+export async function clearCloudKey(provider: KeyProvider): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("integration_keys")
+    .delete()
+    .eq("provider", provider);
+  if (error) throw new IntegrationError(error.message);
+}

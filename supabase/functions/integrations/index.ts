@@ -67,7 +67,19 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    if (BILLABLE.has(op)) {
+    // A cloud user can bring their own key (integration_keys, service-role
+    // readable only). When they have, this call spends their credits, not
+    // ours — so it skips the platform's daily ceiling entirely, the same way
+    // the desktop's own-key path bypasses this function altogether.
+    const { data: ownRow } = await supa
+      .from("integration_keys")
+      .select("api_key")
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .maybeSingle();
+    const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
+
+    if (BILLABLE.has(op) && !ownKey) {
       // Same tier resolution as send-email: the org's plan decides the ceiling.
       let paid = false;
       const { data: prof } = await supa
@@ -110,12 +122,12 @@ Deno.serve(async (req) => {
 
     const result =
       provider === "composio"
-        ? await composio(action, payload ?? {}, userId)
+        ? await composio(action, payload ?? {}, userId, ownKey)
         : provider === "zernio"
-          ? await zernio(action, payload ?? {})
+          ? await zernio(action, payload ?? {}, ownKey)
           : { status: 400, body: { error: `Unknown provider: ${provider}` } };
 
-    if (BILLABLE.has(op) && result.status < 400) {
+    if (BILLABLE.has(op) && !ownKey && result.status < 400) {
       await supa.from("audit_log").insert({
         user_id: userId,
         actor: "user",
@@ -153,9 +165,10 @@ async function callJson(
 async function composio(
   action: string,
   payload: Record<string, unknown>,
-  userId: string
+  userId: string,
+  ownKey = ""
 ): Promise<Result> {
-  const key = Deno.env.get("COMPOSIO_API_KEY");
+  const key = ownKey || Deno.env.get("COMPOSIO_API_KEY");
   if (!key)
     return { status: 503, body: { error: "Integrations aren't configured yet." } };
   const headers = { "x-api-key": key, "Content-Type": "application/json" };
@@ -265,9 +278,10 @@ async function composio(
 
 async function zernio(
   action: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  ownKey = ""
 ): Promise<Result> {
-  const key = Deno.env.get("ZERNIO_API_KEY");
+  const key = ownKey || Deno.env.get("ZERNIO_API_KEY");
   if (!key)
     return { status: 503, body: { error: "Social publishing isn't configured yet." } };
   const headers = {

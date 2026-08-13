@@ -6,7 +6,14 @@
  * back into the browser or used for API calls from here. Desktop-only.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { platformCall, platformAvailable, type KeySource } from "./integrations";
+import {
+  platformCall,
+  platformAvailable,
+  saveCloudKey,
+  clearCloudKey,
+  hasCloudKey,
+  type KeySource,
+} from "./integrations";
 
 export const hasDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -46,17 +53,37 @@ export async function getComposioKey(): Promise<string> {
   }
 }
 
+/** Save the customer's own key. Desktop puts it in the encrypted store and
+ *  calls Composio directly; a browser has nowhere safe for a secret, so it goes
+ *  to the cloud instead (write-only to the client — see saveCloudKey) and the
+ *  proxy spends it on their behalf. */
 export async function setComposioKey(value: string): Promise<void> {
-  if (!hasDesktop)
-    throw new Error(
-      "Composio integrations are available in the Filey desktop app only — the key is stored in the device's encrypted store, never the browser."
-    );
-  await invoke("cache_set", { key: KEY, value: value.trim() });
+  if (hasDesktop) {
+    await invoke("cache_set", { key: KEY, value: value.trim() });
+    return;
+  }
+  await saveCloudKey("composio", value);
 }
 
-/** True when this install has its OWN key and should bypass the platform. */
+export async function clearComposioKey(): Promise<void> {
+  if (hasDesktop) {
+    await invoke("cache_set", { key: KEY, value: "" });
+    return;
+  }
+  await clearCloudKey("composio");
+}
+
+/** True when this install has its OWN key ON THIS DEVICE and should bypass the
+ *  platform proxy. A cloud-stored key is deliberately NOT "own" here: the call
+ *  still goes through the proxy, which is the only party that can read it. */
 export async function usingOwnKey(): Promise<boolean> {
   return !!(await getComposioKey()).trim();
+}
+
+/** The customer is on their own key, wherever it happens to live. */
+export async function usingOwnKeyAnywhere(): Promise<boolean> {
+  if (await usingOwnKey()) return true;
+  return hasCloudKey("composio");
 }
 
 /** Integrations are usable at all: either the customer's own key, or Filey's
@@ -68,7 +95,7 @@ export async function composioReady(): Promise<boolean> {
 
 /** Which key is paying for this install's integrations. */
 export async function composioKeySource(): Promise<KeySource> {
-  if (await usingOwnKey()) return "own";
+  if (await usingOwnKeyAnywhere()) return "own";
   return (await platformAvailable()) ? "platform" : "none";
 }
 

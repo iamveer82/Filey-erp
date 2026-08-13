@@ -136,3 +136,58 @@ Deno.test("write tools refuse to run without an owner", async () => {
   const out = (await runTool(client, "ORG", "add_customer", { name: "X" })) as { error: string };
   assertEquals(typeof out.error, "string");
 });
+
+/* send_message — the agent talking to someone who is NOT the owner. The
+ * recipient must be pinned down exactly, and nothing may go out without an
+ * approval code. */
+function fakeLookupClient(customers: unknown[]) {
+  const inserts: [string, unknown][] = [];
+  const from = (table: string) => {
+    // deno-lint-ignore no-explicit-any
+    const builder: any = {
+      insert: (rows: unknown) => {
+        inserts.push([table, rows]);
+        return Promise.resolve({ error: null });
+      },
+      select: () => builder,
+      eq: () => builder,
+      ilike: () => builder,
+      limit: () => Promise.resolve({ data: customers, error: null }),
+      then: (resolve: (x: unknown) => void) => resolve({ data: customers, error: null }),
+    };
+    return builder;
+  };
+  return { client: { from }, inserts };
+}
+
+Deno.test("send_message parks an approval instead of sending", async () => {
+  const { client, inserts } = fakeLookupClient([{ name: "Acme", company: "Acme LLC", phone: "+971500000000" }]);
+  const out = (await runTool(client, "ORG", "send_message", {
+    channel: "whatsapp",
+    customer_name: "acme",
+    text: "Your invoice is ready.",
+  }, "OWNER")) as { code?: string; proposed?: string };
+
+  assertEquals(out.proposed, "send_message");
+  assertEquals(typeof out.code, "string");
+  const parked = inserts.find(([t]) => t === "agent_pending_actions");
+  assertEquals(Boolean(parked), true, "must park a pending action, never send directly");
+  const row = parked![1] as { action: string; payload: { to: string } };
+  assertEquals(row.action, "send_message");
+  assertEquals(row.payload.to, "+971500000000", "must resolve the CRM phone, not the name");
+});
+
+Deno.test("send_message refuses an ambiguous or unreachable recipient", async () => {
+  const two = fakeLookupClient([{ name: "Acme One", phone: "1" }, { name: "Acme Two", phone: "2" }]);
+  const ambiguous = (await runTool(two.client, "ORG", "send_message", {
+    channel: "whatsapp", customer_name: "acme", text: "hi",
+  }, "OWNER")) as { error?: string };
+  assertEquals(typeof ambiguous.error, "string");
+  assertEquals(two.inserts.length, 0, "an ambiguous match must not park anything");
+
+  const noPhone = fakeLookupClient([{ name: "Acme", phone: null }]);
+  const unreachable = (await runTool(noPhone.client, "ORG", "send_message", {
+    channel: "whatsapp", customer_name: "acme", text: "hi",
+  }, "OWNER")) as { error?: string };
+  assertEquals(typeof unreachable.error, "string");
+});

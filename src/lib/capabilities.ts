@@ -72,7 +72,7 @@ export const CAPABILITIES: Capability[] = [
     id: "channels",
     name: "Messaging (Composio)",
     description: "Send via connected Gmail / Slack / Telegram, and share document links",
-    tools: ["send_gmail", "composio_run", "share_document_link"],
+    tools: ["send_gmail", "composio_run", "share_document_link", "connect_whatsapp"],
   },
   {
     id: "reminders",

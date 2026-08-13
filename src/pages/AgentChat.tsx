@@ -62,6 +62,12 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { cn } from "../lib/format";
+import {
+  hasDesktop as waHasDesktop,
+  bridgeState,
+  onBridgeState,
+  type BridgeState,
+} from "../lib/waBridge";
 
 /* Claude-style full-page chat for the Filey AI agent. Conversational mode runs
  * the standard tool-calling agent; the "Autonomous" toggle hands a goal to
@@ -400,6 +406,12 @@ export default function AgentChat() {
         )}
 
         {err && <ErrorBanner message={err} />}
+
+        {/* Pairing QR, rendered from live bridge state rather than from the
+            model's reply: a data URL is kilobytes of base64 that would bloat
+            every subsequent turn's context, and the code refreshes on its own
+            timer — this card follows it. */}
+        <WhatsAppPairingCard />
 
         <div ref={endRef} />
       </div>
@@ -774,6 +786,52 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** WhatsApp pairing QR, shown in the conversation while one is live. Driven by
+ *  the bridge supervisor, so it appears when the agent starts the bridge and
+ *  disappears the moment the code is scanned or spent. */
+function WhatsAppPairingCard() {
+  const [st, setSt] = useState<BridgeState>({ state: "stopped" });
+
+  useEffect(() => {
+    if (!waHasDesktop) return;
+    void bridgeState().then(setSt);
+    return onBridgeState(setSt);
+  }, []);
+
+  if (!st.qr && st.state !== "connected") return null;
+
+  if (st.state === "connected") {
+    return (
+      <div className="flex gap-3">
+        <div className="h-8 w-8 shrink-0" />
+        <div className="rounded-lg border border-success/30 bg-success/10 px-3.5 py-2.5 text-[13px] text-foreground">
+          ✅ WhatsApp is connected. Message that number and I'll answer there.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3">
+      <div className="h-8 w-8 shrink-0" />
+      <div className="rounded-lg border border-border bg-card p-3.5">
+        <p className="mb-2 text-[13px] font-medium text-foreground">
+          Scan to connect WhatsApp
+        </p>
+        <img
+          src={st.qr!}
+          alt="WhatsApp pairing QR code"
+          className="h-44 w-44 rounded bg-white p-1"
+        />
+        <p className="mt-2 max-w-[15rem] text-[12px] text-muted-foreground">
+          On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a
+          device. The code refreshes on its own if it expires.
+        </p>
       </div>
     </div>
   );

@@ -60,6 +60,10 @@ pub fn run() {
             modules::storage::restore_all,
             // First-run desktop shortcut (Windows)
             modules::shortcut::create_desktop_shortcut,
+            // WhatsApp bridge sidecar (QR-paired session, supervised here)
+            modules::wa_bridge::wa_bridge_start,
+            modules::wa_bridge::wa_bridge_stop,
+            modules::wa_bridge::wa_bridge_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

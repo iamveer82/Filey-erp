@@ -2567,6 +2567,39 @@ export const TOOLS: ToolDef[] = [
    * outbound and effectively permanent, so schedule_social_post is marked
    * sensitive and goes through the same confirm gate as sending money. */
   {
+    name: "connect_whatsapp",
+    description:
+      "Start the WhatsApp bridge and show the user a pairing QR code in this " +
+      "chat. Use when they ask to connect WhatsApp. The QR appears in the " +
+      "conversation on its own — do NOT try to describe or draw it. Just tell " +
+      "them to scan it from WhatsApp → Settings → Linked devices. Desktop app " +
+      "only. Warn them once that this pairs a real WhatsApp account through an " +
+      "unofficial connection, which is against WhatsApp's terms.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const { hasDesktop, startBridge, getBridgeConfig } = await import("./waBridge");
+      if (!hasDesktop)
+        return { error: "The WhatsApp bridge runs in the desktop app only." };
+      const cfg = getBridgeConfig();
+      if (!cfg.webhookUrl || !cfg.secret)
+        return {
+          error:
+            "Not configured yet — the webhook URL and bridge secret go in " +
+            "Integrations → WhatsApp (QR).",
+        };
+      try {
+        const st = await startBridge();
+        return {
+          started: true,
+          state: st.state,
+          note: "The pairing QR is showing in the chat. Tell them to scan it.",
+        };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  },
+  {
     name: "list_social_accounts",
     description:
       "List the social accounts connected through Zernio, with their platform and handle. Call this before posting so you can name the right account IDs.",

@@ -11,6 +11,7 @@ import {
   Landmark,
   Loader2,
   Megaphone,
+  MessageCircle,
   Plug,
   RefreshCw,
   Share2,
@@ -35,9 +36,11 @@ import {
   composioSearchToolkits,
   getComposioKey,
   setComposioKey,
+  clearComposioKey,
   COMPOSIO_TOOLKITS,
   type ToolkitInfo,
 } from "../lib/composio";
+import { hasCloudKey } from "../lib/integrations";
 import {
   getZernioConfig,
   setZernioConfig,
@@ -49,6 +52,17 @@ import {
 } from "../lib/zernio";
 import type { KeySource } from "../lib/integrations";
 import { reachReady } from "../lib/reach";
+import {
+  hasDesktop as waHasDesktop,
+  getBridgeConfig,
+  setBridgeConfig,
+  bridgeState,
+  startBridge,
+  stopBridge,
+  onBridgeState,
+  type BridgeConfig,
+  type BridgeState,
+} from "../lib/waBridge";
 
 /* ── Integrations ──────────────────────────────────────────────────────────
  * The single home for everything Filey connects to. This used to be split in
@@ -354,6 +368,7 @@ export default function Integrations() {
       <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2">
         <ComposioProvider source={source} onSourceChange={setSource} onSaved={refresh} />
         <ZernioProvider />
+        <WhatsAppBridgeProvider />
       </div>
 
       <div className="mb-4 flex gap-2">
@@ -543,7 +558,14 @@ function ComposioProvider({
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    getComposioKey().then((k) => setHasKey(!!k.trim()));
+    // Desktop keeps the key on the device; the browser's lives in the cloud,
+    // where it can be seen to exist but never read back.
+    (hasDesktop
+      ? getComposioKey().then((k) => !!k.trim())
+      : hasCloudKey("composio")
+    )
+      .then(setHasKey)
+      .catch(() => setHasKey(false));
   }, []);
 
   const save = async () => {
@@ -570,7 +592,7 @@ function ComposioProvider({
     setBusy(true);
     setMsg("");
     try {
-      await setComposioKey("");
+      await clearComposioKey();
       setHasKey(false);
       setMsg("Your key was removed — integrations fall back to your Filey plan.");
       void composioKeySource().then(onSourceChange);
@@ -599,13 +621,18 @@ function ComposioProvider({
         <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground">
           Use my own Composio key instead
         </summary>
-        {!hasDesktop ? (
+        {!hasDesktop && !cloudConfigured ? (
           <p className="mt-2 rounded-xl bg-warning/10 px-3 py-2 text-[12px] font-medium text-warning">
-            Your own key can only be stored by the desktop app, which keeps it in
-            the device's encrypted store rather than the browser.
+            Your own key needs either the desktop app (device's encrypted store)
+            or a signed-in cloud workspace to keep it in.
           </p>
         ) : (
           <>
+            <p className="mt-2 text-[12px] text-muted-foreground">
+              {hasDesktop
+                ? "Kept in this device's encrypted store. Calls go straight to Composio on your key, so nothing is metered by Filey."
+                : "Kept in your workspace, where the browser can replace or remove it but never read it back. Calls still go through Filey's proxy — it just spends your key, so they aren't metered against your plan."}
+            </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="field flex-1">
                 <span className="label">Composio API key</span>
@@ -744,6 +771,129 @@ function ZernioProvider() {
       </details>
 
       {msg && <p className="mt-3 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+/* ── WhatsApp bridge: QR-paired session, no per-message cost ─────────────── */
+function WhatsAppBridgeProvider() {
+  const [cfg, setCfg] = useState<BridgeConfig>(() =>
+    waHasDesktop ? getBridgeConfig() : { webhookUrl: "", secret: "", autoStart: false }
+  );
+  const [st, setSt] = useState<BridgeState>({ state: "stopped" });
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (!waHasDesktop) return;
+    void bridgeState().then(setSt);
+    return onBridgeState(setSt); // QR + connection changes arrive from Rust
+  }, []);
+
+  if (!waHasDesktop) {
+    return (
+      <div className="bg-card p-5">
+        <div className="mb-1 flex items-center gap-2">
+          <MessageCircle size={17} className="text-primary-500" />
+          <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
+        </div>
+        <p className="text-[12.5px] text-muted-foreground">
+          A QR-paired WhatsApp session has to stay connected, so it runs in the
+          desktop app rather than the browser.
+        </p>
+      </div>
+    );
+  }
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setMsg("");
+    try {
+      await fn();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const connected = st.state === "connected";
+  const label: Record<string, string> = {
+    stopped: "Not running",
+    starting: "Starting…",
+    connecting: "Waiting for the QR to be scanned",
+    connected: "Connected",
+    reconnecting: "Reconnecting…",
+    logged_out: "Logged out on the phone — re-pair to continue",
+  };
+
+  return (
+    <div className="bg-card p-5">
+      <div className="mb-1 flex items-center gap-2">
+        <MessageCircle size={17} className="text-primary-500" />
+        <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
+        <span
+          className={cn(
+            "ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium",
+            connected ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
+          )}
+        >
+          {label[st.state] ?? st.state}
+        </span>
+      </div>
+      <p className="mb-3 text-[12.5px] text-muted-foreground">
+        Pairs to a WhatsApp account you own, so chatting with your agent costs
+        nothing per message. This drives a real account through an unofficial
+        connection — against WhatsApp's terms, and the number can be banned. Use
+        one you can afford to lose.
+      </p>
+
+      {st.qr && (
+        <div className="mb-3 flex items-start gap-3 rounded-xl border border-border p-3">
+          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-40 w-40" />
+          <p className="text-[12.5px] text-muted-foreground">
+            On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a
+            device, then scan this.
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="field">
+          <span className="label">Webhook URL</span>
+          <input
+            className="input"
+            placeholder="https://<project>.functions.supabase.co/channel-webhook"
+            value={cfg.webhookUrl}
+            onChange={(e) => setCfg(setBridgeConfig({ webhookUrl: e.target.value }))}
+          />
+        </div>
+        <div className="field">
+          <span className="label">Bridge secret</span>
+          <input
+            type="password"
+            className="input"
+            placeholder="WA_BRIDGE_SECRET"
+            value={cfg.secret}
+            onChange={(e) => setCfg(setBridgeConfig({ secret: e.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button className="btn-primary" onClick={() => run(startBridge)}>
+          {st.state === "stopped" ? "Connect" : "Restart"}
+        </button>
+        <button className="btn-ghost" onClick={() => run(stopBridge)}>
+          Stop
+        </button>
+        <label className="ml-auto flex items-center gap-2 text-[12.5px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={cfg.autoStart}
+            onChange={(e) => setCfg(setBridgeConfig({ autoStart: e.target.checked }))}
+          />
+          Start with Filey
+        </label>
+      </div>
+
+      {msg && <p className="mt-2 text-[12px] font-medium text-danger">{msg}</p>}
     </div>
   );
 }
