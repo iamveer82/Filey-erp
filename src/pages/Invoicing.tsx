@@ -64,6 +64,8 @@ import {
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
 import ColorPicker from "../components/ColorPicker";
+import CompanyModal from "../components/CompanyModal";
+import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
@@ -455,8 +457,12 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     }
   }, [params, company, form, setParams, docs, numFmt, mode]);
 
-  const newInvoice = () => {
-    if (company) setForm(blankForm(company, docs.map((d) => d.number), mode, numFmt));
+  const newInvoice = async () => {
+    if (!company) return;
+    const f = blankForm(company, docs.map((d) => d.number), mode, numFmt);
+    // The section's preset wins over the profile-wide default template.
+    f.template = await startingTemplate("invoice", company.default_template, f.template);
+    setForm(f);
   };
 
 const editInvoice = async (id: number) => {
@@ -1167,9 +1173,6 @@ const editInvoice = async (id: number) => {
         }
         action={
           <div className="flex gap-2">
-            <button className="btn-ghost" onClick={() => setCompanyOpen(true)}>
-              <Building2 size={16} /> Company
-            </button>
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
               <Sparkles size={16} /> Scan with AI
             </button>
@@ -1187,16 +1190,15 @@ const editInvoice = async (id: number) => {
                 <Plus size={16} /> New Purchase Invoice
               </button>
             ) : (
-              <button
-                onClick={newInvoice}
-                className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60 transition-colors"
-              >
+              <button className="btn-primary" onClick={newInvoice}>
                 <Plus size={16} /> New Invoice
               </button>
             )}
           </div>
         }
       />
+
+      <DocPresetBar docType="invoice" company={company} onCompanySaved={setCompany} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
@@ -4042,156 +4044,3 @@ function CustomerModal({
 
 /* ---------------- Company modal ---------------- */
 
-function CompanyModal({
-  open,
-  company,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  company: CompanyProfile;
-  onClose: () => void;
-  onSaved: (c: CompanyProfile) => void;
-}) {
-  const { toast } = useUI();
-  const [c, setC] = useState<CompanyProfile>(company);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) setC(company);
-  }, [open, company]);
-
-  const onLogo = (file?: File) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setC({ ...c, logo: String(reader.result) });
-    reader.readAsDataURL(file);
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Company Profile">
-      <div className="space-y-3">
-        <Field label="Company Name">
-          <input
-            className="input"
-            value={c.name}
-            onChange={(e) => setC({ ...c, name: e.target.value })}
-          />
-        </Field>
-        <Field label="Address">
-          <input
-            className="input"
-            value={c.address ?? ""}
-            onChange={(e) => setC({ ...c, address: e.target.value })}
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="TRN">
-            <input
-              className="input"
-              value={c.trn ?? ""}
-              onChange={(e) => setC({ ...c, trn: e.target.value })}
-            />
-          </Field>
-          <Field label="Phone">
-            <input
-              className="input"
-              value={c.phone ?? ""}
-              onChange={(e) => setC({ ...c, phone: e.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label="Email">
-          <input
-            className="input"
-            value={c.email ?? ""}
-            onChange={(e) => setC({ ...c, email: e.target.value })}
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Default Template">
-            <select
-              className="select"
-              value={c.default_template}
-              onChange={(e) => setC({ ...c, default_template: e.target.value })}
-            >
-              {[
-                ...TEMPLATES,
-                ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
-              ].map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Default Accent">
-            <input
-              type="color"
-              className="input h-[38px] p-1"
-              value={c.default_accent}
-              onChange={(e) => setC({ ...c, default_accent: e.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label="Logo">
-          <div className="flex items-center gap-3">
-            {c.logo && (
-              <img
-                src={c.logo}
-                alt="logo"
-                className="h-12 w-12 object-contain border border-brand-200 rounded-xl"
-              />
-            )}
-            <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
-              <Upload size={14} /> {c.logo ? "Replace" : "Upload"}
-            </button>
-            {c.logo && (
-              <button
-                className="btn-ghost"
-                onClick={() => setC({ ...c, logo: undefined })}
-              >
-                <X size={14} /> Remove
-              </button>
-            )}
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onLogo(e.target.files?.[0])}
-            />
-          </div>
-        </Field>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          className="btn-primary"
-          onClick={async () => {
-            try {
-              await billing.saveCompany(c);
-              // Re-fetch so we apply exactly what the server persisted
-              // (server defaults, RLS-trimmed columns, etc.) to the
-              // invoice page and not just the locally-edited copy.
-              let fresh: CompanyProfile;
-              try {
-                fresh = await billing.getCompany();
-              } catch {
-                fresh = c; // server unreachable — use what we saved
-              }
-              onSaved(fresh);
-              toast.success("Company details saved.");
-            } catch (e) {
-              toast.error(`Could not save company details: ${errMsg(e)}`);
-            }
-          }}
-        >
-          Save Company
-        </button>
-      </div>
-    </Modal>
-  );
-}

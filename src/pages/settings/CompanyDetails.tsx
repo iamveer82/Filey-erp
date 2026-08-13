@@ -11,7 +11,9 @@ import {
   FileText,
   Stamp,
   Hash,
+  Bookmark,
 } from "lucide-react";
+import { DocPresetsPanel } from "../../components/DocPresetBar";
 import { numInput } from "../../lib/format";
 import { loadInvoiceFormat, saveInvoiceFormat } from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
@@ -449,6 +451,18 @@ export default function CompanyDetails() {
             />
           </FormField>
         </div>
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-brand-100">
+        <p className="font-medium text-ink flex items-center gap-2">
+          <Bookmark size={16} /> Document Presets
+        </p>
+        <p className="text-sm text-brand-500 mt-0.5 mb-4">
+          The template each section starts a new document on. Set once here — or
+          from the preset row above any section's list — instead of choosing on
+          every document.
+        </p>
+        <DocPresetsPanel />
       </div>
 
       <div className="mt-6 pt-5 border-t border-brand-100">

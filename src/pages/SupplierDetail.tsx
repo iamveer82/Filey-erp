@@ -564,7 +564,7 @@ export default function SupplierDetail() {
                 ?.scrollIntoView({ behavior: "smooth" })
             }
             disabled={!supplier}
-            className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
+            className="btn-primary"
           >
             <Download className="h-3.5 w-3.5" /> Download statement
           </button>
@@ -870,7 +870,7 @@ export default function SupplierDetail() {
               <button
                 onClick={downloadStatementPdf}
                 disabled={!supplier || exporting || !built.hasContent}
-                className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60 disabled:opacity-50"
+                className="btn-primary"
               >
                 <FileDown className="h-3.5 w-3.5" />{" "}
                 {exporting ? "Preparing…" : "Download PDF"}

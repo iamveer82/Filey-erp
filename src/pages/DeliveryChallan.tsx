@@ -52,7 +52,8 @@ import TemplateDesigner, {
 } from "../components/TemplateDesigner";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { tools, billing, crm, type CrmCustomer } from "../lib/api";
+import { tools, billing, crm, type CrmCustomer, type CompanyProfile } from "../lib/api";
+import DocPresetBar from "../components/DocPresetBar";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -241,6 +242,12 @@ export default function DeliveryChallan() {
   const [records, setRecords] = useState<DcRecord[]>([]);
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
+  // Challans carry the company header like every other document, so this
+  // section gets the same company control as the rest.
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  useEffect(() => {
+    billing.getCompany().then(setCompany).catch(() => {});
+  }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [quickView, setQuickView] = useState<DcRecord | null>(null);
@@ -373,6 +380,8 @@ export default function DeliveryChallan() {
           </button>
         }
       />
+      <DocPresetBar company={company} onCompanySaved={setCompany} />
+
       <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-6">
         <MetricCard
           label="Challans"

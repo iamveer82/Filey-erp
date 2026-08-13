@@ -29,6 +29,7 @@ import { nextDocNumber } from "../lib/docNumber";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import DocTemplateGallery from "../components/DocTemplateGallery";
+import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
 import TemplateDesigner, {
   loadCustomTemplates,
   syncCustomTemplates,
@@ -201,9 +202,13 @@ export default function PaymentReceipt() {
     });
   };
 
-  const newReceipt = () => {
+  const newReceipt = async () => {
     if (!company) return;
-    setForm(blankForm(company, docs.map((d) => d.number)));
+    const f = blankForm(company, docs.map((d) => d.number));
+    // Receipts used to hardcode their template because default_template was
+    // shared with invoices; the per-type preset gives them their own.
+    f.template = await startingTemplate("receipt", company.default_template, f.template);
+    setForm(f);
     setView("edit");
   };
 
@@ -469,11 +474,8 @@ export default function PaymentReceipt() {
             <button className="btn-ghost" aria-label="Export" onClick={exportCsv}>
               <Download size={14} /> Export
             </button>
-            <button
-              onClick={newReceipt}
-              className="h-8 px-3 rounded-md text-[13px] font-medium inline-flex items-center gap-1.5 bg-amber-400 text-neutral-900 hover:bg-amber-300 border border-amber-500/60"
-            >
-              <Plus size={14} /> Record Payment
+            <button className="btn-primary" onClick={newReceipt}>
+              <Plus size={16} /> Record Payment
             </button>
           </div>
         }
@@ -481,6 +483,8 @@ export default function PaymentReceipt() {
 
       {view === "list" ? (
         <>
+          <DocPresetBar docType="receipt" company={company} onCompanySaved={setCompany} />
+
           <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
             <MetricCard label="Total receipts" value={String(stats.total)} icon={<FileText size={20} />} />
             <MetricCard
@@ -517,8 +521,9 @@ export default function PaymentReceipt() {
             </div>
           </div>
 
-          <div className="card">
-            <DataTable
+          {/* DataTable draws its own card — the extra wrapper here was the
+              reason receipts looked boxed-in next to the other sections. */}
+          <DataTable
               pageSize={10}
               columns={[
                 { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
@@ -569,7 +574,6 @@ export default function PaymentReceipt() {
                   : "No receipts yet."
               }
             />
-          </div>
 
           <QuickViewModal
             open={!!quickView}
