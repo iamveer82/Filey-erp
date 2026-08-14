@@ -25,7 +25,11 @@ import { useUI } from "../lib/ui";
 import { fmtDate, money, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import ColorPicker from "../components/ColorPicker";
-import { nextDocNumber } from "../lib/docNumber";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import DocTemplateGallery from "../components/DocTemplateGallery";
@@ -71,9 +75,13 @@ type Form = Omit<ReceiptDoc, "id" | "created_at" | "updated_at" | "items"> & {
   show_signature?: boolean;
 };
 
-function blankForm(c: CompanyProfile, existing: string[] = []): Form {
+function blankForm(
+  c: CompanyProfile,
+  existing: string[] = [],
+  formats?: DocFormats
+): Form {
   return {
-    number: nextDocNumber({ prefix: "REC", existing }),
+    number: pickDocNumber("payment_receipt", existing, formats),
     status: "draft",
     template: "receipt",
     accent: c.default_accent || "#222222",
@@ -155,6 +163,13 @@ export default function PaymentReceipt() {
   const confirmDelete = (title: string, message?: string) =>
     confirm({ title, message, danger: true });
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  // Saved number formats (Settings → Company Details → Document Numbering).
+  const [docFmts, setDocFmts] = useState<DocFormats>({});
+  useEffect(() => {
+    loadDocFormats()
+      .then(setDocFmts)
+      .catch(() => {});
+  }, []);
   const [docs, setDocs] = useState<ReceiptSummary[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [view, setView] = useState<"list" | "edit">("list");
@@ -204,7 +219,7 @@ export default function PaymentReceipt() {
 
   const newReceipt = async () => {
     if (!company) return;
-    const f = blankForm(company, docs.map((d) => d.number));
+    const f = blankForm(company, docs.map((d) => d.number), docFmts);
     // Receipts used to hardcode their template because default_template was
     // shared with invoices; the per-type preset gives them their own.
     f.template = await startingTemplate("receipt", company.default_template, f.template);
@@ -284,10 +299,10 @@ export default function PaymentReceipt() {
   const duplicate = () => {
     const numbers = docs.map((d) => d.number);
     setForm({
-      ...blankForm(company || ({} as any), numbers),
+      ...blankForm(company || ({} as any), numbers, docFmts),
       ...form,
       id: undefined,
-      number: nextDocNumber({ prefix: "REC", existing: numbers }),
+      number: pickDocNumber("payment_receipt", numbers, docFmts),
       status: "draft",
       shared: false,
       share_token: undefined,
@@ -398,10 +413,10 @@ export default function PaymentReceipt() {
       const d = await receipts.get(id);
       const numbers = docs.map((x) => x.number);
       setForm({
-        ...blankForm(company || ({} as any), numbers),
+        ...blankForm(company || ({} as any), numbers, docFmts),
         ...d,
         id: undefined,
-        number: nextDocNumber({ prefix: "REC", existing: numbers }),
+        number: pickDocNumber("payment_receipt", numbers, docFmts),
         status: "draft",
         shared: false,
         share_token: undefined,

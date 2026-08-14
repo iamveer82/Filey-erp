@@ -53,7 +53,11 @@ import {
   RESERVED_ITEM_COLUMNS,
   type DocItem,
 } from "../lib/docItems";
-import { nextDocNumber } from "../lib/docNumber";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
@@ -137,9 +141,13 @@ type Form = Omit<PoInput, "items"> & {
 
 const today = () => todayYmd();
 
-function blankForm(c: CompanyProfile, existing: string[] = []): Form {
+function blankForm(
+  c: CompanyProfile,
+  existing: string[] = [],
+  formats?: DocFormats
+): Form {
   return {
-    po_number: nextDocNumber({ prefix: "PO", existing }),
+    po_number: pickDocNumber("purchase_order", existing, formats),
     status: "draft",
     total: 0,
     doc_title: "Purchase Order",
@@ -216,6 +224,13 @@ const normStamp = (
 export default function PurchaseOrders() {
   const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
+  // Saved number formats (Settings → Company Details → Document Numbering).
+  const [docFmts, setDocFmts] = useState<DocFormats>({});
+  useEffect(() => {
+    loadDocFormats()
+      .then(setDocFmts)
+      .catch(() => {});
+  }, []);
   const [rows, setRows] = useState<PoSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [loading, setLoading] = useState(true);
@@ -258,14 +273,14 @@ export default function PurchaseOrders() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, rows.map((r) => r.po_number)));
+      setForm(blankForm(company, rows.map((r) => r.po_number), docFmts));
       setParams({}, { replace: true });
     }
   }, [params, company, form, setParams, rows]);
 
   const newPo = async () => {
     if (!company) return;
-    const f = blankForm(company, rows.map((r) => r.po_number));
+    const f = blankForm(company, rows.map((r) => r.po_number), docFmts);
     // The section's preset wins over the profile-wide default template.
     f.template = await startingTemplate("po", company.default_template, f.template);
     setForm(f);
@@ -308,6 +323,7 @@ export default function PurchaseOrders() {
             loadRows();
           }}
           onSaved={onSaved}
+          docFmts={docFmts}
           onEditCompany={() => setCompanyOpen(true)}
           tplRev={tplRev}
           onTplRev={() => setTplRev((v) => v + 1)}
@@ -665,7 +681,8 @@ export default function PurchaseOrders() {
                       setForm,
                       company,
                       rows.map((x) => x.po_number),
-                      toast
+                      toast,
+                      docFmts
                     )
                   }
                   onSend={{
@@ -839,7 +856,8 @@ async function duplicatePo(
   setForm: (f: Form) => void,
   company: CompanyProfile | null,
   existing: string[],
-  toast: ReturnType<typeof useUI>["toast"]
+  toast: ReturnType<typeof useUI>["toast"],
+  formats?: DocFormats
 ) {
   try {
     const po = await pos.get(id);
@@ -849,7 +867,7 @@ async function duplicatePo(
       ...f,
       id: undefined,
       status: "draft",
-      po_number: nextDocNumber({ prefix: "PO", existing }),
+      po_number: pickDocNumber("purchase_order", existing, formats),
       order_date: today(),
       shared: false,
       share_token: undefined,
@@ -874,6 +892,7 @@ function Editor({
   onEditCompany,
   tplRev,
   onTplRev,
+  docFmts,
 }: {
   form: Form;
   setForm: (f: Form) => void;
@@ -884,6 +903,8 @@ function Editor({
   onEditCompany: () => void;
   tplRev: number;
   onTplRev: () => void;
+  /** Saved number formats, so a duplicate numbers itself the user's way. */
+  docFmts: DocFormats;
 }) {
   const { toast, confirm } = useUI();
   const poRef = useRef<HTMLDivElement>(null);
@@ -1043,10 +1064,11 @@ function Editor({
       ...form,
       id: undefined,
       status: "draft",
-      po_number: nextDocNumber({
-        prefix: "PO",
-        existing: rows.map((r) => r.po_number),
-      }),
+      po_number: pickDocNumber(
+        "purchase_order",
+        rows.map((r) => r.po_number),
+        docFmts
+      ),
       shared: false,
       share_token: undefined,
     };

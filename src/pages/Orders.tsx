@@ -14,7 +14,11 @@ import { erp, crm, CrmCustomer, Order, OrderItem, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, fmtDate, numInput, num, cn, getDisplayCurrency } from "../lib/format";
-import { nextDocNumber } from "../lib/docNumber";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import {
   PageHeader,
   MetricCard,
@@ -41,8 +45,13 @@ const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
 /** Next sequential order number for this year, derived from existing
  * orders — random suffixes collide and confuse customers. */
+let orderFormats: DocFormats = {};
 const nextOrderNumber = (existing: Order[]) =>
-  nextDocNumber({ prefix: "SO", existing: existing.map((o) => o.order_number ?? "") });
+  pickDocNumber(
+    "sales_order",
+    existing.map((o) => o.order_number ?? ""),
+    orderFormats
+  );
 
 export default function Orders() {
   const { toast, confirm } = useUI();
@@ -57,6 +66,15 @@ export default function Orders() {
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    // Saved number formats, so a new order follows the user's scheme.
+    loadDocFormats()
+      .then((f) => {
+        orderFormats = f;
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (params.get("new") === "1") {
       setOpen(true);

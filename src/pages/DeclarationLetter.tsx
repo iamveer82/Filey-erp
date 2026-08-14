@@ -22,6 +22,11 @@ import {
   type CrmCustomer,
 } from "../lib/api";
 import { useUI } from "../lib/ui";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import { errMsg, fmtDate, todayYmd } from "../lib/format";
 import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput } from "../components/ui";
 import {
@@ -159,14 +164,17 @@ const newId = () =>
     ? crypto.randomUUID()
     : String(Date.now());
 
-/** Next sequential letter reference: DL-0001, DL-0002, … (DEMO parity). */
-const nextRef = (list: SavedDecl[]) => {
-  const nums = list.map((d) => {
-    const m = /DL-(\d+)/.exec(d.ref || "");
-    return m ? Number(m[1]) : 0;
-  });
-  return `DL-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, "0")}`;
-};
+// Saved format, loaded once on mount; empty until then, which falls back to
+// the built-in DL- scheme.
+let dlFormats: DocFormats = {};
+
+/** Next letter reference: the user's format when set, else DL-0001, DL-0002… */
+const nextRef = (list: SavedDecl[]) =>
+  pickDocNumber(
+    "declaration_letter",
+    list.map((d) => d.ref || ""),
+    dlFormats
+  );
 
 const fmtAmount = (v: string) => {
   const n = Number(String(v).replace(/,/g, ""));
@@ -519,6 +527,13 @@ function DeclarationEditor({
   const declRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Number format first, so a letter opened straight away still numbers the
+    // user's way rather than falling back to DL-0001.
+    loadDocFormats()
+      .then((f) => {
+        dlFormats = f;
+      })
+      .catch(() => {});
     billing
       .getCompany()
       .then((c) => {

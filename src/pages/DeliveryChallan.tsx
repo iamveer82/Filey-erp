@@ -17,7 +17,11 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { fmtDate, numInput, todayYmd } from "../lib/format";
-import { nextDocNumber } from "../lib/docNumber";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import {
   PageHeader,
   MetricCard,
@@ -66,8 +70,11 @@ const DC_TEMPLATES = [
   { id: "corporate", name: "Corporate" },
 ];
 
+// Module-level so the numbering helpers can reach the saved format without
+// threading it through every blankDc caller; refreshed once on mount.
+let dcFormats: DocFormats = {};
 const dcNumber = (existing: string[] = []) =>
-  nextDocNumber({ prefix: "DC", existing });
+  pickDocNumber("delivery_challan", existing, dcFormats);
 const today = () => todayYmd();
 
 type DcItem = { description: string; qty: number };
@@ -247,6 +254,11 @@ export default function DeliveryChallan() {
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   useEffect(() => {
     billing.getCompany().then(setCompany).catch(() => {});
+    loadDocFormats()
+      .then((f) => {
+        dcFormats = f;
+      })
+      .catch(() => {});
   }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");

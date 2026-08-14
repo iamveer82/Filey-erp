@@ -16,10 +16,10 @@ import {
 import { DocPresetsPanel } from "../../components/DocPresetBar";
 import { numInput } from "../../lib/format";
 import {
-  loadInvoiceFormat,
-  saveInvoiceFormat,
-  loadQuoteFormat,
-  saveQuoteFormat,
+  DOC_NUMBER_KINDS,
+  loadDocFormats,
+  saveDocFormat,
+  type DocFormats,
 } from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
 import { LEGAL_ID_TYPES, EMIRATES, normalizeEmirate } from "../../lib/einvoice";
@@ -72,8 +72,7 @@ export default function CompanyDetails() {
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [stampSig, setStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
-  const [numFmt, setNumFmt] = useState("");
-  const [quoteFmt, setQuoteFmt] = useState("");
+  const [docFmts, setDocFmts] = useState<DocFormats>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -103,12 +102,9 @@ export default function CompanyDetails() {
     loadCompanyStampSig()
       .then(setStampSig)
       .catch((e) => console.warn("Failed to load stamp/signature", e));
-    loadInvoiceFormat()
-      .then(setNumFmt)
-      .catch((e) => console.warn("Failed to load invoice format", e));
-    loadQuoteFormat()
-      .then(setQuoteFmt)
-      .catch((e) => console.warn("Failed to load quotation format", e));
+    loadDocFormats()
+      .then(setDocFmts)
+      .catch((e) => console.warn("Failed to load document formats", e));
   }, []);
 
   const setBankField = (k: keyof BankInfo, v: string) => {
@@ -160,8 +156,11 @@ export default function CompanyDetails() {
       await saveBankInfo(bank);
       await saveLetterhead(lh);
       await saveCompanyStampSig(stampSig);
-      await saveInvoiceFormat(numFmt);
-      await saveQuoteFormat(quoteFmt);
+      // One write per type, and only for types the user actually touched.
+      for (const spec of DOC_NUMBER_KINDS) {
+        const v = docFmts[spec.kind];
+        if (v !== undefined) await saveDocFormat(spec.kind, v);
+      }
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
@@ -535,55 +534,40 @@ export default function CompanyDetails() {
 
       <div className="mt-6 pt-5 border-t border-brand-100">
         <p className="font-medium text-ink flex items-center gap-2">
-          <Hash size={16} /> Invoice Numbering
+          <Hash size={16} /> Document Numbering
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Set how new invoice numbers are generated. Put the part that should count up
+          Set how each document type numbers itself. Put the part that should count up
           inside braces — its digits set the width and the starting value, so{" "}
           <span className="font-mono">{"{001}"}</span> means 001, 002, 003… Everything
           outside the braces stays fixed. Use <span className="font-mono">{"{YY}"}</span>{" "}
-          or <span className="font-mono">{"{YYYY}"}</span> for the year. Leave blank to
-          keep the default INV-2026-0001 scheme.
+          or <span className="font-mono">{"{YYYY}"}</span> for the year. Leave a type
+          blank to keep its built-in scheme. Each type counts separately, so a quote and
+          the invoice it becomes never share a number.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Format">
-            <input
-              className="input font-mono"
-              placeholder="INV-DLS-{001}-26"
-              value={numFmt}
-              onChange={(e) => {
-                setNumFmt(e.target.value);
-                setSaved(false);
-              }}
-            />
-          </FormField>
-          <FormField label="Preview — your next invoices">
-            <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
-              {numberPreview(numFmt)}
+        <div className="space-y-3">
+          {DOC_NUMBER_KINDS.map((spec) => (
+            <div key={spec.kind} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField label={spec.label}>
+                <input
+                  className="input font-mono"
+                  placeholder={spec.placeholder}
+                  value={docFmts[spec.kind] ?? ""}
+                  onChange={(e) => {
+                    setDocFmts((f) => ({ ...f, [spec.kind]: e.target.value }));
+                    setSaved(false);
+                  }}
+                />
+              </FormField>
+              <FormField label="Preview">
+                <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
+                  {(docFmts[spec.kind] ?? "").trim()
+                    ? numberPreview(docFmts[spec.kind] ?? "")
+                    : `${spec.prefix}-0001, ${spec.prefix}-0002, …`}
+                </div>
+              </FormField>
             </div>
-          </FormField>
-        </div>
-
-        {/* Quotations count separately: a quote and the invoice it becomes are
-            different documents to a customer and to an auditor, so they must
-            not share a counter. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <FormField label="Quotation format">
-            <input
-              className="input font-mono"
-              placeholder="QT-DLS-{001}-26"
-              value={quoteFmt}
-              onChange={(e) => {
-                setQuoteFmt(e.target.value);
-                setSaved(false);
-              }}
-            />
-          </FormField>
-          <FormField label="Preview — your next quotations">
-            <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
-              {quoteFmt.trim() ? numberPreview(quoteFmt) : "QT-0001, QT-0002, …"}
-            </div>
-          </FormField>
+          ))}
         </div>
       </div>
 

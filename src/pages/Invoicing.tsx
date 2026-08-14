@@ -69,8 +69,11 @@ import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
-import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
-import { loadInvoiceFormat } from "../lib/numberFormat";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import { sendEmail, emailShell, esc, bytesToBase64 } from "../lib/email";
 import InvoiceExportSheet from "../components/InvoiceExportSheet";
 import { reactToPdfBytes } from "../lib/reactPdf";
@@ -304,21 +307,23 @@ export type DocMode = "sales" | "purchase";
 function pickInvoiceNumber(
   mode: DocMode,
   existing: string[],
-  format?: string
+  formats?: DocFormats
 ): string {
-  if (mode === "sales" && format && hasCounter(format))
-    return nextFromPattern({ pattern: format, existing });
-  return nextDocNumber({ prefix: mode === "purchase" ? "PINV" : "INV", existing });
+  return pickDocNumber(
+    mode === "purchase" ? "purchase_invoice" : "invoice",
+    existing,
+    formats
+  );
 }
 
 function blankForm(
   c: CompanyProfile,
   existing: string[] = [],
   mode: DocMode = "sales",
-  format?: string
+  formats?: DocFormats
 ): Form {
   return {
-    number: pickInvoiceNumber(mode, existing, format),
+    number: pickInvoiceNumber(mode, existing, formats),
     status: "draft",
     doc_title: mode === "purchase" ? "Purchase Invoice" : "Tax Invoice",
     template: c.default_template || "minimal",
@@ -388,7 +393,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       .then(setFxRates)
       .catch(() => setFxRates({}));
   }, []);
-  const [numFmt, setNumFmt] = useState("");
+  const [numFmt, setNumFmt] = useState<DocFormats>({});
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
@@ -426,7 +431,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       .getCompany()
       .then(setCompany)
       .catch(() => toast.error("Failed to load company profile"));
-    loadInvoiceFormat().then(setNumFmt).catch(() => {});
+    loadDocFormats().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
   };

@@ -57,8 +57,11 @@ import {
   localYmd,
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
-import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
-import { loadQuoteFormat } from "../lib/numberFormat";
+import {
+  pickDocNumber,
+  loadDocFormats,
+  type DocFormats,
+} from "../lib/numberFormat";
 import {
   sendEmail,
   emailShell,
@@ -160,18 +163,17 @@ const addDays = (n: number) =>
 /** The next quotation number: the user's saved format when they have set one,
  *  otherwise the built-in QT- scheme. Mirrors pickInvoiceNumber in Invoicing so
  *  neither document type makes the user retype a number. */
-function pickQuoteNumber(existing: string[], format?: string): string {
-  if (format && hasCounter(format)) return nextFromPattern({ pattern: format, existing });
-  return nextDocNumber({ prefix: "QT", existing });
+function pickQuoteNumber(existing: string[], formats?: DocFormats): string {
+  return pickDocNumber("quote", existing, formats);
 }
 
 function blankForm(
   c: CompanyProfile,
   existing: string[] = [],
-  format?: string
+  formats?: DocFormats
 ): Form {
   return {
-    number: pickQuoteNumber(existing, format),
+    number: pickQuoteNumber(existing, formats),
     status: "draft",
     doc_title: "Quotation",
     template: c.default_template || "minimal",
@@ -294,9 +296,9 @@ export default function Quoting() {
   const [search, setSearch] = useState("");
   // The saved quotation number format (Settings → Company Details). Loaded once
   // so a new quote numbers itself instead of asking the user to type one.
-  const [quoteFmt, setQuoteFmt] = useState("");
+  const [quoteFmt, setQuoteFmt] = useState<DocFormats>({});
   useEffect(() => {
-    loadQuoteFormat()
+    loadDocFormats()
       .then(setQuoteFmt)
       .catch(() => {});
   }, []);
