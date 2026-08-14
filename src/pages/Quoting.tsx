@@ -194,7 +194,11 @@ function blankForm(c: CompanyProfile, existing: string[] = []): Form {
   };
 }
 
-const asDocItem = (it: Item): DocItem => ({
+/* Exported for test: these two mappings are where the quotation bug lived, and
+ * a mapping that silently drops a field cannot be caught by rendering the page
+ * — the editor never displays the figures they feed. They are unit-tested in
+ * src/pages/__tests__/quoting-mappings.test.ts. */
+export const asDocItem = (it: Item): DocItem => ({
   description: it.product,
   product_id: it.product_id,
   unit_price: it.rate,
@@ -206,6 +210,35 @@ const asDocItem = (it: Item): DocItem => ({
   pageBreakBefore: it.pageBreakBefore,
   // These three are what docLineAmount() consults before falling back to
   // qty × unit_price. Dropping them here was the whole bug.
+  calcMode: it.calcMode,
+  amount: it.amount,
+  itemFormula: it.itemFormula,
+});
+
+/** One quotation item as the document renderer wants it. Shared by the live
+ *  preview, the PDF pages and the print view, which each used to build this
+ *  object separately — and so each dropped the calc fields independently. */
+export const asDocViewItem = (it: {
+  description?: string;
+  product?: string;
+  qty: number;
+  unit_price?: number;
+  rate?: number;
+  unit?: string;
+  custom?: Record<string, string> | null;
+  discount?: number;
+  tax?: number;
+  calcMode?: CalcMode;
+  amount?: number;
+  itemFormula?: { a: string; b?: string } | null;
+}): DocViewItem => ({
+  description: it.description ?? it.product ?? "",
+  qty: it.qty,
+  unit_price: it.unit_price ?? it.rate ?? 0,
+  unit: it.unit,
+  custom: it.custom,
+  discount: it.discount,
+  tax: it.tax,
   calcMode: it.calcMode,
   amount: it.amount,
   itemFormula: it.itemFormula,
@@ -854,22 +887,7 @@ export default function Quoting() {
 
     const docViewForm = {
       ...form,
-      items: form.items.map(
-        (it): DocViewItem => ({
-          description: it.product,
-          qty: it.qty,
-          unit_price: it.rate,
-          unit: it.unit,
-          custom: it.custom,
-          discount: it.discount,
-          tax: it.tax,
-          // Without these the printed document recomputes qty × rate and
-          // disagrees with the editor on every manual or formula line.
-          calcMode: it.calcMode,
-          amount: it.amount,
-          itemFormula: it.itemFormula,
-        })
-      ),
+      items: form.items.map(asDocViewItem),
       issue_date: form.quote_date,
       due_date: form.valid_until,
       customColumns: form.customColumns,
@@ -1817,18 +1835,7 @@ export default function Quoting() {
                         <DocView
                           form={docViewForm}
                           pageItems={pages[curPageIdx]?.map(
-                            (it): DocViewItem => ({
-                              description: it.description,
-                              qty: it.qty,
-                              unit_price: it.unit_price,
-                              unit: it.unit,
-                              custom: it.custom,
-                              discount: it.discount,
-                              tax: it.tax,
-                              calcMode: it.calcMode,
-                              amount: it.amount,
-                              itemFormula: it.itemFormula,
-                            })
+                            asDocViewItem
                           )}
                           itemStartIndex={pageStartIndex}
                           showTotals={isLastPreviewPage}
@@ -1919,18 +1926,7 @@ export default function Quoting() {
                                 <DocView
                                   form={docViewForm}
                                   pageItems={group.map(
-                                    (it): DocViewItem => ({
-                                      description: it.description,
-                                      qty: it.qty,
-                                      unit_price: it.unit_price,
-                                      unit: it.unit,
-                                      custom: it.custom,
-                                      discount: it.discount,
-                                      tax: it.tax,
-                                      calcMode: it.calcMode,
-                                      amount: it.amount,
-                                      itemFormula: it.itemFormula,
-                                    })
+                                    asDocViewItem
                                   )}
                                   itemStartIndex={startIdx}
                                   showTotals={isLast}
@@ -2135,18 +2131,7 @@ export default function Quoting() {
                         <DocView
                           form={docViewForm}
                           pageItems={viewPages[viewPageIdx]?.map(
-                            (it): DocViewItem => ({
-                              description: it.description,
-                              qty: it.qty,
-                              unit_price: it.unit_price,
-                              unit: it.unit,
-                              custom: it.custom,
-                              discount: it.discount,
-                              tax: it.tax,
-                              calcMode: it.calcMode,
-                              amount: it.amount,
-                              itemFormula: it.itemFormula,
-                            })
+                            asDocViewItem
                           )}
                           itemStartIndex={viewPageStart}
                           showTotals={isLastViewPage}
