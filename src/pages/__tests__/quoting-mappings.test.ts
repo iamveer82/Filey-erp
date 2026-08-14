@@ -76,3 +76,28 @@ describe("asDocViewItem (feeds the preview, the PDF pages and print)", () => {
     expect(v.itemFormula).toEqual({ a: "area", b: "unit_price" });
   });
 });
+
+/* The preview and PDF paginate the editor's items. That was done with
+ * `form.items as unknown as DocItem[]` — a cast that told the compiler the
+ * quotation shape (product/rate) was the document shape (description/
+ * unit_price). It is not, so every paginated line read unit_price undefined
+ * and printed an amount of ZERO while the editor's own table looked correct.
+ * The cast is gone; these prove the mapping actually converts. */
+describe("paginated pages get real document items, not a cast", () => {
+  it("converts rate → unit_price and product → description", () => {
+    const d = asDocItem(manualLine);
+    expect(d.unit_price).toBe(100);
+    expect(d.description).toBe("Site survey");
+    // What the cast produced instead:
+    const cast = manualLine as unknown as { unit_price?: number; description?: string };
+    expect(cast.unit_price).toBeUndefined();
+    expect(cast.description).toBeUndefined();
+  });
+
+  it("a page item still prices correctly once mapped", () => {
+    const auto = { ...manualLine, calcMode: undefined, amount: undefined };
+    const page = asDocViewItem(asDocItem(auto));
+    expect(page.unit_price).toBe(100);
+    expect(docLineAmount(asDocItem(auto))).toBe(300); // 3 × 100, not 0
+  });
+});

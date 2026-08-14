@@ -782,7 +782,7 @@ export default function Quoting() {
       });
     };
 
-    const pages = paginateItems(form.items as unknown as DocItem[]);
+    const pages = paginateItems(form.items.map(asDocItem));
     const previewPages = pages.length;
     const curPageIdx = Math.min(previewPage, previewPages) - 1;
     const pageStartIndex = pages
@@ -790,7 +790,7 @@ export default function Quoting() {
       .reduce((n, g) => n + g.length, 0);
     const isLastPreviewPage = curPageIdx === previewPages - 1;
 
-    const viewPages = paginateItems(form.items as unknown as DocItem[]);
+    const viewPages = paginateItems(form.items.map(asDocItem));
     const viewPageCount = viewPages.length;
     const viewPageIdx = Math.min(viewPage, viewPageCount) - 1;
     const viewPageStart = viewPages
@@ -1838,7 +1838,21 @@ export default function Quoting() {
                   <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
                     {/* ponytail: keep quote preview + PDF English regardless of app lang */}
                     <div ref={quoteRef} data-no-i18n dir="ltr">
-                      <div style={{ position: "relative", minHeight: device === "desktop" ? 1027 : 498 }}>
+                      {/* Pinned to the A4 sheet the way the invoice preview is.
+                          Without an explicit width the page had none of its own
+                          and collapsed to whatever the panel gave it, so the
+                          document read as cut off at both edges; the height was
+                          short of A4 too (1027 against 1123 at 96dpi). */}
+                      <div
+                        style={{
+                          width: device === "desktop" ? 794 : 420,
+                          minHeight: device === "desktop" ? 1123 : 594,
+                          position: "relative",
+                          padding: device === "desktop" ? 48 : 25,
+                          boxSizing: "border-box",
+                          background: "#fff",
+                        }}
+                      >
                         <StampSignatureLayer
                           stamp={
                             form.show_stamp
@@ -1899,7 +1913,7 @@ export default function Quoting() {
 
                   {/* Off-screen full-page export (all pages) */}
                   {(() => {
-                    const exportPages = paginateItems(form.items as unknown as DocItem[]);
+                    const exportPages = paginateItems(form.items.map(asDocItem));
                     return (
                       <div
                         ref={exportRef}
