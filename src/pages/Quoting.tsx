@@ -27,6 +27,8 @@ import {
   FileText,
   FileSignature,
   PackageSearch,
+  CheckCircle2,
+  Pencil,
 } from "lucide-react";
 import {
   billing,
@@ -55,7 +57,8 @@ import {
   localYmd,
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
-import { nextDocNumber } from "../lib/docNumber";
+import { nextDocNumber, nextFromPattern, hasCounter } from "../lib/docNumber";
+import { loadQuoteFormat } from "../lib/numberFormat";
 import {
   sendEmail,
   emailShell,
@@ -154,9 +157,21 @@ const today = () => todayYmd();
 const addDays = (n: number) =>
   localYmd(new Date(Date.now() + n * 86400000));
 
-function blankForm(c: CompanyProfile, existing: string[] = []): Form {
+/** The next quotation number: the user's saved format when they have set one,
+ *  otherwise the built-in QT- scheme. Mirrors pickInvoiceNumber in Invoicing so
+ *  neither document type makes the user retype a number. */
+function pickQuoteNumber(existing: string[], format?: string): string {
+  if (format && hasCounter(format)) return nextFromPattern({ pattern: format, existing });
+  return nextDocNumber({ prefix: "QT", existing });
+}
+
+function blankForm(
+  c: CompanyProfile,
+  existing: string[] = [],
+  format?: string
+): Form {
   return {
-    number: nextDocNumber({ prefix: "QT", existing }),
+    number: pickQuoteNumber(existing, format),
     status: "draft",
     doc_title: "Quotation",
     template: c.default_template || "minimal",
@@ -277,6 +292,14 @@ export default function Quoting() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [search, setSearch] = useState("");
+  // The saved quotation number format (Settings → Company Details). Loaded once
+  // so a new quote numbers itself instead of asking the user to type one.
+  const [quoteFmt, setQuoteFmt] = useState("");
+  useEffect(() => {
+    loadQuoteFormat()
+      .then(setQuoteFmt)
+      .catch(() => {});
+  }, []);
   const [statusFilter, setStatusFilter] = useState<
     "all" | "draft" | "sent" | "accepted"
   >("all");
@@ -317,14 +340,14 @@ export default function Quoting() {
   // Deep-link: ?new=1 opens a blank quotation once company loads.
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, docs.map((d) => d.number)));
+      setForm(blankForm(company, docs.map((d) => d.number), quoteFmt));
       setParams({}, { replace: true });
     }
   }, [params, company, form, setParams, docs]);
 
   const newQuote = async () => {
     if (!company) return;
-    const f = blankForm(company, docs.map((d) => d.number));
+    const f = blankForm(company, docs.map((d) => d.number), quoteFmt);
     // The section's preset wins over the profile-wide default template.
     f.template = await startingTemplate("quote", company.default_template, f.template);
     setForm(f);
@@ -389,7 +412,7 @@ export default function Quoting() {
   const duplicateQuote = async (id?: number) => {
     try {
       const newBase = {
-        number: nextDocNumber({ prefix: "QT", existing: docs.map((x) => x.number) }),
+        number: pickQuoteNumber(docs.map((x) => x.number), quoteFmt),
         status: "draft" as const,
         quote_date: today(),
         valid_until: addDays(30),
@@ -1018,18 +1041,44 @@ export default function Quoting() {
               >
                 <Copy size={15} /> Duplicate
               </button>
-              <select
-                className="select h-9 text-xs"
-                value={form.status}
-                onChange={(e) => commit(e.target.value)}
-                disabled={saving}
-                title="Mark Sent / Accepted / Cancelled"
+              <button
+                className="btn-ghost"
+                onClick={() => setCompanyOpen(true)}
+                title="Edit company details"
               >
-                <option value="draft">Mark as Draft</option>
-                <option value="sent">Mark as Sent</option>
-                <option value="accepted">Mark as Accepted</option>
-                <option value="cancelled">Mark as Cancelled</option>
-              </select>
+                <Building2 size={15} /> Company
+              </button>
+              {/* One-click status, the way the invoice editor does it. A quote
+                  moves draft → sent → accepted, so the primary button is
+                  whatever comes next rather than a dropdown of every state. */}
+              {form.status === "draft" ? (
+                <button
+                  className="btn-primary"
+                  onClick={() => commit("sent")}
+                  disabled={saving}
+                  title="Mark this quotation as sent to the customer"
+                >
+                  <CheckCircle2 size={15} /> Mark as sent
+                </button>
+              ) : form.status === "sent" ? (
+                <button
+                  className="btn-primary"
+                  onClick={() => commit("accepted")}
+                  disabled={saving}
+                  title="The customer accepted this quotation"
+                >
+                  <CheckCircle2 size={15} /> Mark as accepted
+                </button>
+              ) : (
+                <button
+                  className="btn-ghost"
+                  onClick={() => commit("draft")}
+                  disabled={saving}
+                  title="Move this quotation back to draft"
+                >
+                  <Pencil size={15} /> Move to draft
+                </button>
+              )}
               <button
                 className="btn-ghost"
                 onClick={emailQuote}
@@ -1607,6 +1656,57 @@ export default function Quoting() {
                       ))}
                     </div>
                   )}
+
+                  {/* Document-level settings, matching the invoice editor: VAT
+                      is a yes/no first and a rate second, because "do I charge
+                      VAT on this" is the question a user actually has. */}
+                  <div className="mt-4 max-w-xs">
+                    <p className="text-xs font-semibold text-brand-500 mb-1.5">Apply VAT</p>
+                    <div className="flex rounded-xl bg-brand-50 p-0.5">
+                      {(
+                        [
+                          ["Yes", true],
+                          ["No", false],
+                        ] as const
+                      ).map(([lbl, on]) => {
+                        const active = ((form.tax_rate || 0) > 0) === on;
+                        return (
+                          <button
+                            key={lbl}
+                            type="button"
+                            onClick={() =>
+                              setForm({
+                                ...form,
+                                tax_rate: on
+                                  ? (form.tax_rate || 0) > 0
+                                    ? form.tax_rate
+                                    : 5
+                                  : 0,
+                              })
+                            }
+                            className={`flex-1 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                              active
+                                ? "bg-background text-foreground shadow-sm"
+                                : "text-brand-500 hover:text-ink"
+                            }`}
+                          >
+                            {lbl}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(form.tax_rate || 0) > 0 && (
+                      <input
+                        type="number"
+                        className="input mt-2"
+                        placeholder="VAT rate %"
+                        value={form.tax_rate}
+                        onChange={(e) =>
+                          setForm({ ...form, tax_rate: numInput(e.target.value) })
+                        }
+                      />
+                    )}
+                  </div>
 
                   {/* Same switch invoices carry, so a quote and the invoice it
                       becomes agree on the figure the customer signs off. */}

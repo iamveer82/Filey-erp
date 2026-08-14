@@ -15,7 +15,12 @@ import {
 } from "lucide-react";
 import { DocPresetsPanel } from "../../components/DocPresetBar";
 import { numInput } from "../../lib/format";
-import { loadInvoiceFormat, saveInvoiceFormat } from "../../lib/numberFormat";
+import {
+  loadInvoiceFormat,
+  saveInvoiceFormat,
+  loadQuoteFormat,
+  saveQuoteFormat,
+} from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
 import { LEGAL_ID_TYPES, EMIRATES, normalizeEmirate } from "../../lib/einvoice";
 import {
@@ -68,6 +73,7 @@ export default function CompanyDetails() {
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [stampSig, setStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [numFmt, setNumFmt] = useState("");
+  const [quoteFmt, setQuoteFmt] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -100,6 +106,9 @@ export default function CompanyDetails() {
     loadInvoiceFormat()
       .then(setNumFmt)
       .catch((e) => console.warn("Failed to load invoice format", e));
+    loadQuoteFormat()
+      .then(setQuoteFmt)
+      .catch((e) => console.warn("Failed to load quotation format", e));
   }, []);
 
   const setBankField = (k: keyof BankInfo, v: string) => {
@@ -152,6 +161,7 @@ export default function CompanyDetails() {
       await saveLetterhead(lh);
       await saveCompanyStampSig(stampSig);
       await saveInvoiceFormat(numFmt);
+      await saveQuoteFormat(quoteFmt);
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
@@ -550,6 +560,28 @@ export default function CompanyDetails() {
           <FormField label="Preview — your next invoices">
             <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
               {numberPreview(numFmt)}
+            </div>
+          </FormField>
+        </div>
+
+        {/* Quotations count separately: a quote and the invoice it becomes are
+            different documents to a customer and to an auditor, so they must
+            not share a counter. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <FormField label="Quotation format">
+            <input
+              className="input font-mono"
+              placeholder="QT-DLS-{001}-26"
+              value={quoteFmt}
+              onChange={(e) => {
+                setQuoteFmt(e.target.value);
+                setSaved(false);
+              }}
+            />
+          </FormField>
+          <FormField label="Preview — your next quotations">
+            <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
+              {quoteFmt.trim() ? numberPreview(quoteFmt) : "QT-0001, QT-0002, …"}
             </div>
           </FormField>
         </div>
