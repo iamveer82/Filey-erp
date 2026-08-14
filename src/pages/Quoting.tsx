@@ -87,6 +87,7 @@ import {
   Field,
   ShareToggle,
   SearchInput,
+  FilterChip,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import {
@@ -270,6 +271,9 @@ export default function Quoting() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "draft" | "sent" | "accepted"
+  >("all");
   const [saving, setSaving] = useState(false);
   const [converting, setConverting] = useState(false);
   const [quickView, setQuickView] = useState<{
@@ -509,13 +513,17 @@ export default function Quoting() {
   const quoteRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
 
-  const filteredDocs = search
-    ? docs.filter(
-        (d) =>
-          d.number.toLowerCase().includes(search.toLowerCase()) ||
-          d.customer_name.toLowerCase().includes(search.toLowerCase())
-      )
-    : docs;
+  // Search and status filter, matching how the invoice list narrows: a quote
+  // list is mostly "what have I sent that nobody has answered", which searching
+  // by number cannot answer.
+  const filteredDocs = docs.filter((d) => {
+    if (statusFilter !== "all" && (d.status || "draft") !== statusFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      d.number.toLowerCase().includes(q) || d.customer_name.toLowerCase().includes(q)
+    );
+  });
 
   const statCcy = company?.currency || "AED";
   // One KPI, one currency: each quote is converted at its own frozen rate
@@ -2211,13 +2219,44 @@ export default function Quoting() {
         />
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <SearchInput
           value={search}
           onChange={setSearch}
           placeholder="Search quote or customer…"
           className="max-w-xs"
         />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FilterChip
+            active={statusFilter === "all"}
+            onClick={() => setStatusFilter("all")}
+            count={docs.length}
+          >
+            All
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "draft"}
+            onClick={() => setStatusFilter("draft")}
+            count={docs.filter((d) => (d.status || "draft") === "draft").length}
+          >
+            Draft
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "sent"}
+            onClick={() => setStatusFilter("sent")}
+            count={sentCount}
+          >
+            Sent
+          </FilterChip>
+          <FilterChip
+            active={statusFilter === "accepted"}
+            onClick={() => setStatusFilter("accepted")}
+            tone="success"
+            count={acceptedCount}
+          >
+            Accepted
+          </FilterChip>
+        </div>
       </div>
 
       <DataTable<QuotationSummary>
