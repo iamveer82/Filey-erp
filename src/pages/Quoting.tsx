@@ -56,7 +56,13 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import { nextDocNumber } from "../lib/docNumber";
-import { sendEmail, emailShell, esc, sendShareEmail } from "../lib/email";
+import {
+  sendEmail,
+  emailShell,
+  esc,
+  sendShareEmail,
+  bytesToBase64,
+} from "../lib/email";
 import FitPreview from "../components/FitPreview";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
@@ -807,10 +813,29 @@ export default function Quoting() {
       } catch {
         /* link optional */
       }
+      // Attach the rendered quotation, as the invoice email does — a customer
+      // asked to approve a price expects the document, not a summary and a
+      // link. Best-effort: a PDF failure must not stop the email going out.
+      let attachments: { filename: string; content: string }[] | undefined;
+      try {
+        const el = exportRef.current || quoteRef.current;
+        if (el) {
+          const pdf = await elementToPdfBytes(el, form.number || "quotation");
+          attachments = [
+            {
+              filename: `${form.number || "quotation"}.pdf`,
+              content: bytesToBase64(pdf.bytes),
+            },
+          ];
+        }
+      } catch {
+        /* attachment optional */
+      }
       try {
         await sendEmail({
           to: form.customer_email,
           subject: `Quotation ${form.number} from ${form.seller_name}`,
+          attachments,
           html: emailShell(
             `Quotation ${form.number}`,
             `<p>Dear ${esc(form.customer_name || "customer")},</p>
