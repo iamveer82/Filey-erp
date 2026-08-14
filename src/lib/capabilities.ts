@@ -84,7 +84,13 @@ export const CAPABILITIES: Capability[] = [
     id: "web",
     name: "Web research",
     description: "Read and search public web pages, enrich leads from their own site",
-    tools: ["read_web_page", "search_web", "enrich_company_website", "score_lead"],
+    tools: [
+      "read_web_page",
+      "search_web",
+      "enrich_company_website",
+      "find_prospects",
+      "score_lead",
+    ],
   },
   {
     id: "social",

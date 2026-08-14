@@ -5,7 +5,7 @@
 // no email-pattern guessing, and no SMTP probing here — see docs/LEAD-DATA.md
 // for why that line is drawn where it is.
 
-import { readUrl, type ReachPage } from "./reach";
+import { readUrl, searchWeb, type ReachPage } from "./reach";
 
 export interface CompanyDetails {
   /** The page the details came from — always shown to the user, so a wrong
@@ -201,4 +201,86 @@ export function scoreLead(s: LeadSignals): LeadScore {
   }
 
   return { score: Math.max(0, Math.min(100, score)), reasons };
+}
+
+/* ---------------- prospecting: find companies, then read their own sites ----
+ *
+ * The missing half of lead generation. Enrichment could already read a company
+ * site once you knew the company; this finds candidates from a description of
+ * who you want to sell to ("lubricant distributors in Sharjah") and then reads
+ * each one's own site for the contact details it publishes.
+ *
+ * Search first, then the company's own domain — deliberately not social
+ * profiles, guessed email patterns or SMTP probes. See docs/LEAD-DATA.md: that
+ * line is about what Filey goes out and collects on the user's behalf, and one
+ * of those techniques would put gofiley.com's sending reputation — the domain
+ * that carries their invoices — at risk. */
+
+export interface Prospect extends CompanyDetails {
+  /** Where the search found them, kept so a wrong match is traceable. */
+  site: string;
+  title?: string;
+  /** Why the search surfaced this one. */
+  snippet?: string;
+}
+
+/** Directories and marketplaces: useful to a human reading results, useless as
+ *  a "company" to enrich, since the contact details belong to the directory. */
+const DIRECTORY_HOST =
+  /(^|\.)(facebook|instagram|linkedin|twitter|x|tiktok|youtube|pinterest|yellowpages|yelp|indiamart|alibaba|tradeindia|justdial|glassdoor|indeed|crunchbase|wikipedia|google|bing)\./i;
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Find companies matching a description and pull the contact details each one
+ * publishes on its own site.
+ *
+ * Sequential on purpose: this reads real websites through the shared reader,
+ * and firing a dozen parallel fetches at it is how a rate limit turns into a
+ * page of empty results.
+ */
+export async function findProspects(
+  query: string,
+  opts: { limit?: number; signal?: AbortSignal } = {}
+): Promise<{ prospects: Prospect[]; skipped: string[] }> {
+  const limit = Math.max(1, Math.min(opts.limit ?? 5, 10));
+  const { hits } = await searchWeb(query, { limit: limit * 2, signal: opts.signal });
+
+  const prospects: Prospect[] = [];
+  const skipped: string[] = [];
+  const seen = new Set<string>();
+
+  for (const hit of hits) {
+    if (prospects.length >= limit) break;
+    const host = hostOf(hit.url);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    if (DIRECTORY_HOST.test(host)) {
+      skipped.push(`${host} — directory or social platform, not a company site`);
+      continue;
+    }
+    try {
+      const details = await enrichFromWebsite(hit.url, { signal: opts.signal });
+      // A result with no way to contact anyone is noise in a lead list.
+      if (!details.emails.length && !details.phones.length) {
+        skipped.push(`${host} — no contact details published`);
+        continue;
+      }
+      prospects.push({
+        ...details,
+        site: hit.url,
+        title: hit.title,
+        snippet: hit.snippet,
+      });
+    } catch (e) {
+      skipped.push(`${host} — ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { prospects, skipped };
 }

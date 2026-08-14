@@ -23,7 +23,7 @@ import { findSkill, loadSkills } from "./agentSkills";
 import { isToolAllowed } from "./capabilities";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
 import { readUrl, searchWeb, asUntrustedContext } from "./reach";
-import { enrichFromWebsite, scoreLead } from "./scout";
+import { enrichFromWebsite, findProspects, scoreLead } from "./scout";
 import {
   listAccounts as listSocialAccounts,
   listPosts as listSocialPosts,
@@ -2521,6 +2521,53 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "find_prospects",
+    description:
+      "Lead generation: find companies matching a description of who the user wants to sell to (e.g. 'lubricant distributors in Sharjah', 'car workshops in Dubai') and return the contact details each publishes on its own website — phones, emails, address, TRN — with the source URL for each. Use when the user asks for leads, prospects or new customers to approach. This only READS public company websites; it does not create leads. To save one, show the user what was found and then call create_lead.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Who to look for. Include the trade and the place — a vague query returns directories, not companies.",
+        },
+        limit: { type: "number", description: "How many companies to return (max 10, default 5)." },
+      },
+      required: ["query"],
+    },
+    run: async (a) => {
+      const query = str(a.query).trim();
+      if (!query) return { error: "Say what kind of company to look for, and where." };
+      try {
+        const { prospects, skipped } = await findProspects(query, {
+          limit: a.limit == null ? 5 : numOf(a.limit),
+        });
+        if (!prospects.length)
+          return {
+            prospects: [],
+            skipped,
+            note: "Nothing with published contact details. Try naming the trade and the emirate/city.",
+          };
+        return {
+          prospects: prospects.map((p) => ({
+            name: p.name ?? p.title ?? null,
+            site: p.site,
+            phones: p.phones,
+            emails: p.emails,
+            address: p.address ?? null,
+            trn: p.trn ?? null,
+            source: p.source,
+          })),
+          skipped,
+          note: "Read from each company's own website. Show the source URL with each one before saving it as a lead.",
+        };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  },
+  {
     name: "enrich_company_website",
     description:
       "Read a company's own website and return the contact details, address and TRN it publishes there. Returns the source URL — always show it to the user before saving anything.",
@@ -2577,16 +2624,9 @@ export const TOOLS: ToolDef[] = [
       "unofficial connection, which is against WhatsApp's terms.",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const { hasDesktop, startBridge, getBridgeConfig } = await import("./waBridge");
+      const { hasDesktop, startBridge } = await import("./waBridge");
       if (!hasDesktop)
         return { error: "The WhatsApp bridge runs in the desktop app only." };
-      const cfg = getBridgeConfig();
-      if (!cfg.webhookUrl || !cfg.secret)
-        return {
-          error:
-            "Not configured yet — the webhook URL and bridge secret go in " +
-            "Integrations → WhatsApp (QR).",
-        };
       try {
         const st = await startBridge();
         return {
