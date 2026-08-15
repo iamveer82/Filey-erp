@@ -778,7 +778,7 @@ function ZernioProvider() {
 /* ── WhatsApp bridge: QR-paired session, no per-message cost ─────────────── */
 function WhatsAppBridgeProvider() {
   const [cfg, setCfg] = useState<BridgeConfig>(() =>
-    waHasDesktop ? getBridgeConfig() : { autoStart: false }
+    waHasDesktop ? getBridgeConfig() : { autoStart: false, ownerNumber: "" }
   );
   const [st, setSt] = useState<BridgeState>({ state: "stopped" });
   const [msg, setMsg] = useState("");
@@ -853,6 +853,22 @@ function WhatsAppBridgeProvider() {
           </p>
         </div>
       )}
+
+      <label className="mt-3 block text-[12.5px] text-muted-foreground">
+        My WhatsApp number
+        <input
+          className="input mt-1"
+          placeholder="971501234567"
+          inputMode="tel"
+          defaultValue={cfg.ownerNumber}
+          onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
+        />
+        <span className="mt-1 block">
+          The agent answers you and nobody else. Leave this empty if you paired
+          your own phone — messaging yourself already works. Fill it in when the
+          paired account is a second number, so Filey knows which number is you.
+        </span>
+      </label>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button className="btn-primary" onClick={() => run(startBridge)}>

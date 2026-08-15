@@ -24,19 +24,28 @@ export interface BridgeState {
 }
 
 const AUTO_KEY = "filey.wa_bridge.auto";
+const OWNER_KEY = "filey.wa_bridge.owner";
 
 export interface BridgeConfig {
   /** Start with the app, so WhatsApp is simply live after launch. */
   autoStart: boolean;
+  /** The number the agent takes orders from, when it isn't the paired account
+   *  itself — pair a spare SIM as the bot and this is your own phone. Empty
+   *  means self-chat only. */
+  ownerNumber: string;
 }
 
 export function getBridgeConfig(): BridgeConfig {
-  // Default ON: WhatsApp should simply be live after launch. Opt out with "0".
-  return { autoStart: localStorage.getItem(AUTO_KEY) !== "0" };
+  return {
+    // Default ON: WhatsApp should simply be live after launch. Opt out with "0".
+    autoStart: localStorage.getItem(AUTO_KEY) !== "0",
+    ownerNumber: localStorage.getItem(OWNER_KEY) ?? "",
+  };
 }
 
 export function setBridgeConfig(c: Partial<BridgeConfig>): BridgeConfig {
   if (c.autoStart !== undefined) localStorage.setItem(AUTO_KEY, c.autoStart ? "1" : "0");
+  if (c.ownerNumber !== undefined) localStorage.setItem(OWNER_KEY, c.ownerNumber.trim());
   return getBridgeConfig();
 }
 

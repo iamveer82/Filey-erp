@@ -9,7 +9,7 @@
 import { aiAgent, aiReady, buildSystemPrompt, getPersona, type AiMessage } from "./ai";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
-import { bridgeState, hasDesktop, onWaMessage, replyWa } from "./waBridge";
+import { bridgeState, getBridgeConfig, hasDesktop, onWaMessage, replyWa } from "./waBridge";
 import { billing } from "./api";
 
 const SYSTEM =
@@ -35,23 +35,27 @@ const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sur
 const num = (s: string | null | undefined) =>
   (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "");
 
-/** Is this sender the owner? Exact match against the paired number or the
- *  company WhatsApp number. Exact, not substring: a shorter number that sits
- *  inside the owner's would otherwise pass as the owner. */
+/** Is this sender the owner? Exact match against the paired account itself
+ *  (self-chat), the company WhatsApp number, or the owner number set in
+ *  Integrations — that last one is how a spare SIM can be the bot while the
+ *  owner talks to it from their own phone. Exact, not substring: a shorter
+ *  number that sits inside the owner's would otherwise pass as the owner. */
 export function isOwnerNumber(
   me: string | null | undefined,
   companyWa: string | null | undefined,
-  from: string
+  from: string,
+  ownerNumber?: string | null
 ): boolean {
   const f = num(from);
   if (!f) return false;
-  return f === num(me) || (!!num(companyWa) && f === num(companyWa));
+  return [me, companyWa, ownerNumber].some((c) => !!num(c) && num(c) === f);
 }
 
 async function isOwnerSender(from: string): Promise<boolean> {
   try {
     const me = (await bridgeState()).me;
-    return isOwnerNumber(me, (await billing.getCompany())?.whatsapp, from);
+    const { ownerNumber } = getBridgeConfig();
+    return isOwnerNumber(me, (await billing.getCompany())?.whatsapp, from, ownerNumber);
   } catch {
     // offline / no profile — deny (the agent stays owner-only)
     return false;

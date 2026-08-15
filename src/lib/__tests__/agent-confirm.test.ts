@@ -44,6 +44,13 @@ describe("isOwnerNumber", () => {
     expect(isOwnerNumber(ME, null, "97150123456")).toBe(false);
   });
 
+  it("matches the owner number set in Integrations (spare SIM as the bot)", () => {
+    const bot = "971509999999:3@s.whatsapp.net";
+    expect(isOwnerNumber(bot, null, "971501234567", "+971 50 123 4567")).toBe(true);
+    expect(isOwnerNumber(bot, null, "971505555555", "+971 50 123 4567")).toBe(false);
+    expect(isOwnerNumber(bot, null, "971501234567", "")).toBe(false);
+  });
+
   it("rejects strangers, and empty input", () => {
     expect(isOwnerNumber(ME, "971507654321", "971509999999")).toBe(false);
     expect(isOwnerNumber(ME, null, "")).toBe(false);
