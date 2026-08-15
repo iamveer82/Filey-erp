@@ -28,6 +28,16 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Plain-Node scripts (the WhatsApp bridge sidecar). They never see the DOM,
+    // and without node globals every console/process/setTimeout is a no-undef.
+    files: ["tools/**/*.{js,mjs}"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: globals.node,
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       ecmaVersion: 2022,

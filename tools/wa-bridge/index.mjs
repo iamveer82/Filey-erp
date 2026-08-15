@@ -53,7 +53,7 @@ function textOf(m) {
 /** Replies arrive on stdin as `FILEY {"type":"reply","id":...,"text":...}`.
  *  Each outstanding message awaits its reply by id; anything else is ignored. */
 const pending = new Map(); // id -> resolve(text)
-const REPLAY_TIMEOUT_MS = 120_000;
+const REPLY_TIMEOUT_MS = 120_000;
 
 /** The live socket (set in start()); the stdin `send` handler uses it for
  *  proactive owner notifications. */
@@ -112,7 +112,7 @@ function askAgent(from, text, fromName) {
     const timer = setTimeout(() => {
       pending.delete(id);
       resolve("The app didn't answer in time — make sure Filey is open and the WhatsApp bridge is running.");
-    }, REPLAY_TIMEOUT_MS);
+    }, REPLY_TIMEOUT_MS);
     pending.set(id, { resolve, timer });
     emit({ type: "message", id, from, text, fromName });
   });
