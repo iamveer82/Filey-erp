@@ -14,12 +14,15 @@ const STORE_KEY = "filey_reach_config";
 export interface ReachConfig {
   /** Optional Jina key — raises rate limits; reading works without one. */
   apiKey: string;
-  /** Master switch for the web tools. Off by default: reading the open web is
-   *  a capability the owner opts into, not something an ERP does unasked. */
+  /** Master switch for the web tools. On by default: an agent that cannot look
+   *  anything up is a worse agent, and this only ever reads the public web —
+   *  the SSRF guard below blocks private hosts, and everything read comes back
+   *  wrapped as untrusted text. The switch stays for anyone who wants the app
+   *  fully offline. */
   enabled: boolean;
 }
 
-const DEFAULTS: ReachConfig = { apiKey: "", enabled: false };
+const DEFAULTS: ReachConfig = { apiKey: "", enabled: true };
 
 export function getReachConfig(): ReachConfig {
   try {

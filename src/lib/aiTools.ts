@@ -2531,12 +2531,16 @@ export const TOOLS: ToolDef[] = [
     ownerOnly: true,
     sensitive: true,
     description:
-      "Run a shell command on the owner's machine — git clone a repo, npm install, run a script or an open-source tool. OWNER-ONLY and always confirmed first. Output is clipped; bounded by a timeout.",
+      "Run a shell command on the owner's machine — git clone a repo, npm/pip install, run a script or an open-source tool. Commands run in the Filey workspace folder unless you pass cwd, so clone first and then pass cwd=<the repo folder> for the commands that follow. The result tells you which directory it ran in. OWNER-ONLY and always confirmed first. Output is clipped; bounded by a timeout.",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "Full shell command to run" },
-        timeout: { type: "number", description: "Optional timeout in ms (default 60000, max 300000)" },
+        cwd: {
+          type: "string",
+          description: "Directory to run in. Defaults to the Filey workspace folder.",
+        },
+        timeout: { type: "number", description: "Optional timeout in ms (default 60000, max 900000)" },
       },
       required: ["command"],
     },
@@ -2547,9 +2551,15 @@ export const TOOLS: ToolDef[] = [
       const r = (await invoke("shell_exec", {
         cmd: str(a.command),
         timeout: a.timeout ? Number(a.timeout) : null,
-      })) as { stdout: string; stderr: string; exit_code: number };
+        cwd: a.cwd ? str(a.cwd) : null,
+      })) as { stdout: string; stderr: string; exit_code: number; cwd: string };
       const clip = (s: string) => (s.length > 8000 ? `${s.slice(0, 8000)}\n…[truncated]` : s);
-      return { exit_code: r.exit_code, stdout: clip(r.stdout || ""), stderr: clip(r.stderr || "") };
+      return {
+        exit_code: r.exit_code,
+        stdout: clip(r.stdout || ""),
+        stderr: clip(r.stderr || ""),
+        cwd: r.cwd,
+      };
     },
   },
   {

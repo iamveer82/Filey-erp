@@ -30,18 +30,27 @@ export function saveSkills(skills: Skill[]): void {
   localStorage.setItem(KEY, JSON.stringify(skills));
 }
 
+/** Add a skill, or rewrite the one that already owns this name. Names are the
+ *  handle the agent looks skills up by, so two of them is a bug — and the agent
+ *  re-learning something it already knows should sharpen the entry, not stack a
+ *  second copy behind it. */
 export function addSkill(
   s: Omit<Skill, "id" | "createdAt" | "enabled"> & { enabled?: boolean }
 ): Skill {
+  const existing = loadSkills();
+  const key = s.name.trim().toLowerCase();
+  const prior = existing.find((x) => x.name.trim().toLowerCase() === key);
   const skill: Skill = {
-    id: `skill_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
-    createdAt: Date.now(),
-    enabled: s.enabled ?? true,
+    id: prior?.id ?? `skill_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+    createdAt: prior?.createdAt ?? Date.now(),
+    enabled: s.enabled ?? prior?.enabled ?? true,
     name: s.name,
     description: s.description,
     instructions: s.instructions,
   };
-  saveSkills([...loadSkills(), skill]);
+  saveSkills(
+    prior ? existing.map((x) => (x.id === prior.id ? skill : x)) : [...existing, skill]
+  );
   return skill;
 }
 

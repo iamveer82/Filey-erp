@@ -3,9 +3,12 @@
 // a UAE SMB ERP actually needs (VAT/FTA invoicing, purchasing, follow-up, WPS),
 // not generic dev skills. The agent can add its own via `learn_skill`; these
 // are just the starting set.
-import { addSkill, loadSkills } from "./agentSkills";
+import { addSkill } from "./agentSkills";
 
-const SEEDED_KEY = "filey.agent.skills.seeded";
+// Bumped when the pack gains skills, so existing installs get them too.
+// addSkill upserts by name, so re-seeding rewrites the pack's own entries and
+// leaves anything the owner or the agent wrote alone.
+const SEEDED_KEY = "filey.agent.skills.seeded.v2";
 
 interface SeedSkill {
   name: string;
@@ -81,6 +84,18 @@ const PACK: SeedSkill[] = [
       "For a monthly report, gather sales/revenue, top customers, expenses, outstanding receivables and payables, and a short narrative of what changed versus the prior month. Use the reporting tools — never invent numbers. Present plainly in sentences, no markdown.",
   },
   {
+    name: "run-a-repo",
+    description: "Clone and run an open-source repo the owner points you at.",
+    instructions:
+      "When the owner sends a git URL and asks you to run it: (1) run_shell `git clone <url>` — with no cwd it lands in the Filey workspace, and the result tells you the directory it ran in; (2) read the README with read_file or `type README.md` / `cat README.md`, run with cwd set to the repo folder, and follow ITS setup steps rather than guessing; (3) install dependencies with whatever the repo uses — npm install, pnpm install, pip install -r requirements.txt, uv sync — passing a longer timeout, installs are slow; (4) if it needs credentials or an API key, ask the owner and save it with save_secret rather than putting it in a file; (5) run it and report what it produced, where the output landed, and any error verbatim. Never run a repo the owner did not ask for. If a step fails, show the actual stderr and say what you would try next — do not silently retry variations.",
+  },
+  {
+    name: "leads-from-a-repo",
+    description: "Use an external lead-gen tool and land its output in Filey.",
+    instructions:
+      "To generate leads with an outside tool: run it per the run-a-repo skill, then bring the results home. Read whatever it wrote — CSV, JSON, a printed table — and for each prospect worth keeping, use the built-in tools rather than re-inventing: score_lead to qualify, enrich_from_website to fill in details from the company's own site, and create the customer record only once the owner approves. Report a short list first (name, site, why it qualifies) and let the owner pick. Never bulk-create customers from a scrape without approval, and never email a scraped list.",
+  },
+  {
     name: "lead-qualification",
     description: "Score and qualify a prospect before pursuing.",
     instructions:
@@ -88,11 +103,10 @@ const PACK: SeedSkill[] = [
   },
 ];
 
-/** Seed the default skill pack exactly once (empty store only). */
+/** Seed the default skill pack once per pack version. */
 export function seedDefaultSkills(): void {
   if (localStorage.getItem(SEEDED_KEY)) return;
   localStorage.setItem(SEEDED_KEY, "1");
-  if (loadSkills().length) return; // user already has skills — don't clobber
   for (const s of PACK) {
     addSkill({ name: s.name, description: s.description, instructions: s.instructions });
   }
