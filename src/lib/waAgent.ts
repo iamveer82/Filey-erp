@@ -30,23 +30,32 @@ const pendingApproval = new Map<string, boolean>();
 
 const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sure|agreed)$/i;
 
-const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+/** Digits of the number part of a JID: "971501234567:12@s.whatsapp.net" and
+ *  "971501234567" both come out as "971501234567". */
+const num = (s: string | null | undefined) =>
+  (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "");
 
-/** Is this sender the owner? True for self-chat on the paired number, or for
- *  the company WhatsApp number from the profile. Customers get false, so they
- *  can never reach owner-only tools. */
-async function isOwnerSender(from: string): Promise<boolean> {
-  const f = digits(from);
+/** Is this sender the owner? Exact match against the paired number or the
+ *  company WhatsApp number. Exact, not substring: a shorter number that sits
+ *  inside the owner's would otherwise pass as the owner. */
+export function isOwnerNumber(
+  me: string | null | undefined,
+  companyWa: string | null | undefined,
+  from: string
+): boolean {
+  const f = num(from);
   if (!f) return false;
+  return f === num(me) || (!!num(companyWa) && f === num(companyWa));
+}
+
+async function isOwnerSender(from: string): Promise<boolean> {
   try {
     const me = (await bridgeState()).me;
-    if (me && me.includes(f)) return true; // self-chat on the paired number
-    const wa = digits((await billing.getCompany())?.whatsapp);
-    if (wa && wa === f) return true;
+    return isOwnerNumber(me, (await billing.getCompany())?.whatsapp, from);
   } catch {
-    // offline — fall through to false (deny owner-only tools)
+    // offline / no profile — deny (the agent stays owner-only)
+    return false;
   }
-  return false;
 }
 
 /** Mount the WhatsApp handler once at boot. Safe to call repeatedly. */
@@ -55,6 +64,21 @@ export function startWaAgent(): void {
   started = true;
 
   onWaMessage(async (m) => {
+    // The agent answers the OWNER only. Anyone else who happens to have the
+    // business number gets silence: this agent can read the whole book —
+    // customers, prices, revenue — and its approval gate is a "yes" in the
+    // same chat, so a stranger could both read the data and approve their own
+    // invoice edits. Silence rather than a refusal: a customer messaging the
+    // business must not get an auto-reply at all.
+    // ponytail: hard owner gate. A customer-facing mode needs its own
+    // read-only, no-confirm tool set before it can be turned on.
+    // The empty reply matters: it releases the sidecar's pending promise, which
+    // would otherwise time out and send the customer a "didn't answer" line.
+    if (!(await isOwnerSender(m.from))) {
+      await replyWa(m.id, "");
+      return;
+    }
+
     if (!aiReady()) {
       await replyWa(m.id, "Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first.");
       return;
@@ -68,7 +92,6 @@ export function startWaAgent(): void {
       const key = m.from || "unknown";
       // A "yes" to a pending proposal is the second pass: sensitive tools allowed.
       const allowSensitive = pendingApproval.has(key) && AFFIRMATIVE.test(m.text.trim());
-      const isOwner = await isOwnerSender(m.from);
 
       let approvalHit = false;
       const confirm = (name: string, args: Record<string, unknown>) => {
@@ -95,7 +118,7 @@ export function startWaAgent(): void {
       const reply = await aiAgent([system, ...prev, userMsg], {
         maxTokens: 1200,
         confirm,
-        isOwner,
+        isOwner: true, // gated above — only the owner reaches this point
       });
       const text = reply?.trim() ? reply : "…";
       const next: AiMessage[] = [...prev, userMsg, { role: "assistant", text }];

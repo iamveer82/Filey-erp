@@ -72,14 +72,11 @@ jobs:
       # start with the app instead of from a terminal. Compiled to a standalone
       # binary here (Baileys is Node-only), named with the target triple, which
       # is what externalBin resolves at bundle time.
-      # Not yet wired into `externalBin`: compiling Baileys to a standalone
-      # binary is unproven, and a failure there must never cost every user the
-      # rest of a release. This step proves it out first — flip on externalBin
-      # once it is green on both runners.
+      # Required, not optional: `externalBin` in tauri.conf.json now names this
+      # binary, so tauri bundling fails without it. Letting the step continue on
+      # error only buys a confusing failure two steps later.
       - uses: oven-sh/setup-bun@v2
-        continue-on-error: true
-      - name: Build WhatsApp bridge sidecar (proving run)
-        continue-on-error: true
+      - name: Build WhatsApp bridge sidecar
         shell: bash
         run: |
           cd tools/wa-bridge

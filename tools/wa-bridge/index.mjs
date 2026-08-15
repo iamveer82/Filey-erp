@@ -59,6 +59,20 @@ const REPLAY_TIMEOUT_MS = 120_000;
  *  proactive owner notifications. */
 let activeSock = null;
 
+/** Message ids this bridge sent itself. In self-chat every outgoing message
+ *  comes straight back through messages.upsert as fromMe on our own JID, so
+ *  without this the agent answers its own replies forever.
+ *  ponytail: bounded Set, oldest evicted — ids only need to survive the round
+ *  trip (milliseconds). */
+const sentIds = new Set();
+function remember(id) {
+  if (!id) return;
+  sentIds.add(id);
+  if (sentIds.size > 200) sentIds.delete(sentIds.values().next().value);
+}
+
+const digitsOf = (s) => (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "");
+
 function startStdinLoop() {
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   rl.on("line", (line) => {
@@ -82,9 +96,10 @@ function startStdinLoop() {
       // Proactive message to a specific JID (owner notifications). The desktop
       // app drives these after pairing; before that activeSock is null.
       if (v.to && v.text && activeSock) {
-        activeSock.sendMessage(v.to, { text: v.text }).catch((e) =>
-          console.error("send failed:", e?.message)
-        );
+        activeSock
+          .sendMessage(v.to, { text: v.text })
+          .then((s) => remember(s?.key?.id))
+          .catch((e) => console.error("send failed:", e?.message));
       }
     }
   });
@@ -145,21 +160,28 @@ async function start() {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
+    const meDigits = digitsOf(sock.user?.id);
     for (const m of messages) {
-      // fromMe covers the "chat with myself" case: talking to your own agent in
-      // your own Saved Messages thread should still work.
       if (m.key.remoteJid?.endsWith("@g.us")) continue; // ignore group chats
+      if (sentIds.has(m.key.id)) continue; // our own reply echoing back
+
+      const jid = m.key.remoteJid;
+      // fromMe is only for the agent in self-chat (your own Saved Messages
+      // thread). Any other fromMe message is the owner typing to a real
+      // contact — answering there would butt into their conversation.
+      const selfChat = !!meDigits && digitsOf(jid) === meDigits;
+      if (m.key.fromMe && !selfChat) continue;
+
       const text = textOf(m);
       if (!text) continue;
 
-      const jid = m.key.remoteJid;
       const phone = (jid ?? "").split("@")[0];
       const name = m.pushName ?? phone;
       console.log(`← ${name}: ${text}`);
 
       const reply = await askAgent(phone, text, name);
       if (!reply) continue;
-      await sock.sendMessage(jid, { text: reply });
+      remember((await sock.sendMessage(jid, { text: reply }))?.key?.id);
       console.log(`→ ${reply.slice(0, 120)}${reply.length > 120 ? "…" : ""}`);
     }
   });

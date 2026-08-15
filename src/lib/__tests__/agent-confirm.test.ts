@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool, setToolConfirm } from "../aiTools";
+import { isOwnerNumber } from "../waAgent";
 
 /* The WhatsApp path routes sensitive-tool approval over chat instead of the
  * in-app modal, via a per-run `confirm` override on runTool. These pin that the
@@ -21,6 +22,32 @@ describe("runTool confirm override", () => {
     // Not "Cancelled" — the gate let it through; the tool then reports its own
     // outcome (here "no invoice matching", which is fine).
     expect(r).not.toEqual({ error: "Cancelled — the user did not approve this action." });
+  });
+});
+
+/* Who counts as the owner decides who can drive the whole agent over WhatsApp,
+ * so the match is exact on the number part of the JID — never a substring. */
+describe("isOwnerNumber", () => {
+  const ME = "971501234567:12@s.whatsapp.net";
+
+  it("matches the paired number, device suffix and all", () => {
+    expect(isOwnerNumber(ME, null, "971501234567@s.whatsapp.net")).toBe(true);
+    expect(isOwnerNumber(ME, null, "971501234567")).toBe(true);
+  });
+
+  it("matches the company WhatsApp number from the profile", () => {
+    expect(isOwnerNumber(null, "+971 50 765 4321", "971507654321")).toBe(true);
+  });
+
+  it("rejects a number that is merely a substring of the owner's", () => {
+    expect(isOwnerNumber(ME, null, "5012345")).toBe(false);
+    expect(isOwnerNumber(ME, null, "97150123456")).toBe(false);
+  });
+
+  it("rejects strangers, and empty input", () => {
+    expect(isOwnerNumber(ME, "971507654321", "971509999999")).toBe(false);
+    expect(isOwnerNumber(ME, null, "")).toBe(false);
+    expect(isOwnerNumber(null, null, "971501234567")).toBe(false);
   });
 });
 

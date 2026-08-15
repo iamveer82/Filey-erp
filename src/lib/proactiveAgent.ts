@@ -12,6 +12,7 @@ let started = false;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_KEY = "filey.proactive.daily";
+const ALERTS_KEY = "filey.proactive.alerts";
 
 const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
 
@@ -82,19 +83,22 @@ export function startProactiveAgent(): void {
   if (started || !hasDesktop) return;
   started = true;
 
-  const daily = async () => {
-    const last = Number(localStorage.getItem(DAILY_KEY) || "0");
-    if (Date.now() - last < DAY_MS) return;
-    await run("daily");
-    localStorage.setItem(DAILY_KEY, String(Date.now()));
+  /** Run at most once per `every` ms, across restarts. A dropped WhatsApp
+   *  socket reconnects freely, and every reconnect used to fire a fresh agent
+   *  run — an LLM bill and a WhatsApp message per flap. */
+  const throttled = async (kind: "daily" | "alerts", key: string, every: number) => {
+    const last = Number(localStorage.getItem(key) || "0");
+    if (Date.now() - last < every) return;
+    localStorage.setItem(key, String(Date.now()));
+    await run(kind);
   };
 
   onBridgeState((s) => {
     if (s.state !== "connected") return;
-    void daily();
-    void run("alerts");
+    void throttled("daily", DAILY_KEY, DAY_MS);
+    void throttled("alerts", ALERTS_KEY, HOUR_MS);
     void fireDueReminders();
   });
-  setInterval(() => void run("alerts"), HOUR_MS);
+  setInterval(() => void throttled("alerts", ALERTS_KEY, HOUR_MS), HOUR_MS);
   setInterval(() => void fireDueReminders(), 30_000);
 }
