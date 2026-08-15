@@ -18,7 +18,7 @@
  * a test can run the whole loop against a stub without a network.
  */
 
-import { TOOLS, runTool } from "./aiTools";
+import { TOOLS, runTool, type ConfirmFn } from "./aiTools";
 import { createGuard, coachResult } from "./agentGuard";
 import type { AiConfig, AiMessage } from "./ai";
 
@@ -57,6 +57,11 @@ export interface HarnessOpts {
   maxRounds?: number;
   extraTools?: AgentToolDef[];
   finishToolName?: string;
+  /** Per-run override for the sensitive-action confirm gate. */
+  confirm?: ConfirmFn;
+  /** Whether this run may use owner-only tools (true in-app, and for the owner's
+   *  own WhatsApp number; false for customers). */
+  isOwner?: boolean;
 }
 
 export interface HarnessDeps {
@@ -324,7 +329,9 @@ export async function* runAgentStream(
       // same invoice gets emailed twice when the model second-guesses itself.
       const decided = guard.before(call.name, call.args);
       const raw =
-        "short" in decided ? decided.short : await runTool(call.name, call.args);
+        "short" in decided
+          ? decided.short
+          : await runTool(call.name, call.args, opts.confirm, opts.isOwner);
       if (!("short" in decided)) guard.after(call.name, call.args, raw);
       const result = coachResult(raw, maxRounds - round - 1);
 

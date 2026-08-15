@@ -778,7 +778,7 @@ function ZernioProvider() {
 /* ── WhatsApp bridge: QR-paired session, no per-message cost ─────────────── */
 function WhatsAppBridgeProvider() {
   const [cfg, setCfg] = useState<BridgeConfig>(() =>
-    waHasDesktop ? getBridgeConfig() : { webhookUrl: "", secret: "", autoStart: false }
+    waHasDesktop ? getBridgeConfig() : { autoStart: false }
   );
   const [st, setSt] = useState<BridgeState>({ state: "stopped" });
   const [msg, setMsg] = useState("");
@@ -853,28 +853,6 @@ function WhatsAppBridgeProvider() {
           </p>
         </div>
       )}
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="field">
-          <span className="label">Webhook URL</span>
-          <input
-            className="input"
-            placeholder="https://<project>.functions.supabase.co/channel-webhook"
-            value={cfg.webhookUrl}
-            onChange={(e) => setCfg(setBridgeConfig({ webhookUrl: e.target.value }))}
-          />
-        </div>
-        <div className="field">
-          <span className="label">Bridge secret</span>
-          <input
-            type="password"
-            className="input"
-            placeholder="WA_BRIDGE_SECRET"
-            value={cfg.secret}
-            onChange={(e) => setCfg(setBridgeConfig({ secret: e.target.value }))}
-          />
-        </div>
-      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button className="btn-primary" onClick={() => run(startBridge)}>

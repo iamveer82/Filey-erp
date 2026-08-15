@@ -126,6 +126,41 @@ export async function readUrl(
   return { url: target, title, text, truncated };
 }
 
+/** Raw HTTP (curl-like) for the agent — public http(s) URLs only, same SSRF
+ *  guard as readUrl. Returns status + clipped body. */
+export async function httpFetch(
+  url: string,
+  opts: { method?: string; body?: string; headers?: Record<string, string> } = {}
+): Promise<{ status: number; body: string }> {
+  const target = publicHttpUrl(url);
+  const res = await aiFetch(target, {
+    method: (opts.method || "GET").toUpperCase(),
+    headers: { "content-type": "application/json", ...(opts.headers ?? {}) },
+    body: opts.body,
+  });
+  const body = await res.text();
+  return { status: res.status, body: clip(body).text };
+}
+
+/** Drive the owner's real browser via the local WebBridge daemon. Returns the
+ *  parsed JSON response. The harness clips oversized results downstream. */
+export async function webBridge(
+  action: string,
+  args: Record<string, unknown>
+): Promise<unknown> {
+  const res = await aiFetch("http://127.0.0.1:10086/command", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, ...args }),
+  });
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text.slice(0, 8000) };
+  }
+}
+
 /** Search the public web. Returns whatever the reader could parse into hits;
  *  the raw text is kept as a fallback when the shape changes upstream. */
 export async function searchWeb(

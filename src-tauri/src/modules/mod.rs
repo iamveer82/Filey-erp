@@ -5,3 +5,4 @@ pub mod shortcut;
 pub mod storage;
 pub mod sync;
 pub mod wa_bridge;
+pub mod shell;

@@ -202,6 +202,7 @@ export default function AgentChat() {
         const steps: string[] = [];
         const summary = await aiAutonomous(goalText, {
           images,
+          isOwner: true,
           onProgress: (t) => {
             if (!t) return;
             steps.push(t);
@@ -225,7 +226,7 @@ export default function AgentChat() {
           ...withUser.turns.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
         ];
         if (images?.length) messages[messages.length - 1].images = images;
-        reply = await aiAgent(messages, { maxTokens: 1200 });
+        reply = await aiAgent(messages, { maxTokens: 1200, isOwner: true });
       }
       // Files belong to the message that produced them. They used to live in
       // one shared slot above the composer, so asking a second question threw

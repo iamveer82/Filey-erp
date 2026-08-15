@@ -64,6 +64,10 @@ pub fn run() {
             modules::wa_bridge::wa_bridge_start,
             modules::wa_bridge::wa_bridge_stop,
             modules::wa_bridge::wa_bridge_state,
+            modules::wa_bridge::wa_bridge_reply,
+            modules::wa_bridge::wa_bridge_send,
+            // Owner-only shell execution (terminal / repo run)
+            modules::shell::shell_exec,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

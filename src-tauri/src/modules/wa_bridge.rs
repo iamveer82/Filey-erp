@@ -11,8 +11,14 @@
 //! The sidecar prints one JSON object per line prefixed with "FILEY ". A reader
 //! thread parses those into BRIDGE, which the UI polls through wa_bridge_state
 //! and which also rides out on the `wa-bridge` event for live updates.
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+//!
+//! LOCAL AGENT: there is no webhook anymore. Incoming messages arrive as
+//! `{type:"message", id, from, text, fromName}` lines, which are re-emitted to
+//! the frontend as the `wa-message` event; the frontend runs the app's own
+//! agent and answers with `wa_bridge_reply`, which writes the reply back to the
+//! sidecar's stdin. The brain, memory and tools all live in the app — no server.
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -32,10 +38,13 @@ pub struct BridgeState {
     pub qr: Option<String>,
     /// Last error worth showing a human.
     pub error: Option<String>,
+    /// The paired JID once connected (the owner's own chat in self-chat mode).
+    pub me: Option<String>,
 }
 
 struct Supervisor {
     child: Option<Child>,
+    stdin: Option<ChildStdin>,
     state: BridgeState,
 }
 
@@ -81,17 +90,10 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Err("WhatsApp bridge binary is not installed with this build".into())
 }
 
-/// Start (or restart) the bridge. `webhook_url` and `secret` are what the
-/// sidecar authenticates to channel-webhook with.
+/// Start (or restart) the bridge. No webhook — messages route to the app's own
+/// agent over stdin/stdout.
 #[tauri::command]
-pub fn wa_bridge_start(
-    app: AppHandle,
-    webhook_url: String,
-    secret: String,
-) -> Result<BridgeState, String> {
-    if webhook_url.trim().is_empty() || secret.trim().is_empty() {
-        return Err("The bridge needs both a webhook URL and a shared secret".into());
-    }
+pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
     wa_bridge_stop(app.clone()).ok();
 
     let bin = sidecar_path(&app)?;
@@ -105,9 +107,8 @@ pub fn wa_bridge_start(
     std::fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
 
     let mut cmd = Command::new(&bin);
-    cmd.env("FILEY_WEBHOOK_URL", webhook_url.trim())
-        .env("FILEY_BRIDGE_SECRET", secret.trim())
-        .env("FILEY_BRIDGE_STATE", &state_dir)
+    cmd.env("FILEY_BRIDGE_STATE", &state_dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(windows)]
@@ -115,15 +116,18 @@ pub fn wa_bridge_start(
 
     let mut child = cmd.spawn().map_err(|e| format!("could not start bridge: {e}"))?;
     let stdout = child.stdout.take();
+    let stdin = child.stdin.take();
 
     {
         let mut guard = BRIDGE.lock().unwrap();
         *guard = Some(Supervisor {
             child: Some(child),
+            stdin,
             state: BridgeState {
                 state: "starting".into(),
                 qr: None,
                 error: None,
+                me: None,
             },
         });
     }
@@ -148,6 +152,7 @@ pub fn wa_bridge_start(
                     }
                     Some("status") => {
                         let st = v.get("state").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let me = v.get("me").and_then(|m| m.as_str()).map(String::from);
                         set_state(&app2, |s| {
                             // A scanned code is spent — drop it so the UI stops
                             // showing a QR nobody can use.
@@ -155,7 +160,14 @@ pub fn wa_bridge_start(
                                 s.qr = None;
                             }
                             s.state = st.clone();
+                            if let Some(m) = me {
+                                s.me = Some(m);
+                            }
                         });
+                    }
+                    Some("message") => {
+                        // Route to the local agent in the frontend.
+                        let _ = app2.emit("wa-message", v.clone());
                     }
                     _ => {}
                 }
@@ -173,6 +185,42 @@ pub fn wa_bridge_start(
     Ok(wa_bridge_state())
 }
 
+/// Send the local agent's reply back to the sidecar (and thus to WhatsApp).
+#[tauri::command]
+pub fn wa_bridge_reply(id: String, text: String) -> Result<(), String> {
+    let mut guard = BRIDGE.lock().unwrap();
+    if let Some(sup) = guard.as_mut() {
+        if let Some(stdin) = sup.stdin.as_mut() {
+            let line = format!(
+                "FILEY {}\n",
+                serde_json::json!({ "type": "reply", "id": id, "text": text })
+            );
+            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+            stdin.flush().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Send a proactive WhatsApp message to a specific JID (owner notifications —
+/// daily summary, low-stock and overdue alerts). Returns Ok even if the bridge
+/// isn't connected yet; the sidecar simply has no socket to write to.
+#[tauri::command]
+pub fn wa_bridge_send(to: String, text: String) -> Result<(), String> {
+    let mut guard = BRIDGE.lock().unwrap();
+    if let Some(sup) = guard.as_mut() {
+        if let Some(stdin) = sup.stdin.as_mut() {
+            let line = format!(
+                "FILEY {}\n",
+                serde_json::json!({ "type": "send", "to": to, "text": text })
+            );
+            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+            stdin.flush().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
     let mut guard = BRIDGE.lock().unwrap();
@@ -182,10 +230,12 @@ pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
             let _ = child.wait();
         }
         sup.child = None;
+        sup.stdin = None;
         sup.state = BridgeState {
             state: "stopped".into(),
             qr: None,
             error: None,
+            me: None,
         };
     }
     Ok(())

@@ -20,6 +20,9 @@ import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
 import { autoStartBridge } from "./lib/waBridge";
+import { startWaAgent } from "./lib/waAgent";
+import { startProactiveAgent } from "./lib/proactiveAgent";
+import { seedDefaultSkills } from "./lib/defaultSkills";
 
 applyTheme();
 applyAccent();
@@ -30,6 +33,12 @@ startAutoSync();
 // channel is simply live after launch rather than something to go and start.
 // Never awaited: a bridge that won't start must not hold up the UI.
 void autoStartBridge();
+// The WhatsApp agent answers on-device — mount the listener once, up front.
+startWaAgent();
+// Proactive: daily summary + low-stock/overdue alerts to the owner on WhatsApp.
+startProactiveAgent();
+// Seed the default business-skill pack once, so the agent starts capable.
+seedDefaultSkills();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

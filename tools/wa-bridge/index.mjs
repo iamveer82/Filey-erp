@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /*
- * Filey — WhatsApp bridge (QR pairing, no per-message cost).
+ * Filey — WhatsApp bridge (QR pairing, local agent, no server).
  *
- * WHY THIS EXISTS
- * The Meta Cloud API charges per conversation and needs approved templates to
- * start one, which makes "chat with my own assistant" a metered activity. This
- * pairs by QR to a WhatsApp account you already own, so talking to your agent
- * is free.
+ * WHY A SEPARATE PROCESS
+ * A QR session is a long-lived socket with rolling auth state, so it runs as a
+ * sidecar the desktop app starts and outlives. It is dumb transport only: it
+ * forwards each message to the LOCAL Filey agent (the app's own brain, over
+ * stdin/stdout) and speaks the reply it gets back. No Supabase, no webhook
+ * URL, no server — the agent, its memory and every tool run in the app.
  *
  * THE TRADE-OFF, STATED PLAINLY
  * This drives a real WhatsApp account through an unofficial library. It is
@@ -14,25 +15,17 @@
  * number you can afford to lose, and don't point it at bulk messaging — one
  * owner, one assistant, low volume.
  *
- * WHY A SEPARATE PROCESS
- * A QR session is a long-lived socket with rolling auth state. Supabase edge
- * functions are stateless and die between requests, so the session has to live
- * on a machine you control. This process is dumb transport: it forwards each
- * message to channel-webhook and speaks the reply it gets back. The agent, its
- * memory, and every approval gate stay server-side — nothing about the brain is
- * duplicated here.
- *
  * SETUP
- *   cd tools/wa-bridge && npm install
- *   set FILEY_WEBHOOK_URL=https://<ref>.functions.supabase.co/channel-webhook
- *   set FILEY_BRIDGE_SECRET=<same value as the WA_BRIDGE_SECRET function secret>
- *   npm start          → scan the QR with WhatsApp → Linked devices
+ *   cd tools/wa-bridge && npm install && npm start
+ *   → scan the QR with WhatsApp → Linked devices
  *
- * Auth state is written to ./auth/ — that folder IS the login. Anyone holding
- * it can message as you, so keep it off shared drives and out of git.
+ * Auth state is written to the session dir the app passes (or ./auth here) —
+ * that folder IS the login. Anyone holding it can message as you, so keep it
+ * off shared drives and out of git.
  */
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import readline from "node:readline";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -41,23 +34,9 @@ import qrcode from "qrcode-terminal";
 import QR from "qrcode";
 
 /** One JSON object per line on stdout. The desktop app parses these to show
- *  the QR and connection state in the Integrations page; a human running this
- *  in a terminal gets the pretty output below instead. Keep it one-line — the
- *  Rust side reads line by line. */
+ *  the QR/state and to route messages to the local agent. Keep it one-line —
+ *  the Rust side reads line by line. */
 const emit = (obj) => console.log("FILEY " + JSON.stringify(obj));
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-
-const WEBHOOK = process.env.FILEY_WEBHOOK_URL;
-const SECRET = process.env.FILEY_BRIDGE_SECRET;
-if (!WEBHOOK || !SECRET) {
-  console.error(
-    "Set FILEY_WEBHOOK_URL and FILEY_BRIDGE_SECRET first.\n" +
-      "  FILEY_WEBHOOK_URL   = https://<project-ref>.functions.supabase.co/channel-webhook\n" +
-      "  FILEY_BRIDGE_SECRET = the WA_BRIDGE_SECRET you set on the function"
-  );
-  process.exit(1);
-}
 
 /** Plain text out of the many shapes a WhatsApp message can arrive in. */
 function textOf(m) {
@@ -71,36 +50,67 @@ function textOf(m) {
   ).trim();
 }
 
-/** Ask the agent. Never throws: a bridge that dies on a bad reply is worse
- *  than one that says so and keeps the session up. */
-async function askAgent(from, text, fromName) {
-  try {
-    const res = await fetch(WEBHOOK, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-bridge-secret": SECRET },
-      body: JSON.stringify({ from, text, fromName }),
-    });
-    if (!res.ok) {
-      console.error("webhook", res.status, await res.text().catch(() => ""));
-      return res.status === 403
-        ? "The bridge secret is wrong — check WA_BRIDGE_SECRET."
-        : "The assistant is unreachable right now.";
+/** Replies arrive on stdin as `FILEY {"type":"reply","id":...,"text":...}`.
+ *  Each outstanding message awaits its reply by id; anything else is ignored. */
+const pending = new Map(); // id -> resolve(text)
+const REPLAY_TIMEOUT_MS = 120_000;
+
+/** The live socket (set in start()); the stdin `send` handler uses it for
+ *  proactive owner notifications. */
+let activeSock = null;
+
+function startStdinLoop() {
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  rl.on("line", (line) => {
+    const prefix = "FILEY ";
+    if (!line.startsWith(prefix)) return;
+    let v;
+    try {
+      v = JSON.parse(line.slice(prefix.length));
+    } catch {
+      return;
     }
-    const body = await res.json().catch(() => null);
-    return body?.reply ?? "";
-  } catch (e) {
-    console.error("webhook call failed:", e.message);
-    return "The assistant is unreachable right now.";
-  }
+    if (v.type === "reply") {
+      const r = pending.get(v.id);
+      if (r) {
+        pending.delete(v.id);
+        clearTimeout(r.timer);
+        r.resolve(v.text ?? "");
+      }
+    }
+    if (v.type === "send") {
+      // Proactive message to a specific JID (owner notifications). The desktop
+      // app drives these after pairing; before that activeSock is null.
+      if (v.to && v.text && activeSock) {
+        activeSock.sendMessage(v.to, { text: v.text }).catch((e) =>
+          console.error("send failed:", e?.message)
+        );
+      }
+    }
+  });
+}
+
+/** Send a message to the local agent and wait for its reply. Never throws. */
+function askAgent(from, text, fromName) {
+  const id = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      resolve("The app didn't answer in time — make sure Filey is open and the WhatsApp bridge is running.");
+    }, REPLAY_TIMEOUT_MS);
+    pending.set(id, { resolve, timer });
+    emit({ type: "message", id, from, text, fromName });
+  });
 }
 
 async function start() {
   // The session folder IS the login, so it must survive app updates and live
   // somewhere writable. The desktop app passes its per-user data dir; a human
   // running this from the repo gets ./auth next to the script.
-  const authDir = process.env.FILEY_BRIDGE_STATE || path.join(HERE, "auth");
+  const authDir = process.env.FILEY_BRIDGE_STATE || path.join(process.cwd(), "auth");
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const sock = makeWASocket({ auth: state, printQRInTerminal: false });
+  activeSock = sock;
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -109,15 +119,13 @@ async function start() {
     if (qr) {
       console.log("\nScan this in WhatsApp → Settings → Linked devices:\n");
       qrcode.generate(qr, { small: true });
-      // Same code as a PNG data URL, so the app can render it without pulling
-      // a QR library into the frontend bundle.
       QR.toDataURL(qr, { margin: 1, width: 320 })
         .then((dataUrl) => emit({ type: "qr", dataUrl }))
         .catch((e) => console.error("qr encode failed:", e.message));
     }
     if (connection === "open") {
       console.log("\n✅ Paired. Message this number from your own WhatsApp and the agent answers.\n");
-      emit({ type: "status", state: "connected" });
+      emit({ type: "status", state: "connected", me: sock.user?.id ?? null });
     }
     if (connection === "connecting") emit({ type: "status", state: "connecting" });
     if (connection === "close") {
@@ -125,7 +133,7 @@ async function start() {
       // forever, so stop and make the human re-scan.
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
-        console.error("Logged out on the phone. Delete ./auth and run again to re-pair.");
+        console.error("Logged out on the phone. Delete the session dir and run again to re-pair.");
         emit({ type: "status", state: "logged_out" });
         process.exit(1);
       }
@@ -157,6 +165,7 @@ async function start() {
   });
 }
 
+startStdinLoop();
 start().catch((e) => {
   console.error("bridge failed to start:", e);
   process.exit(1);

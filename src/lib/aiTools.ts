@@ -19,10 +19,12 @@ import { getDisplayCurrency, todayYmd } from "./format";
 import { getExchangeRates, docAmountInAed } from "./exchange-rates";
 import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
-import { findSkill, loadSkills } from "./agentSkills";
+import { addSkill, findSkill, loadSkills } from "./agentSkills";
+import { saveSecret, recallSecret, listSecrets } from "./secretStore";
+import { addReminder, listReminders, removeReminder } from "./reminders";
 import { isToolAllowed } from "./capabilities";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
-import { readUrl, searchWeb, asUntrustedContext } from "./reach";
+import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
 import { enrichFromWebsite, findProspects, scoreLead } from "./scout";
 import {
   listAccounts as listSocialAccounts,
@@ -44,13 +46,15 @@ export interface ToolDef {
   /** Mutates money/inventory state or sends something outbound — must be
    * confirmed by the user before running (prompt-injection guard). */
   sensitive?: boolean;
+  /** Owner-only: customers can never trigger it (terminal, secrets, browser). */
+  ownerOnly?: boolean;
 }
 
 /* Sensitive tools require explicit user approval before they run, so injected
  * instructions (e.g. text inside an attached document) can't silently move
  * money or send email. The UI registers a real prompt via setToolConfirm();
  * the default falls back to window.confirm, and denies if neither exists. */
-type ConfirmFn = (
+export type ConfirmFn = (
   toolName: string,
   args: Record<string, unknown>
 ) => boolean | Promise<boolean>;
@@ -2477,6 +2481,212 @@ export const TOOLS: ToolDef[] = [
       return { name: s.name, instructions: s.instructions };
     },
   },
+  {
+    name: "learn_skill",
+    description:
+      "Save a reusable procedure as a skill for future use. Call this when you figured out how to do something your tools didn't cover, so you never have to work it out again. Give a short name, a one-line description, and the step-by-step instructions.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+        instructions: { type: "string" },
+      },
+      required: ["name", "description", "instructions"],
+    },
+    run: async (a) => {
+      const s = addSkill({
+        name: str(a.name).trim(),
+        description: str(a.description).trim(),
+        instructions: str(a.instructions).trim(),
+      });
+      return { ok: true, name: s.name, message: `Skill "${s.name}" saved for future use.` };
+    },
+  },
+  {
+    name: "http_fetch",
+    description:
+      "Make a raw HTTP request like curl and return the status and body. Use for APIs or endpoints read_web_page can't reach. Public http(s) URLs only; GET by default, pass method and body for POST/PUT.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        method: { type: "string", enum: ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+        body: { type: "string" },
+        headers: { type: "object", additionalProperties: { type: "string" } },
+      },
+      required: ["url"],
+    },
+    run: async (a) => {
+      const r = await httpFetch(str(a.url), {
+        method: str(a.method) || "GET",
+        body: a.body ? str(a.body) : undefined,
+        headers: (a.headers as Record<string, string>) ?? {},
+      });
+      return { status: r.status, body: r.body };
+    },
+  },
+  {
+    name: "run_shell",
+    ownerOnly: true,
+    sensitive: true,
+    description:
+      "Run a shell command on the owner's machine — git clone a repo, npm install, run a script or an open-source tool. OWNER-ONLY and always confirmed first. Output is clipped; bounded by a timeout.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Full shell command to run" },
+        timeout: { type: "number", description: "Optional timeout in ms (default 60000, max 300000)" },
+      },
+      required: ["command"],
+    },
+    run: async (a) => {
+      const hasDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+      if (!hasDesktop) return { error: "Shell runs in the desktop app only." };
+      const { invoke } = await import("@tauri-apps/api/core");
+      const r = (await invoke("shell_exec", {
+        cmd: str(a.command),
+        timeout: a.timeout ? Number(a.timeout) : null,
+      })) as { stdout: string; stderr: string; exit_code: number };
+      const clip = (s: string) => (s.length > 8000 ? `${s.slice(0, 8000)}\n…[truncated]` : s);
+      return { exit_code: r.exit_code, stdout: clip(r.stdout || ""), stderr: clip(r.stderr || "") };
+    },
+  },
+  {
+    name: "save_secret",
+    ownerOnly: true,
+    sensitive: true,
+    description:
+      "Store a credential the owner gave you (API key, portal password, token) under a name, so you can use it later. OWNER-ONLY and always confirmed.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        value: { type: "string" },
+      },
+      required: ["name", "value"],
+    },
+    run: async (a) => {
+      saveSecret(str(a.name).trim(), str(a.value));
+      return { ok: true, name: str(a.name) };
+    },
+  },
+  {
+    name: "recall_secret",
+    ownerOnly: true,
+    description:
+      "Retrieve a stored credential by name. OWNER-ONLY. Use only when the owner asked you to; never echo the value back into a message.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const v = recallSecret(str(a.name).trim());
+      return v == null
+        ? { error: `No secret named "${str(a.name)}"` }
+        : { name: str(a.name), value: v };
+    },
+  },
+  {
+    name: "list_secrets",
+    ownerOnly: true,
+    description: "List the names of stored credentials (values not included). OWNER-ONLY.",
+    parameters: { type: "object", properties: {} },
+    run: async () => ({ names: listSecrets() }),
+  },
+  {
+    name: "browser",
+    ownerOnly: true,
+    sensitive: true,
+    description:
+      "Drive the owner's real browser (with their logins) via the local WebBridge daemon. Actions: navigate, find_tab, snapshot, click, fill, evaluate, screenshot, list_tabs, close_tab. Use a short unique session name per task. OWNER-ONLY and confirmed each call.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["navigate", "find_tab", "snapshot", "click", "fill", "evaluate", "screenshot", "list_tabs", "close_tab"],
+        },
+        session: { type: "string", description: "Short unique name for this task's tab group" },
+        url: { type: "string" },
+        selector: { type: "string" },
+        value: { type: "string" },
+        code: { type: "string" },
+        path: { type: "string" },
+      },
+      required: ["action", "session"],
+    },
+    run: async (a) => {
+      const body: Record<string, unknown> = { session: str(a.session) };
+      for (const k of ["url", "selector", "value", "code", "path"]) {
+        const v = a[k];
+        if (v != null && v !== "") body[k] = str(v);
+      }
+      try {
+        return await webBridge(str(a.action), body);
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  },
+  {
+    name: "current_time",
+    description:
+      "Get the current date and time (epoch ms + ISO). Use it to compute a reminder's fire time from a phrase like 'tomorrow 9am'.",
+    parameters: { type: "object", properties: {} },
+    run: async () => ({ now: Date.now(), iso: new Date().toISOString() }),
+  },
+  {
+    name: "remind_me",
+    ownerOnly: true,
+    description:
+      "Set a reminder for the owner, delivered over WhatsApp when due. `at` is the fire time as epoch milliseconds (compute it from current_time). `repeat` optional: none, daily, weekly, monthly.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        at: { type: "number" },
+        repeat: { type: "string", enum: ["none", "daily", "weekly", "monthly"] },
+      },
+      required: ["text", "at"],
+    },
+    run: async (a) => {
+      const repeat = ["daily", "weekly", "monthly"].includes(str(a.repeat))
+        ? (str(a.repeat) as "daily" | "weekly" | "monthly")
+        : "none";
+      const r = addReminder(str(a.text).trim(), Number(a.at), repeat);
+      return { ok: true, id: r.id, fires_at: new Date(r.at).toISOString(), repeat: r.repeat };
+    },
+  },
+  {
+    name: "list_reminders",
+    ownerOnly: true,
+    description: "List the owner's scheduled reminders.",
+    parameters: { type: "object", properties: {} },
+    run: async () => ({
+      reminders: listReminders().map((r) => ({
+        id: r.id,
+        text: r.text,
+        at: new Date(r.at).toISOString(),
+        repeat: r.repeat,
+      })),
+    }),
+  },
+  {
+    name: "cancel_reminder",
+    ownerOnly: true,
+    description: "Cancel a reminder by id (from list_reminders).",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+    run: async (a) => {
+      removeReminder(str(a.id));
+      return { ok: true };
+    },
+  },
 
   /* ── Web reach ──────────────────────────────────────────────────────────
    * Reading is not "sensitive" in the confirm-before-running sense — it moves
@@ -2729,15 +2939,19 @@ export const TOOLS: ToolDef[] = [
 
 export async function runTool(
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  confirm?: ConfirmFn,
+  isOwner?: boolean
 ): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return { error: `Unknown tool: ${name}` };
+  if (tool.ownerOnly && !isOwner)
+    return { error: `"${name}" is owner-only — only the business owner can run it.` };
   if (!isToolAllowed(name))
     return {
       error: `The "${name}" capability is turned off (Settings → Capabilities). Ask the user to enable it.`,
     };
-  if (tool.sensitive && !(await confirmTool(name, args)))
+  if (tool.sensitive && !(await (confirm ?? confirmTool)(name, args)))
     return { error: "Cancelled — the user did not approve this action." };
   try {
     return await tool.run(args);

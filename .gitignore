@@ -16,6 +16,7 @@ dist-ssr
 .env
 .env.*
 !.env.example
+.mcp.json
 
 # Editor directories and files
 .vscode/*
@@ -49,3 +50,6 @@ src-tauri/updater_signing.key
 src-tauri/updater_signing.key.pub
 src-tauri/filey-key
 src-tauri/filey-key.pub
+
+# WhatsApp bridge sidecar binary (built via `bun build --compile`, see build.ps1)
+src-tauri/binaries/
