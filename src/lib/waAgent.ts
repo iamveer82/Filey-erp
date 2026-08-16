@@ -47,6 +47,17 @@ export function waFormat(text: string): string {
   return body ? `${WA_HEADER}\n\n${body}` : WA_HEADER;
 }
 
+/** The same business snapshot the in-app chat gets. Never fatal: a phone
+ *  message must still be answered when the snapshot cannot be built. */
+async function businessBrief(): Promise<string> {
+  try {
+    const { buildAiContext } = await import("./aiContext");
+    return await buildAiContext();
+  } catch {
+    return "";
+  }
+}
+
 let started = false;
 
 /** One agent run at a time, and messages wait their turn instead of being
@@ -190,7 +201,7 @@ async function handle(m: WaMessage): Promise<void> {
     const baseSystem = buildSystemPrompt(
       `${SYSTEM}\n\n${FORMAT}`,
       getPersona(),
-      [memoryDigest(), skillsIndex()].filter(Boolean).join("\n\n")
+      [memoryDigest(), skillsIndex(), await businessBrief()].filter(Boolean).join("\n\n")
     );
     const system: AiMessage = {
       role: "system",

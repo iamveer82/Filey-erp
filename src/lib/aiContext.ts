@@ -15,7 +15,31 @@ type Row = Record<string, unknown>;
 const n = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 
+/** Building the brief reads five tables. A WhatsApp thread is a burst of
+ *  messages seconds apart, and each was re-reading all of them; the answer to
+ *  "who owes me money" does not change between two lines of the same
+ *  conversation.
+ *  ponytail: one shared 60s memo, no invalidation on write — a stale brief
+ *  costs nothing because the agent looks the details up with tools anyway. */
+let cached: { at: number; key: string; text: string } | null = null;
+const CACHE_MS = 60_000;
+
 export async function buildAiContext(companyName?: string): Promise<string> {
+  const key = companyName ?? "";
+  if (cached && cached.key === key && Date.now() - cached.at < CACHE_MS) {
+    return cached.text;
+  }
+  const text = await composeContext(companyName);
+  cached = { at: Date.now(), key, text };
+  return text;
+}
+
+/** Drop the memo — used by tests, and worth calling after a bulk import. */
+export function clearAiContextCache(): void {
+  cached = null;
+}
+
+async function composeContext(companyName?: string): Promise<string> {
   const unreadable: string[] = [];
   const section = (label: string, p: Promise<unknown[]>): Promise<Row[]> =>
     p
@@ -32,6 +56,10 @@ export async function buildAiContext(companyName?: string): Promise<string> {
     section("quotations", quotes.listDocs()),
     section("orders", erp.orders()),
   ]);
+  // Identity is worth its handful of tokens: without the VAT rate and currency
+  // the agent guesses them, and a guessed tax rate on a tax invoice is the
+  // expensive kind of wrong.
+  const company = await billing.getCompany().catch(() => null);
 
   const ccy = getDisplayCurrency();
   const today = todayYmd();
@@ -40,7 +68,16 @@ export async function buildAiContext(companyName?: string): Promise<string> {
   lines.push(
     `CURRENT BUSINESS DATA (live snapshot — the user owns all of this; use it to answer and to draft):`
   );
-  if (companyName) lines.push(`- Company: ${companyName} · display currency ${ccy}`);
+  const name = companyName || s(company?.name);
+  if (name || company) {
+    const bits = [
+      name && `Company: ${name}`,
+      `display currency ${ccy}`,
+      company?.trn && `TRN ${s(company.trn)}`,
+      company?.default_tax_rate != null && `default VAT ${n(company.default_tax_rate)}%`,
+    ].filter(Boolean);
+    lines.push(`- ${bits.join(" · ")}`);
+  }
   if (unreadable.length)
     lines.push(
       `- UNAVAILABLE THIS TURN: ${unreadable.join(", ")} could not be read. ` +
@@ -62,8 +99,9 @@ export async function buildAiContext(companyName?: string): Promise<string> {
     const inv = invoices as Row[];
     const unpaid = inv.filter((d) => n(d.balance) > 0 && d.status !== "paid");
     const overdue = unpaid.filter((d) => d.due_date && s(d.due_date) < today);
+    const owed = unpaid.reduce((t, d) => t + n(d.balance), 0);
     lines.push(
-      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue.`
+      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue · ${money(owed, ccy)} outstanding.`
     );
     if (overdue.length) {
       const list = overdue
@@ -93,13 +131,27 @@ export async function buildAiContext(companyName?: string): Promise<string> {
       })
       .filter(Boolean);
     lines.push(`- Products: ${p.length}. e.g. ${names.join("; ")}`);
+
+    // Worth naming: it is the thing an owner most often wants told to them
+    // rather than asked about.
+    const low = p.filter((x) => {
+      const qty = n(x.stock ?? x.qty ?? x.quantity);
+      const min = n(x.reorder_level ?? x.min_stock);
+      return min > 0 && qty <= min;
+    });
+    if (low.length) {
+      const names2 = low.slice(0, CAP).map((x) => s(x.name)).filter(Boolean);
+      lines.push(`- Low stock: ${low.length} item(s) at or below reorder level — ${names2.join("; ")}`);
+    }
   }
 
   // Orders
   if (orders.length) lines.push(`- Orders: ${orders.length}`);
 
   lines.push(
-    `If the user asks about data not shown here, say you may need them to open the relevant page so you can read more.`
+    `This is a summary, not the whole book: counts are exact, the examples are a sample. ` +
+      `For anything beyond it — a specific invoice, a customer's history, a product's stock — ` +
+      `use the find/list tools rather than answering from what is listed here.`
   );
 
   return lines.join("\n");

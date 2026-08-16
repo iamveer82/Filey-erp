@@ -30,6 +30,7 @@ import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { skillsIndex } from "../lib/agentSkills";
+import { buildAiContext } from "../lib/aiContext";
 import {
   AGENT_MODES,
   getAgentMode,
@@ -251,13 +252,17 @@ export default function AgentChat() {
             ? `${steps.join("\n\n")}\n\n${summary}`
             : summary;
       } else {
+        // The popover copilot has always had the business snapshot; this page
+        // and WhatsApp did not, so the same question got a vaguer answer
+        // depending on where it was asked.
+        const brief = await buildAiContext().catch(() => "");
         const messages: AiMessage[] = [
           {
             role: "system",
             text: buildSystemPrompt(
               SYSTEM,
               getPersona(),
-              [memoryDigest(), skillsIndex()].filter(Boolean).join("\n\n")
+              [memoryDigest(), skillsIndex(), brief].filter(Boolean).join("\n\n")
             ),
           },
           ...withUser.turns.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
