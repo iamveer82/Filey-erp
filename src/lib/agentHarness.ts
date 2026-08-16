@@ -20,6 +20,9 @@
 
 import { TOOLS, runTool, type ConfirmFn } from "./aiTools";
 import { createGuard, coachResult } from "./agentGuard";
+import { isToolAllowed } from "./capabilities";
+import { gateFor } from "./agentMode";
+import { CORE_TOOLS, TOOLSETS, toolsetIndex } from "./toolsets";
 import type { AiConfig, AiMessage } from "./ai";
 
 /** Eight was too few and it showed as "gives up early": discovering a file
@@ -27,6 +30,102 @@ import type { AiConfig, AiMessage } from "./ai";
  *  anything goes wrong once. A round is one model call, so the cost of the
  *  extra headroom is only paid by tasks that actually use it. */
 export const MAX_TOOL_ROUNDS = 16;
+
+/** The two tools the harness owns rather than aiTools: they change what the
+ *  model can see next round, so they are answered here without touching the
+ *  app. */
+const LIST_TOOLSETS = "list_toolsets";
+const USE_TOOLSET = "use_toolset";
+
+const toolsetTools: AgentToolDef[] = [
+  {
+    name: LIST_TOOLSETS,
+    description:
+      "List the extra tool domains available (purchasing, accounting, people, files, messaging, web…). Call this when the job needs something beyond the everyday tools you can already see.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: USE_TOOLSET,
+    description:
+      "Load a tool domain by name so its tools become available for the rest of this conversation. Call it as soon as you know which domain the job needs, then use the tools it brings.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string", description: "Domain id from list_toolsets." } },
+      required: ["name"],
+    },
+  },
+];
+
+/** Open a domain for the rest of the run. Names what actually arrived, because
+ *  a domain whose tools are all gated off would otherwise look like it worked
+ *  and then appear empty. */
+function openToolset(
+  name: string,
+  opened: Set<string>,
+  opts: HarnessOpts
+): Record<string, unknown> {
+  const id = name.trim().toLowerCase();
+  const set = TOOLSETS[id];
+  if (!set) {
+    return {
+      error: `No toolset "${name}".`,
+      available: Object.keys(TOOLSETS),
+    };
+  }
+  opened.add(id);
+  const usable = set.tools.filter((n) => {
+    const t = TOOLS.find((x) => x.name === n);
+    if (!t) return false;
+    if (t.ownerOnly && !opts.isOwner) return false;
+    if (!isToolAllowed(n)) return false;
+    return gateFor(n, t.sensitive) !== "block";
+  });
+  return usable.length
+    ? { ok: true, loaded: id, tools: usable }
+    : {
+        ok: true,
+        loaded: id,
+        tools: [],
+        note: `The "${id}" tools are all switched off right now — either the capability is disabled in Settings, or the current agent mode blocks them. Tell the user that rather than trying another way in.`,
+      };
+}
+
+/**
+ * What the model is shown this round.
+ *
+ * Two filters, in order. First the gates that would refuse the call anyway —
+ * offering a tool the app will decline wastes a round and teaches the model
+ * nothing, and in Plan mode advertising writes invites exactly the attempt the
+ * mode exists to prevent. Then the core/domain split, so the list stays short
+ * enough for the model to choose well.
+ */
+export function offeredTools(
+  opts: HarnessOpts,
+  opened: ReadonlySet<string>
+): AgentToolDef[] {
+  const visible = TOOLS.filter((t) => {
+    if (t.ownerOnly && !opts.isOwner) return false;
+    if (!isToolAllowed(t.name)) return false;
+    return gateFor(t.name, t.sensitive) !== "block";
+  });
+
+  const inOpenSets = new Set(
+    [...opened].flatMap((id) => TOOLSETS[id]?.tools ?? [])
+  );
+  const core = new Set<string>(CORE_TOOLS);
+  const chosen = visible.filter((t) => core.has(t.name) || inOpenSets.has(t.name));
+
+  return [
+    ...chosen.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    })),
+    // No point advertising more domains once they are all open.
+    ...(opened.size < Object.keys(TOOLSETS).length ? toolsetTools : []),
+    ...(opts.extraTools ?? []),
+  ];
+}
 
 /** Why the loop stopped. */
 export type AgentDoneReason =
@@ -295,11 +394,13 @@ export async function* runAgentStream(
 ): AsyncGenerator<AgentEvent, string, void> {
   const adapter = adapterFor(deps.cfg.provider);
   const wire = adapter.init(messages);
-  const tools = [...TOOLS, ...(opts.extraTools ?? [])];
   const maxRounds = opts.maxRounds ?? MAX_TOOL_ROUNDS;
   const guard = createGuard();
+  /** Domains the model has asked for this run (see toolsets.ts). */
+  const opened = new Set<string>();
 
   for (let round = 0; round < maxRounds; round++) {
+    const tools = offeredTools(opts, opened);
     const { url, init } = adapter.buildRequest(wire, tools, opts, deps.cfg);
     const res = await deps.fetchFn(url, init);
     const data = await res.json();
@@ -323,6 +424,18 @@ export async function* runAgentStream(
       }
 
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
+
+      // Answered here, not in the app: these two decide what the model can see
+      // on the next round, which is this loop's business rather than the ERP's.
+      if (call.name === LIST_TOOLSETS || call.name === USE_TOOLSET) {
+        const result =
+          call.name === LIST_TOOLSETS
+            ? { toolsets: toolsetIndex() }
+            : openToolset(String(call.args.name ?? ""), opened, opts);
+        yield { type: "tool_result", id: call.id, name: call.name, result };
+        outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
+        continue;
+      }
 
       // A repeat of an identical call is answered from this run's memory —
       // reads return the earlier answer, writes are refused. Without it the

@@ -204,7 +204,7 @@ async function handle(m: WaMessage): Promise<void> {
     // null is the timeout marker — the agent itself always returns a string.
     const reply = await withTimeout<string | null>(
       aiAgent([system, ...prev, userMsg], {
-        maxTokens: 1200,
+        maxTokens: 2048,
         confirm,
         isOwner: true, // gated above — only the owner reaches this point
       }),

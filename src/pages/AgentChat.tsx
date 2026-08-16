@@ -267,7 +267,9 @@ export default function AgentChat() {
         // drafts an invoice took a minute behind the word "Thinking…", with no
         // sign it was doing anything. The same run now narrates itself.
         const stream = aiAgentStream(messages, {
-          maxTokens: 1200,
+          // The harness default. 1200 truncated any answer with a table or a
+          // list of invoices in it, which reads as the agent losing its thread.
+          maxTokens: 2048,
           isOwner: true,
           signal: ctl.signal,
         });
