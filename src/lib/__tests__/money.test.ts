@@ -1,6 +1,32 @@
 import { describe, it, expect } from "vitest";
 import { invoiceTotals, invoiceLineAmount, quotationTotals } from "../money";
 
+// The shape create_invoice_draft now builds for "rate per unit of measure"
+// pricing. It once priced this line as 20 × 4.1 = 82 — the pack count times a
+// per-litre rate — which put a wrong total on a tax invoice.
+describe("pricing by a custom column, not by pack count", () => {
+  const line = {
+    description: "H/O 68 Pail 20L",
+    qty: 20,
+    unit: "Pail",
+    unit_price: 4.1,
+    custom: { total_liters: "400" },
+  };
+
+  it("multiplies the named column by the rate", () => {
+    expect(invoiceLineAmount(line, { a: "total_liters" })).toBe(1640);
+  });
+
+  it("still prices by qty when no formula is set", () => {
+    expect(invoiceLineAmount(line)).toBe(82);
+  });
+
+  it("totals the document on the formula amount", () => {
+    const t = invoiceTotals([line], 0, 0, { a: "total_liters" });
+    expect(t.subtotal).toBe(1640);
+  });
+});
+
 describe("invoiceTotals — category-aware VAT", () => {
   it("taxes only standard-rated lines (mixed invoice)", () => {
     const t = invoiceTotals(

@@ -101,3 +101,32 @@ describe("paginated pages get real document items, not a cast", () => {
     expect(docLineAmount(asDocItem(auto))).toBe(300); // 3 × 100, not 0
   });
 });
+
+/* create_quote can price a line by a custom column instead of the pack count
+ * ("4.1 per litre, 400 litres" on 20 pails). That only holds if asDocItem
+ * carries `custom` through — without it the formula finds nothing and every
+ * such line silently prices at zero. */
+describe("quote lines priced by a custom column", () => {
+  const perLitre = {
+    product: "H/O 68 Pail 20L",
+    sku: "",
+    qty: 20,
+    rate: 4.1,
+    discount: 0,
+    tax: 0,
+    unit: "Pail",
+    custom: { total_liters: "400" },
+  };
+
+  it("prices on the column, not the pack count", () => {
+    expect(docLineAmount(asDocItem(perLitre), { a: "total_liters" })).toBe(1640);
+  });
+
+  it("keeps the column value through the mapping", () => {
+    expect(asDocItem(perLitre).custom?.total_liters).toBe("400");
+  });
+
+  it("falls back to qty × rate with no formula", () => {
+    expect(docLineAmount(asDocItem(perLitre))).toBe(82);
+  });
+});
