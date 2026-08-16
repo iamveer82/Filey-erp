@@ -18,8 +18,12 @@ import {
   BookOpen,
   SlidersHorizontal,
   User,
+  Copy,
+  Check,
+  Square,
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
+import Markdown from "../components/Markdown";
 import { openFolder } from "../lib/localPaths";
 import { ErrorBanner, PageHeader } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
@@ -27,7 +31,13 @@ import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { skillsIndex } from "../lib/agentSkills";
 import {
-  aiAgent,
+  AGENT_MODES,
+  getAgentMode,
+  setAgentMode,
+  type AgentMode,
+} from "../lib/agentMode";
+import {
+  aiAgentStream,
   aiAutonomous,
   aiReady,
   AiError,
@@ -53,9 +63,9 @@ import { fileToImage } from "../lib/docScan";
 import {
   loadChats,
   saveChats,
-  getActiveId,
   setActiveId,
   newChat,
+  resolveOpeningChat,
   deriveTitle,
   TURN_CAP,
   type Chat,
@@ -76,11 +86,18 @@ import {
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval. Never invent data — look it up. Be concise and practical.";
 
+/** Four things the agent is genuinely good at, phrased the way an owner would
+ *  ask. Kept short enough to fit one row on a laptop. */
+const STARTERS = [
+  "What did I invoice this month?",
+  "Who owes me money?",
+  "Draft an invoice",
+  "What's running low in stock?",
+];
+
 export default function AgentChat() {
-  const [chat, setChat] = useState<Chat>(() => {
-    const all = loadChats();
-    return all.find((c) => c.id === getActiveId()) ?? all[0] ?? newChat();
-  });
+  // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
+  const [chat, setChat] = useState<Chat>(resolveOpeningChat);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState(false);
@@ -103,6 +120,18 @@ export default function AgentChat() {
   const [dragging, setDragging] = useState(false);
   const ready = useMemo(() => aiReady(), []);
   const model = useMemo(() => getAiConfig().model, []);
+  const [mode, setMode] = useState<AgentMode>(getAgentMode);
+  /** What the agent is doing right now ("Looking up customers…"), shown while a
+   *  tool runs so a long turn reads as work rather than as a hang. */
+  const [activity, setActivity] = useState<string | null>(null);
+  /** Lets the Stop button cut a run short. ponytail: on desktop the native AI
+   *  proxy call itself isn't cancellable (see ai.ts), so an abort stops the
+   *  agent between rounds rather than mid-request — which is what "stop doing
+   *  more work" means to the person clicking it. */
+  const abortRef = useRef<AbortController | null>(null);
+  /** Mirrors the streamed text for the catch block — reading the state there
+   *  would get the value from the render that started the run, not the latest. */
+  const streamedRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -152,6 +181,10 @@ export default function AgentChat() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.turns, streaming, busy]);
 
+  /** Stop the run. The catch in send() turns the abort into a kept partial
+   *  reply rather than an error banner. */
+  const stop = () => abortRef.current?.abort();
+
   const startNew = () => {
     const c = newChat();
     setChat(c);
@@ -184,6 +217,8 @@ export default function AgentChat() {
     setChat(withUser);
     setBusy(true);
     setStreaming(auto ? "Planning…" : "");
+    const ctl = new AbortController();
+    abortRef.current = ctl;
 
     // Make the file available to run_file_tool; convert images for vision.
     setAttachment(attached);
@@ -203,10 +238,12 @@ export default function AgentChat() {
         const summary = await aiAutonomous(goalText, {
           images,
           isOwner: true,
+          signal: ctl.signal,
           onProgress: (t) => {
             if (!t) return;
             steps.push(t);
-            setStreaming(steps.join("\n\n"));
+            streamedRef.current = steps.join("\n\n");
+            setStreaming(streamedRef.current);
           },
         });
         reply =
@@ -226,7 +263,32 @@ export default function AgentChat() {
           ...withUser.turns.slice(-TURN_CAP).map((t) => ({ role: t.role, text: t.text })),
         ];
         if (images?.length) messages[messages.length - 1].images = images;
-        reply = await aiAgent(messages, { maxTokens: 1200, isOwner: true });
+        // Streamed, not awaited whole: a turn that looks up three things and
+        // drafts an invoice took a minute behind the word "Thinking…", with no
+        // sign it was doing anything. The same run now narrates itself.
+        const stream = aiAgentStream(messages, {
+          maxTokens: 1200,
+          isOwner: true,
+          signal: ctl.signal,
+        });
+        let sofar = "";
+        for (;;) {
+          const step = await stream.next();
+          if (step.done) {
+            reply = step.value;
+            break;
+          }
+          const ev = step.value;
+          if (ev.type === "text" && ev.text) {
+            sofar = sofar ? `${sofar}\n\n${ev.text}` : ev.text;
+            streamedRef.current = sofar;
+            setStreaming(sofar);
+          } else if (ev.type === "tool_call") {
+            setActivity(toolLabel(ev.name));
+          } else if (ev.type === "tool_result") {
+            setActivity(null);
+          }
+        }
       }
       // Files belong to the message that produced them. They used to live in
       // one shared slot above the composer, so asking a second question threw
@@ -240,10 +302,27 @@ export default function AgentChat() {
         ],
       }));
     } catch (e) {
-      setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
+      // A stop the user asked for is not an error. Whatever the agent had
+      // already said is kept as the reply — throwing it away would punish them
+      // for interrupting, which is the opposite of what the button is for.
+      if (ctl.signal.aborted) {
+        const partial = streamedRef.current.trim();
+        setChat((c) => ({
+          ...c,
+          turns: [
+            ...c.turns,
+            { role: "assistant", text: partial ? `${partial}\n\n_Stopped._` : "_Stopped._" },
+          ],
+        }));
+      } else {
+        setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
+      }
     } finally {
+      abortRef.current = null;
+      streamedRef.current = "";
       setBusy(false);
       setStreaming("");
+      setActivity(null);
       setAttachment(null); // don't leak into the next turn
     }
   };
@@ -307,7 +386,10 @@ export default function AgentChat() {
           </div>
         </div>
       )}
-      {/* Header */}
+      {/* Pinned: New chat, history and memory are needed most in the middle of
+          a long conversation, which is exactly where they used to be scrolled
+          off the top. The blur keeps message text from showing through. */}
+      <div className="sticky top-0 z-30 -mx-1 bg-background/85 px-1 backdrop-blur">
       <PageHeader
         title="Filey AI"
         subtitle="Your business assistant — ask about revenue, invoices, customers and more."
@@ -358,29 +440,13 @@ export default function AgentChat() {
             >
               <Brain size={15} />
             </button>
-            <button
-              type="button"
-              onClick={() => setAuto((v) => !v)}
-              title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
-              className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium transition-colors",
-                auto
-                  ? "border-primary-400 bg-primary-400/15 text-foreground"
-                  : "border-border bg-card text-muted-foreground hover:bg-hover hover:text-foreground"
-              )}
-            >
-              <Zap
-                size={13}
-                className={auto ? "text-primary-600 dark:text-primary-400" : ""}
-              />
-              {auto ? "Autonomous" : "Chat"}
-            </button>
             <button type="button" onClick={startNew} className="btn-ghost">
               <Plus size={14} /> New
             </button>
           </div>
         }
       />
+      </div>
 
       {/* Messages */}
       <div className="flex-1 space-y-6 pb-40 pt-2">
@@ -394,16 +460,38 @@ export default function AgentChat() {
               Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
               act across invoices, customers, inventory, accounting and more.
             </p>
+            {/* Openers, not decoration: a blank box gives no clue that this
+                agent can draft documents and chase payments, not just chat. */}
+            <div className="mt-5 flex flex-wrap justify-center gap-1.5">
+              {STARTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => void send(s)}
+                  className="rounded-full border border-border bg-card px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground active:scale-[0.97]"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           chat.turns.map((t, i) => <Bubble key={i} turn={t} />)
         )}
 
         {busy && (
-          <Bubble
-            turn={{ role: "assistant", text: streaming || "Thinking…" }}
-            pending
-          />
+          <>
+            <Bubble
+              turn={{ role: "assistant", text: streaming || "Thinking…" }}
+              pending
+            />
+            {activity && (
+              <div className="flex items-center gap-2 pl-11 text-[12px] text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" />
+                <span>{activity}</span>
+              </div>
+            )}
+          </>
         )}
 
         {err && <ErrorBanner message={err} />}
@@ -511,16 +599,66 @@ export default function AgentChat() {
                 {model}
               </span>
             )}
-            <div className="flex-1" />
+            {/* Right of the model name: how much the agent may do without
+                asking. It belongs next to the model because both answer the
+                same question — what is about to act on your data. */}
+            <select
+              value={mode}
+              onChange={(e) => {
+                const v = e.target.value as AgentMode;
+                setAgentMode(v);
+                setMode(v);
+              }}
+              aria-label="Agent mode"
+              title={AGENT_MODES.find((m) => m.id === mode)?.description}
+              className="rounded-lg border border-border bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground"
+            >
+              {AGENT_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            {/* Autonomous belongs here, not in the page header: it changes what
+                pressing Enter will do, so it sits with the thing you press. */}
             <button
               type="button"
-              onClick={() => void send(input)}
-              disabled={busy || (!input.trim() && !file)}
-              aria-label="Send"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
+              onClick={() => setAuto((v) => !v)}
+              aria-pressed={auto}
+              title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
+              className={cn(
+                "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-colors active:scale-[0.97]",
+                auto
+                  ? "bg-primary-400/15 text-foreground"
+                  : "text-muted-foreground hover:bg-hover hover:text-foreground"
+              )}
             >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={16} />}
+              <Zap size={13} className={auto ? "text-primary-600 dark:text-primary-400" : ""} />
+              {auto ? "Autonomous" : "Chat"}
             </button>
+            <div className="flex-1" />
+            {busy ? (
+              // Square, because that is what stop looks like everywhere else.
+              <button
+                type="button"
+                onClick={stop}
+                aria-label="Stop generating"
+                title="Stop"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80"
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void send(input)}
+                disabled={!input.trim() && !file}
+                aria-label="Send"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
           </div>
         </div>
         <p className="mt-1.5 px-2 text-[11px] text-muted-foreground">
@@ -726,6 +864,63 @@ export default function AgentChat() {
   );
 }
 
+/** Copy a reply. Shows "Copied" for a moment — without that the click has no
+ *  visible result at all and people click it twice. */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          },
+          () => {
+            /* clipboard blocked — nothing useful to say about it */
+          }
+        );
+      }}
+      aria-label="Copy reply"
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+    >
+      {done ? <Check size={12} /> : <Copy size={12} />}
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+/** Tool name → something a business owner recognises. Unknown tools fall back
+ *  to their own name with the underscores taken out, which reads well enough
+ *  that new tools need no entry here to be presentable. */
+function toolLabel(name: string): string {
+  const known: Record<string, string> = {
+    create_invoice_draft: "Drafting the invoice",
+    create_quote: "Drafting the quote",
+    create_purchase_order: "Drafting the purchase order",
+    create_customer: "Adding the customer",
+    create_product: "Adding the product",
+    adjust_stock: "Updating stock",
+    log_expense: "Logging the expense",
+    send_invoice: "Sending the invoice",
+    email_invoice: "Emailing the invoice",
+    mark_invoice_paid: "Marking it paid",
+    get_stats: "Checking the numbers",
+    find_customers: "Looking up customers",
+    find_products: "Looking up products",
+    find_invoices: "Looking up invoices",
+    list_whatsapp_messages: "Reading WhatsApp",
+    send_whatsapp: "Sending on WhatsApp",
+    read_web_page: "Reading the page",
+    search_web: "Searching the web",
+    recall: "Checking what I remember",
+    remember: "Saving that for later",
+    run_file_tool: "Working on the file",
+  };
+  return known[name] ?? `${name.replace(/_/g, " ")}…`;
+}
+
 function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
     return (
@@ -747,16 +942,23 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
       <div className="grid h-8 w-8 shrink-0 place-items-center">
         <ThinkingOrb size={20} state={pending ? "working" : "listening"} />
       </div>
-      <div className="min-w-0 max-w-[85%]">
+      <div className="group/msg min-w-0 max-w-[85%]">
         <div
           className={cn(
-            "whitespace-pre-wrap rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
+            "rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
             pending && "text-muted-foreground"
           )}
         >
-          {turn.text}
+          {/* Markdown, not raw text: the model writes **bold**, bullets and
+              fenced code, and every one of those used to show as punctuation. */}
+          <Markdown text={turn.text} />
           {pending && <span className="ml-1 inline-block animate-pulse">▍</span>}
         </div>
+        {!pending && turn.text.trim() && (
+          <div className="mt-1 flex opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
+            <CopyButton text={turn.text} />
+          </div>
+        )}
         {!!turn.files?.length && (
           <div className="mt-2 flex flex-wrap gap-2">
             {turn.files.map((f, i) =>

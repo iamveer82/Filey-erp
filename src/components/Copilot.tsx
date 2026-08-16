@@ -27,9 +27,9 @@ import {
 import {
   loadChats,
   saveChats,
-  getActiveId,
   setActiveId,
   newChat,
+  resolveOpeningChat,
   deriveTitle,
   transcript,
   TURN_CAP,
@@ -98,10 +98,15 @@ export default function Copilot() {
   const { profile } = useAuth();
   const { toast, confirm, prompt } = useUI();
   const [open, setOpen] = useState(false);
-  const [chats, setChats] = useState<Chat[]>(loadChats);
-  const [activeId, setActiveIdState] = useState<string | null>(
-    () => getActiveId() ?? loadChats()[0]?.id ?? null
-  );
+  // Same rule as the full page: a fresh chat per app launch, the one you were
+  // using for the rest of the run. Seeded into the list too — a brand-new chat
+  // has no turns, so it isn't in storage yet and would otherwise be missing.
+  const [opening] = useState(resolveOpeningChat);
+  const [chats, setChats] = useState<Chat[]>(() => {
+    const all = loadChats();
+    return all.some((c) => c.id === opening.id) ? all : [opening, ...all];
+  });
+  const [activeId, setActiveIdState] = useState<string | null>(opening.id);
   const [view, setView] = useState<View>("chat");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [input, setInput] = useState("");

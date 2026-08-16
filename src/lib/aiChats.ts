@@ -83,6 +83,40 @@ export function saveChats(chats: Chat[]): void {
   }
 }
 
+/** Set once per app run; its absence is what marks a fresh launch. */
+const SESSION_KEY = "filey.agent.session_started";
+
+/**
+ * The chat to open, given where in the app's life we are.
+ *
+ * Each launch starts a clean conversation — yesterday's half-finished thread is
+ * rarely what you meant to continue. Within one run, leaving the page (or using
+ * the popover instead) keeps the chat you were having.
+ *
+ * sessionStorage draws that line for free: the webview clears it when the app
+ * closes, while the chats themselves live in localStorage and survive. So
+ * history keeps everything; only the *active* pointer resets. Both the full
+ * page and the popover call this, or they would disagree about which chat is
+ * current depending on which one you opened first.
+ */
+export function resolveOpeningChat(): Chat {
+  let fresh = false;
+  try {
+    fresh = !sessionStorage.getItem(SESSION_KEY);
+    if (fresh) sessionStorage.setItem(SESSION_KEY, "1");
+  } catch {
+    // No sessionStorage (private mode, locked-down webview): fall through and
+    // resume the last chat rather than losing the thread on every mount.
+  }
+  if (fresh) {
+    const c = newChat();
+    setActiveId(c.id);
+    return c;
+  }
+  const all = loadChats();
+  return all.find((c) => c.id === getActiveId()) ?? all[0] ?? newChat();
+}
+
 export function getActiveId(): string | null {
   try {
     return localStorage.getItem(ACTIVE_KEY);
