@@ -837,6 +837,115 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "revise_invoice",
+    description:
+      "Correct a DRAFT invoice that is already saved — replace its lines, change the customer, or change how the lines are priced. Use this when the user says a figure is wrong instead of drafting a second invoice: two near-identical drafts are worse than one corrected. Only drafts can be revised; an invoice that has been sent or paid must be handled deliberately, not edited underneath the customer. `items` replaces every line when given.",
+    parameters: {
+      type: "object",
+      properties: {
+        invoice_number: { type: "string", description: "The number returned when it was created." },
+        customer_name: { type: "string" },
+        custom_columns: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" } },
+            required: ["key", "label"],
+          },
+        },
+        price_by: {
+          type: "string",
+          description:
+            "Custom column key the amount multiplies by. Pass an empty string to go back to qty × unit_price.",
+        },
+        items: {
+          type: "array",
+          description: "Replaces ALL existing lines. Omit to keep them.",
+          items: {
+            type: "object",
+            properties: {
+              description: { type: "string" },
+              qty: { type: "number" },
+              unit_price: { type: "number" },
+              unit: { type: "string" },
+              custom: { type: "object" },
+            },
+            required: ["description", "qty", "unit_price"],
+          },
+        },
+      },
+      required: ["invoice_number"],
+    },
+    run: async (a) => {
+      const found = await findInvoice(a.invoice_number);
+      if (!found) return { error: `No invoice matching "${str(a.invoice_number)}"` };
+      const doc = (await billing.getDoc(Number(found.id))) as unknown as InvoiceDocInput;
+      // A sent invoice is a document the customer already has. Changing it
+      // silently is how the books and the customer's copy stop agreeing.
+      if (str(doc.status) !== "draft")
+        return {
+          error: `${str(doc.number)} is "${str(doc.status)}", not a draft. Only drafts can be revised — issue a credit note or a new invoice instead.`,
+        };
+
+      const cols = Array.isArray(a.custom_columns)
+        ? (a.custom_columns as Record<string, unknown>[])
+            .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
+            .filter((c) => c.key)
+        : doc.custom_columns ?? [];
+
+      const items = Array.isArray(a.items)
+        ? (a.items as Record<string, unknown>[]).map((it) => ({
+            description: str(it.description),
+            qty: numOf(it.qty) || 1,
+            unit_price: numOf(it.unit_price),
+            ...(str(it.unit) ? { unit: str(it.unit) } : {}),
+            ...(it.custom && typeof it.custom === "object"
+              ? {
+                  custom: Object.fromEntries(
+                    Object.entries(it.custom as Record<string, unknown>).map(([k, v]) => [
+                      k,
+                      String(v ?? ""),
+                    ])
+                  ),
+                }
+              : {}),
+          }))
+        : doc.items;
+
+      // Absent means "leave it"; an empty string means "stop using a formula".
+      const priceBy =
+        a.price_by === undefined
+          ? doc.unit_price_formula?.a ?? ""
+          : (() => {
+              const w = str(a.price_by);
+              return w && (w === "qty" || cols.some((c) => c.key === w)) ? w : "";
+            })();
+
+      const next: InvoiceDocInput = {
+        ...doc,
+        ...(str(a.customer_name) ? { customer_name: str(a.customer_name) } : {}),
+        items,
+        custom_columns: cols,
+        unit_price_formula: priceBy ? { a: priceBy, b: "unit_price" } : null,
+      };
+      await billing.saveDoc(next);
+
+      const formula = priceBy ? { a: priceBy } : undefined;
+      const lines = items.map((it) => ({
+        description: it.description,
+        amount: invoiceLineAmount(it, formula),
+      }));
+      return {
+        ok: true,
+        number: doc.number,
+        lines,
+        subtotal: r2(lines.reduce((s, l) => s + l.amount, 0)),
+        priced_by: priceBy || "qty × unit price",
+        message: `${doc.number} updated.`,
+      };
+    },
+  },
+  {
     name: "send_invoice",
     sensitive: true,
     description: "Mark an invoice as sent (by its number).",
@@ -1354,10 +1463,30 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_purchase_order",
-    description: "Create a purchase order with line items (draft).",
+    description:
+      "Create a purchase order with line items (draft). Name the supplier — a PO without one cannot be sent.\n\n" +
+      "PRICING THAT IS NOT qty × unit_price: when the supplier quotes a rate per litre, kg, metre or hour, do NOT multiply it out by hand and do NOT price by the pack count. Add the real measure as a custom column and price on it: `custom_columns` names the columns ([{key:\"total_liters\", label:\"T.Liters\"}]), each item carries its value in `custom` ({\"total_liters\":\"400\"}), and `price_by` is the column the amount multiplies. 20 pails of 20L at 4.1 per litre is 400 × 4.1 = 1640, not 20 × 4.1 = 82.",
     parameters: {
       type: "object",
       properties: {
+        supplier_name: { type: "string" },
+        currency: { type: "string" },
+        expected_date: { type: "string", description: "YYYY-MM-DD, when it is needed." },
+        custom_columns: {
+          type: "array",
+          description:
+            "Extra per-line columns, e.g. [{key:\"total_liters\", label:\"T.Liters\"}].",
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" } },
+            required: ["key", "label"],
+          },
+        },
+        price_by: {
+          type: "string",
+          description:
+            "Custom column key the line amount multiplies by instead of qty. Omit for ordinary qty × unit_price.",
+        },
         items: {
           type: "array",
           items: {
@@ -1366,6 +1495,11 @@ export const TOOLS: ToolDef[] = [
               description: { type: "string" },
               qty: { type: "number" },
               unit_price: { type: "number" },
+              unit: { type: "string", description: "What one qty is — Pail, Drum, kg, hr." },
+              custom: {
+                type: "object",
+                description: "Values for the custom columns, keyed by column key.",
+              },
             },
             required: ["description", "qty", "unit_price"],
           },
@@ -1377,24 +1511,69 @@ export const TOOLS: ToolDef[] = [
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
         : [];
+      const cols = Array.isArray(args.custom_columns)
+        ? (args.custom_columns as Record<string, unknown>[])
+            .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
+            .filter((c) => c.key)
+        : [];
+      const wanted = str(args.price_by);
+      const priceBy =
+        wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
       const poNumber = `PO-${today().replace(/-/g, "")}-${Math.floor(Math.random() * 9000 + 1000)}`;
+      const lineItems = items.map((it) => ({
+        description: str(it.description),
+        quantity: numOf(it.qty) || 1,
+        unit_cost: numOf(it.unit_price),
+        ...(str(it.unit) ? { unit: str(it.unit) } : {}),
+        ...(it.custom && typeof it.custom === "object"
+          ? {
+              custom: Object.fromEntries(
+                Object.entries(it.custom as Record<string, unknown>).map(([k, v]) => [
+                  k,
+                  String(v ?? ""),
+                ])
+              ),
+            }
+          : {}),
+      }));
+      // PO lines price off unit_cost; invoiceLineAmount reads unit_price, so the
+      // value is handed over under the name it expects.
+      const formula = priceBy ? { a: priceBy } : undefined;
+      const lines = lineItems.map((it) => ({
+        description: it.description,
+        amount: invoiceLineAmount(
+          { qty: it.quantity, unit_price: it.unit_cost, custom: it.custom },
+          formula
+        ),
+      }));
+      const total = r2(lines.reduce((s, l) => s + l.amount, 0));
       await pos.save({
         po_number: poNumber,
         status: "draft",
         template: "uae",
         accent: "#222222",
-        currency: "AED",
+        currency: str(args.currency) || getDisplayCurrency(),
         order_date: today(),
-        total: 0,
-        items: items.map((it) => ({
-          description: str(it.description),
-          quantity: numOf(it.qty) || 1,
-          unit_cost: numOf(it.unit_price),
-        })),
+        ...(str(args.supplier_name) ? { supplier_name: str(args.supplier_name) } : {}),
+        ...(str(args.expected_date) ? { expected_date: str(args.expected_date) } : {}),
+        // Passed, not left at 0: pos.save trusts the caller's total (it is the
+        // only figure that accounts for a formula), so a hardcoded zero was
+        // persisting every agent-made PO with no value at all.
+        total,
+        items: lineItems,
+        ...(cols.length ? { custom_columns: cols } : {}),
+        ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       });
+      const unknownParty = str(args.supplier_name)
+        ? await partyCheck("supplier", args.supplier_name)
+        : { warning: "No supplier named — the PO cannot be sent until one is set." };
       return {
         ok: true,
         number: poNumber,
+        ...(unknownParty ?? {}),
+        lines,
+        total,
+        priced_by: priceBy || "qty × unit price",
         message: `Purchase order ${poNumber} created.`,
       };
     },

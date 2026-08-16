@@ -1110,9 +1110,9 @@ function Editor({
       // Remove the in-memory aliases that don't exist on the DB model.
       delete (payload as any).customColumns;
 
-      // TODO: pos.save recomputes total from qty*unit_cost, so formula-driven
-      // line amounts are not reflected in the persisted total. Update the
-      // API helper to accept/respect the total field when a formula is set.
+      // The payload carries `total` (from totals.total above) because pos.save
+      // trusts a passed total and only falls back to qty × unit_cost when none
+      // is given — which is what makes formula-priced lines persist correctly.
       const id = await pos.save(payload);
       setForm({ ...form, id });
       await onSaved();

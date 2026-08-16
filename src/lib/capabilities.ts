@@ -19,6 +19,7 @@ export const CAPABILITIES: Capability[] = [
     description: "Create/send invoices & quotes, mark paid, recurring, orders",
     tools: [
       "create_invoice_draft",
+      "revise_invoice",
       "send_invoice",
       "mark_invoice_paid",
       "set_recurring",

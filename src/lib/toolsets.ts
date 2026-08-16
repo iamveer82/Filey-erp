@@ -31,6 +31,10 @@ export const CORE_TOOLS = [
   "financial_summary",
   // the documents people ask for by name
   "create_invoice_draft",
+  // Correcting a draft is as everyday as making one, and keeping it out of the
+  // core set is what makes an agent produce a second invoice instead of fixing
+  // the first.
+  "revise_invoice",
   "create_quote",
   "create_customer",
   "create_product",
