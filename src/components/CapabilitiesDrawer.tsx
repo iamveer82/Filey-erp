@@ -6,6 +6,7 @@ import {
   isCapabilityEnabled,
   setCapabilityEnabled,
 } from "../lib/capabilities";
+import { AGENT_MODES, getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
 import { cn } from "../lib/format";
 
 /* Toggle which action groups the agent may use. Read-only tools (search,
@@ -18,12 +19,14 @@ export default function CapabilitiesDrawer({
   onClose: () => void;
 }) {
   const [state, setState] = useState<Record<string, boolean>>({});
+  const [mode, setMode] = useState<AgentMode>("accept_edits");
 
   useEffect(() => {
     if (!open) return;
     const next: Record<string, boolean> = {};
     for (const c of CAPABILITIES) next[c.id] = isCapabilityEnabled(c.id);
     setState(next);
+    setMode(getAgentMode());
   }, [open]);
 
   if (!open) return null;
@@ -58,6 +61,37 @@ export default function CapabilitiesDrawer({
         </div>
 
         <div className="flex-1 space-y-2 overflow-auto p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-400">
+            How much it does on its own
+          </p>
+          <div className="space-y-1.5 pb-2">
+            {AGENT_MODES.map((m) => {
+              const on = mode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    setAgentMode(m.id);
+                    setMode(m.id);
+                  }}
+                  aria-pressed={on}
+                  className={cn(
+                    "w-full rounded-xl border px-4 py-2.5 text-left transition-colors",
+                    on
+                      ? "border-primary-400 bg-primary-50"
+                      : "border-brand-200 hover:border-brand-300"
+                  )}
+                >
+                  <p className="text-sm font-medium text-ink">{m.name}</p>
+                  <p className="text-xs text-brand-400">{m.description}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-brand-400">
+            What it may touch
+          </p>
           {CAPABILITIES.map((c) => {
             const on = state[c.id] ?? true;
             return (

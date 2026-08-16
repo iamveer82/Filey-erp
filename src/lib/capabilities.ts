@@ -72,7 +72,13 @@ export const CAPABILITIES: Capability[] = [
     id: "channels",
     name: "Messaging (Composio)",
     description: "Send via connected Gmail / Slack / Telegram, and share document links",
-    tools: ["send_gmail", "composio_run", "share_document_link", "connect_whatsapp"],
+    tools: [
+      "send_gmail",
+      "composio_run",
+      "share_document_link",
+      "connect_whatsapp",
+      "send_whatsapp",
+    ],
   },
   {
     id: "reminders",
@@ -129,4 +135,11 @@ export function setCapabilityEnabled(id: string, enabled: boolean): void {
 export function isToolAllowed(toolName: string): boolean {
   const cap = CAPABILITIES.find((c) => c.tools.includes(toolName));
   return cap ? isCapabilityEnabled(cap.id) : true;
+}
+
+/** Does this tool change anything? Only write/action tools are grouped above,
+ *  so being in a group is what makes a tool a write — this saves flagging every
+ *  read tool by hand. Used by the agent modes (see agentMode.ts). */
+export function isWriteTool(toolName: string): boolean {
+  return CAPABILITIES.some((c) => c.tools.includes(toolName));
 }

@@ -14,6 +14,7 @@
 import { runAgentStream, type AgentEvent } from "./agentHarness";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
+import { modeSystemNote } from "./agentMode";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -134,6 +135,10 @@ const WORKING_RULES =
 
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
   const parts = [base, AI_GUARDRAILS, HUMAN_TONE, WORKING_RULES, FILE_WORKFLOW];
+  // Every surface (in-app chat, WhatsApp, autonomous runs) builds its prompt
+  // here, so the agent mode is stated once and applies everywhere.
+  const modeNote = modeSystemNote();
+  if (modeNote) parts.push(modeNote);
   const who: string[] = [`Your name is ${persona.assistantName || "Filey"}.`];
   if (persona.userName) who.push(`The user's name is ${persona.userName}.`);
   if (persona.role) who.push(`Their role is ${persona.role}.`);
