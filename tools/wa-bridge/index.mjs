@@ -52,8 +52,17 @@ function textOf(m) {
 
 /** Replies arrive on stdin as `FILEY {"type":"reply","id":...,"text":...}`.
  *  Each outstanding message awaits its reply by id; anything else is ignored. */
-const pending = new Map(); // id -> resolve(text)
-const REPLY_TIMEOUT_MS = 120_000;
+const pending = new Map(); // id -> { resolve, timer, ackTimer, jid, timedOut }
+/** One agent turn can be several LLM calls, and the desktop AI proxy allows
+ *  180s per call — two minutes was short enough that a real piece of work
+ *  (look up the customer, price the lines, draft the invoice) blew through it,
+ *  and the answer that arrived afterwards was thrown away. */
+const REPLY_TIMEOUT_MS = 240_000;
+/** Silence reads as "it's broken", so say something while the agent works. */
+const ACK_AFTER_MS = 20_000;
+/** The app's replies open with this line (waFormat in src/lib/waAgent.ts); the
+ *  bridge's own messages wear it too so everything from Filey looks the same. */
+const HEADER = "*⚡ Filey Agent*";
 
 /** The live socket (set in start()); the stdin `send` handler uses it for
  *  proactive owner notifications. */
@@ -73,6 +82,17 @@ function remember(id) {
 
 const digitsOf = (s) => (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "");
 
+/** Send on the live socket, remembering the id so our own message doesn't come
+ *  back through messages.upsert as a new question. Never throws. */
+async function sendTo(jid, text) {
+  if (!jid || !text || !activeSock) return;
+  try {
+    remember((await activeSock.sendMessage(jid, { text }))?.key?.id);
+  } catch (e) {
+    console.error("send failed:", e?.message);
+  }
+}
+
 function startStdinLoop() {
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   rl.on("line", (line) => {
@@ -89,33 +109,80 @@ function startStdinLoop() {
       if (r) {
         pending.delete(v.id);
         clearTimeout(r.timer);
-        r.resolve(v.text ?? "");
+        clearTimeout(r.ackTimer);
+        // A late answer is still the answer: deliver it as its own message
+        // instead of dropping it because a timer fired first.
+        if (r.timedOut) void sendTo(r.jid, v.text ?? "");
+        else r.resolve(v.text ?? "");
       }
     }
     if (v.type === "send") {
       // Proactive message to a specific JID (owner notifications). The desktop
       // app drives these after pairing; before that activeSock is null.
-      if (v.to && v.text && activeSock) {
-        activeSock
-          .sendMessage(v.to, { text: v.text })
-          .then((s) => remember(s?.key?.id))
-          .catch((e) => console.error("send failed:", e?.message));
-      }
+      void sendTo(v.to, v.text);
     }
   });
 }
 
-/** Send a message to the local agent and wait for its reply. Never throws. */
-function askAgent(from, text, fromName) {
+/** Send a message to the local agent and wait for its reply. Never throws.
+ *  The entry survives its own timeout so a slow answer is still delivered. */
+function askAgent(jid, from, text, fromName) {
   const id = crypto.randomUUID();
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      resolve("The app didn't answer in time — make sure Filey is open and the WhatsApp bridge is running.");
+    const entry = { resolve, jid, timedOut: false };
+    entry.ackTimer = setTimeout(() => {
+      if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
+    }, ACK_AFTER_MS);
+    entry.timer = setTimeout(() => {
+      entry.timedOut = true;
+      // Stop holding this chat's turn, but keep the entry around a while: if
+      // the app answers late, the reply handler sends it as its own message.
+      setTimeout(() => pending.delete(id), 120_000).unref?.();
+      resolve(
+        `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected. I'll send the answer if it still lands.`
+      );
     }, REPLY_TIMEOUT_MS);
-    pending.set(id, { resolve, timer });
+    pending.set(id, entry);
     emit({ type: "message", id, from, text, fromName });
   });
+}
+
+/** Reconnect ONCE per drop, on a fresh socket, with the dead one fully torn
+ *  down first.
+ *
+ *  This used to call start() straight from the close handler. Nothing stopped
+ *  the old socket, so every drop left another live socket behind, all sharing
+ *  the same auth folder and all writing signal state: the phone ends up unable
+ *  to decrypt what the stale session sends, and shows "Waiting for this
+ *  message" where the reply should be. A flapping connection also meant the
+ *  same incoming message was handled by several sockets at once. */
+let reconnecting = false;
+let backoffStep = 0;
+
+function reconnect(dead) {
+  try {
+    // Stop it answering and stop it re-entering here — but NOT `creds.update`.
+    // Baileys flushes credential updates (prekey counters, identity state) as
+    // it shuts down, and those are saved by that listener while the signal keys
+    // are written straight to disk by the auth state. Dropping the listener
+    // first loses the creds half, so the folder ends up with keys newer than
+    // the creds that index them — after which the phone cannot decrypt what we
+    // send and shows "Waiting for this message". End first, unsubscribe after.
+    dead?.ev?.removeAllListeners?.("messages.upsert");
+    dead?.ev?.removeAllListeners?.("connection.update");
+    dead?.end?.(undefined);
+    setTimeout(() => dead?.ev?.removeAllListeners?.("creds.update"), 2_000).unref?.();
+  } catch {
+    // already gone
+  }
+  if (activeSock === dead) activeSock = null;
+  if (reconnecting) return;
+  reconnecting = true;
+  const wait = Math.min(30_000, 2_000 * 2 ** backoffStep++);
+  setTimeout(() => {
+    reconnecting = false;
+    start().catch((e) => console.error("reconnect failed:", e?.message));
+  }, wait);
 }
 
 async function start() {
@@ -123,6 +190,20 @@ async function start() {
   // somewhere writable. The desktop app passes its per-user data dir; a human
   // running this from the repo gets ./auth next to the script.
   const authDir = process.env.FILEY_BRIDGE_STATE || path.join(process.cwd(), "auth");
+  // Never two sockets on one auth folder. Both would write signal state and the
+  // phone would stop being able to decrypt us; one live socket is the whole
+  // invariant this file has to hold.
+  if (activeSock) {
+    const old = activeSock;
+    activeSock = null;
+    try {
+      old.ev?.removeAllListeners?.("messages.upsert");
+      old.ev?.removeAllListeners?.("connection.update");
+      old.end?.(undefined);
+    } catch {
+      // already gone
+    }
+  }
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const sock = makeWASocket({ auth: state, printQRInTerminal: false });
   activeSock = sock;
@@ -139,6 +220,7 @@ async function start() {
         .catch((e) => console.error("qr encode failed:", e.message));
     }
     if (connection === "open") {
+      backoffStep = 0;
       console.log("\n✅ Paired. Message this number from your own WhatsApp and the agent answers.\n");
       emit({ type: "status", state: "connected", me: sock.user?.id ?? null });
     }
@@ -154,7 +236,7 @@ async function start() {
       }
       console.warn("Connection dropped — reconnecting…");
       emit({ type: "status", state: "reconnecting" });
-      start();
+      reconnect(sock);
     }
   });
 
@@ -179,9 +261,12 @@ async function start() {
       const name = m.pushName ?? phone;
       console.log(`← ${name}: ${text}`);
 
-      const reply = await askAgent(phone, text, name);
+      const reply = await askAgent(jid, phone, text, name);
       if (!reply) continue;
-      remember((await sock.sendMessage(jid, { text: reply }))?.key?.id);
+      // Sent on the CURRENT socket, not the one this message arrived on: a
+      // reconnect during a long agent run would otherwise send on a dead
+      // session, which the phone shows as "Waiting for this message".
+      await sendTo(jid, reply);
       console.log(`→ ${reply.slice(0, 120)}${reply.length > 120 ? "…" : ""}`);
     }
   });

@@ -90,11 +90,35 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Err("WhatsApp bridge binary is not installed with this build".into())
 }
 
+/// Kill any sidecar left over from a previous run of the app.
+///
+/// Windows does not reap orphans: a crash, a force-quit, or a dev-mode rebuild
+/// kills the app and leaves the bridge running with a live WhatsApp socket.
+/// The next launch then spawns a second one, and two bridges sharing one auth
+/// folder both write signal state — which shreds the session and leaves the
+/// phone showing "Waiting for this message" until you re-pair. wa_bridge_stop
+/// only reaches a child THIS process spawned, so it cannot help here; sweeping
+/// by name before spawning is what survives a hard kill.
+fn kill_stale_sidecars() {
+    #[cfg(windows)]
+    {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/F", "/IM", "filey-wa-bridge.exe"]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.output(); // nothing to kill is the normal case
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("pkill").args(["-f", "filey-wa-bridge"]).output();
+    }
+}
+
 /// Start (or restart) the bridge. No webhook — messages route to the app's own
 /// agent over stdin/stdout.
 #[tauri::command]
 pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
     wa_bridge_stop(app.clone()).ok();
+    kill_stale_sidecars();
 
     let bin = sidecar_path(&app)?;
     // Session state must outlive updates, so it goes in the per-user app data
@@ -137,7 +161,14 @@ pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 let Some(payload) = line.strip_prefix("FILEY ") else {
-                    continue; // human-readable noise (the ASCII QR, logs)
+                    // Not protocol — the sidecar's own logs ("← Name: text",
+                    // send failures, the ASCII QR). These used to be dropped on
+                    // the floor, which meant a bridge that received a message
+                    // and answered nobody left no trace anywhere. Forward them.
+                    if !line.trim().is_empty() {
+                        println!("[wa-bridge] {line}");
+                    }
+                    continue;
                 };
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else {
                     continue;
@@ -239,6 +270,28 @@ pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
         };
     }
     Ok(())
+}
+
+/// Forget the pairing and start fresh, so the next start shows a QR.
+///
+/// A dropped connection used to leave stale sockets writing the same signal
+/// state; once that state is torn, the phone cannot decrypt what the session
+/// sends and shows "Waiting for this message" forever. Reconnecting is fixed in
+/// the sidecar, but a session already corrupted stays corrupted — the keys are
+/// on the phone too. This is the only way out, and it needs to be a button
+/// rather than "go delete a folder in AppData".
+#[tauri::command]
+pub fn wa_bridge_reset(app: AppHandle) -> Result<BridgeState, String> {
+    wa_bridge_stop(app.clone()).ok();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("wa-bridge");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("could not clear session: {e}"))?;
+    }
+    wa_bridge_start(app)
 }
 
 #[tauri::command]

@@ -18,9 +18,34 @@ import {
   type WaMessage,
 } from "./waBridge";
 import { billing } from "./api";
+import { waLogAdd } from "./waLog";
 
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval: if a tool needs approval and is refused, tell the user exactly what you need approved and ask them to reply YES to proceed. Never invent data — look it up. Be concise and practical.";
+
+/** Every message Filey sends on WhatsApp opens with this line, so an answer is
+ *  recognisable as the agent's at a glance in a thread of your own messages. */
+export const WA_HEADER = "*⚡ Filey Agent*";
+
+/** WhatsApp is not markdown: `#`, `**` and tables render as literal characters,
+ *  so the house style is spelled out rather than left to the model's defaults. */
+const FORMAT = [
+  "REPLY FORMAT — every WhatsApp message you send follows it:",
+  `1. First line is exactly: ${WA_HEADER}`,
+  "2. Blank line, then the answer — lead with the outcome in one sentence, key values in *bold*.",
+  "3. Detail, when there is any, goes in sections: a heading line in *BOLD CAPS*, then items as `· Label — value`.",
+  "4. WhatsApp formatting ONLY: *bold*, _italic_, ```monospace```. Never markdown (#, **, ---, | tables, code fences) — it shows up as raw characters.",
+  "5. Plain sentences, no emojis beyond the header, and keep it short enough to read on a phone.",
+].join("\n");
+
+/** Put the header on a reply (once) — the model is asked for it, and this makes
+ *  sure it is there even when the model forgets. */
+export function waFormat(text: string): string {
+  const t = (text ?? "").trim();
+  if (!t) return "";
+  const body = t.startsWith(WA_HEADER) ? t.slice(WA_HEADER.length).trim() : t;
+  return body ? `${WA_HEADER}\n\n${body}` : WA_HEADER;
+}
 
 let started = false;
 
@@ -42,6 +67,25 @@ const HISTORY_LIMIT = 20; // user+assistant turns kept per chat
 const pendingApproval = new Map<string, boolean>();
 
 const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sure|agreed)$/i;
+
+/** A run that never finishes used to wedge the queue forever: the message that
+ *  hung was never answered, and every message after it — hours of them — was
+ *  answered by nobody either. One LLM call can legitimately take minutes (the
+ *  desktop AI proxy allows 180s per request and retries transient failures), so
+ *  the cap is generous, but it is a cap. Stays under the sidecar's own reply
+ *  timeout so the owner gets this line rather than the sidecar's. */
+const RUN_TIMEOUT_MS = 200_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const t = setTimeout(() => resolve(fallback), ms);
+    const done = (v: T) => {
+      clearTimeout(t);
+      resolve(v);
+    };
+    p.then(done, () => done(fallback));
+  });
+}
 
 /** Digits of the number part of a JID: "971501234567:12@s.whatsapp.net" and
  *  "971501234567" both come out as "971501234567". */
@@ -87,6 +131,19 @@ export function startWaAgent(): void {
 
 /** Answer one incoming message. Runs one at a time, off the queue. */
 async function handle(m: WaMessage): Promise<void> {
+  // Everything the bridge sees goes in the log, owner or customer: it is the
+  // only record of the WhatsApp thread the in-app agent can read back (see
+  // list_whatsapp_messages). WhatsApp itself offers no history to fetch.
+  waLogAdd({ dir: "in", from: m.from, name: m.fromName, text: m.text });
+  console.info(`[wa] message from ${m.from}: ${m.text.slice(0, 80)}`);
+  const answer = async (text: string) => {
+    // Empty stays empty: that is the deliberate silence for a non-owner, and it
+    // is what releases the sidecar's pending promise.
+    const out = waFormat(text);
+    if (out) waLogAdd({ dir: "out", from: m.from, name: m.fromName, text: out });
+    await replyWa(m.id, out);
+  };
+
   // The agent answers the OWNER only. Anyone else who happens to have the
   // business number gets silence: this agent can read the whole book —
   // customers, prices, revenue — and its approval gate is a "yes" in the same
@@ -98,12 +155,22 @@ async function handle(m: WaMessage): Promise<void> {
   // The empty reply matters: it releases the sidecar's pending promise, which
   // would otherwise time out and send the customer a "didn't answer" line.
   if (!(await isOwnerSender(m.from))) {
-    await replyWa(m.id, "");
+    // Silent to the sender, but never silent to the log: a wrong owner match is
+    // indistinguishable from a broken bridge from the outside, and that cost a
+    // long evening once.
+    const me = await bridgeState().then((s) => s.me).catch(() => null);
+    console.warn(
+      `[wa] ignored message from ${m.from} — not recognised as the owner ` +
+        `(paired account: ${me ?? "unknown"}, owner number set: ${
+          getBridgeConfig().ownerNumber || "none"
+        })`
+    );
+    await answer("");
     return;
   }
 
   if (!aiReady()) {
-    await replyWa(m.id, "Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first.");
+    await answer("Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first.");
     return;
   }
 
@@ -121,7 +188,7 @@ async function handle(m: WaMessage): Promise<void> {
     };
 
     const baseSystem = buildSystemPrompt(
-      SYSTEM,
+      `${SYSTEM}\n\n${FORMAT}`,
       getPersona(),
       [memoryDigest(), skillsIndex()].filter(Boolean).join("\n\n")
     );
@@ -134,11 +201,24 @@ async function handle(m: WaMessage): Promise<void> {
 
     const prev = history.get(key) ?? [];
     const userMsg: AiMessage = { role: "user", text: m.text };
-    const reply = await aiAgent([system, ...prev, userMsg], {
-      maxTokens: 1200,
-      confirm,
-      isOwner: true, // gated above — only the owner reaches this point
-    });
+    // null is the timeout marker — the agent itself always returns a string.
+    const reply = await withTimeout<string | null>(
+      aiAgent([system, ...prev, userMsg], {
+        maxTokens: 1200,
+        confirm,
+        isOwner: true, // gated above — only the owner reaches this point
+      }),
+      RUN_TIMEOUT_MS,
+      null
+    );
+    if (reply === null) {
+      // Say so and drop the turn rather than holding the queue: the next
+      // message must still get answered.
+      await answer(
+        "That one is taking longer than I can hold the line for — it may still be running in the app. Send it again, or ask me to check what got created."
+      );
+      return;
+    }
     const text = reply?.trim() ? reply : "…";
     const next: AiMessage[] = [...prev, userMsg, { role: "assistant", text }];
     if (next.length > HISTORY_LIMIT) next.splice(0, next.length - HISTORY_LIMIT);
@@ -147,8 +227,10 @@ async function handle(m: WaMessage): Promise<void> {
     if (approvalHit) pendingApproval.set(key, true);
     else pendingApproval.delete(key);
 
-    await replyWa(m.id, text);
-  } catch {
-    await replyWa(m.id, "Sorry — something went wrong on my side. Try again in a moment.");
+    await answer(text);
+  } catch (e) {
+    // The reason matters over WhatsApp — there is no console to check.
+    const why = e instanceof Error ? e.message : String(e);
+    await answer(`Sorry — that failed on my side: ${why.slice(0, 300)}`);
   }
 }

@@ -63,6 +63,13 @@ export async function startBridge(): Promise<BridgeState> {
   return invoke<BridgeState>("wa_bridge_start");
 }
 
+/** Wipe the pairing and start again (next start shows a QR). The way out of a
+ *  session the phone can no longer decrypt — see wa_bridge_reset. */
+export async function resetBridge(): Promise<BridgeState> {
+  if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
+  return invoke<BridgeState>("wa_bridge_reset");
+}
+
 export async function stopBridge(): Promise<void> {
   if (!hasDesktop) return;
   await invoke("wa_bridge_stop");

@@ -59,6 +59,7 @@ import {
   bridgeState,
   startBridge,
   stopBridge,
+  resetBridge,
   onBridgeState,
   type BridgeConfig,
   type BridgeState,
@@ -876,6 +877,20 @@ function WhatsAppBridgeProvider() {
         </button>
         <button className="btn-ghost" onClick={() => run(stopBridge)}>
           Stop
+        </button>
+        <button
+          className="btn-ghost"
+          title="Forget the pairing and show a fresh QR — use this if your phone shows “Waiting for this message”."
+          onClick={() => {
+            if (
+              window.confirm(
+                "Unpair this WhatsApp session and start over? You'll scan a new QR code."
+              )
+            )
+              void run(resetBridge);
+          }}
+        >
+          Re-pair
         </button>
         <label className="ml-auto flex items-center gap-2 text-[12.5px] text-muted-foreground">
           <input
