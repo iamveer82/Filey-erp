@@ -8,6 +8,7 @@
 // `wa-message` event and the app's own agent answers through replyWa(). The
 // brain, memory and tools all live in this app — nothing is sent to a server.
 import { invoke } from "@tauri-apps/api/core";
+import { log } from "./log";
 import { listen } from "@tauri-apps/api/event";
 
 export const hasDesktop =
@@ -118,6 +119,6 @@ export async function autoStartBridge(): Promise<void> {
   try {
     await startBridge();
   } catch (e) {
-    console.warn("WhatsApp bridge auto-start failed:", e);
+    log.warn("whatsapp", "bridge auto-start failed", e);
   }
 }

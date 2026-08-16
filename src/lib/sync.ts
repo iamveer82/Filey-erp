@@ -16,6 +16,7 @@
 // (cloudSignIn below); its session persists in localStorage across restarts.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { log } from "./log";
 import { supabase } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { PUSH_TABLES } from "./syncTables";
@@ -290,7 +291,7 @@ export async function syncNow(
     // Rows that wouldn't upsert stay marked so the next sync retries them.
     // Silent: re-dispatching the write event would hot-loop on a bad row.
     for (const [t, ids] of Object.entries(failedByTable)) {
-      console.warn(`[sync] ${t}: ${ids.length} row(s) failed, will retry`);
+      log.warn("sync", `${t}: ${ids.length} row(s) failed, will retry`);
       await journalMark(t, { changed: ids, silent: true });
     }
     setStatus({ state: "done", at: now });

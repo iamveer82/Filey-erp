@@ -3,6 +3,7 @@
 // Everything runs on-device; nothing is sent unless the bridge is paired and
 // the owner's number resolves.
 import { aiAutonomous, aiReady } from "./ai";
+import { log } from "./log";
 import { bridgeState, getBridgeConfig, hasDesktop, onBridgeState, sendWa } from "./waBridge";
 import { loadReminders, nextOccurrence, saveReminders } from "./reminders";
 import { waFormat } from "./waAgent";
@@ -58,7 +59,7 @@ async function run(kind: "daily" | "alerts"): Promise<void> {
     if (kind === "alerts" && text.toUpperCase() === "NONE") return; // stay quiet
     await sendWa(to, waFormat(text));
   } catch (e) {
-    console.warn(`proactive ${kind} failed:`, e);
+    log.warn("agent", `proactive ${kind} failed`, e);
   }
 }
 

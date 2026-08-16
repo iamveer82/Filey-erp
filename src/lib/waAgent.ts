@@ -7,6 +7,7 @@
 // denies them so the agent asks the user, and a "yes" reply re-runs with them
 // allowed. Nothing leaves without approval.
 import { aiAgent, aiReady, buildSystemPrompt, getPersona, type AiMessage } from "./ai";
+import { log } from "./log";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import {
@@ -146,7 +147,7 @@ async function handle(m: WaMessage): Promise<void> {
   // only record of the WhatsApp thread the in-app agent can read back (see
   // list_whatsapp_messages). WhatsApp itself offers no history to fetch.
   waLogAdd({ dir: "in", from: m.from, name: m.fromName, text: m.text });
-  console.info(`[wa] message from ${m.from}: ${m.text.slice(0, 80)}`);
+  log.info("whatsapp", `message from ${m.from}`, m.text.slice(0, 120));
   const answer = async (text: string) => {
     // Empty stays empty: that is the deliberate silence for a non-owner, and it
     // is what releases the sidecar's pending promise.
@@ -170,11 +171,12 @@ async function handle(m: WaMessage): Promise<void> {
     // indistinguishable from a broken bridge from the outside, and that cost a
     // long evening once.
     const me = await bridgeState().then((s) => s.me).catch(() => null);
-    console.warn(
-      `[wa] ignored message from ${m.from} — not recognised as the owner ` +
-        `(paired account: ${me ?? "unknown"}, owner number set: ${
-          getBridgeConfig().ownerNumber || "none"
-        })`
+    log.warn(
+      "whatsapp",
+      `ignored ${m.from} — not recognised as the owner`,
+      `paired account: ${me ?? "unknown"}, owner number set: ${
+        getBridgeConfig().ownerNumber || "none"
+      }`
     );
     await answer("");
     return;

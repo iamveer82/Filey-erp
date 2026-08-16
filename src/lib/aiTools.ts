@@ -24,6 +24,7 @@ import { saveSecret, recallSecret, listSecrets } from "./secretStore";
 import { addReminder, listReminders, removeReminder } from "./reminders";
 import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
+import { log } from "./log";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
 import { invoiceLineAmount, r2 } from "./money";
 import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
@@ -3326,24 +3327,43 @@ export async function runTool(
   isOwner?: boolean
 ): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
-  if (!tool) return { error: `Unknown tool: ${name}` };
-  if (tool.ownerOnly && !isOwner)
+  if (!tool) {
+    log.warn("agent", `unknown tool: ${name}`);
+    return { error: `Unknown tool: ${name}` };
+  }
+  // Every refusal is logged. "The agent didn't do it" is the single most common
+  // report, and the reason is never visible from the reply alone.
+  if (tool.ownerOnly && !isOwner) {
+    log.warn("agent", `${name} refused: owner-only`);
     return { error: `"${name}" is owner-only — only the business owner can run it.` };
-  if (!isToolAllowed(name))
+  }
+  if (!isToolAllowed(name)) {
+    log.warn("agent", `${name} refused: capability switched off`);
     return {
       error: `The "${name}" capability is turned off (Settings → Capabilities). Ask the user to enable it.`,
     };
+  }
   // The agent mode decides how much gets asked about (Settings → Capabilities).
   const gate = gateFor(name, tool.sensitive);
-  if (gate === "block")
+  if (gate === "block") {
+    log.warn("agent", `${name} refused: Plan mode`);
     return {
       error: `Plan mode is on, so "${name}" was not run. Describe what you would do instead, and tell the user to switch to Accept edits or Auto to carry it out.`,
     };
-  if (gate === "ask" && !(await (confirm ?? confirmTool)(name, args)))
+  }
+  if (gate === "ask" && !(await (confirm ?? confirmTool)(name, args))) {
+    log.warn("agent", `${name} refused: not approved`);
     return { error: "Cancelled — the user did not approve this action." };
+  }
   try {
-    return await tool.run(args);
+    log.info("agent", `${name} running`, args);
+    const out = await tool.run(args);
+    if (out && typeof out === "object" && "error" in out) {
+      log.warn("agent", `${name} returned an error`, (out as { error: unknown }).error);
+    }
+    return out;
   } catch (e) {
+    log.error("agent", `${name} threw`, e);
     return { error: e instanceof Error ? e.message : String(e) };
   }
 }

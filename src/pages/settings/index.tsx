@@ -15,6 +15,7 @@ import {
   Lock,
   Activity,
   KeyRound,
+  Stethoscope,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
 import { cloudConfigured } from "../../lib/supabase";
@@ -24,6 +25,7 @@ import AccountProfile from "./AccountProfile";
 import AiSettings from "../../components/AiSettings";
 import UsersRoles from "./UsersRoles";
 import ActivityLog from "./ActivityLog";
+import DiagnosticsPanel from "./DiagnosticsPanel";
 import SecurityPanel, { ChangePasswordModal } from "./SecurityPanel";
 import AppsManager from "./AppsManager";
 import AppearancePanel from "./AppearancePanel";
@@ -49,6 +51,7 @@ type Section =
   | "backup"
   | "datamode"
   | "activity"
+  | "diagnostics"
   | "ai"
   | "license";
 
@@ -68,6 +71,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "datamode", label: "Data & Storage", icon: HardDrive },
   { id: "activity", label: "Activity Log", icon: Activity },
+  { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
 ];
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the
@@ -128,6 +132,7 @@ export default function Settings() {
         {section === "apps" && <AppsManager />}
         {section === "appearance" && <AppearancePanel />}
         {section === "activity" && <ActivityLog />}
+        {section === "diagnostics" && <DiagnosticsPanel />}
         {section === "security" && (
           <SecurityPanel onChangePassword={() => setPwOpen(true)} />
         )}

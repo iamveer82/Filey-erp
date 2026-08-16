@@ -23,6 +23,7 @@ import { createGuard, coachResult } from "./agentGuard";
 import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
 import { CORE_TOOLS, TOOLSETS, toolsetIndex } from "./toolsets";
+import { log } from "./log";
 import type { AiConfig, AiMessage } from "./ai";
 
 /** Eight was too few and it showed as "gives up early": discovering a file
@@ -409,6 +410,7 @@ export async function* runAgentStream(
     if (text) yield { type: "text", text };
 
     if (!calls.length) {
+      log.info("agent", `answered after ${round + 1} round(s)`);
       yield { type: "done", text, reason: "answered" };
       return text;
     }
@@ -460,6 +462,7 @@ export async function* runAgentStream(
 
   // Running out of rounds used to produce an apology and nothing else. What
   // was actually done matters more — especially if some of it changed data.
+  log.warn("agent", `ran out of rounds after ${maxRounds}`, guard.summary());
   const done = guard.summary();
   const text = done
     ? `I got part of the way but ran out of steps. ${done}. Tell me how to continue.`
