@@ -78,6 +78,10 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     about: "Stock levels and adjustments",
     tools: ["adjust_stock"],
   },
+  logistics: {
+    about: "Delivery challans, goods received notes and returns — what physically moved, to whom",
+    tools: ["create_delivery_challan", "list_delivery_challans"],
+  },
   accounting: {
     about: "Ledger, VAT, cheques, banks, expenses, ageing and statements",
     tools: [

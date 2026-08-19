@@ -34,6 +34,12 @@ export const CAPABILITIES: Capability[] = [
     tools: ["create_purchase_order"],
   },
   {
+    id: "logistics",
+    name: "Delivery challans",
+    description: "Create delivery challans, goods received notes and returns",
+    tools: ["create_delivery_challan"],
+  },
+  {
     id: "inventory",
     name: "Inventory",
     description: "Add products, adjust stock levels",

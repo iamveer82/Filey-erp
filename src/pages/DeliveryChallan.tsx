@@ -57,6 +57,19 @@ import TemplateDesigner, {
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import { tools, billing, crm, type CrmCustomer, type CompanyProfile } from "../lib/api";
+import {
+  DC_TYPES,
+  DC_STATUSES,
+  DC_STORAGE_KEY,
+  DC_SETTING_KEY,
+  loadChallans,
+  saveChallans,
+  blankChallanForm,
+  type DcItem as ChallanItem,
+  type DcStatus as ChallanStatus,
+  type DcForm as ChallanForm,
+  type DcRecord as ChallanRecord,
+} from "../lib/challans";
 import DocPresetBar from "../components/DocPresetBar";
 
 /* ------------------------------------------------------------------ */
@@ -77,108 +90,22 @@ const dcNumber = (existing: string[] = []) =>
   pickDocNumber("delivery_challan", existing, dcFormats);
 const today = () => todayYmd();
 
-type DcItem = { description: string; qty: number };
-/** Shipment lifecycle for the list's status pills / filters (DEMO parity). */
-type DcStatus = "preparing" | "in_transit" | "delivered" | "failed";
-type DcForm = {
-  number: string;
-  template: string;
-  accent: string;
-  dc_type: "delivery" | "goods_received" | "return";
-  company_name: string;
-  company_address: string;
-  company_trn: string;
-  party_name: string;
-  party_address: string;
-  party_trn: string;
-  ref_number: string;
-  issue_date: string;
-  vehicle_number: string;
-  driver_name: string;
-  status: DcStatus;
-  destination: string;
-  eta: string;
-  notes: string;
-  font: string;
-  items: DcItem[];
-  show_stamp?: boolean;
-  show_signature?: boolean;
-};
+// Shape, storage and constants live in lib/challans so the agent tools work on
+// the same records this page does — see the note at the top of that module.
+type DcItem = ChallanItem;
+type DcStatus = ChallanStatus;
+type DcForm = ChallanForm;
+type DcRecord = ChallanRecord;
 
-const DC_TYPES = [
-  { id: "delivery", label: "Delivery Challan" },
-  { id: "goods_received", label: "Goods Received Note" },
-  { id: "return", label: "Return Challan" },
-];
-
-/** Status labels + Badge/FilterChip tones — one source for the list pills,
- *  filter chips and the editor's status select (DEMO parity). */
-const DC_STATUSES: {
-  id: DcStatus;
-  label: string;
-  tone: "info" | "warn" | "success" | "danger";
-}[] = [
-  { id: "preparing", label: "Preparing", tone: "info" },
-  { id: "in_transit", label: "In Transit", tone: "warn" },
-  { id: "delivered", label: "Delivered", tone: "success" },
-  { id: "failed", label: "Failed", tone: "danger" },
-];
 const dcStatusMeta = (s: DcStatus) =>
   DC_STATUSES.find((x) => x.id === s) ?? DC_STATUSES[0];
 
-function blankDc(existing: string[] = []): DcForm {
-  return {
-    number: dcNumber(existing),
-    template: "standard",
-    accent: "#222222",
-    dc_type: "delivery",
-    company_name: "",
-    company_address: "",
-    company_trn: "",
-    party_name: "",
-    party_address: "",
-    party_trn: "",
-    ref_number: "",
-    issue_date: today(),
-    vehicle_number: "",
-    driver_name: "",
-    status: "preparing",
-    destination: "",
-    eta: today(),
-    notes: "",
-    font: "'Plus Jakarta Sans', system-ui, sans-serif",
-    show_stamp: false,
-    show_signature: false,
-    items: [{ description: "", qty: 1 }],
-  };
-}
+const blankDc = (existing: string[] = []): DcForm =>
+  blankChallanForm(dcNumber(existing));
 
 /* ------------------------------------------------------------------ */
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
-
-// DC records: localStorage cache mirrored to Supabase (app_settings) for cross-device sync.
-const DC_STORAGE_KEY = "filey_delivery_challans";
-const DC_SETTING_KEY = "delivery_challans";
-
-interface DcRecord {
-  id: number;
-  number: string;
-  dc_type: string;
-  party_name: string;
-  issue_date: string;
-  item_count: number;
-  show_stamp?: boolean;
-  show_signature?: boolean;
-  /** Shipment tracking — optional so records saved before it existed still render. */
-  status?: DcStatus;
-  destination?: string;
-  eta?: string;
-  created_at: string;
-  /** Full editor payload — present on records saved after edit/quick-view
-   *  support; older records only carry the summary fields above. */
-  form?: DcForm;
-}
 
 /** Shipment fields: prefer the record summary, fall back to the form payload,
  *  then to "preparing" / "" so records saved before tracking existed stay readable. */
@@ -210,23 +137,9 @@ function formFromRecord(r: DcRecord, existing: string[]): DcForm {
   };
 }
 
-function loadDcs(): DcRecord[] {
-  try {
-    try { return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]"); } catch { return []; }
-  } catch (e) {
-    console.warn("Failed to load delivery challans", e);
-    return [];
-  }
-}
-function saveDcs(records: DcRecord[]) {
-  try {
-    localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records));
-  } catch (e) {
-    console.warn("Failed to save delivery challans", e);
-  }
-  // Write-through so challans follow the user across devices.
-  void tools.setSetting(DC_SETTING_KEY, JSON.stringify(records)).catch(() => {});
-}
+const loadDcs = loadChallans;
+const saveDcs = saveChallans;
+
 /** Pull challans saved on the user's other devices; remote wins when present. */
 async function syncDcs(): Promise<DcRecord[]> {
   try {

@@ -3,6 +3,7 @@ import { offeredTools } from "../agentHarness";
 import { TOOLS } from "../aiTools";
 import { setAgentMode } from "../agentMode";
 import { setCapabilityEnabled } from "../capabilities";
+import { TOOLSETS } from "../toolsets";
 
 beforeEach(() => localStorage.clear());
 
@@ -24,21 +25,10 @@ describe("what the model is offered", () => {
   });
 
   it("stops advertising domains once they are all open", () => {
-    const all = names([
-      "sales",
-      "purchasing",
-      "inventory",
-      "accounting",
-      "crm",
-      "people",
-      "files",
-      "messaging",
-      "web",
-      "social",
-      "reminders",
-      "system",
-    ]);
-    expect(all).not.toContain("use_toolset");
+    // Derived from TOOLSETS rather than hand-listed: a hardcoded copy fails
+    // whenever a domain is added, which says nothing about the behaviour under
+    // test and trains people to edit the list until it goes green.
+    expect(names(Object.keys(TOOLSETS))).not.toContain("use_toolset");
   });
 });
 

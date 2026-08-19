@@ -2118,6 +2118,120 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_delivery_challans",
+    description:
+      "List delivery challans, goods received notes and return challans, newest first — number, type, party, date, shipment status and destination. Use it for questions about deliveries in progress or what was sent to whom.",
+    parameters: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["preparing", "in_transit", "delivered", "failed"],
+          description: "Optional shipment status filter.",
+        },
+        limit: { type: "number", description: "Default 20." },
+      },
+    },
+    run: async (a) => {
+      const { loadChallans } = await import("./challans");
+      const want = str(a.status);
+      const rows = loadChallans()
+        .slice()
+        .reverse()
+        .filter((r) => !want || (r.status ?? r.form?.status ?? "preparing") === want)
+        .slice(0, numOf(a.limit) || 20)
+        .map((r) => ({
+          number: r.number,
+          type: r.dc_type,
+          party: r.party_name,
+          issue_date: r.issue_date,
+          items: r.item_count,
+          status: r.status ?? r.form?.status ?? "preparing",
+          destination: r.destination ?? r.form?.destination ?? "",
+        }));
+      return { count: rows.length, challans: rows };
+    },
+  },
+  {
+    name: "create_delivery_challan",
+    description:
+      "Create a delivery challan (or goods received note / return challan) for a party, with the items and quantities being moved. Challans carry quantities, not prices. The number is assigned from the saved numbering format. Open Delivery Challans in the app to print or send it.",
+    parameters: {
+      type: "object",
+      properties: {
+        party_name: { type: "string", description: "Who the goods go to (or come from)." },
+        items: {
+          type: "array",
+          description: "Lines being moved.",
+          items: {
+            type: "object",
+            properties: {
+              description: { type: "string" },
+              qty: { type: "number" },
+            },
+            required: ["description"],
+          },
+        },
+        dc_type: {
+          type: "string",
+          enum: ["delivery", "goods_received", "return"],
+          description: "Default delivery.",
+        },
+        destination: { type: "string" },
+        vehicle_number: { type: "string" },
+        driver_name: { type: "string" },
+        ref_number: { type: "string", description: "Related order or invoice number." },
+        issue_date: { type: "string", description: "YYYY-MM-DD, defaults to today." },
+        notes: { type: "string" },
+      },
+      required: ["party_name", "items"],
+    },
+    run: async (a) => {
+      const party = str(a.party_name);
+      if (!party) return { error: "Name the party the challan is for." };
+      const lines = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
+      const items = lines
+        .map((l) => ({ description: str(l.description), qty: numOf(l.qty) || 1 }))
+        .filter((l) => l.description);
+      if (!items.length)
+        return { error: "A challan needs at least one item with a description." };
+
+      const { loadChallans, saveChallans, blankChallanForm, challanRecord, DC_TYPES } =
+        await import("./challans");
+      const { pickDocNumber, loadDocFormats } = await import("./numberFormat");
+
+      const existing = loadChallans();
+      const number = pickDocNumber(
+        "delivery_challan",
+        existing.map((r) => r.number),
+        await loadDocFormats()
+      );
+
+      const type = str(a.dc_type) || "delivery";
+      const form = {
+        ...blankChallanForm(number),
+        dc_type: (DC_TYPES.some((t) => t.id === type)
+          ? type
+          : "delivery") as "delivery" | "goods_received" | "return",
+        party_name: party,
+        destination: str(a.destination),
+        vehicle_number: str(a.vehicle_number),
+        driver_name: str(a.driver_name),
+        ref_number: str(a.ref_number),
+        issue_date: str(a.issue_date) || today(),
+        notes: str(a.notes),
+        items,
+      };
+      saveChallans([...existing, challanRecord(form)]);
+      return {
+        ok: true,
+        number,
+        items: items.length,
+        message: `Challan ${number} created for ${party} — open Delivery Challans to print or send it.`,
+      };
+    },
+  },
+  {
     name: "list_payroll",
     description:
       "Payroll runs, newest first — who was paid, for which period, and whether it has been marked paid. Filter by period (e.g. 2026-07) or employee name.",
