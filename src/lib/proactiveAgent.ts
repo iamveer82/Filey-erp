@@ -2,7 +2,7 @@
 // low-stock / overdue alerts) and delivers results to the owner over WhatsApp.
 // Everything runs on-device; nothing is sent unless the bridge is paired and
 // the owner's number resolves.
-import { aiAutonomous, aiReady } from "./ai";
+import { aiAutonomous, aiReady, DENY_SENSITIVE } from "./ai";
 import { log } from "./log";
 import { bridgeState, getBridgeConfig, hasDesktop, onBridgeState, sendWa } from "./waBridge";
 import { loadReminders, nextOccurrence, saveReminders } from "./reminders";
@@ -53,6 +53,10 @@ async function run(kind: "daily" | "alerts"): Promise<void> {
     const text = (
       await aiAutonomous(kind === "daily" ? DAILY_GOAL : ALERTS_GOAL, {
         maxTokens: 900,
+        // This fires hourly with nobody watching, and its goal names overdue
+        // invoices and low stock — i.e. it is holding a list of customers and
+        // suppliers. It reports to the owner; it does not get to contact them.
+        confirm: DENY_SENSITIVE,
       })
     ).trim();
     if (!text) return;

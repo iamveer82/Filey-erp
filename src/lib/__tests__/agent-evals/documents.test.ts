@@ -198,18 +198,34 @@ describe("agent modes decide what a run may do", () => {
   it("Auto mode runs it without asking", async () => {
     setAgentMode("auto");
     send();
-    let asked = false;
-    const { events } = await run("send invoice X-1", {
-      confirm: async () => {
-        asked = true;
-        return true;
-      },
-    });
-    expect(asked).toBe(false); // Auto mode never reaches the confirm gate
+    // No caller-supplied confirm: this is the in-app chat the owner is
+    // watching, and Auto means auto.
+    const { events } = await run("send invoice X-1");
     // No invoice X-1 exists, so the tool's own "not found" is the right answer
     // here — what matters is that nothing stopped it before it ran.
     const result = events.find((e) => e.type === "tool_result");
     expect(JSON.stringify(result)).not.toMatch(/did not approve/i);
+  });
+
+  // This case used to assert the opposite ("Auto mode never reaches the confirm
+  // gate") and that is precisely the defect: waAgent hands runTool a confirm
+  // that refuses sensitive tools until the owner replies YES, and Auto mode
+  // skipped it, so the agent sent WhatsApp messages to customers unapproved.
+  // A caller that supplies a confirm has a policy for that run; Auto is a
+  // statement about the in-app chat, not about every surface.
+  it("Auto mode still honours a confirm the caller supplied", async () => {
+    setAgentMode("auto");
+    send();
+    let asked = false;
+    const { events } = await run("send invoice X-1", {
+      confirm: async () => {
+        asked = true;
+        return false;
+      },
+    });
+    expect(asked).toBe(true);
+    const result = events.filter((e) => e.type === "tool_result").pop();
+    expect(JSON.stringify(result)).toMatch(/did not approve/i);
   });
 });
 

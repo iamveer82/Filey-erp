@@ -3351,7 +3351,16 @@ export async function runTool(
       error: `Plan mode is on, so "${name}" was not run. Describe what you would do instead, and tell the user to switch to Accept edits or Auto to carry it out.`,
     };
   }
-  if (gate === "ask" && !(await (confirm ?? confirmTool)(name, args))) {
+  // A caller that supplied its own `confirm` has an approval policy for THIS
+  // run — the WhatsApp agent's reply-YES pass, or a background job with nobody
+  // there to ask. That policy outranks the mode, for sensitive (money/outbound)
+  // tools only. Auto mode is a statement about the in-app chat the owner is
+  // watching; it is not a licence for a WhatsApp turn or an unattended hourly
+  // job to message third parties. Without this, Auto skipped waAgent's confirm
+  // entirely and the agent sent WhatsApp to customers with no approval at all.
+  // Writes stay on the mode's terms — drafting an invoice is not the harm.
+  const mustAsk = gate === "ask" || (!!confirm && !!tool.sensitive);
+  if (mustAsk && !(await (confirm ?? confirmTool)(name, args))) {
     log.warn("agent", `${name} refused: not approved`);
     return { error: "Cancelled — the user did not approve this action." };
   }

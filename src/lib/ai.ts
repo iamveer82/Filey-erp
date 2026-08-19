@@ -12,6 +12,9 @@
  */
 
 import { runAgentStream, type AgentEvent } from "./agentHarness";
+// Type-only: erased at compile time, so this cannot reintroduce a runtime cycle
+// with aiTools (see the note at the top of agentHarness.ts).
+import type { ConfirmFn } from "./aiTools";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import { modeSystemNote } from "./agentMode";
@@ -434,6 +437,9 @@ export async function aiAutonomous(
     images?: AiImage[];
     /** Whether this run may use owner-only tools. */
     isOwner?: boolean;
+    /** Approval policy for THIS run. Unattended callers pass DENY_SENSITIVE —
+     *  see the note there. Omitted, the global agent mode decides. */
+    confirm?: ConfirmFn;
   } = {}
 ): Promise<string> {
   if (!goal.trim()) throw new AiError("No goal provided.");
@@ -454,8 +460,19 @@ export async function aiAutonomous(
     onProgress: opts.onProgress,
     signal: opts.signal,
     isOwner: opts.isOwner,
+    confirm: opts.confirm,
   });
 }
+
+/** The approval policy for a run with no human watching it: refuse every
+ *  sensitive (money/outbound) tool.
+ *
+ *  A scheduled automation, the hourly proactive sweep and a reminder all fire
+ *  on a timer. There is nobody to answer a prompt, so "ask" has no meaning —
+ *  the only honest answers are "never" and "silently yes", and silently yes is
+ *  how an agent ends up messaging customers at 3am. The run still reads freely
+ *  and still drafts; it just cannot send, pay or post on its own. */
+export const DENY_SENSITIVE: ConfirmFn = () => false;
 
 /* ── Document extraction (#21): an image of an invoice/receipt → fields ───── */
 
