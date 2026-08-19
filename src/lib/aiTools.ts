@@ -20,7 +20,7 @@ import { getExchangeRates, docAmountInAed } from "./exchange-rates";
 import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { addSkill, findSkill, loadSkills } from "./agentSkills";
-import { saveSecret, recallSecret, listSecrets } from "./secretStore";
+import { saveSecret, recallSecret, listSecrets, fillSecrets } from "./secretStore";
 import { addReminder, listReminders, removeReminder } from "./reminders";
 import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
@@ -3022,7 +3022,9 @@ export const TOOLS: ToolDef[] = [
     ownerOnly: true,
     sensitive: true,
     description:
-      "Make a raw HTTP request like curl and return the status and body. Use for APIs or endpoints read_web_page can't reach. Public http(s) URLs only; GET by default, pass method and body for POST/PUT. OWNER-ONLY and confirmed each call — for plain page reading use read_web_page, which needs no approval.",
+      "Make a raw HTTP request like curl and return the status and body — this is how you call any third-party API the user has a key for. Public http(s) URLs only; GET by default, pass method and body for POST/PUT.\n\n" +
+      "To authenticate, write {{secret:NAME}} wherever the credential goes (a header, the URL, the body) — for example an Authorization header of \"Bearer {{secret:stripe_key}}\". The value is substituted inside the tool, so you never see it and it never enters this conversation. Use list_secrets to see which names exist, and save_secret to store a new one. Do NOT call recall_secret to build a request: that puts the raw credential in the transcript for no reason.\n\n" +
+      "OWNER-ONLY and confirmed each call — for plain page reading use read_web_page, which needs no approval.",
     parameters: {
       type: "object",
       properties: {
@@ -3034,12 +3036,39 @@ export const TOOLS: ToolDef[] = [
       required: ["url"],
     },
     run: async (a) => {
-      const r = await httpFetch(str(a.url), {
-        method: str(a.method) || "GET",
-        body: a.body ? str(a.body) : undefined,
-        headers: (a.headers as Record<string, string>) ?? {},
-      });
-      return { status: r.status, body: r.body };
+      // Substituted here rather than by the caller so the credential is absent
+      // from the model's context AND from the approval prompt: the owner sees
+      // "Bearer {{secret:stripe_key}}", which is the readable thing to approve.
+      const used = new Set<string>();
+      const missing = new Set<string>();
+      const fill = (v: string) => {
+        const r = fillSecrets(v);
+        r.used.forEach((n) => used.add(n));
+        r.missing.forEach((n) => missing.add(n));
+        return r.text;
+      };
+
+      const rawHeaders = (a.headers as Record<string, string>) ?? {};
+      const headers: Record<string, string> = {};
+      for (const k of Object.keys(rawHeaders)) headers[k] = fill(str(rawHeaders[k]));
+
+      const url = fill(str(a.url));
+      const body = a.body ? fill(str(a.body)) : undefined;
+
+      if (missing.size)
+        return {
+          error: `No stored secret named ${[...missing]
+            .map((n) => `"${n}"`)
+            .join(", ")}. Use list_secrets to see what exists, or save_secret to add it.`,
+        };
+
+      const r = await httpFetch(url, { method: str(a.method) || "GET", body, headers });
+      // Names only. Echoing a value here would undo the entire point.
+      return {
+        status: r.status,
+        body: r.body,
+        ...(used.size ? { secrets_used: [...used] } : {}),
+      };
     },
   },
   {
@@ -3083,7 +3112,7 @@ export const TOOLS: ToolDef[] = [
     ownerOnly: true,
     sensitive: true,
     description:
-      "Store a credential the owner gave you (API key, portal password, token) under a name, so you can use it later. OWNER-ONLY and always confirmed.",
+      "Store a credential the owner gave you (API key, portal password, token) under a name, so you can use it later. Once stored, use it by writing {{secret:NAME}} in an http_fetch call rather than reading it back. OWNER-ONLY and always confirmed.",
     parameters: {
       type: "object",
       properties: {
@@ -3101,7 +3130,7 @@ export const TOOLS: ToolDef[] = [
     name: "recall_secret",
     ownerOnly: true,
     description:
-      "Retrieve a stored credential by name. OWNER-ONLY. Use only when the owner asked you to; never echo the value back into a message.",
+      "Retrieve a stored credential by name. OWNER-ONLY, and a last resort: reading a secret puts it in this conversation and in the transcript. To call an API, write {{secret:NAME}} in http_fetch instead — that substitutes the value without exposing it. Use this only when the owner explicitly asks to see the credential itself, and never echo it into a message.",
     parameters: {
       type: "object",
       properties: { name: { type: "string" } },
