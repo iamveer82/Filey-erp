@@ -168,7 +168,14 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   system: {
     about: "Secrets, saved procedures and the machine itself",
-    tools: ["save_secret", "recall_secret", "list_secrets", "learn_skill", "run_shell"],
+    tools: [
+      "save_secret",
+      "recall_secret",
+      "list_secrets",
+      "learn_skill",
+      "import_skill",
+      "run_shell",
+    ],
   },
 };
 

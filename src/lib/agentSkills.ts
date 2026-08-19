@@ -11,6 +11,11 @@ export interface Skill {
   instructions: string;
   enabled: boolean;
   createdAt: number;
+  /** Where an imported skill came from (a repo or URL). Absent on skills the
+   *  owner or the agent wrote here, which is the distinction that matters: an
+   *  imported one is somebody else's text running as standing instructions, and
+   *  the owner should be able to see that at a glance. */
+  source?: string;
 }
 
 const KEY = "filey.agent.skills";
@@ -47,6 +52,9 @@ export function addSkill(
     name: s.name,
     description: s.description,
     instructions: s.instructions,
+    // Re-importing keeps the new origin; a locally written skill that overwrites
+    // an imported one drops it, because it is no longer somebody else's text.
+    ...(s.source ? { source: s.source } : {}),
   };
   saveSkills(
     prior ? existing.map((x) => (x.id === prior.id ? skill : x)) : [...existing, skill]

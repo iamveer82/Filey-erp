@@ -101,8 +101,9 @@ export const CAPABILITIES: Capability[] = [
     // and Plan mode gate it like any other change.
     id: "self",
     name: "Self-improvement",
-    description: "Let the agent save procedures it works out as reusable skills",
-    tools: ["learn_skill"],
+    description:
+      "Let the agent save procedures it works out, and install skills from repos",
+    tools: ["learn_skill", "import_skill"],
   },
   {
     id: "web",
