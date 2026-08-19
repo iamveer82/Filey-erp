@@ -25,7 +25,7 @@ export function deleteSecret(name: string): void {
 }
 
 /** `{{secret:NAME}}` — a reference to a stored credential. */
-const SECRET_REF = /\{\{\s*secret:\s*([A-Za-z0-9_.\-]+)\s*\}\}/g;
+const SECRET_REF = /\{\{\s*secret:\s*([A-Za-z0-9_.-]+)\s*\}\}/g;
 
 export interface FilledSecrets {
   text: string;
