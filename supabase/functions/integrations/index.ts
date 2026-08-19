@@ -276,14 +276,44 @@ async function composio(
   return { status: 400, body: { error: `Unknown Composio action: ${action}` } };
 }
 
+/**
+ * Zernio, scoped to the caller.
+ *
+ * SECURITY — why the platform key is refused here.
+ *
+ * Composio calls carry `user_id` on every request (see above), so one shared
+ * platform key still yields per-user results. Zernio has no such parameter on
+ * this path: the unit of isolation is a *profile*, and the platform key is a
+ * single Zernio account holding every Filey user who connected through it. So
+ * `/accounts`, `/profiles` and `/posts` under that key returned the whole
+ * shared account — one tenant listing another's connected handles, posting from
+ * them, and `delete_post` removing another tenant's published post.
+ *
+ * The client does know its profile (`ZernioConfig.profileId`), and the BYOK path
+ * passes it — `listAccounts()` in src/lib/zernio.ts sends `/accounts?profileId=`.
+ * But it is client-supplied, so forwarding it here would be an access control
+ * the caller chooses for itself: anyone can send someone else's profile id.
+ * A real fix needs a server-side user → profile mapping that this function
+ * looks up. Until that exists, the shared key cannot serve account-scoped
+ * calls at all.
+ *
+ * Bring-your-own-key is unaffected: an own key IS the tenant boundary.
+ */
 async function zernio(
   action: string,
   payload: Record<string, unknown>,
   ownKey = ""
 ): Promise<Result> {
-  const key = ownKey || Deno.env.get("ZERNIO_API_KEY");
-  if (!key)
-    return { status: 503, body: { error: "Social publishing isn't configured yet." } };
+  if (!ownKey)
+    return {
+      status: 503,
+      body: {
+        error:
+          "Social publishing needs your own Zernio API key — add it in Settings → Integrations. " +
+          "The shared key cannot keep one business's accounts separate from another's, so it is not used here.",
+      },
+    };
+  const key = ownKey;
   const headers = {
     Authorization: `Bearer ${key}`,
     "Content-Type": "application/json",
