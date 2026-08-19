@@ -74,9 +74,24 @@ let queue: Promise<void> = Promise.resolve();
 const history = new Map<string, AiMessage[]>();
 const HISTORY_LIMIT = 20; // user+assistant turns kept per chat
 
-/** Chats that have a proposal awaiting approval (a refused sensitive tool).
- *  A "yes" reply to one of these re-runs the agent with sensitive tools allowed. */
-const pendingApproval = new Map<string, boolean>();
+/** The exact call a chat has proposed and is waiting on, as `name:argsJSON`.
+ *
+ *  This stored a bare `true`, and the confirm below threw away the tool name and
+ *  arguments — so a "yes" did not approve the message the owner had just been
+ *  shown, it switched sensitive tools ON for the whole next run: up to
+ *  MAX_TOOL_ROUNDS rounds, any number of calls, any recipient. Approving one
+ *  WhatsApp message and getting several, to numbers never mentioned, is exactly
+ *  that. Binding the approval to the proposed call is what makes "yes" mean the
+ *  thing the owner read.
+ *
+ *  ponytail: signature is JSON.stringify of the args, so a re-proposal with the
+ *  keys in a different order reads as a different call and is re-asked. Erring
+ *  towards asking twice is the right side to err on here. */
+const pendingApproval = new Map<string, string>();
+
+/** Identity of a proposed call, for matching an approval to it. */
+const callSig = (name: string, args: Record<string, unknown>) =>
+  `${name}:${JSON.stringify(args ?? {})}`;
 
 const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sure|agreed)$/i;
 
@@ -189,14 +204,20 @@ async function handle(m: WaMessage): Promise<void> {
 
   try {
     const key = m.from || "unknown";
-    // A "yes" to a pending proposal is the second pass: sensitive tools allowed.
-    const allowSensitive = pendingApproval.has(key) && AFFIRMATIVE.test(m.text.trim());
+    // A "yes" approves the ONE call that was proposed last turn, not sensitive
+    // tools in general. Anything else the run tries is refused and re-proposed.
+    const approvedSig = AFFIRMATIVE.test(m.text.trim())
+      ? pendingApproval.get(key)
+      : undefined;
+    const allowSensitive = !!approvedSig;
 
-    let approvalHit = false;
+    // The first refused call becomes the new pending proposal, so the reply the
+    // owner reads and the call a later "yes" authorises are the same thing.
+    let proposedSig: string | null = null;
     const confirm = (name: string, args: Record<string, unknown>) => {
-      void name; void args; // refused below — the agent must ask the user
-      if (allowSensitive) return true;
-      approvalHit = true;
+      const sig = callSig(name, args);
+      if (approvedSig && sig === approvedSig) return true;
+      if (!proposedSig) proposedSig = sig;
       return false;
     };
 
@@ -237,8 +258,8 @@ async function handle(m: WaMessage): Promise<void> {
     if (next.length > HISTORY_LIMIT) next.splice(0, next.length - HISTORY_LIMIT);
     history.set(key, next);
 
-    if (approvalHit) pendingApproval.set(key, true);
-    else pendingApproval.delete(key);
+    if (proposedSig) pendingApproval.set(key, proposedSig);
+    else pendingApproval.delete(key); // nothing outstanding — a stale "yes" must not land
 
     await answer(text);
   } catch (e) {
