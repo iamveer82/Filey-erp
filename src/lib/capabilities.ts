@@ -88,6 +88,17 @@ export const CAPABILITIES: Capability[] = [
     tools: ["add_reminder"],
   },
   {
+    // A saved skill is replayed into every later prompt, so writing one changes
+    // how the agent behaves from then on. That makes it a write with an unusually
+    // long tail: a instruction injected from a scanned document could teach a
+    // standing habit rather than just a one-off action. Grouping it means Manual
+    // and Plan mode gate it like any other change.
+    id: "self",
+    name: "Self-improvement",
+    description: "Let the agent save procedures it works out as reusable skills",
+    tools: ["learn_skill"],
+  },
+  {
     id: "web",
     name: "Web research",
     description: "Read and search public web pages, enrich leads from their own site",

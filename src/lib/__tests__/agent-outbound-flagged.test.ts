@@ -52,6 +52,26 @@ describe("outbound tools carry the sensitive flag", () => {
     ).toBe(true);
   });
 
+  // Tools that reach the owner's machine, credentials or the raw network. These
+  // sit in no capability group, so `isWriteTool` is false for them and the agent
+  // modes treat them as reads — which means the tool's OWN flags are the only
+  // thing standing between an injected instruction and a shell command. Both
+  // flags, or the mode system silently waves them through, Plan mode included.
+  const POWER_TOOLS = ["run_shell", "browser", "http_fetch", "save_secret"];
+
+  it.each(POWER_TOOLS)("%s is owner-only AND sensitive", (name) => {
+    const tool = TOOLS.find((t) => t.name === name);
+    expect(tool, `${name} is missing from TOOLS`).toBeDefined();
+    expect(tool!.ownerOnly, `${name} must be ownerOnly`).toBe(true);
+    expect(tool!.sensitive, `${name} must be sensitive`).toBe(true);
+  });
+
+  it.each(["recall_secret", "list_secrets"])("%s is at least owner-only", (name) => {
+    // These read credentials rather than writing or spending, so they are not
+    // required to be sensitive — but they must never be reachable by a customer.
+    expect(TOOLS.find((t) => t.name === name)?.ownerOnly).toBe(true);
+  });
+
   it("every capability's tools all exist in TOOLS", () => {
     const names = new Set(TOOLS.map((t) => t.name));
     const missing = CAPABILITIES.flatMap((c) =>

