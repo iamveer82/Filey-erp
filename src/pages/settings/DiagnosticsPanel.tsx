@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Check, Trash2 } from "lucide-react";
 import { clearLog, logAsText, logEntries, onLog, type LogEntry, type LogLevel } from "../../lib/log";
+import { clearJournal, listRuns, type RunNote } from "../../lib/agentJournal";
 import { cn } from "../../lib/format";
 
 /* What the app has been doing, for when it stops doing it.
@@ -18,6 +19,73 @@ const TONE: Record<LogLevel, string> = {
 
 const time = (at: number) =>
   new Date(at).toLocaleTimeString(undefined, { hour12: false });
+
+const day = (at: number) =>
+  new Date(at).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+/* The agent's own track record. Unlike the log above this OUTLIVES a restart,
+ * because it is what the agent reads back into its next run — so the owner
+ * should be able to see, and clear, what it has concluded about itself. */
+function RunJournal() {
+  const [runs, setRuns] = useState<RunNote[]>(() => listRuns());
+  if (!runs.length) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <h3 className="text-[13.5px] font-semibold text-foreground">
+          Agent run journal
+        </h3>
+        <button
+          className="btn-ghost ml-auto"
+          onClick={() => {
+            clearJournal();
+            setRuns([]);
+          }}
+        >
+          <Trash2 size={14} /> Clear
+        </button>
+      </div>
+      <p className="text-[12.5px] text-muted-foreground">
+        Runs that gave up or hit tool errors. The agent reads the most recent
+        few before its next autonomous run so it does not repeat them. Clearing
+        this makes it forget those lessons.
+      </p>
+      <div className="max-h-[30vh] overflow-auto rounded-xl border border-border bg-card">
+        {runs.map((r, i) => (
+          <div
+            key={`${r.at}-${i}`}
+            className="border-b border-border px-3 py-2 text-[12px] last:border-b-0"
+          >
+            <div className="flex gap-3">
+              <span className="shrink-0 font-mono text-muted-foreground">
+                {day(r.at)}
+              </span>
+              <span className="min-w-0 flex-1 text-foreground">{r.goal}</span>
+              <span className="shrink-0 text-warning">
+                {r.reason === "exhausted" ? "ran out of steps" : "tool errors"}
+              </span>
+            </div>
+            {r.failures.map((f) => (
+              <div
+                key={f.tool}
+                className="mt-0.5 break-all pl-1 font-mono text-[11px] text-muted-foreground"
+              >
+                {f.tool}: {f.error}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function DiagnosticsPanel() {
   const [entries, setEntries] = useState<LogEntry[]>(() => logEntries());
@@ -133,6 +201,8 @@ export default function DiagnosticsPanel() {
           ))}
         </div>
       )}
+
+      <RunJournal />
     </div>
   );
 }

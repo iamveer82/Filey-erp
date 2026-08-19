@@ -18,6 +18,7 @@ import type { ConfirmFn } from "./aiTools";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import { modeSystemNote } from "./agentMode";
+import { journalDigest, recordRun, failuresFrom } from "./agentJournal";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -446,13 +447,19 @@ export async function aiAutonomous(
   const system = buildSystemPrompt(
     AUTONOMY_SYSTEM,
     getPersona(),
-    [memoryDigest(), skillsIndex()].filter(Boolean).join("\n\n")
+    // journalDigest() is the agent's own track record — see agentJournal.ts.
+    // It goes in with memory and skills because it is the same kind of thing:
+    // standing context that makes this run better than the last one.
+    [memoryDigest(), skillsIndex(), journalDigest()].filter(Boolean).join("\n\n")
   );
   const messages: AiMessage[] = [
     { role: "system", text: system },
     { role: "user", text: goal, images: opts.images },
   ];
-  return aiAgent(messages, {
+
+  // Drained here rather than via aiAgent so the run's own tool failures are
+  // visible: that is what gets written to the journal for next time.
+  const stream = aiAgentStream(messages, {
     maxTokens: opts.maxTokens ?? 4096,
     maxRounds: opts.maxRounds ?? 20,
     extraTools: [TASK_COMPLETE_TOOL],
@@ -462,6 +469,23 @@ export async function aiAutonomous(
     isOwner: opts.isOwner,
     confirm: opts.confirm,
   });
+
+  const events: AgentEvent[] = [];
+  for (;;) {
+    const step = await stream.next();
+    if (step.done) return step.value;
+    events.push(step.value);
+    if (step.value.type === "text") opts.onProgress?.(step.value.text);
+    if (step.value.type === "done") {
+      // Recorded before the generator returns, so a caller that stops reading
+      // still leaves a trace. recordRun ignores runs with nothing to teach.
+      recordRun({
+        goal,
+        reason: step.value.reason,
+        failures: failuresFrom(events),
+      });
+    }
+  }
 }
 
 /** The approval policy for a run with no human watching it: refuse every
