@@ -98,6 +98,7 @@ import PdfTools from "../PdfTools";
 import AgentChat from "../AgentChat";
 import CustomerDetail from "../CustomerDetail";
 import EmployeeDetail from "../EmployeeDetail";
+import PayslipPage from "../PayslipPage";
 import SupplierDetail from "../SupplierDetail";
 import PortalView from "../PortalView";
 import Login from "../Login";
@@ -171,5 +172,8 @@ describe("detail page render smoke", () => {
   });
   it("EmployeeDetail mounts without throwing", () => {
     wrapAt("/people/1", "/people/:id", <EmployeeDetail />).unmount();
+  });
+  it("PayslipPage mounts without throwing", () => {
+    wrapAt("/people/1/payslip", "/people/:id/payslip", <PayslipPage />).unmount();
   });
 });

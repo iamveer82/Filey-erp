@@ -1,14 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Download } from "lucide-react";
-import { hr, billing, type Employee, type CompanyProfile } from "../lib/api";
+import { ArrowLeft, Download, Save, Check } from "lucide-react";
+import {
+  hr,
+  billing,
+  type Employee,
+  type CompanyProfile,
+  type Payroll,
+} from "../lib/api";
 import { aed, numInput, getDisplayCurrency } from "../lib/format";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { PageHeader } from "../components/ui";
+import { useUI } from "../lib/ui";
 
 export default function PayslipPage() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { toast, confirm } = useUI();
   const ref = useRef<HTMLDivElement>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
@@ -16,6 +24,17 @@ export default function PayslipPage() {
   const [allowances, setAllowances] = useState(0);
   const [deductions, setDeductions] = useState(0);
   const [loading, setLoading] = useState(true);
+  /** Payroll already recorded for this employee, so a period cannot be paid
+   *  twice — runPayroll posts to the ledger, and a second run would double the
+   *  expense and the cash credit with nothing to show it was a mistake. */
+  const [payroll, setPayroll] = useState<Payroll[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const loadPayroll = useCallback(() => {
+    hr.payroll()
+      .then(setPayroll)
+      .catch(() => setPayroll([]));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -24,6 +43,7 @@ export default function PayslipPage() {
         if (emp) setEmployee(emp);
       }),
       billing.getCompany().then(setCompany).catch(() => {}),
+      hr.payroll().then(setPayroll).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [id]);
 
@@ -40,6 +60,37 @@ export default function PayslipPage() {
   const download = () => {
     const el = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
     if (el) downloadElementAsPdf(el, `Payslip-${employee.name}-${month}`);
+    else window.print(); // never leave the button doing nothing at all
+  };
+
+  /** The payslip this page is showing, if it has already been recorded. */
+  const recorded = payroll.find(
+    (p) => Number(p.employee_id) === employee.id && p.period === month
+  );
+
+  /** Save the payslip as a payroll record.
+   *
+   *  Downloading a PDF was the only thing this page did, so a payslip existed
+   *  as a file and nowhere else: the employee's payroll history stayed empty,
+   *  monthly payroll read zero, and the agent's list_payroll saw nothing. */
+  const save = async () => {
+    if (recorded || saving) return;
+    const ok = await confirm({
+      title: "Record this payslip?",
+      message: `${employee.name} — ${periodLabel}, net ${aed(net)}. This posts the salary to your accounts as an expense paid from cash.`,
+      confirmLabel: "Record payslip",
+    });
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await hr.runPayroll(employee.id, month, basic, allowances, deductions);
+      loadPayroll();
+      toast.success(`Payslip recorded for ${periodLabel}.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the payslip.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -52,8 +103,21 @@ export default function PayslipPage() {
             <button className="btn-ghost" onClick={() => nav("/people")}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-primary" onClick={download}>
+            <button className="btn-ghost" onClick={download}>
               <Download size={15} /> Download PDF
+            </button>
+            <button
+              className="btn-primary"
+              onClick={save}
+              disabled={!!recorded || saving}
+              title={
+                recorded
+                  ? "Already recorded for this month"
+                  : "Save this payslip to payroll"
+              }
+            >
+              {recorded ? <Check size={15} /> : <Save size={15} />}
+              {recorded ? "Recorded" : saving ? "Recording…" : "Record payslip"}
             </button>
           </div>
         }
