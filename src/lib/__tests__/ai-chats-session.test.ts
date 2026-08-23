@@ -18,13 +18,13 @@ describe("resolveOpeningChat", () => {
     expect(loadChats().find((c) => c.id === old.id)).toBeTruthy();
   });
 
-  it("resumes the same chat for the rest of the run", () => {
+  it("opens fresh even mid-run - resume lives in History, not on mount", () => {
     const first = resolveOpeningChat();
     saveChats([{ ...first, turns: [{ role: "user", text: "hi" }] }]);
 
     const again = resolveOpeningChat();
-    expect(again.id).toBe(first.id);
-    expect(again.turns).toHaveLength(1); // the live one, not another blank
+    expect(again.id).not.toBe(first.id);
+    expect(again.turns).toHaveLength(0);
   });
 
   it("treats the next launch as new again", () => {
@@ -35,21 +35,10 @@ describe("resolveOpeningChat", () => {
     expect(resolveOpeningChat().id).not.toBe(first.id);
   });
 
-  it("resumes rather than losing the thread when sessionStorage is unavailable", () => {
+  it("starts fresh even when a previous chat was active", () => {
     const live = { ...newChat(), turns: [{ role: "user" as const, text: "hi" }] };
     saveChats([live]);
     setActiveId(live.id);
-    const orig = Object.getOwnPropertyDescriptor(window, "sessionStorage");
-    Object.defineProperty(window, "sessionStorage", {
-      configurable: true,
-      get() {
-        throw new Error("blocked");
-      },
-    });
-    try {
-      expect(resolveOpeningChat().id).toBe(live.id);
-    } finally {
-      if (orig) Object.defineProperty(window, "sessionStorage", orig);
-    }
+    expect(resolveOpeningChat().id).not.toBe(live.id);
   });
 });

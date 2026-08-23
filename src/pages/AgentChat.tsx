@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Plus,
-  Loader2,
   Zap,
   Paperclip,
   X,
@@ -17,15 +16,18 @@ import {
   CalendarClock,
   BookOpen,
   SlidersHorizontal,
-  User,
   Copy,
   Check,
   Square,
+  Hammer,
+  Sparkles,
 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
+import { GitBranch, Globe } from "lucide-react";
+import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
 import { openFolder } from "../lib/localPaths";
-import { ErrorBanner, PageHeader } from "../components/ui";
+import { ErrorBanner } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
@@ -61,6 +63,7 @@ import {
   drainFileOutputs,
 } from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
+import { MenuPopover, MenuItemRow, MenuSep } from "../components/ui-menu";
 import {
   loadChats,
   saveChats,
@@ -73,6 +76,7 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { cn } from "../lib/format";
+import { getAccent, type AccentKey } from "../lib/accent";
 import {
   hasDesktop as waHasDesktop,
   bridgeState,
@@ -96,6 +100,32 @@ const STARTERS = [
   "What's running low in stock?",
 ];
 
+/** One-tap tasks that sit above the composer once a conversation exists — the
+ *  empty-state starters cover discovery; these cover the repeats an owner
+ *  actually does daily. Each sends immediately: predictable beats clever. */
+
+/** Shared pill style for every tappable suggestion (starters + quick tabs):
+ *  same shape everywhere, so a tap always predicts the same kind of result. */
+const CHIP =
+  "shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground active:scale-[0.97]";
+
+/** Width both halves of the conversation share — messages and the composer sit
+ *  on one measure so long replies don't stretch wider than where you type. */
+const COLUMN = "mx-auto w-full max-w-[760px]";
+
+/** The orb library draws in grayscale only, so the accent from Settings ->
+ *  Appearance is applied optically: sepia re-colorises, saturate intensifies,
+ *  hue-rotate lands on the chosen accent. Slate stays neutral. */
+const ORB_ACCENT_FILTER: Record<AccentKey, string> = {
+  amber: "sepia(1) saturate(4) hue-rotate(-8deg)",
+  blue: "sepia(1) saturate(5) hue-rotate(175deg)",
+  sky: "sepia(1) saturate(4) hue-rotate(160deg)",
+  emerald: "sepia(1) saturate(4) hue-rotate(95deg)",
+  violet: "sepia(1) saturate(5) hue-rotate(215deg)",
+  rose: "sepia(1) saturate(5) hue-rotate(280deg)",
+  slate: "none",
+};
+
 export default function AgentChat() {
   // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
   const [chat, setChat] = useState<Chat>(resolveOpeningChat);
@@ -117,14 +147,31 @@ export default function AgentChat() {
   const [autoOpen, setAutoOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [webOn, setWebOn] = useState(getReachConfig().enabled);
+  const plusRef = useRef<HTMLDivElement>(null);
+
+  // Ctrl+U opens the file picker from anywhere on the page, as the "+" menu's
+  // shortcut promises.
+  useEffect(() => {
+    const keys = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
+        e.preventDefault();
+        fileRef.current?.click();
+      }
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, []);
+
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const ready = useMemo(() => aiReady(), []);
   const model = useMemo(() => getAiConfig().model, []);
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
-  /** What the agent is doing right now ("Looking up customers…"), shown while a
-   *  tool runs so a long turn reads as work rather than as a hang. */
-  const [activity, setActivity] = useState<string | null>(null);
+  /** The tools run so far this turn ("Looking up customers…"), shown as a chip
+   *  trail while the agent works so a long turn reads as work, not a hang. */
+  const [activity, setActivity] = useState<string[]>([]);
   /** Lets the Stop button cut a run short. ponytail: on desktop the native AI
    *  proxy call itself isn't cancellable (see ai.ts), so an abort stops the
    *  agent between rounds rather than mid-request — which is what "stop doing
@@ -146,12 +193,13 @@ export default function AgentChat() {
     setFile(f);
   };
 
-  // Auto-grow the textarea up to a cap.
+  // Auto-grow the textarea up to a cap — tall enough for a real brief, short
+  // enough that it never crowds the conversation off the screen.
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
   }, [input]);
 
   // Route the agent's sensitive-action approvals through an in-app modal
@@ -178,6 +226,12 @@ export default function AgentChat() {
     setActiveId(chat.id);
   }, [chat]);
 
+  // The rail lists every stored chat, so re-read the store whenever the active
+  // chat changes — the persist effect above writes, this is what sees it.
+  useEffect(() => {
+    setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
+  }, [chat]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.turns, streaming, busy]);
@@ -199,7 +253,7 @@ export default function AgentChat() {
     const attached = file;
     if ((!q && !attached) || busy) return;
     if (!ready) {
-      setErr("Connect an AI model first — Settings → AI Assistant (bring your own key).");
+      setErr("Connect an AI model first - Settings → AI Assistant (bring your own key).");
       return;
     }
     setErr(null);
@@ -209,7 +263,7 @@ export default function AgentChat() {
     const shownText = attached ? `${q}${q ? "\n\n" : ""}📎 ${attached.name}` : q;
     // Explicit hint so the agent knows it can edit the attached file via tools.
     const goalText = attached
-      ? `${q || "Process the attached file."}\n\n[A file named "${attached.name}" is attached — use the run_file_tool to edit/convert it, or read it to act on its contents.]`
+      ? `${q || "Process the attached file."}\n\n[A file named "${attached.name}" is attached - use the run_file_tool to edit/convert it, or read it to act on its contents.]`
       : q;
     const withUser: Chat = {
       ...chat,
@@ -291,10 +345,12 @@ export default function AgentChat() {
             streamedRef.current = sofar;
             setStreaming(sofar);
           } else if (ev.type === "tool_call") {
-            setActivity(toolLabel(ev.name));
-          } else if (ev.type === "tool_result") {
-            setActivity(null);
+            const label = toolLabel(ev.name);
+            setActivity((a) => (a[a.length - 1] === label ? a : [...a, label]));
           }
+          // tool_result deliberately clears nothing: finished steps stay on
+          // screen until the turn ends, which is what makes the trail read as
+          // progress rather than a single label that keeps swapping.
         }
       }
       // Files belong to the message that produced them. They used to live in
@@ -329,7 +385,7 @@ export default function AgentChat() {
       streamedRef.current = "";
       setBusy(false);
       setStreaming("");
-      setActivity(null);
+      setActivity([]);
       setAttachment(null); // don't leak into the next turn
     }
   };
@@ -369,7 +425,7 @@ export default function AgentChat() {
 
   return (
     <div
-      className="relative mx-auto flex min-h-[calc(100vh-7rem)] max-w-3xl flex-col"
+      className="relative flex flex-1 items-start gap-6"
       onDragOver={(e) => {
         e.preventDefault();
         if (!busy) setDragging(true);
@@ -385,488 +441,590 @@ export default function AgentChat() {
         if (f && !busy) attach(f);
       }}
     >
-      {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-2 text-foreground">
-            <Paperclip size={28} />
-            <p className="text-sm font-semibold text-foreground">Drop a PDF or image to attach</p>
-          </div>
-        </div>
-      )}
-      {/* Pinned: New chat, history and memory are needed most in the middle of
-          a long conversation, which is exactly where they used to be scrolled
-          off the top. The blur keeps message text from showing through. */}
-      <div className="sticky top-0 z-30 -mx-1 bg-background/85 px-1 backdrop-blur">
-      <PageHeader
-        title="Filey AI"
-        subtitle="Your business assistant — ask about revenue, invoices, customers and more."
-        action={
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setCapsOpen(true)}
-              title="Capabilities — what the agent may do"
-              aria-label="Capabilities"
-              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <SlidersHorizontal size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setSkillsOpen(true)}
-              title="Skills — reusable procedures"
-              aria-label="Skills"
-              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <BookOpen size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setAutoOpen(true)}
-              title="Automations — scheduled tasks"
-              aria-label="Automations"
-              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <CalendarClock size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={openHistory}
-              title="Chat history"
-              aria-label="Chat history"
-              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <History size={15} />
-            </button>
-            <button
-              type="button"
-              onClick={openMemory}
-              title="Memory — what the agent has learned"
-              aria-label="Memory"
-              className="grid h-8 w-8 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-            >
-              <Brain size={15} />
-            </button>
-            <button type="button" onClick={startNew} className="btn-ghost">
-              <Plus size={14} /> New
-            </button>
-          </div>
-        }
-      />
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 space-y-6 pb-40 pt-2">
-        {empty && !busy ? (
-          <div className="mx-auto mt-10 max-w-xl text-center">
-            <div className="mx-auto mb-4 grid h-16 w-16 place-items-center">
-              <ThinkingOrb size={64} state="listening" />
-            </div>
-            <p className="text-[22px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
-            <p className="mt-2 text-[13px] text-muted-foreground">
-              Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
-              act across invoices, customers, inventory, accounting and more.
-            </p>
-            {/* Openers, not decoration: a blank box gives no clue that this
-                agent can draft documents and chase payments, not just chat. */}
-            <div className="mt-5 flex flex-wrap justify-center gap-1.5">
-              {STARTERS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => void send(s)}
-                  className="rounded-full border border-border bg-card px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground active:scale-[0.97]"
-                >
-                  {s}
-                </button>
-              ))}
+      {/* Conversation column: header, messages and the composer all share the
+          same 760px measure so the eye never jumps between widths. */}
+      <div className="relative flex min-h-[calc(100vh-7rem)] min-w-0 flex-1 flex-col">
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2 text-foreground">
+              <Paperclip size={28} />
+              <p className="text-sm font-semibold text-foreground">Drop a PDF or image to attach</p>
             </div>
           </div>
-        ) : (
-          chat.turns.map((t, i) => <Bubble key={i} turn={t} />)
         )}
 
-        {busy && (
-          <>
-            <Bubble
-              turn={{ role: "assistant", text: streaming || "Thinking…" }}
-              pending
-            />
-            {activity && (
-              <div className="flex items-center gap-2 pl-11 text-[12px] text-muted-foreground">
-                <Loader2 size={12} className="animate-spin" />
-                <span>{activity}</span>
-              </div>
-            )}
-          </>
-        )}
-
-        {err && <ErrorBanner message={err} />}
-
-        {/* Pairing QR, rendered from live bridge state rather than from the
-            model's reply: a data URL is kilobytes of base64 that would bloat
-            every subsequent turn's context, and the code refreshes on its own
-            timer — this card follows it. */}
-        <WhatsAppPairingCard />
-
-        <div ref={endRef} />
-      </div>
-
-      {/* Composer */}
-      <div className="sticky bottom-0 -mx-1 bg-background/80 px-1 pb-4 pt-2 backdrop-blur">
-        {/* Minimal composer: the border states in neutral ink, no brand accent.
-            An input is not a place that needs decorating. */}
-        <div className="rounded-xl border border-border bg-card p-2.5 transition-colors focus-within:border-foreground/25">
-          {/* Attachment preview card */}
-          {file && (
-            <div className="mb-2 flex">
-              <div className="group relative h-20 w-44 overflow-hidden rounded-xl border border-border bg-muted">
-                {filePreview ? (
-                  <img
-                    src={filePreview}
-                    alt={file.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full flex-col justify-between p-2.5">
-                    <span className="inline-flex w-fit items-center gap-1 rounded bg-hover px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-                      <FileText size={10} /> {file.name.split(".").pop()}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-medium text-foreground" title={file.name}>
-                        {file.name}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {Math.max(1, Math.ceil(file.size / 1024))} KB
-                      </p>
-                    </div>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => attach(null)}
-                  aria-label="Remove attachment"
-                  className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
-                >
-                  <X size={11} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Input */}
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={input}
-            disabled={busy}
-            placeholder={auto ? "Describe a task to delegate…" : "Message Filey AI…"}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send(input);
-              }
-            }}
-            // No focus ring on the composer: the global :focus-visible rule
-            // paints an amber ring, and a textarea matches it on every click —
-            // a yellow box around the thing you type in, all the time. Focus is
-            // still shown, by the wrapper's border darkening.
-            className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
-            autoFocus
-          />
-
-          {/* Action bar */}
-          <div className="mt-1 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              aria-label="Attach a document"
-              title="Attach a PDF or image to edit/convert with tools"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-40"
-            >
-              <Plus size={18} />
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,image/*"
-              className="hidden"
-              onChange={(e) => {
-                attach(e.target.files?.[0] ?? null);
-                e.target.value = ""; // allow re-selecting the same file
-              }}
-            />
-            {model && (
-              <span
-                className="hidden items-center rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex"
-                title="Model is configured in Settings → AI Assistant"
-              >
-                {model}
-              </span>
-            )}
-            {/* Right of the model name: how much the agent may do without
-                asking. It belongs next to the model because both answer the
-                same question — what is about to act on your data. */}
-            <select
-              value={mode}
-              onChange={(e) => {
-                const v = e.target.value as AgentMode;
-                setAgentMode(v);
-                setMode(v);
-              }}
-              aria-label="Agent mode"
-              title={AGENT_MODES.find((m) => m.id === mode)?.description}
-              className="rounded-lg border border-border bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground"
-            >
-              {AGENT_MODES.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-            {/* Autonomous belongs here, not in the page header: it changes what
-                pressing Enter will do, so it sits with the thing you press. */}
-            <button
-              type="button"
-              onClick={() => setAuto((v) => !v)}
-              aria-pressed={auto}
-              title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
-              className={cn(
-                "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition-colors active:scale-[0.97]",
-                auto
-                  ? "bg-primary-400/15 text-foreground"
-                  : "text-muted-foreground hover:bg-hover hover:text-foreground"
-              )}
-            >
-              <Zap size={13} className={auto ? "text-primary-600 dark:text-primary-400" : ""} />
-              {auto ? "Autonomous" : "Chat"}
-            </button>
-            <div className="flex-1" />
-            {busy ? (
-              // Square, because that is what stop looks like everywhere else.
-              <button
-                type="button"
-                onClick={stop}
-                aria-label="Stop generating"
-                title="Stop"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80"
-              >
-                <Square size={12} fill="currentColor" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void send(input)}
-                disabled={!input.trim() && !file}
-                aria-label="Send"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-30"
-              >
-                <ArrowUp size={16} />
-              </button>
-            )}
+        {/* Pinned: New chat, history and memory are needed most in the middle of
+            a long conversation, which is exactly where they used to be scrolled
+            off the top. On lg+ those controls live in the rail, so only the
+            title stays. The blur keeps message text from showing through. */}
+        <div className="sticky top-0 z-30 bg-background/85 backdrop-blur">
+          <div className={COLUMN}>
           </div>
         </div>
-        <p className="mt-1.5 px-2 text-[11px] text-muted-foreground">
-          {auto
-            ? "Autonomous: the agent runs multiple steps on its own. Money/outbound actions still ask first."
-            : "Tip: turn on Autonomous to delegate a whole task. Enter to send · Shift+Enter for a new line."}
-        </p>
-      </div>
 
-      {/* Sensitive-action approval (replaces the native confirm dialog).
-          Portaled, like the two overlays below it: this page renders inside
-          <main>, and WebView2 composites a `fixed` overlay into its scrolling
-          ancestor's layer and then repaints only part of it. */}
-      {pendingConfirm && createPortal(
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg">
-            <div className="flex items-center gap-2">
-              <ShieldAlert size={18} className="text-warning" />
-              <p className="font-semibold text-foreground">Approve action</p>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              The assistant wants to run{" "}
-              <b className="text-foreground">{pendingConfirm.name}</b>. This can change data
-              or send something out.
-            </p>
-            {Object.keys(pendingConfirm.args).length > 0 && (
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-[11px] text-muted-foreground">
-                {JSON.stringify(pendingConfirm.args, null, 2)}
-              </pre>
-            )}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="btn-ghost"
-                onClick={() => {
-                  pendingConfirm.resolve(false);
-                  setPendingConfirm(null);
-                }}
-              >
-                Deny
-              </button>
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  pendingConfirm.resolve(true);
-                  setPendingConfirm(null);
-                }}
-              >
-                Allow
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Memory viewer */}
-      {memOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setMemOpen(false)}
-        >
-          <div
-            className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Brain size={18} className="text-primary-500" />
-                <p className="font-semibold text-foreground">Agent memory</p>
+        {/* Messages */}
+        <div className={cn(COLUMN, "flex-1 space-y-6 pb-6 pt-2")}>
+          {empty && !busy ? (
+            <div className="mx-auto mt-8 max-w-xl text-center">
+              {/* The orb ships two tuned presets (64 / 20) rather than arbitrary
+                  sizes, so the 56px presence comes from a static scale on the
+                  box, not from an untuned canvas redraw. Static transform = no
+                  motion-budget cost. */}
+              <div className="mx-auto mb-3 grid h-14 w-14 place-items-center">
+                <div className="scale-[0.875]">
+                  <ThinkingOrb size={64} state="listening" style={{ filter: ORB_ACCENT_FILTER[getAccent()] }} />
+                </div>
               </div>
-              <button
-                onClick={() => setMemOpen(false)}
-                aria-label="Close"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            {mems.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                Nothing learned yet. The agent saves durable facts and preferences
-                here as you chat.
+              <p className="text-[20px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
+              <p className="mt-1.5 text-[13px] text-muted-foreground">
+                Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
+                act across invoices, customers, inventory, accounting and more.
               </p>
-            ) : (
-              <div className="max-h-[50vh] space-y-2 overflow-auto">
-                {mems.map((m) => (
-                  <div
-                    key={m.id}
-                    className="flex items-start gap-2 rounded-lg border border-border px-3 py-2"
+              {/* Openers, not decoration: a blank box gives no clue that this
+                  agent can draft documents and chase payments, not just chat. */}
+              <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                {STARTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => void send(s)}
+                    className={CHIP.replace("shrink-0 ", "")}
                   >
-                    <div className="min-w-0 flex-1">
-                      {m.tag && (
-                        <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                          {m.tag}
-                        </span>
-                      )}
-                      <span className="text-sm text-foreground">{m.text}</span>
-                    </div>
-                    <button
-                      onClick={() => removeMem(m.id)}
-                      aria-label="Forget"
-                      className="shrink-0 text-muted-foreground hover:text-danger"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                    {s}
+                  </button>
                 ))}
               </div>
-            )}
-            {mems.length > 0 && (
-              <div className="mt-4 flex justify-end">
-                <button
-                  className="btn-ghost text-danger"
-                  onClick={wipeMem}
-                >
-                  Clear all memory
-                </button>
-              </div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
-      {/* Chat history drawer */}
-      {histOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 bg-black/40"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setHistOpen(false)}
-        >
-          <div
-            className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col border-r border-border bg-card shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <p className="font-semibold text-foreground">Chats</p>
-              <button
-                onClick={() => setHistOpen(false)}
-                aria-label="Close"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={16} />
-              </button>
             </div>
-            <button
-              onClick={() => {
-                startNew();
-                setHistOpen(false);
-              }}
-              className="m-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-hover"
+          ) : (
+            // Turns separate by spacing alone: ChatTurn carries no timestamp
+            // (aiChats.ts stores none), so no time meta is invented here.
+            chat.turns.map((t, i) => <Bubble key={i} turn={t} />)
+          )}
+
+          {busy && (
+            <>
+              <Bubble
+                turn={{ role: "assistant", text: streaming || "Thinking…" }}
+                pending
+              />
+              {activity.length > 0 && (
+                // Tool steps collect into quiet chips under the pending reply:
+                // a multi-tool run reads as a visible checklist of work instead
+                // of one spinner whose text keeps changing underneath you.
+                <div className="flex flex-wrap gap-1.5 pl-11">
+                  {activity.map((label, i) => {
+                    const Icon = stepIcon(label);
+                    return (
+                      <span
+                        key={`${i}-${label}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11.5px] text-muted-foreground"
+                      >
+                        <Icon size={12} />
+                        {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {err && <ErrorBanner message={err} />}
+
+          {/* Pairing QR, rendered from live bridge state rather than from the
+              model's reply: a data URL is kilobytes of base64 that would bloat
+              every subsequent turn's context, and the code refreshes on its own
+              timer - this card follows it. */}
+          <WhatsAppPairingCard />
+
+          <div ref={endRef} />
+        </div>
+
+        {/* Composer — sticky within the column and on the same 760px measure as
+            the messages, replacing the old edge-to-edge bar. */}
+        <div className="sticky bottom-0 z-20 mt-auto pb-3">
+          <div className={COLUMN}>
+        {/* Composer toolbar: the chat controls that used to live in a left
+            rail, one quiet icon row directly above where you type. */}
+        <div className="mb-1.5 flex items-center gap-1">
+          <button type="button" onClick={startNew} aria-label="New chat" title="New chat (fresh context)" className="grid h-8 w-8 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-[color,border-color] hover:border-foreground/30 hover:text-foreground"><Plus size={16} /></button>
+          <button type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" className="grid h-8 w-8 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-[color,border-color] hover:border-foreground/30 hover:text-foreground"><History size={16} /></button>
+          <button type="button" onClick={openMemory} aria-label="Agent memory" title="Memory: what the agent has learned" className="grid h-8 w-8 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-[color,border-color] hover:border-foreground/30 hover:text-foreground"><Brain size={16} /></button>
+          <div className="mx-1 h-4 w-px bg-border" />
+          <span className="inline-flex max-w-[240px] items-center truncate rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">{chat.title || "New chat"}</span>
+        </div>
+
+            {/* Minimal composer: hairline card that darkens its border on focus.
+                An input is not a place that needs decorating. While the agent
+                runs, the whole card dims — the clearest possible "not typing
+                right now" without disabling anything visually louder. */}
+            <div
+              className={cn(
+                "rounded-xl border border-border bg-transparent p-1.5 transition-[border-color,opacity] focus-within:border-muted-foreground/50",
+                busy && "opacity-60"
+              )}
             >
-              <Plus size={15} /> New chat
-            </button>
-            <div className="flex-1 space-y-1 overflow-auto px-2 pb-3">
-              {chatList.length === 0 ? (
-                <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-                  No chats yet.
-                </p>
-              ) : (
-                chatList.map((c) => (
-                  <div
-                    key={c.id}
-                    onClick={() => switchChat(c)}
-                    className={cn(
-                      "group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 transition-colors",
-                      c.id === chat.id
-                        ? "bg-primary-400/15"
-                        : "hover:bg-hover"
+              {/* Attachment chip — thumbnail-first, remove always visible
+                  (hover-only removal hides the affordance on touch). */}
+              {file && (
+                <div className="mb-2 flex">
+                  <div className="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted">
+                    {filePreview ? (
+                      <img
+                        src={filePreview}
+                        alt={file.name}
+                        className="h-full w-full object-cover"
+                        title={file.name}
+                      />
+                    ) : (
+                      <div
+                        className="flex h-full flex-col items-center justify-center gap-1 p-1"
+                        title={`${file.name} · ${Math.max(1, Math.ceil(file.size / 1024))} KB`}
+                      >
+                        <FileText size={16} className="text-muted-foreground" />
+                        <span className="w-full truncate text-center text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {file.name.split(".").pop()}
+                        </span>
+                      </div>
                     )}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
-                      {c.title || "New chat"}
-                    </span>
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteChat(c.id);
-                      }}
-                      aria-label="Delete chat"
-                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                      type="button"
+                      onClick={() => attach(null)}
+                      aria-label={`Remove ${file.name}`}
+                      className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
                     >
-                      <Trash2 size={13} />
+                      <X size={11} />
                     </button>
                   </div>
-                ))
+                </div>
+              )}
+
+              {/* Input */}
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={input}
+                disabled={busy}
+                placeholder={auto ? "Describe a task to delegate…" : "Message Filey AI…"}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void send(input);
+                  }
+                }}
+                onPaste={(e) => {
+                  // Screenshot straight into the composer, like the reference
+                  // input: an image on the clipboard is almost always meant
+                  // for the agent to look at.
+                  const img = Array.from(e.clipboardData.files).find((f) =>
+                    f.type.startsWith("image/")
+                  );
+                  if (img) {
+                    e.preventDefault();
+                    attach(img);
+                  }
+                }}
+                /*
+                 * No focus ring on the composer: the global :focus-visible rule
+                 * paints an amber ring, and a textarea matches it on every
+                 * click - a yellow box around the thing you type in. Focus is
+                 * still shown, by the wrapper's border darkening.
+                 */
+                className="max-h-[160px] min-h-[44px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
+                autoFocus
+              />
+
+              {/* Action bar — one circular cluster, reference-style: the same
+                  8×8 round slot carries attach, toggles, and send, so the eye
+                  reads one row of controls instead of mixed shapes. */}
+              <div className="mt-1 flex items-center gap-1">
+                <div className="relative shrink-0" ref={plusRef}>
+                  <button
+                    type="button"
+                    onClick={() => setPlusOpen((v) => !v)}
+                    disabled={busy}
+                    aria-label="Add to message"
+                    aria-expanded={plusOpen}
+                    title="Add files, repos, skills — Ctrl+U for files"
+                    className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:opacity-40"
+                  >
+                    <Paperclip size={16} />
+                  </button>
+
+                  <MenuPopover
+                    open={plusOpen}
+                    onClose={() => setPlusOpen(false)}
+                    anchorRef={plusRef}
+                    side="top"
+                    className="w-[248px]"
+                  >
+                      {/* Group 0: how much the agent may do — the mode lives in
+                          this menu so one control answers both "what can you
+                          do" and "what will you do". */}
+                      {AGENT_MODES.map((m) => (
+                        <MenuItemRow
+                          key={m.id}
+                          icon={<Zap size={14} />}
+                          label={m.name}
+                          checked={mode === m.id}
+                          onClick={() => {
+                            setAgentMode(m.id);
+                            setMode(m.id);
+                            setPlusOpen(false);
+                          }}
+                        />
+                      ))}
+
+                      <MenuSep />
+
+                      {/* Group 1: things that attach content */}
+                      <MenuItemRow
+                        icon={<Paperclip size={14} />}
+                        label="Add files or photos"
+                        hint="Ctrl+U"
+                        onClick={() => {
+                          setPlusOpen(false);
+                          fileRef.current?.click();
+                        }}
+                      />
+                      <MenuItemRow
+                        icon={<GitBranch size={14} />}
+                        label="Add from GitHub"
+                        onClick={() => {
+                          setPlusOpen(false);
+                          setInput("Read this GitHub repo and tell me what it does: ");
+                        }}
+                      />
+
+                      <MenuSep />
+
+                      {/* Group 2: agent capabilities */}
+                      <MenuItemRow
+                        icon={<BookOpen size={14} />}
+                        label="Skills"
+                        chevron
+                        onClick={() => {
+                          setPlusOpen(false);
+                          setSkillsOpen(true);
+                        }}
+                      />
+                      <MenuItemRow
+                        icon={<CalendarClock size={14} />}
+                        label="Automations"
+                        chevron
+                        onClick={() => {
+                          setPlusOpen(false);
+                          setAutoOpen(true);
+                        }}
+                      />
+                      <MenuItemRow
+                        icon={<SlidersHorizontal size={14} />}
+                        label="Capabilities"
+                        chevron
+                        onClick={() => {
+                          setPlusOpen(false);
+                          setCapsOpen(true);
+                        }}
+                      />
+
+                      <MenuSep />
+
+                      {/* Group 3: live toggles */}
+                      <MenuItemRow
+                        icon={<Globe size={14} />}
+                        label="Web research"
+                        checked={webOn}
+                        onClick={() => {
+                          const next = !webOn;
+                          setReachConfig({ enabled: next });
+                          setWebOn(next);
+                          if (!next) setPlusOpen(false);
+                        }}
+                      />
+                  </MenuPopover>
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    attach(e.target.files?.[0] ?? null);
+                    e.target.value = ""; // allow re-selecting the same file
+                  }}
+                />
+                {model && (
+                  <span
+                    className="hidden items-center rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex"
+                    title="Model is configured in Settings → AI Assistant"
+                  >
+                    {model}
+                  </span>
+                )}
+                {/* Autonomous belongs here, not in the page header: it changes what
+                    pressing Enter will do, so it sits with the thing you press.
+                    Same pill in both states so nothing shifts when it flips; the
+                    amber tint is reserved for the ON state, where it means it.
+                    The label expands only when ON — off stays a compact icon
+                    pill, on announces itself. */}
+                <button
+                  type="button"
+                  onClick={() => setAuto((v) => !v)}
+                  aria-pressed={auto}
+                  title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border text-[12px] font-medium transition-[color,background-color,border-color,max-width] active:scale-[0.97]",
+                    auto
+                      ? "border-primary-400/50 bg-primary-400/15 px-2.5 text-foreground"
+                      : "w-8 justify-center border-border px-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                  )}
+                >
+                  <Zap
+                    size={13}
+                    className={cn(
+                      "shrink-0 transition-transform duration-200 motion-reduce:transition-none",
+                      auto && "rotate-12 text-primary-600 dark:text-primary-400"
+                    )}
+                  />
+                  {auto ? "Autonomous" : ""}
+                </button>
+                <div className="flex-1" />
+                {/* One button, three states — empty ghost, ready amber,
+                    streaming stop — exactly like the reference input. Stop is
+                    ink on purpose: an interrupt is not what amber invites. */}
+                {busy ? (
+                  <button
+                    type="button"
+                    onClick={stop}
+                    aria-label="Stop generating"
+                    title="Stop"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
+                  >
+                    <Square size={12} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void send(input)}
+                    disabled={!input.trim() && !file}
+                    aria-label="Send message"
+                    title="Send (Enter)"
+                    className={cn(
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
+                      input.trim() || file
+                        ? "bg-primary-400 text-zinc-900 hover:bg-primary-500"
+                        : "bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+                    )}
+                  >
+                    <ArrowUp size={16} strokeWidth={2.25} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="mt-1.5 px-2 text-[11px] text-muted-foreground">
+              {auto
+                ? "Autonomous: the agent runs multiple steps on its own. Money/outbound actions still ask first."
+                : "Tip: turn on Autonomous to delegate a whole task. Enter to send · Shift+Enter for a new line."}
+            </p>
+          </div>
+        </div>
+
+        {/* Sensitive-action approval (replaces the native confirm dialog).
+            Portaled, like the overlays below: this page renders inside <main>,
+            and WebView2 composites a `fixed` overlay into its scrolling
+            ancestor's layer and then repaints only part of it. */}
+        {pendingConfirm && createPortal(
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={18} className="text-warning" />
+                <p className="font-semibold text-foreground">Approve action</p>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                The assistant wants to run{" "}
+                <b className="text-foreground">{pendingConfirm.name}</b>. This can change data
+                or send something out.
+              </p>
+              {Object.keys(pendingConfirm.args).length > 0 && (
+                <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-[11px] text-muted-foreground">
+                  {JSON.stringify(pendingConfirm.args, null, 2)}
+                </pre>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="btn-ghost"
+                  onClick={() => {
+                    pendingConfirm.resolve(false);
+                    setPendingConfirm(null);
+                  }}
+                >
+                  Deny
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    pendingConfirm.resolve(true);
+                    setPendingConfirm(null);
+                  }}
+                >
+                  Allow
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Memory viewer */}
+        {memOpen && createPortal(
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setMemOpen(false)}
+          >
+            <div
+              className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Brain size={18} className="text-primary-500" />
+                  <p className="font-semibold text-foreground">Agent memory</p>
+                </div>
+                <button
+                  onClick={() => setMemOpen(false)}
+                  aria-label="Close"
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {mems.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nothing learned yet. The agent saves durable facts and preferences
+                  here as you chat.
+                </p>
+              ) : (
+                <div className="max-h-[50vh] space-y-2 overflow-auto">
+                  {mems.map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex items-start gap-2 rounded-lg border border-border px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        {m.tag && (
+                          <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                            {m.tag}
+                          </span>
+                        )}
+                        <span className="text-sm text-foreground">{m.text}</span>
+                      </div>
+                      <button
+                        onClick={() => removeMem(m.id)}
+                        aria-label="Forget"
+                        className="shrink-0 text-muted-foreground hover:text-danger"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {mems.length > 0 && (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    className="btn-ghost text-danger"
+                    onClick={wipeMem}
+                  >
+                    Clear all memory
+                  </button>
+                </div>
               )}
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
-      <AutomationsDrawer open={autoOpen} onClose={() => setAutoOpen(false)} />
-      <SkillsDrawer open={skillsOpen} onClose={() => setSkillsOpen(false)} />
-      <CapabilitiesDrawer open={capsOpen} onClose={() => setCapsOpen(false)} />
+          </div>,
+          document.body
+        )}
+
+        {/* Chat history drawer — the sub-lg path to older chats; on lg+ the rail
+            covers browsing, but delete-from-history stays drawer-only. */}
+        {histOpen && createPortal(
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setHistOpen(false)}
+          >
+            <div
+              className="absolute left-0 top-0 flex h-full w-80 max-w-[85vw] flex-col border-r border-border bg-card shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <p className="font-semibold text-foreground">Chats</p>
+                <button
+                  onClick={() => setHistOpen(false)}
+                  aria-label="Close"
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  startNew();
+                  setHistOpen(false);
+                }}
+                className="m-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-hover"
+              >
+                <Plus size={15} /> New chat
+              </button>
+              <div className="flex-1 space-y-1 overflow-auto px-2 pb-3">
+                {chatList.length === 0 ? (
+                  <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+                    No chats yet.
+                  </p>
+                ) : (
+                  chatList.map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => switchChat(c)}
+                      className={cn(
+                        "group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 transition-colors",
+                        c.id === chat.id
+                          ? "bg-primary-400/15"
+                          : "hover:bg-hover"
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                        {c.title || "New chat"}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteChat(c.id);
+                        }}
+                        aria-label="Delete chat"
+                        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+        <AutomationsDrawer open={autoOpen} onClose={() => setAutoOpen(false)} />
+        <SkillsDrawer open={skillsOpen} onClose={() => setSkillsOpen(false)} />
+        <CapabilitiesDrawer open={capsOpen} onClose={() => setCapsOpen(false)} />
+      </div>
     </div>
   );
 }
@@ -928,31 +1086,52 @@ function toolLabel(name: string): string {
   return known[name] ?? `${name.replace(/_/g, " ")}…`;
 }
 
+/** Presentational icon for a tool-step chip, picked from the label wording —
+ *  activity state keeps the human label, not the raw tool name. Reads/writes/
+ *  sends get distinct glyphs; anything else gets the generic spark. */
+function stepIcon(label: string): typeof Hammer {
+  const s = label.toLowerCase();
+  if (s.includes("remember") || s.includes("memory") || s.includes("recall")) return Brain;
+  if (s.includes("send") || s.includes("email")) return Zap;
+  if (
+    s.includes("draft") ||
+    s.includes("add") ||
+    s.includes("log") ||
+    s.includes("updat") ||
+    s.includes("work")
+  )
+    return Hammer;
+  return Sparkles;
+}
+
 function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
+    // A quiet right-aligned film, not a filled balloon: the user's words stay
+    // readable ink on a tint, so the assistant's plain prose remains the page's
+    // dominant voice.
     return (
-      <div className="flex justify-end gap-3">
-        <div className="max-w-[75%] whitespace-pre-wrap rounded-lg bg-foreground px-3.5 py-2.5 text-[13px] leading-relaxed text-background">
+      <div className="flex justify-end">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-xl bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
           {turn.text}
-        </div>
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-          <User size={15} />
         </div>
       </div>
     );
   }
   return (
-    <div className="flex gap-3">
+    <div className="group/msg flex gap-3">
       {/* The orb is the assistant's face, so it stays alive whatever the agent
-          is doing — working while a turn is in flight, listening once it has
+          is doing - working while a turn is in flight, listening once it has
           answered. */}
       <div className="grid h-8 w-8 shrink-0 place-items-center">
-        <ThinkingOrb size={20} state={pending ? "working" : "listening"} />
+        <ThinkingOrb size={20} state={pending ? "working" : "listening"} style={{ filter: ORB_ACCENT_FILTER[getAccent()] }} />
       </div>
-      <div className="group/msg min-w-0 max-w-[85%]">
+      {/* Plain text on the background, full measure: boxing every answer as a
+          card frames two-line confirmations like documents. 14px separates the
+          agent's voice from the 13px working density everywhere else. */}
+      <div className="min-w-0 flex-1">
         <div
           className={cn(
-            "rounded-lg border border-border bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground",
+            "text-[14px] leading-relaxed text-foreground",
             pending && "text-muted-foreground"
           )}
         >
@@ -962,7 +1141,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
           {pending && <span className="ml-1 inline-block animate-pulse">▍</span>}
         </div>
         {!pending && turn.text.trim() && (
-          <div className="mt-1 flex opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
+          <div className="mt-0.5 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100">
             <CopyButton text={turn.text} />
           </div>
         )}

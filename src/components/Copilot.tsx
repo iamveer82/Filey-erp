@@ -42,6 +42,7 @@ import { setAttachment } from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
+import { MenuPopover, MenuItemRow, SelectMenu } from "./ui-menu";
 import ColorOrb from "./ColorOrb";
 
 const SYSTEM =
@@ -108,7 +109,6 @@ export default function Copilot() {
   });
   const [activeId, setActiveIdState] = useState<string | null>(opening.id);
   const [view, setView] = useState<View>("chat");
-  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -192,7 +192,7 @@ export default function Copilot() {
     c.turns = [
       {
         role: "assistant",
-        text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm ${p.assistantName || "Filey"}. I can see your customers, invoices, products and more — ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
+        text: `Hi${p.userName ? ` ${p.userName}` : ""}! I'm ${p.assistantName || "Filey"}. I can see your customers, invoices, products and more - ask me to draft an invoice line, a customer email, a summary, or anything about your business.`,
       },
     ];
     persist([c, ...chats]);
@@ -213,7 +213,7 @@ export default function Copilot() {
     const text = input.trim() || (file ? "Process the attached file." : "");
     if (!text || busy) return;
     if (!navigator.onLine) {
-      setErr("You're offline — Filey AI needs a connection to reach your model.");
+      setErr("You're offline - Filey AI needs a connection to reach your model.");
       return;
     }
     setErr(null);
@@ -307,7 +307,6 @@ export default function Copilot() {
   };
 
   const renameChat = async (c: Chat) => {
-    setMenuFor(null);
     const name = await prompt({
       title: "Rename chat",
       defaultValue: c.title,
@@ -319,7 +318,6 @@ export default function Copilot() {
       );
   };
   const shareChat = async (c: Chat) => {
-    setMenuFor(null);
     try {
       await navigator.clipboard.writeText(transcript(c));
       toast.success("Conversation copied to clipboard");
@@ -329,7 +327,6 @@ export default function Copilot() {
     }
   };
   const deleteChat = async (c: Chat) => {
-    setMenuFor(null);
     const ok = await confirm({
       title: "Delete this chat?",
       danger: true,
@@ -374,10 +371,7 @@ export default function Copilot() {
                   <Plus size={16} />
                 </button>
                 <button
-                  onClick={() => {
-                    setView((v) => (v === "history" ? "chat" : "history"));
-                    setMenuFor(null);
-                  }}
+                  onClick={() => setView((v) => (v === "history" ? "chat" : "history"))}
                   aria-label="History"
                   title="Chat history"
                   className={cn(
@@ -457,7 +451,7 @@ export default function Copilot() {
             {!ready ? (
               <div className="space-y-3 text-sm text-brand-500">
                 <p>
-                  Connect your own AI model to begin. Filey never sees your key — it stays
+                  Connect your own AI model to begin. Filey never sees your key - it stays
                   in this browser and talks to your provider directly.
                 </p>
                 <button
@@ -473,7 +467,7 @@ export default function Copilot() {
             ) : needsOnboarding ? (
               <div className="space-y-3">
                 <p className="text-sm text-brand-500">
-                  Hi! I'm Filey. A couple of quick things so I can help you better — I'll
+                  Hi! I'm Filey. A couple of quick things so I can help you better - I'll
                   remember these.
                 </p>
                 <div className="field">
@@ -498,19 +492,13 @@ export default function Copilot() {
                 </div>
                 <div className="field">
                   <label className="label">Pick a vibe</label>
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={draft.vibe}
-                    onChange={(e) =>
-                      setDraft((d) => ({ ...d, vibe: e.target.value as AiVibe }))
+                    onChange={(v) =>
+                      setDraft((d) => ({ ...d, vibe: v as AiVibe }))
                     }
-                  >
-                    {AI_VIBES.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
+                    options={AI_VIBES.map((v) => ({ value: v, label: v }))}
+                  />
                 </div>
                 <button onClick={finishOnboarding} className="btn-primary w-full">
                   Start
@@ -542,39 +530,16 @@ export default function Copilot() {
                             {c.turns.length} msgs
                           </span>
                         </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          aria-label="Chat options"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuFor((m) => (m === c.id ? null : c.id));
-                          }}
-                          className="rounded-xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 cursor-pointer"
-                        >
-                          <MoreHorizontal size={16} />
-                        </span>
                       </button>
-                      {menuFor === c.id && (
-                        <div className="absolute right-2 top-11 z-20 w-36 overflow-hidden rounded-xl border border-brand-200 bg-white py-1">
-                          <MenuItem
-                            icon={<Pencil size={14} />}
-                            label="Rename"
-                            onClick={() => renameChat(c)}
-                          />
-                          <MenuItem
-                            icon={<Share2 size={14} />}
-                            label="Share"
-                            onClick={() => shareChat(c)}
-                          />
-                          <MenuItem
-                            icon={<Trash2 size={14} />}
-                            label="Delete"
-                            danger
-                            onClick={() => deleteChat(c)}
-                          />
-                        </div>
-                      )}
+                      {/* Sibling of the row button (never nested inside it):
+                          a button inside a button is invalid HTML. */}
+                      <div className="absolute right-1 top-2">
+                        <ChatOptionsMenu
+                          onRename={() => void renameChat(c)}
+                          onShare={() => void shareChat(c)}
+                          onDelete={() => void deleteChat(c)}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -630,7 +595,7 @@ export default function Copilot() {
             <div className="border-t border-brand-100 p-2.5">
               {!online && (
                 <p className="mb-2 rounded-xl bg-warning/10 px-2.5 py-1.5 text-[11px] font-medium text-warning">
-                  You're offline — Filey AI will reconnect automatically.
+                  You're offline - Filey AI will reconnect automatically.
                 </p>
               )}
               {file && (
@@ -697,29 +662,62 @@ export default function Copilot() {
   );
 }
 
-function MenuItem({
-  icon,
-  label,
-  danger,
-  onClick,
+/** Per-chat options (rename / share / delete) in the history list — the app's
+ *  one menu primitive, anchored to the row's ⋯ button. */
+function ChatOptionsMenu({
+  onRename,
+  onShare,
+  onDelete,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  danger?: boolean;
-  onClick: () => void;
+  onRename: () => void;
+  onShare: () => void;
+  onDelete: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const run = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer",
-        danger
-          ? "text-danger hover:bg-danger/10"
-          : "text-ink hover:bg-brand-50 dark:hover:bg-white/5"
-      )}
-    >
-      {icon}
-      {label}
-    </button>
+    <>
+      <button
+        type="button"
+        ref={btnRef}
+        aria-label="Chat options"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="rounded-xl p-1 text-brand-400 hover:bg-brand-100 hover:text-ink dark:hover:bg-white/10 cursor-pointer"
+      >
+        <MoreHorizontal size={16} />
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        align="end"
+        className="w-36"
+      >
+        <MenuItemRow
+          icon={<Pencil size={14} />}
+          label="Rename"
+          onClick={() => run(onRename)}
+        />
+        <MenuItemRow
+          icon={<Share2 size={14} />}
+          label="Share"
+          onClick={() => run(onShare)}
+        />
+        <MenuItemRow
+          danger
+          icon={<Trash2 size={14} />}
+          label="Delete"
+          onClick={() => run(onDelete)}
+        />
+      </MenuPopover>
+    </>
   );
 }

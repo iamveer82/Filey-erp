@@ -84,7 +84,6 @@ export function saveChats(chats: Chat[]): void {
 }
 
 /** Set once per app run; its absence is what marks a fresh launch. */
-const SESSION_KEY = "filey.agent.session_started";
 
 /**
  * The chat to open, given where in the app's life we are.
@@ -100,21 +99,9 @@ const SESSION_KEY = "filey.agent.session_started";
  * current depending on which one you opened first.
  */
 export function resolveOpeningChat(): Chat {
-  let fresh = false;
-  try {
-    fresh = !sessionStorage.getItem(SESSION_KEY);
-    if (fresh) sessionStorage.setItem(SESSION_KEY, "1");
-  } catch {
-    // No sessionStorage (private mode, locked-down webview): fall through and
-    // resume the last chat rather than losing the thread on every mount.
-  }
-  if (fresh) {
-    const c = newChat();
-    setActiveId(c.id);
-    return c;
-  }
-  const all = loadChats();
-  return all.find((c) => c.id === getActiveId()) ?? all[0] ?? newChat();
+  // Every launch starts clean - the last conversation stays in History,
+  // it just does not reopen over your screen.
+  return newChat();
 }
 
 export function getActiveId(): string | null {
