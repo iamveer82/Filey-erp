@@ -96,7 +96,10 @@ serve(async (req) => {
       const path = `${user.id}/${jobId}/${i}_${o.name}`;
       const up = await client.storage
         .from("tool-outputs")
-        .upload(path, new Blob([o.bytes], { type: "application/pdf" }), {
+        // `as BlobPart`: newer Deno lib types declare Uint8Array over
+        // ArrayBufferLike, which BlobPart (ArrayBuffer only) won't accept. The
+        // bytes are a plain Uint8Array at runtime, so the cast is the whole fix.
+        .upload(path, new Blob([o.bytes as BlobPart], { type: "application/pdf" }), {
           upsert: true,
           contentType: "application/pdf",
         });
