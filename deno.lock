@@ -51,6 +51,7 @@
     "https://esm.sh/@supabase/supabase-js@2.110.1/denonext/supabase-js.mjs": "0711d0b96934f46c0f9a53529839151d07cda70f06bb1234f12fa68f7b81055b",
     "https://esm.sh/iceberg-js@0.8.1/denonext/iceberg-js.mjs": "d839d81a2e3966500ca2cdd0c1cb458e9608bacfc91f7bb67a69b2e878dcdb4f",
     "https://esm.sh/iceberg-js@0.8.1?target=denonext": "58c849d7fe2bf4eca4a84eb501e83c161a7d8c34ca1bec15a962b3bec3062633",
+    "https://esm.sh/pdf-lib@1.17.1": "cf7c5527829cb9bbb3aa20d339c530067441c10eb98880360aea9e77c3c87ff8",
     "https://esm.sh/stripe@17.7.0?target=deno": "ddb041a98d12c5cbe22086fd01d57a240125505520a7fcfded79a7f207975486",
     "https://esm.sh/tslib@2.8.1/denonext/tslib.mjs": "c38da5dd6da6281964435002ce204cd586634fe3bdfb24a0ee116f48cf3292e9"
   },
