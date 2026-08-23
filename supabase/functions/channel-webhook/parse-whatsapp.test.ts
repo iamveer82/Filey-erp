@@ -29,6 +29,7 @@ Deno.test("parses a text message from a Meta Cloud API payload", () => {
     externalId: "971500000002",
     body: "what's my cash position?",
     fromName: "Ada Lovelace",
+    msgId: "wamid.abc", // dedup id — a redelivered webhook must not answer twice
   }]);
 });
 

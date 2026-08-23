@@ -8,6 +8,11 @@ export interface InboundMsg {
   body: string;
   fromName: string;
   userId?: string; // Slack only: the sender's Slack user id (for owner pinning)
+  senderId?: string; // Telegram only: the sender's user id (group-chat owner pinning)
+  chatType?: string; // Telegram only: chat.type — groups need the user-id pin too
+  msgId?: string; // provider's message id (Telegram update_id, WhatsApp wamid,
+  // Slack event_id) — claimed in channel_seen_messages so a redelivered
+  // webhook can't make us answer twice.
 }
 
 /** Normalize a Telegram webhook update into an InboundMsg.
@@ -15,9 +20,8 @@ export interface InboundMsg {
  *  joins, stickers, or empty/non-text messages. */
 export function parseTelegramUpdate(update: unknown): InboundMsg | null {
   if (!update || typeof update !== "object") return null;
-  const msg = (update as Record<string, unknown>).message as
-    | Record<string, unknown>
-    | undefined;
+  const u = update as Record<string, unknown>;
+  const msg = u.message as Record<string, unknown> | undefined;
   if (!msg || typeof msg !== "object") return null;
 
   const text = typeof msg.text === "string" ? msg.text.trim() : "";
@@ -40,6 +44,15 @@ export function parseTelegramUpdate(update: unknown): InboundMsg | null {
     externalId: String(chatId),
     body: text,
     fromName: String(fromName),
+    ...(chat?.type !== undefined && chat.type !== null
+      ? { chatType: String(chat.type) }
+      : {}),
+    ...(from?.id !== undefined && from.id !== null
+      ? { senderId: String(from.id) }
+      : {}),
+    ...(u.update_id !== undefined && u.update_id !== null
+      ? { msgId: String(u.update_id) }
+      : {}),
   };
 }
 
@@ -78,7 +91,15 @@ export function parseWhatsAppWebhook(payload: unknown): InboundMsg[] {
         const textObj = msg.text as Record<string, unknown> | undefined;
         const body = typeof textObj?.body === "string" ? textObj.body.trim() : "";
         if (!body) continue;
-        out.push({ channel: "whatsapp", externalId: from, body, fromName });
+        out.push({
+          channel: "whatsapp",
+          externalId: from,
+          body,
+          fromName,
+          ...(msg.id !== undefined && msg.id !== null
+            ? { msgId: String(msg.id) }
+            : {}),
+        });
       }
     }
   }
@@ -125,5 +146,9 @@ export function parseSlackEvent(payload: unknown): InboundMsg | null {
     userId: user,
     body,
     fromName: "there", // display names need a users.info lookup; keep it simple
+    // Slack's event_id identifies this delivery — our dedup key for it.
+    ...(p.event_id !== undefined && p.event_id !== null
+      ? { msgId: String(p.event_id) }
+      : {}),
   };
 }

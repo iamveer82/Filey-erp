@@ -95,6 +95,72 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "get_invoice_detail",
+    description:
+      "Full detail for one invoice by its exact number: status, customer, " +
+      "dates, currency, every line item, plus computed subtotal / VAT / " +
+      "total. Use when list_invoices isn't enough — 'what's on INV-…?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        invoice_number: { type: "string", description: "Exact invoice number, e.g. INV-2026-0042." },
+      },
+      required: ["invoice_number"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_vat_summary",
+    description:
+      "Output vs input VAT over a period (default last 90 days), computed " +
+      "from issued invoices' tax rates: output tax on sales documents, input " +
+      "tax on purchase documents. Use for 'how much VAT do I owe/collect?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Period start YYYY-MM-DD (inclusive)." },
+        to: { type: "string", description: "Period end YYYY-MM-DD (inclusive)." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_expenses",
+    description:
+      "List recent expenses, newest first, optionally filtered by category. " +
+      "Use for spending questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Exact category filter." },
+        limit: { type: "integer", description: "Max expenses to return (default 10, max 25)." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "expense_totals",
+    description:
+      "Total spend grouped by category over a period (default last 90 days). " +
+      "Use for 'where is my money going?' style questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Period start YYYY-MM-DD (inclusive)." },
+        to: { type: "string", description: "Period end YYYY-MM-DD (inclusive)." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "stock_valuation",
+    description:
+      "Inventory value: sum of quantity × cost price across all products " +
+      "(plus the retail value at selling prices). Use for 'what's my stock " +
+      "worth?'",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ];
 
 const LINE_ITEM_SCHEMA = {
@@ -212,11 +278,30 @@ export const WRITE_TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "log_expense",
+    description:
+      "Record a business expense in the books (category, amount, optional " +
+      "note and date — defaults to today). Additive only; deleting or editing " +
+      "expenses happens in Filey.",
+    input_schema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Expense category, e.g. 'fuel', 'rent'." },
+        amount: { type: "number", description: "Amount spent, greater than zero." },
+        description: { type: "string", description: "Optional note." },
+        expense_date: { type: "string", description: "YYYY-MM-DD, defaults to today." },
+      },
+      required: ["category", "amount"],
+      additionalProperties: false,
+    },
+  },
 ];
 
-/** Actions with EXTERNAL effect (they leave the org: emails to customers).
- *  These are never executed directly — the tool creates a pending action and
- *  the owner must reply "APPROVE <code>" on the channel to fire it. */
+/** Actions with EXTERNAL effect or money-state changes (emails to customers,
+ *  marking invoices paid). These are never executed directly — the tool
+ *  creates a pending action and the owner must reply "APPROVE <code>" on the
+ *  channel to fire it. */
 export const CONFIRM_TOOLS: ToolDef[] = [
   {
     name: "request_payment_reminder",
@@ -252,6 +337,23 @@ export const CONFIRM_TOOLS: ToolDef[] = [
         text: { type: "string", description: "The message body to send." },
       },
       required: ["channel", "text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "propose_mark_invoice_paid",
+    description:
+      "Propose marking an invoice as PAID in the books. This does NOT change " +
+      "anything — it returns an approval code the owner must reply with " +
+      "(APPROVE <code>) before the invoice is flipped to paid. Use " +
+      "list_invoices first to find the invoice number, and confirm with the " +
+      "owner when they say 'invoice X is paid'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        invoice_number: { type: "string", description: "Exact invoice number, e.g. INV-2026-0042." },
+      },
+      required: ["invoice_number"],
       additionalProperties: false,
     },
   },
@@ -334,13 +436,17 @@ export const MEMORY_TOOLS: ToolDef[] = [
 export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...WRITE_TOOLS, ...CONFIRM_TOOLS, ...MEMORY_TOOLS];
 
 import {
+  num,
   proposeConnectChannel,
+  proposeMarkInvoicePaid,
   proposeSendMessage,
   proposePaymentReminder,
   recallMemories,
   rememberMemory,
   runWriteTool,
 } from "./tools-writes.ts";
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 // deno-lint-ignore no-explicit-any
 export async function runTool(
@@ -365,6 +471,10 @@ export async function runTool(
   if (name === "request_payment_reminder") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
     return proposePaymentReminder(client, org, ownerId, input);
+  }
+  if (name === "propose_mark_invoice_paid") {
+    if (!ownerId) return { error: "actions are not configured (no owner)" };
+    return proposeMarkInvoicePaid(client, org, ownerId, input);
   }
   if (name === "connect_channel") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
@@ -538,6 +648,131 @@ export async function runTool(
         .limit(10);
       if (error) return { error: error.message };
       return data ?? [];
+    }
+    case "get_invoice_detail": {
+      const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
+      if (!number) return { error: "invoice_number is required" };
+      const { data: inv, error } = await client
+        .from("invoice_docs")
+        .select("id,number,status,currency,customer_name,customer_email,issue_date,due_date,tax_rate,discount")
+        .eq("org_id", org)
+        .eq("number", number)
+        .maybeSingle();
+      if (error) return { error: error.message };
+      if (!inv) return { error: `invoice ${number} not found` };
+      const { data: items, error: ie } = await client
+        .from("invoice_doc_items")
+        .select("description,qty,unit_price")
+        .eq("invoice_id", inv.id)
+        .order("position");
+      if (ie) return { error: ie.message };
+      // Same math the app's totals use: net lines, doc-level discount, then
+      // the doc-level tax rate. There is no stored tax_amount column.
+      const subtotal = r2((items ?? []).reduce((s: number, it: any) => s + num(it.qty) * num(it.unit_price), 0));
+      const taxable = Math.max(subtotal - num(inv.discount), 0);
+      const tax = r2((taxable * Math.max(num(inv.tax_rate), 0)) / 100);
+      return {
+        ...inv,
+        items: items ?? [],
+        subtotal,
+        tax,
+        total: r2(taxable + tax),
+      };
+    }
+    case "get_vat_summary": {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.from)) ? String(input.from)
+        : new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.to)) ? String(input.to)
+        : new Date().toISOString().slice(0, 10);
+      const { data: docs, error } = await client
+        .from("invoice_docs")
+        .select("id,issue_date,tax_rate,doc_type")
+        .eq("org_id", org)
+        .neq("status", "draft")
+        .gte("issue_date", date)
+        .lte("issue_date", to);
+      if (error) return { error: error.message };
+      const ids = (docs ?? []).map((d: any) => d.id);
+      const { data: items } = ids.length
+        ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").in("invoice_id", ids)
+        : { data: [] };
+      const netByDoc = new Map<number, number>();
+      for (const it of items ?? []) {
+        netByDoc.set(it.invoice_id, (netByDoc.get(it.invoice_id) ?? 0) + num(it.qty) * num(it.unit_price));
+      }
+      let outputNet = 0, outputTax = 0, inputNet = 0, inputTax = 0;
+      for (const d of docs ?? []) {
+        const net = Math.max(netByDoc.get(d.id) ?? 0, 0);
+        const tax = r2((net * Math.max(num(d.tax_rate), 0)) / 100);
+        if (d.doc_type === "purchase") { inputNet += net; inputTax += tax; }
+        else { outputNet += net; outputTax += tax; }
+      }
+      return {
+        from: date,
+        to,
+        output_tax: r2(outputTax),
+        output_net: r2(outputNet),
+        input_tax: r2(inputTax),
+        input_net: r2(inputNet),
+        net_vat: r2(outputTax - inputTax),
+      };
+    }
+    case "list_expenses": {
+      const limit = Math.min(Math.max(Number(input?.limit) || 10, 1), 25);
+      let q = client
+        .from("expenses")
+        .select("id,category,description,amount,expense_date")
+        .eq("org_id", org);
+      if (input?.category) q = q.eq("category", String(input.category).trim().slice(0, 80));
+      const { data, error } = await q.order("expense_date", { ascending: false }).limit(limit);
+      if (error) return { error: error.message };
+      return data ?? [];
+    }
+    case "expense_totals": {
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.from)) ? String(input.from)
+        : new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(input?.to)) ? String(input.to)
+        : new Date().toISOString().slice(0, 10);
+      const { data, error } = await client
+        .from("expenses")
+        .select("category,amount")
+        .eq("org_id", org)
+        .gte("expense_date", from)
+        .lte("expense_date", to);
+      if (error) return { error: error.message };
+      const byCat = new Map<string, number>();
+      let total = 0;
+      for (const e of data ?? []) {
+        const amt = num(e.amount);
+        total += amt;
+        byCat.set(e.category || "—", (byCat.get(e.category || "—") ?? 0) + amt);
+      }
+      return {
+        from,
+        to,
+        total: r2(total),
+        by_category: [...byCat.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([category, amount]) => ({ category, amount: r2(amount) })),
+      };
+    }
+    case "stock_valuation": {
+      const { data, error } = await client
+        .from("products")
+        .select("sku,name,quantity,cost_price,unit_price")
+        .eq("org_id", org);
+      if (error) return { error: error.message };
+      let costValue = 0, retailValue = 0;
+      for (const p of data ?? []) {
+        costValue += num(p.quantity) * num(p.cost_price);
+        retailValue += num(p.quantity) * num(p.unit_price);
+      }
+      return {
+        products: (data ?? []).length,
+        cost_value: r2(costValue),
+        retail_value: r2(retailValue),
+        currency_note: "Amounts in the account currency (AED unless stated).",
+      };
     }
     default:
       return { error: `unknown tool: ${name}` };

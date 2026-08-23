@@ -14,6 +14,11 @@
 //   Required secrets (supabase secrets set KEY=value):
 //     ANTHROPIC_API_KEY         the agent's model key
 //     OWNER_USER_ID             auth.users.id this install belongs to (for logging)
+//     WHATSAPP_APP_SECRET       Meta App Secret — REQUIRED for WhatsApp
+//                               traffic (fail-closed: without it every POST
+//                               is rejected)
+//     SLACK_SIGNING_SECRET      Slack Signing Secret — REQUIRED for Slack
+//                               traffic (fail-closed, same deal)
 //   Optional:
 //     AGENT_MODEL               default claude-haiku-4-5-20251001
 //   Auto-provided by Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -23,6 +28,12 @@
 //     TELEGRAM_WEBHOOK_SECRET   any long random string (REQUIRED — fail-closed)
 //     TELEGRAM_OWNER_CHAT_ID    the owner's chat id (REQUIRED — fail-closed;
 //                               message the bot once, it replies with the id)
+//     TELEGRAM_OWNER_USER_ID    the owner's numeric user id — REQUIRED before
+//                               adding the bot to a GROUP chat: a group matches
+//                               the chat pin for every member, so in groups the
+//                               SENDER's user id must also match this secret or
+//                               the message is refused. Private chats don't need
+//                               it. Find it via @userinfobot.
 //     Setup:
 //       curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 //         -d "url=https://<project>.functions.supabase.co/channel-webhook" \
@@ -36,10 +47,9 @@
 //                               Meta's webhook "Verify token" field (fail-closed)
 //     WHATSAPP_OWNER_PHONE      the owner's phone (any format — compared
 //                               digit-normalized, e.g. 9715XXXXXXX)
-//     WHATSAPP_APP_SECRET       OPTIONAL: Meta App Secret. When set, every POST
-//                               must carry a valid X-Hub-Signature-256
-//                               (HMAC-SHA256 of the raw body). When UNSET the
-//                               signature check is SKIPPED — set it in prod.
+//     WHATSAPP_APP_SECRET       REQUIRED: Meta App Secret. Every POST must
+//                               carry a valid X-Hub-Signature-256 (HMAC-SHA256
+//                               of the raw body); unsigned posts are rejected.
 //     Setup: Meta App → WhatsApp → Configuration → Webhook:
 //       Callback URL = https://<project>.functions.supabase.co/channel-webhook
 //       Verify token = WHATSAPP_VERIFY_TOKEN; subscribe to the `messages` field.
@@ -48,12 +58,11 @@
 //
 //   ── Slack (Events API) ──
 //     SLACK_BOT_TOKEN           xoxb-… bot token (chat:write scope)
-//     SLACK_SIGNING_SECRET      app's Signing Secret. When set, every request
-//                               must carry a valid X-Slack-Signature
-//                               (v0=HMAC-SHA256 of "v0:<ts>:<rawBody>") with a
-//                               timestamp no older than 5 minutes (replay
-//                               guard). When UNSET the check is SKIPPED —
-//                               set it in prod.
+//     SLACK_SIGNING_SECRET      app's Signing Secret — REQUIRED (fail-closed):
+//                               every request must carry a valid
+//                               X-Slack-Signature (v0=HMAC-SHA256 of
+//                               "v0:<ts>:<rawBody>") with a timestamp no
+//                               older than 5 minutes (replay guard).
 //     SLACK_OWNER_USER_ID       the owner's Slack user id (U…)
 //     Setup: api.slack.com → your app → Event Subscriptions → Request URL =
 //       https://<project>.functions.supabase.co/channel-webhook (Slack sends a
@@ -62,7 +71,7 @@
 //
 // ── Security ─────────────────────────────────────────────────────────────────
 //   * Fail-closed: each channel authenticates the caller (Telegram secret
-//     header, Meta verify token + optional app-secret signature, Slack
+//     header, Meta verify token + REQUIRED app-secret signature, Slack
 //     signing-secret signature + 5-minute timestamp window) and pins the
 //     sender to a single owner (TELEGRAM_OWNER_CHAT_ID /
 //     WHATSAPP_OWNER_PHONE / SLACK_OWNER_USER_ID). Transport auth proves the
@@ -95,8 +104,41 @@ import {
 } from "./parse.ts";
 import { ALL_TOOLS, runTool } from "./tools.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import {
+  claimSeenMessage,
+  timingSafeEqualStr,
+  verifySlackSignature,
+  verifyWhatsAppSignature,
+} from "./security.ts";
+// Approvals, pairing and owner pinning live in their own modules so they can
+// be unit-tested without this file's server bootstrap. The pin resolver keeps
+// its original name here; the pure logic is aliased in from access.ts.
+import { handleApproval, type ApprovalIO } from "./approvals.ts";
+import {
+  ownerRefusal as ownerRefusalChecked,
+  tryPair as tryPairChannel,
+} from "./access.ts";
 
 type Channel = InboundMsg["channel"];
+
+/** Everything handleApproval needs from this process: env secrets, the
+ *  credentials cache, the per-channel senders and the conversation logger.
+ *  Built per message so the logger closes over the right client/owner. */
+function approvalIOFor(
+  // deno-lint-ignore no-explicit-any
+  client: any,
+  ownerId: string,
+): ApprovalIO {
+  return {
+    env: (k) => Deno.env.get(k),
+    forgetCreds: (p) => credsCache.delete(p),
+    sendTelegram,
+    sendWhatsApp,
+    sendSlack,
+    logOutbound: (channel, externalId, body) =>
+      log(client, ownerId, channel, { externalId, direction: "out", body, raw: {} }),
+  };
+}
 
 /** Last few logged turns for this conversation — the agent's short-term
  *  memory, so it can follow "and the one before that?" like a person would.
@@ -178,16 +220,21 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
     `end — like a colleague would.\n\n` +
     (canQuery
       ? `You can look up live business data — use it instead of guessing, and ` +
-        `quote figures in AED unless a row says otherwise. You can also CREATE ` +
-        `DRAFTS: invoices, quotations and purchase orders (saved as drafts ` +
-        `${name} reviews and finalizes in Filey — never sent automatically), ` +
-        `plus new customers and products. Look up the customer/supplier first ` +
-        `so names match existing records. For payment reminders use ` +
-        `request_payment_reminder: it returns an approval code — relay it and ` +
-        `say to reply APPROVE <code> to actually send. You cannot finalize, ` +
-        `pay, delete or edit existing records — if asked, say that needs to ` +
-        `happen in Filey. After creating a draft, give its number and note ` +
-        `it's waiting for review.\n\n`
+        `quote figures in AED unless a row says otherwise. Beyond the basics ` +
+        `there's an accountant's toolkit: full invoice detail (get_invoice_detail), ` +
+        `output/input VAT over a period (get_vat_summary), spending by category ` +
+        `(list_expenses / expense_totals) and what the stock is worth ` +
+        `(stock_valuation). You can also CREATE DRAFTS: invoices, quotations and ` +
+        `purchase orders (saved as drafts ${name} reviews and finalizes in Filey — ` +
+        `never sent automatically), plus new customers, products and logged ` +
+        `expenses (log_expense). Look up the customer/supplier first so names ` +
+        `match existing records. For payment reminders use ` +
+        `request_payment_reminder; to mark an invoice PAID use ` +
+        `propose_mark_invoice_paid — both return an approval code, never claim ` +
+        `anything happened until the owner replies APPROVE <code>. You cannot ` +
+        `finalize, send, delete or edit existing records — if asked, say that ` +
+        `needs to happen in Filey. After creating a draft, give its number and ` +
+        `note it's waiting for review.\n\n`
       : `Live data lookups aren't configured here — you can chat and help think ` +
         `things through, but never invent numbers.\n\n`) +
     (canQuery
@@ -271,233 +318,14 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
   }
 }
 
-/** Data interpolated into outgoing email HTML (customer names, invoice
- *  numbers) is org-entered, not trusted markup — escape it. */
-const esc = (s: unknown) =>
-  String(s ?? "").replace(/[<>&"]/g, (c) =>
-    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c] ?? c
-  );
-
-/** APPROVE 1234 / CANCEL 1234 — the confirm step for external actions the
- *  agent proposed (agent_pending_actions). Returns a reply, or null when the
- *  message isn't an approval so the normal AI flow runs. */
-// deno-lint-ignore no-explicit-any
-async function handleApproval(client: any, ownerId: string, text: string): Promise<string | null> {
-  const m = text.trim().match(/^(approve|cancel)\s+(\d{4})$/i);
-  if (!m) return null;
-  const verdict = m[1].toLowerCase();
-  const code = m[2];
-
-  const { data: row } = await client
-    .from("agent_pending_actions")
-    .select("*")
-    .eq("user_id", ownerId)
-    .eq("code", code)
-    .eq("status", "pending")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!row) return `No pending action with code ${code}. It may have expired or already run.`;
-
-  const ageMs = Date.now() - new Date(row.created_at).getTime();
-  if (ageMs > 24 * 60 * 60 * 1000) {
-    await client.from("agent_pending_actions").update({ status: "expired" }).eq("id", row.id);
-    return `Code ${code} expired (older than 24h). Ask me again if you still want it.`;
-  }
-
-  if (verdict === "cancel") {
-    await client.from("agent_pending_actions").update({ status: "rejected" }).eq("id", row.id);
-    return `Canceled — nothing was sent.`;
-  }
-
-  if (row.action === "send_payment_reminder") {
-    const p = row.payload ?? {};
-    const key = Deno.env.get("RESEND_API_KEY");
-    if (!key) return "Approved, but RESEND_API_KEY isn't configured — email not sent.";
-    const from = Deno.env.get("REMINDER_FROM") ?? "Filey <reminders@filey.app>";
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from,
-        to: p.customer_email,
-        subject: `Reminder: invoice ${p.number} is awaiting payment`,
-        html:
-          `<p>Dear ${esc(p.customer_name ?? "customer")},</p>` +
-          `<p>A friendly reminder that invoice <b>${esc(p.number)}</b>` +
-          (p.due_date ? ` (due ${esc(p.due_date)})` : "") +
-          ` is awaiting payment.</p><p>Thank you.</p>`,
-      }),
-    });
-    if (!res.ok) {
-      console.error("resend", res.status, await res.text());
-      return "Approved, but the email failed to send — try again in a moment.";
-    }
-    await client
-      .from("agent_pending_actions")
-      .update({ status: "approved", executed_at: new Date().toISOString() })
-      .eq("id", row.id);
-    try {
-      await client.from("audit_log").insert({
-        user_id: ownerId,
-        actor: "agent",
-        action: "agent.send_payment_reminder",
-        entity: `invoice_docs:${p.invoice_id}`,
-        details: `Reminder for ${p.number} sent to ${p.customer_email} (approved ${code})`,
-      });
-    } catch { /* best-effort */ }
-    return `✅ Sent — payment reminder for ${p.number} emailed to ${p.customer_email}.`;
-  }
-
-  if (row.action === "send_message") {
-    const p = row.payload ?? {};
-    const chan = String(p.channel) as Channel;
-    try {
-      if (chan === "whatsapp") await sendWhatsApp(String(p.to), String(p.text));
-      else if (chan === "slack") await sendSlack(String(p.to), String(p.text));
-      else await sendTelegram(String(p.to), String(p.text));
-    } catch (e) {
-      console.error("send_message", e);
-      return `Approved, but sending on ${chan} failed — check the channel is still connected.`;
-    }
-    await client
-      .from("agent_pending_actions")
-      .update({ status: "approved", executed_at: new Date().toISOString() })
-      .eq("id", row.id);
-    try {
-      // Logged as an outbound message on that channel so the desktop app's
-      // conversation view shows what was sent in your name.
-      await log(client, ownerId, chan, {
-        externalId: String(p.to),
-        direction: "out",
-        body: String(p.text),
-        raw: { via: "send_message", approved: code },
-      });
-      await client.from("audit_log").insert({
-        user_id: ownerId,
-        actor: "agent",
-        action: "agent.send_message",
-        entity: `${chan}:${p.to}`,
-        details: `Message sent to ${p.who ?? p.to} (approved ${code})`,
-      });
-    } catch { /* best-effort */ }
-    return `✅ Sent on ${chan} to ${p.who ?? p.to}.`;
-  }
-
-  if (row.action === "connect_channel") {
-    const p = row.payload ?? {};
-    const provider = String(p.provider) as Channel;
-    const rand = () => crypto.randomUUID().replace(/-/g, "");
-    const pairCode = String(Math.floor(Math.random() * 900000) + 100000);
-
-    const credentials: Record<string, string> =
-      provider === "telegram"
-        ? { bot_token: p.token, webhook_secret: rand(), pair_code: pairCode }
-        : provider === "whatsapp"
-          ? { token: p.token, phone_number_id: p.phone_number_id, pair_code: pairCode }
-          : { bot_token: p.token, signing_secret: p.signing_secret ?? "", pair_code: pairCode };
-
-    // owner_ref stays null: the channel is configured but nobody is paired to
-    // it yet, so ownerRefusal keeps refusing until the PAIR code arrives from
-    // the new account. Connecting a channel must not hand it authority.
-    const { error: ue } = await client.from("agent_channels").upsert(
-      {
-        user_id: ownerId,
-        provider,
-        credentials,
-        owner_ref: null,
-        enabled: true,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,provider" }
-    );
-    if (ue) return `Approved, but saving the channel failed: ${ue.message}`;
-
-    if (provider === "telegram") {
-      const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(
-        ".supabase.co",
-        ".functions.supabase.co"
-      );
-      const res = await fetch(
-        `https://api.telegram.org/bot${p.token}/setWebhook`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            url: `${base}/channel-webhook`,
-            secret_token: credentials.webhook_secret,
-          }),
-        }
-      );
-      const tg = await res.json().catch(() => null);
-      if (!tg?.ok)
-        return `Approved and saved, but Telegram rejected the webhook: ${
-          tg?.description ?? res.status
-        }. Check the bot token.`;
-    }
-
-    credsCache.delete(provider); // this isolate must not serve the old config
-    await client
-      .from("agent_pending_actions")
-      .update({ status: "approved", executed_at: new Date().toISOString() })
-      .eq("id", row.id);
-    try {
-      await client.from("audit_log").insert({
-        user_id: ownerId,
-        actor: "agent",
-        action: "agent.connect_channel",
-        entity: `agent_channels:${provider}`,
-        details: `Channel ${provider} configured (approved ${code}); awaiting PAIR`,
-      });
-    } catch { /* best-effort */ }
-
-    return (
-      `✅ ${provider} is wired up. Now message me there once with:\n\n` +
-      `PAIR ${pairCode}\n\n` +
-      `Until that arrives I'll refuse anyone on ${provider} — that code is what ` +
-      `proves the account is yours.`
-    );
-  }
-
-  return `I don't know how to execute "${row.action}" — it may need a newer agent version.`;
-}
+/** APPROVE 1234 / CANCEL 1234 handling now lives in approvals.ts (extracted
+ *  for unit-testing); index.ts wires it up with env, senders and logging. */
 
 /** PAIR <code> from a channel that is configured but not yet paired. This is
  *  the only way owner_ref gets set, and it is deliberately not "first sender
  *  wins" — whoever finds the bot first would otherwise own the books.
  *  Returns a reply when it handled the message, else null. */
-// deno-lint-ignore no-explicit-any
-async function tryPair(client: any, ownerId: string, msg: InboundMsg, text: string): Promise<string | null> {
-  const m = /^\s*PAIR\s+(\d{6})\s*$/i.exec(text);
-  if (!m) return null;
-  const { data: row } = await client
-    .from("agent_channels")
-    .select("credentials,owner_ref")
-    .eq("user_id", ownerId)
-    .eq("provider", msg.channel)
-    .maybeSingle();
-  if (!row) return null;
-  if (row.owner_ref) return "This channel is already paired.";
-  const creds = (row.credentials ?? {}) as Record<string, string>;
-  if (!creds.pair_code || creds.pair_code !== m[1]) {
-    console.warn("bad pair code on", msg.channel, msg.externalId);
-    return "That pairing code isn't right.";
-  }
-  const rest = { ...creds };
-  delete rest.pair_code; // one-time: spent codes cannot pair a second account
-  const { error } = await client
-    .from("agent_channels")
-    .update({
-      owner_ref: msg.channel === "slack" ? msg.userId : msg.externalId,
-      credentials: rest,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", ownerId)
-    .eq("provider", msg.channel);
-  if (error) return `Pairing failed: ${error.message}`;
-  credsCache.delete(msg.channel);
-  return `✅ Paired. You can talk to me here now — same memory, same books.`;
-}
+// (moved to access.ts — throttled, timing-safe, audit-logged)
 
 /** The org whose data this install can read. Single-owner: derived from the
  *  owner's profile. Null disables data tools (chat-only fallback). */
@@ -512,55 +340,8 @@ async function ownerOrgId(client: any, ownerId: string): Promise<string | null> 
   }
 }
 
-/** Lowercase hex of HMAC-SHA256(key, message) — WebCrypto, no deps. */
-async function hmacSha256Hex(key: string, message: string): Promise<string> {
-  const enc = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Slack Events API auth: X-Slack-Signature must be "v0=" + HMAC-SHA256 hex
- *  of `v0:<X-Slack-Request-Timestamp>:<rawBody>` keyed with
- *  SLACK_SIGNING_SECRET, and the timestamp must be within 5 minutes (replay
- *  guard). When SLACK_SIGNING_SECRET is unset the check is SKIPPED (see the
- *  deploy notes at the top — set it in production). */
-async function verifySlackSignature(req: Request, rawBody: string): Promise<boolean> {
-  const secret =
-    (await chanCreds("slack")).signing_secret || Deno.env.get("SLACK_SIGNING_SECRET");
-  if (!secret) {
-    console.warn("SLACK_SIGNING_SECRET unset — skipping Slack signature check");
-    return true;
-  }
-  const ts = req.headers.get("X-Slack-Request-Timestamp") ?? "";
-  const tsNum = Number(ts);
-  if (!Number.isFinite(tsNum) || Math.abs(Date.now() / 1000 - tsNum) > 5 * 60) {
-    return false; // missing or older than 5 minutes → reject (replay guard)
-  }
-  const expected = "v0=" + (await hmacSha256Hex(secret, `v0:${ts}:${rawBody}`));
-  return expected === (req.headers.get("X-Slack-Signature") ?? "");
-}
-
-/** WhatsApp Cloud API auth: when WHATSAPP_APP_SECRET is set, the
- *  X-Hub-Signature-256 header must be "sha256=" + HMAC-SHA256 hex of the raw
- *  body keyed with the app secret. When the secret is UNSET the check is
- *  SKIPPED (see the deploy notes at the top — set it in production). */
-async function verifyWhatsAppSignature(req: Request, rawBody: string): Promise<boolean> {
-  const secret =
-    (await chanCreds("whatsapp")).app_secret || Deno.env.get("WHATSAPP_APP_SECRET");
-  if (!secret) {
-    console.warn("WHATSAPP_APP_SECRET unset — skipping WhatsApp signature check");
-    return true;
-  }
-  const expected = "sha256=" + (await hmacSha256Hex(secret, rawBody));
-  return expected === (req.headers.get("X-Hub-Signature-256") ?? "");
-}
+// (hmacSha256Hex and the per-provider signature verifiers moved to
+// security.ts; they take the resolved secret so tests don't need env access.)
 
 /** Credentials for a channel: the row this install configured through
  *  agent_channels wins, and the env secret an admin set by hand is the
@@ -685,40 +466,13 @@ async function log(client: any, ownerId: string, channel: Channel, row: {
   }
 }
 
-/** Owner pinning, fail-closed per channel (mirrors TELEGRAM_OWNER_CHAT_ID):
- *  WhatsApp compares digit-normalized phone numbers; Slack compares the
- *  sender's user id. Returns the refusal/guidance text to send back, or null
- *  when the sender IS the owner. */
+/** Owner pinning (moved to access.ts) — index resolves the per-channel
+ *  config and passes it in. */
 async function ownerRefusal(msg: InboundMsg): Promise<string | null> {
   // A channel the agent connected itself pairs through agent_channels.owner_ref;
   // one an admin configured by hand still pairs through the env secret.
   const dbOwner = (await chanCreds(msg.channel)).owner_ref ?? "";
-  if (msg.channel === "whatsapp") {
-    const owner = (dbOwner || Deno.env.get("WHATSAPP_OWNER_PHONE") || "").replace(/\D/g, "");
-    const sender = msg.externalId.replace(/\D/g, "");
-    if (sender === owner && owner) return null;
-    console.warn("unpaired whatsapp sender", msg.externalId);
-    return owner
-      ? "Sorry — this is a private assistant."
-      : `This assistant isn't paired yet. If you're the owner, set the ` +
-        `WHATSAPP_OWNER_PHONE secret to ${msg.externalId} and redeploy.`;
-  }
-  if (msg.channel === "slack") {
-    const owner = dbOwner || Deno.env.get("SLACK_OWNER_USER_ID") || "";
-    if (owner && msg.userId === owner) return null;
-    console.warn("unpaired slack user", msg.userId);
-    return owner
-      ? "Sorry — this is a private assistant."
-      : `This assistant isn't paired yet. If you're the owner, set the ` +
-        `SLACK_OWNER_USER_ID secret to ${msg.userId} and redeploy.`;
-  }
-  const owner = dbOwner || Deno.env.get("TELEGRAM_OWNER_CHAT_ID") || "";
-  if (msg.externalId === owner && owner) return null;
-  console.warn("unpaired chat", msg.externalId);
-  return owner
-    ? "Sorry — this is a private assistant."
-    : `This assistant isn't paired yet. If you're the owner, set the ` +
-      `TELEGRAM_OWNER_CHAT_ID secret to ${msg.externalId} and redeploy.`;
+  return ownerRefusalChecked(msg, { env: (k) => Deno.env.get(k), dbOwner });
 }
 
 const json = (body: unknown, status = 200) =>
@@ -726,15 +480,6 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
-
-/** Constant-time compare so a wrong bridge secret can't be discovered by
- *  timing the 403s. Length is compared first and leaks only that. */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 /** The same pipeline the hosted channels run, except the reply is RETURNED
  *  rather than sent — the bridge already has the socket to answer on. */
@@ -744,7 +489,16 @@ async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<strin
   const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const client = ownerId && url && svc ? createClient(url, svc) : null;
 
-  const paired = client ? await tryPair(client, ownerId, msg, msg.body) : null;
+  // The bridge rides the same limiter discipline as the hosted channels —
+  // it's a private machine, but a runaway script pointed at it shouldn't be
+  // able to burn Anthropic tokens unbounded.
+  if (client && !(await rateLimit(client, ownerId, "bridge_msg", 30, 3600))) {
+    return "Rate limited — too many messages this hour.";
+  }
+
+  const paired = client
+    ? await tryPairChannel(client, ownerId, msg, msg.body, () => credsCache.delete(msg.channel))
+    : null;
   if (paired !== null) return paired;
 
   const refusal = await ownerRefusal(msg);
@@ -759,7 +513,8 @@ async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<strin
     });
   }
 
-  const approval = client ? await handleApproval(client, ownerId, msg.body) : null;
+  const io = client ? approvalIOFor(client, ownerId) : null;
+  const approval = io ? await handleApproval(client, ownerId, msg.body, io) : null;
   const orgId = client ? await ownerOrgId(client, ownerId) : null;
   const reply =
     approval ??
@@ -787,8 +542,12 @@ serve(async (req) => {
       (await chanCreds("whatsapp")).verify_token ||
       Deno.env.get("WHATSAPP_VERIFY_TOKEN") ||
       "";
-    // Fail-closed: no configured verify token → nothing verifies.
-    if (expected && mode === "subscribe" && token === expected && challenge !== null) {
+    // Fail-closed: no configured verify token → nothing verifies. The compare
+    // is constant-time so the challenge can't be probed byte by byte.
+    if (
+      expected && mode === "subscribe" && challenge !== null &&
+      (await timingSafeEqualStr(token ?? "", expected))
+    ) {
       return new Response(challenge, {
         status: 200,
         headers: { "content-type": "text/plain" },
@@ -817,8 +576,8 @@ serve(async (req) => {
   const bridgeSecret = Deno.env.get("WA_BRIDGE_SECRET");
   const presentedSecret = req.headers.get("x-bridge-secret");
   if (presentedSecret) {
-    // Fail-closed and constant-length compare on the shared secret.
-    if (!bridgeSecret || !timingSafeEqual(presentedSecret, bridgeSecret)) {
+    // Fail-closed, constant-time compare on the shared secret.
+    if (!bridgeSecret || !(await timingSafeEqualStr(presentedSecret, bridgeSecret))) {
       return new Response("forbidden", { status: 403 });
     }
     const b = body as Record<string, unknown>;
@@ -847,18 +606,22 @@ serve(async (req) => {
         ? "whatsapp"
         : "telegram";
 
-  // ── Per-provider transport auth (fail-closed unless noted) ──
+  // ── Per-provider transport auth (fail-closed — an unset secret rejects) ──
   if (channel === "telegram") {
     // Shared secret echoed by Telegram in this header. Still fail-closed: a
     // self-connected channel stores its own secret in agent_channels.
     const secret =
       (await chanCreds("telegram")).webhook_secret ||
       Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
-    if (!secret || req.headers.get("X-Telegram-Bot-Api-Secret-Token") !== secret) {
+    const presented = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
+    if (!secret || !presented || !(await timingSafeEqualStr(presented, secret))) {
       return new Response("forbidden", { status: 403 });
     }
   } else if (channel === "slack") {
-    if (!(await verifySlackSignature(req, rawBody))) {
+    const secret =
+      (await chanCreds("slack")).signing_secret ||
+      Deno.env.get("SLACK_SIGNING_SECRET");
+    if (!(await verifySlackSignature(req, rawBody, secret))) {
       return new Response("forbidden", { status: 403 });
     }
     // Slack's one-time setup handshake — answered only after the signature
@@ -871,7 +634,10 @@ serve(async (req) => {
       });
     }
   } else {
-    if (!(await verifyWhatsAppSignature(req, rawBody))) {
+    const secret =
+      (await chanCreds("whatsapp")).app_secret ||
+      Deno.env.get("WHATSAPP_APP_SECRET");
+    if (!(await verifyWhatsAppSignature(req, rawBody, secret))) {
       return new Response("forbidden", { status: 403 });
     }
   }
@@ -907,31 +673,67 @@ serve(async (req) => {
   const client = ownerId && url && svc ? createClient(url, svc) : null;
 
   for (const msg of msgs) {
-    // A channel the agent connected itself arrives here unpaired: the only
-    // message it accepts is the PAIR code, and only until that code is spent.
-    const paired = client ? await tryPair(client, ownerId, msg, msg.body) : null;
-    if (paired !== null) {
-      await sendReply(msg, paired);
-      continue;
+    // ── Inbound dedup: claim the provider's message id BEFORE any work. ──
+    // Providers retry non-2xx deliveries, so once the marker is claimed we
+    // must never fail this webhook again (see the try/catch below) — that
+    // makes processing at-most-once per provider message id instead of
+    // at-least-once-with-duplicate-replies.
+    if (client && msg.msgId && !(await claimSeenMessage(client, channel, msg.msgId))) {
+      continue; // redelivery of something we already handled → swallow
     }
 
-    // SECURITY: only the paired owner gets the agent (see ownerRefusal).
-    const refusal = await ownerRefusal(msg);
-    if (refusal !== null) {
-      await sendReply(msg, refusal);
-      continue;
+    try {
+      // A channel the agent connected itself arrives here unpaired: the only
+      // message it accepts is the PAIR code, and only until that code is spent.
+      const paired = client
+        ? await tryPairChannel(
+            client,
+            ownerId,
+            msg,
+            msg.body,
+            () => credsCache.delete(msg.channel),
+          )
+        : null;
+      if (paired !== null) {
+        await sendReply(msg, paired);
+        continue;
+      }
+
+      // SECURITY: only the paired owner gets the agent (see ownerRefusal).
+      const refusal = await ownerRefusal(msg);
+      if (refusal !== null) {
+        await sendReply(msg, refusal);
+        continue;
+      }
+
+      if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "in", body: msg.body, raw: body });
+
+      const io = client ? approvalIOFor(client, ownerId) : null;
+      // Approvals bypass the model entirely — a confirm must be deterministic.
+      const approval = io ? await handleApproval(client, ownerId, msg.body, io) : null;
+
+      const orgId = client ? await ownerOrgId(client, ownerId) : null;
+      const reply = approval ?? (await aiReply(msg.body, msg.fromName, client, orgId, ownerId, msg.channel, msg.externalId));
+      await sendReply(msg, reply);
+
+      if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "out", body: reply, raw: {} });
+    } catch (e) {
+      // The dedup marker is already claimed, so a non-2xx here would make the
+      // provider redeliver into a swallowed duplicate — fail SOFT instead and
+      // leave a trail in audit_log/console for debugging.
+      console.error("channel-webhook message failed (acked to provider)", e);
+      if (client) {
+        try {
+          await client.from("audit_log").insert({
+            user_id: ownerId,
+            actor: "agent",
+            action: "agent.message_error",
+            entity: `${channel}:${msg.externalId}`,
+            details: String(e).slice(0, 500),
+          });
+        } catch { /* best-effort */ }
+      }
     }
-
-    if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "in", body: msg.body, raw: body });
-
-    // Approvals bypass the model entirely — a confirm must be deterministic.
-    const approval = client ? await handleApproval(client, ownerId, msg.body) : null;
-
-    const orgId = client ? await ownerOrgId(client, ownerId) : null;
-    const reply = approval ?? (await aiReply(msg.body, msg.fromName, client, orgId, ownerId, msg.channel, msg.externalId));
-    await sendReply(msg, reply);
-
-    if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "out", body: reply, raw: {} });
   }
 
   return new Response("ok");

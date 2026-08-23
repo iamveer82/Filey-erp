@@ -4,6 +4,8 @@
 // The same WRITE POLICY and tenant-boundary rules documented in tools.ts
 // apply here.
 
+import { randomCode } from "./security.ts";
+
 export const num = (v: unknown, d = 0): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -11,7 +13,37 @@ export const num = (v: unknown, d = 0): number => {
 
 /** Suffix marks agent-created drafts; the owner renumbers on finalize if needed. */
 export const draftNumber = (prefix: string) =>
-  `${prefix}-${new Date().getFullYear()}-A${Math.floor(Math.random() * 9000) + 1000}`;
+  `${prefix}-${new Date().getFullYear()}-A${randomCode(4)}`;
+
+const MAX_CODE_ATTEMPTS = 5;
+
+/** Insert a pending action under a fresh CSPRNG approval code, retrying when
+ *  the draw collides with another LIVE code for this user (the partial unique
+ *  index from 2026-08-22-agent-hardening.sql makes the DB the tiebreaker).
+ *  Math.random codes are gone: a guessable approval code is a remote-execution
+ *  primitive on someone's books. Every insert also stamps a 24h expires_at so
+ *  old rows can be pruned without guessing at created_at semantics. */
+// deno-lint-ignore no-explicit-any
+export async function insertPendingAction(
+  // deno-lint-ignore no-explicit-any
+  client: any,
+  // deno-lint-ignore no-explicit-any
+  base: any,
+): Promise<{ ok: true; code: string } | { ok: false; error: string }> {
+  let lastMsg = "could not allocate an approval code";
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
+    const code = randomCode(4);
+    const { error } = await client.from("agent_pending_actions").insert({
+      ...base,
+      code,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+    if (!error) return { ok: true, code };
+    lastMsg = String(error.message ?? error);
+    if ((error as { code?: string }).code !== "23505") return { ok: false, error: lastMsg };
+  }
+  return { ok: false, error: lastMsg };
+}
 
 // deno-lint-ignore no-explicit-any
 export async function logAgentAction(client: any, ownerId: string, action: string, entity: string, details: string) {
@@ -124,11 +156,9 @@ export async function proposePaymentReminder(client: any, org: string, ownerId: 
   if (!inv.customer_email)
     return { error: `invoice ${number} has no customer email on file — add one in Filey first` };
 
-  const code = String(Math.floor(Math.random() * 9000) + 1000);
-  const { error: pe } = await client.from("agent_pending_actions").insert({
+  const res = await insertPendingAction(client, {
     user_id: ownerId,
     org_id: org,
-    code,
     action: "send_payment_reminder",
     payload: {
       invoice_id: inv.id,
@@ -138,15 +168,15 @@ export async function proposePaymentReminder(client: any, org: string, ownerId: 
       due_date: inv.due_date,
     },
   });
-  if (pe) return { error: pe.message };
+  if (!res.ok) return { error: res.error };
   return {
     proposed: "send_payment_reminder",
     invoice: inv.number,
     to: inv.customer_email,
-    approval_code: code,
+    approval_code: res.code,
     note:
-      `Tell the user: reply "APPROVE ${code}" to send the reminder to ` +
-      `${inv.customer_email}, or "CANCEL ${code}" to drop it. Codes expire in 24h.`,
+      `Tell the user: reply "APPROVE ${res.code}" to send the reminder to ` +
+      `${inv.customer_email}, or "CANCEL ${res.code}" to drop it. Codes expire in 24h.`,
   };
 }
 
@@ -312,6 +342,34 @@ export async function runWriteTool(
       return { created: "product", name: row.name, note: "Stock starts at 0 — receive stock in Filey." };
     }
 
+    case "log_expense": {
+      // Additive record in the expenses table — same class of write as
+      // add_customer: reversible by deleting the row, nothing modified.
+      const row = {
+        ...owned,
+        category: String(input?.category ?? "").trim().slice(0, 80),
+        description: input?.description ? String(input.description).slice(0, 300) : null,
+        amount: num(input?.amount),
+        expense_date:
+          typeof input?.expense_date === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(input.expense_date)
+            ? input.expense_date
+            : new Date().toISOString().slice(0, 10),
+      };
+      if (!row.category) return { error: "category is required" };
+      if (!(row.amount > 0)) return { error: "amount must be greater than zero" };
+      const { data, error } = await client.from("expenses").insert(row).select("id").single();
+      if (error) return { error: error.message };
+      await logAgentAction(
+        client,
+        ownerId,
+        name,
+        `expenses:${data.id}`,
+        `${row.category} — ${row.amount} on ${row.expense_date}`,
+      );
+      return { created: "expense", id: data.id, category: row.category, amount: row.amount };
+    }
+
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -332,11 +390,9 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
   if (provider === "whatsapp" && !String(input?.phone_number_id ?? "").trim())
     return { error: "whatsapp also needs phone_number_id" };
 
-  const code = String(Math.floor(Math.random() * 9000) + 1000);
-  const { error } = await client.from("agent_pending_actions").insert({
+  const res = await insertPendingAction(client, {
     user_id: ownerId,
     org_id: "default",
-    code,
     action: "connect_channel",
     payload: {
       provider,
@@ -345,14 +401,51 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
       signing_secret: String(input?.signing_secret ?? "").trim() || null,
     },
   });
-  if (error) return { error: error.message };
+  if (!res.ok) return { error: res.error };
   return {
     proposed: "connect_channel",
     provider,
-    code,
+    code: res.code,
     note:
-      `Nothing is connected yet. Tell the owner to reply "APPROVE ${code}" ` +
+      `Nothing is connected yet. Tell the owner to reply "APPROVE ${res.code}" ` +
       `to wire up ${provider}.`,
+  };
+}
+
+/** mark_invoice_paid { invoice_number } — propose flipping an invoice to
+ *  paid. This moves money in the books, so it parks a pending action and
+ *  NEVER executes here: the approval executor in approvals.ts does the flip,
+ *  deterministically, only after the owner replies APPROVE <code>. */
+// deno-lint-ignore no-explicit-any
+export async function proposeMarkInvoicePaid(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
+  const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
+  if (!number) return { error: "invoice_number is required" };
+  const { data: inv, error } = await client
+    .from("invoice_docs")
+    .select("id,number,status")
+    .eq("org_id", org)
+    .eq("number", number)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!inv) return { error: `invoice ${number} not found` };
+  if (inv.status === "paid") return { error: `invoice ${number} is already paid` };
+  if (inv.status === "draft")
+    return { error: `invoice ${number} is still a draft — finalize it in Filey first` };
+
+  const res = await insertPendingAction(client, {
+    user_id: ownerId,
+    org_id: org,
+    action: "mark_invoice_paid",
+    payload: { invoice_id: inv.id, invoice_number: inv.number },
+  });
+  if (!res.ok) return { error: res.error };
+  return {
+    proposed: "mark_invoice_paid",
+    invoice: inv.number,
+    approval_code: res.code,
+    note:
+      `Nothing changed yet. Tell the owner to reply "APPROVE ${res.code}" to ` +
+      `mark ${inv.number} paid, or "CANCEL ${res.code}" to drop it.`,
   };
 }
 
@@ -389,22 +482,20 @@ export async function proposeSendMessage(client: any, org: string, ownerId: stri
   }
   if (!to) return { error: "give either `to` or `customer_name`" };
 
-  const code = String(Math.floor(Math.random() * 9000) + 1000);
-  const { error } = await client.from("agent_pending_actions").insert({
+  const res = await insertPendingAction(client, {
     user_id: ownerId,
     org_id: org,
-    code,
     action: "send_message",
     payload: { channel, to, who, text },
   });
-  if (error) return { error: error.message };
+  if (!res.ok) return { error: res.error };
   return {
     proposed: "send_message",
     channel,
     to: who,
-    code,
+    code: res.code,
     note:
       `Nothing sent yet. Show the owner the exact text and recipient, then ` +
-      `tell them to reply "APPROVE ${code}" to send it.`,
+      `tell them to reply "APPROVE ${res.code}" to send it.`,
   };
 }
