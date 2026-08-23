@@ -19,42 +19,12 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Eye, MoreHorizontal, Plus, Trash2, Trophy } from "lucide-react";
+import { Eye, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { aed, cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import type { Opportunity } from "../lib/api";
-
-const STAGES = [
-  {
-    id: "qualification",
-    label: "Qualification",
-    pill: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  },
-  {
-    id: "proposal",
-    label: "Proposal",
-    pill: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  },
-  {
-    id: "negotiation",
-    label: "Negotiation",
-    pill: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-  },
-  {
-    id: "won",
-    label: "Won",
-    pill: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  },
-  { id: "lost", label: "Lost", pill: "bg-muted text-muted-foreground" },
-];
-
-const STAGE_PROB: Record<string, number> = {
-  qualification: 20,
-  proposal: 45,
-  negotiation: 70,
-  won: 100,
-  lost: 0,
-};
+import { STAGE_PROB, DEAL_STAGES } from "./crm/stageMeta";
+import { MenuPopover, MenuItemRow } from "./ui-menu";
 
 type Deal = Opportunity;
 
@@ -94,25 +64,17 @@ function DealCardMenu({
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div
-      ref={ref}
       className="relative shrink-0 -mt-0.5 -mr-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       <button
         type="button"
+        ref={btnRef}
         aria-label="Deal actions"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -120,32 +82,32 @@ function DealCardMenu({
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-7 z-30 w-40 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]">
-          <button
-            type="button"
-            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-hover transition-colors"
-            onClick={() => {
-              setOpen(false);
-              onView();
-            }}
-          >
-            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-foreground">View details</span>
-          </button>
-          <button
-            type="button"
-            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-hover transition-colors"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-          >
-            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-            <span className="text-red-500">Delete</span>
-          </button>
-        </div>
-      )}
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        align="end"
+        closeOnScroll
+        className="w-40"
+      >
+        <MenuItemRow
+          icon={<Eye size={14} />}
+          label="View details"
+          onClick={() => {
+            setOpen(false);
+            onView();
+          }}
+        />
+        <MenuItemRow
+          danger
+          icon={<Trash2 size={14} />}
+          label="Delete"
+          onClick={() => {
+            setOpen(false);
+            onDelete();
+          }}
+        />
+      </MenuPopover>
     </div>
   );
 }
@@ -218,8 +180,14 @@ function DealCardOverlay({ deal }: { deal: Deal }) {
   );
 }
 
+/**
+ * The kanban board half of the deals workspace. Receives already-filtered
+ * deals (`opps`) from DealsWorkspace plus the unfiltered `fullOpps` — reorder
+ * and contact-pruning must reason about every deal, not just visible ones.
+ */
 export default function PipelineBoard({
   opps,
+  fullOpps,
   setOpps,
   reload,
   onOpen,
@@ -227,14 +195,17 @@ export default function PipelineBoard({
   onQuickAddHandled,
 }: {
   opps: Deal[];
+  /** Unfiltered list (defaults to `opps`) used for reorder + prune integrity. */
+  fullOpps?: Deal[];
   setOpps: React.Dispatch<React.SetStateAction<Deal[]>>;
   reload: () => void;
   onOpen: (d: Deal) => void;
-  /** Bump to open the quick-add input on the first stage (header "Add Deal"). */
+  /** Bump to open the quick-add input on the first stage (header "Add deal"). */
   quickAddNonce?: number;
   /** Called after the quick-add request above is consumed. */
   onQuickAddHandled?: () => void;
 }) {
+  const everything = fullOpps ?? opps;
   const { toast, confirm } = useUI();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [addStage, setAddStage] = useState<string | null>(null);
@@ -256,24 +227,24 @@ export default function PipelineBoard({
     })
   );
 
-  // External "Add Deal" request: open the quick-add input on the first stage.
+  // External "Add deal" request: open the quick-add input on the first stage.
   useEffect(() => {
     if (!quickAddNonce) return;
-    setAddStage(STAGES[0].id);
+    setAddStage(DEAL_STAGES[0].id);
     setAddTitle("");
     onQuickAddHandled?.();
   }, [quickAddNonce, onQuickAddHandled]);
 
   const byStage = useMemo(() => {
     const m: Record<string, Deal[]> = {};
-    for (const s of STAGES) m[s.id] = [];
+    for (const s of DEAL_STAGES) m[s.id] = [];
     for (const o of opps) (m[o.stage] ??= []).push(o);
     return m;
   }, [opps]);
 
   const activeDeal = useMemo(
-    () => opps.find((o) => o.id === activeId) ?? null,
-    [activeId, opps]
+    () => everything.find((o) => o.id === activeId) ?? null,
+    [activeId, everything]
   );
 
   const handleDragStart = (e: DragStartEvent) => {
@@ -289,16 +260,16 @@ export default function PipelineBoard({
       return;
     }
 
-    const activeId = Number(active.id);
+    const draggedId = Number(active.id);
     const overId = over.id;
 
-    const activeDeal = opps.find((o) => o.id === activeId);
-    if (!activeDeal) return;
+    const draggedDeal = everything.find((o) => o.id === draggedId);
+    if (!draggedDeal) return;
 
-    const overIsColumn = STAGES.some((s) => s.id === overId);
-    const overDeal = opps.find((o) => o.id === Number(overId));
+    const overIsColumn = DEAL_STAGES.some((s) => s.id === overId);
+    const overDeal = everything.find((o) => o.id === Number(overId));
 
-    let targetStage = activeDeal.stage;
+    let targetStage = draggedDeal.stage;
     if (overIsColumn) {
       targetStage = String(overId);
     } else if (overDeal) {
@@ -306,13 +277,13 @@ export default function PipelineBoard({
     }
 
     setDragOverColumn(
-      targetStage !== activeDeal.stage ? targetStage : overIsColumn ? targetStage : null
+      targetStage !== draggedDeal.stage ? targetStage : overIsColumn ? targetStage : null
     );
 
-    if (targetStage !== activeDeal.stage) {
+    if (targetStage !== draggedDeal.stage) {
       setOpps((prev) =>
         prev.map((o) =>
-          o.id === activeId
+          o.id === draggedId
             ? {
                 ...o,
                 stage: targetStage,
@@ -336,28 +307,29 @@ export default function PipelineBoard({
       return;
     }
 
-    const activeId = Number(active.id);
+    const draggedId = Number(active.id);
     const overId = over.id;
 
-    const activeDeal = opps.find((o) => o.id === activeId);
-    if (!activeDeal) return;
+    const draggedDeal = everything.find((o) => o.id === draggedId);
+    if (!draggedDeal) return;
 
-    const overDeal = opps.find((o) => o.id === Number(overId));
+    const overDeal = everything.find((o) => o.id === Number(overId));
 
-    if (overDeal && activeDeal.stage === overDeal.stage) {
-      const stageItems = opps.filter((o) => o.stage === activeDeal.stage);
-      const oldIndex = stageItems.findIndex((o) => o.id === activeId);
+    if (overDeal && draggedDeal.stage === overDeal.stage) {
+      // Reorder against the FULL list so filtered-out deals survive the merge.
+      const stageItems = everything.filter((o) => o.stage === draggedDeal.stage);
+      const oldIndex = stageItems.findIndex((o) => o.id === draggedId);
       const newIndex = stageItems.findIndex((o) => o.id === Number(overId));
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
         const reordered = arrayMove(stageItems, oldIndex, newIndex);
-        const otherItems = opps.filter((o) => o.stage !== activeDeal.stage);
+        const otherItems = everything.filter((o) => o.stage !== draggedDeal.stage);
         setOpps([...otherItems, ...reordered]);
       }
     }
 
     try {
       await import("../lib/api").then((m) =>
-        m.crm.setOppStage(activeId, activeDeal.stage)
+        m.crm.setOppStage(draggedId, draggedDeal.stage)
       );
     } catch (e) {
       toast.error("Failed to update opportunity stage");
@@ -411,10 +383,15 @@ export default function PipelineBoard({
       const { crm } = await import("../lib/api");
       await crm.deleteOpportunity(deal.id);
       setOpps((prev) => prev.filter((o) => o.id !== deal.id));
+      // Roles pointing at a deleted deal would resurface as ghosts. Prune
+      // against the FULL list — a role on a merely-filtered-out deal stays.
+      import("../lib/dealContacts").then((m) =>
+        m.pruneDealContacts(everything.filter((o) => o.id !== deal.id).map((o) => o.id))
+      );
       toast.success("Deal deleted");
     } catch (e) {
       toast.error("Failed to delete deal");
-      console.error("Failed to delete deal:", e);
+      console.error("Failed to delete opportunity:", e);
       reload();
     }
   };
@@ -428,13 +405,13 @@ export default function PipelineBoard({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      {/* Joined kanban board — columns as hairline-divided cells (DEMO look). */}
+      {/* Joined kanban board - columns as hairline-divided cells (DEMO look). */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 rounded-xl border border-border bg-card overflow-hidden">
-        {STAGES.map((s, i) => {
+        {DEAL_STAGES.map((s, i) => {
           const list = byStage[s.id] ?? [];
           const total = list.reduce((a, o) => a + o.value, 0);
           const isOver = dragOverColumn === s.id;
-          const last = i === STAGES.length - 1;
+          const last = i === DEAL_STAGES.length - 1;
           return (
             <div
               key={s.id}
@@ -520,13 +497,6 @@ export default function PipelineBoard({
           );
         })}
       </div>
-
-      {opps.length === 0 && (
-        <div className="grid place-items-center py-12 text-[13px] text-muted-foreground">
-          <Trophy size={20} className="mb-2 text-muted-foreground/50" />
-          No opportunities yet.
-        </div>
-      )}
 
       <DragOverlay>
         {activeDeal ? <DealCardOverlay deal={activeDeal} /> : null}

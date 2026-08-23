@@ -12,6 +12,7 @@ import {
 import { crm, type Activity } from "../lib/api";
 import { fmtDate } from "../lib/format";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "./ui-menu";
 
 /* Reusable chronological activity feed (notes / tasks / calls / emails /
  * meetings) for any CRM record. Activities link to the record through
@@ -84,17 +85,14 @@ export default function ActivityTimeline({ relatedTo }: { relatedTo: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Quick add */}
       <div className="mb-3 flex items-center gap-2">
-        <select
+        <SelectMenu
+          ariaLabel="Activity kind"
           value={kind}
-          onChange={(e) => setKind(e.target.value)}
-          className="select h-9 !py-0 text-xs"
-        >
-          {KINDS.map((k) => (
-            <option key={k.id} value={k.id}>
-              {k.label}
-            </option>
-          ))}
-        </select>
+          onChange={setKind}
+          size="md"
+          className="w-32 shrink-0"
+          options={KINDS.map((k) => ({ value: k.id, label: k.label }))}
+        />
         <input
           className="input h-9 flex-1 text-sm"
           placeholder="Add a note or task…"

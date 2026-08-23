@@ -26,8 +26,9 @@ import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import { useChartColors } from "../lib/accent";
 import ImportCsvModal from "../components/ImportCsvModal";
+import { SelectMenu } from "../components/ui-menu";
 import DealDrawer from "../components/DealDrawer";
-import PipelineBoard from "../components/PipelineBoard";
+import DealsWorkspace from "../components/crm/DealsWorkspace";
 import ForecastPanel from "../components/ForecastPanel";
 import { aed, num, fmtDate, cn } from "../lib/format";
 import {
@@ -40,6 +41,7 @@ import {
   Field,
   Spinner,
   ErrorBanner,
+  keyActivate,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import { Tabs, TabsList, TabsTrigger } from "../components/Tabs";
@@ -198,13 +200,13 @@ export default function Crm() {
             </button>
             <button
               className="btn-primary"
-              aria-label="Add Deal"
+              aria-label="Add deal"
               onClick={() => {
                 setView("pipeline");
                 setDealNonce((n) => n + 1);
               }}
             >
-              <Plus size={15} /> Add Deal
+              <Plus size={15} /> Add deal
             </button>
           </div>
         }
@@ -228,7 +230,7 @@ export default function Crm() {
       >
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="pipeline">Pipeline board</TabsTrigger>
+          <TabsTrigger value="pipeline">Deals</TabsTrigger>
           <TabsTrigger value="forecast">Forecast</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -236,7 +238,7 @@ export default function Crm() {
       {view === "forecast" ? (
         <ForecastPanel opps={opps} activities={acts} onOpen={setSelectedOpp} />
       ) : view === "pipeline" ? (
-        <PipelineBoard
+        <DealsWorkspace
           opps={opps}
           setOpps={setOpps}
           reload={load}
@@ -413,7 +415,11 @@ export default function Crm() {
                     {topCustomers.map(({ c, orders, spent }) => (
                       <tr
                         key={c.id || c.name}
+                        tabIndex={c.id ? 0 : undefined}
                         onClick={() => c.id && nav(`/customers/${c.id}`)}
+                        onKeyDown={
+                          c.id ? keyActivate(() => nav(`/customers/${c.id}`)) : undefined
+                        }
                         className={cn(
                           "transition-colors duration-150",
                           c.id && "cursor-pointer hover:bg-brand-50 dark:hover:bg-white/5"
@@ -447,7 +453,7 @@ export default function Crm() {
                           colSpan={5}
                           className="py-6 text-center text-sm text-brand-400"
                         >
-                          No customers yet — add one from Invoicing.
+                          No customers yet - add one from Invoicing.
                         </td>
                       </tr>
                     )}
@@ -467,7 +473,7 @@ export default function Crm() {
               <ul className="space-y-2.5">
                 {tasks.length === 0 && (
                   <li className="text-sm text-brand-400">
-                    Nothing due — you're all caught up.
+                    Nothing due - you're all caught up.
                   </li>
                 )}
                 {tasks.map((a) => (
@@ -573,7 +579,7 @@ function TaskModal({
         <Field label="What needs doing? *">
           <input
             className={cn("input", !f.subject.trim() && "border-danger")}
-            placeholder="Follow up with Acme Corp"
+            placeholder="Follow up with Gulf Line Trading"
             value={f.subject}
             onChange={(e) => setF({ ...f, subject: e.target.value })}
           />
@@ -585,16 +591,17 @@ function TaskModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
-            <select
-              className="select"
+            <SelectMenu
+              ariaLabel="Type"
               value={f.kind}
-              onChange={(e) => setF({ ...f, kind: e.target.value })}
-            >
-              <option value="follow-up">Follow-up</option>
-              <option value="call">Call</option>
-              <option value="meeting">Meeting</option>
-              <option value="email">Email</option>
-            </select>
+              onChange={(kind) => setF({ ...f, kind })}
+              options={[
+                { value: "follow-up", label: "Follow-up" },
+                { value: "call", label: "Call" },
+                { value: "meeting", label: "Meeting" },
+                { value: "email", label: "Email" },
+              ]}
+            />
           </Field>
           <Field label="Due date">
             <DateField
