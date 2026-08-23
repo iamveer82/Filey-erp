@@ -68,11 +68,12 @@ import {
 import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
+import { SelectMenu } from "./ui-menu";
 
 /* ── Typed option schema ───────────────────────────────────────────────────
  Each tool declares its options as `fields`. A single <ToolFields> renderer
  turns them into proper controls (select / number / colour / slider / image
- upload) everywhere — workspace, modal runner and tool browser. ─────────── */
+ upload) everywhere - workspace, modal runner and tool browser. ─────────── */
 export type FieldType =
   | "text"
   | "textarea"
@@ -129,7 +130,8 @@ export interface Tool {
     | "logo"
     | "background"
     | "redact"
-    | "rotate";
+    | "rotate"
+    | "fill-form";
   run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
   /** Optional explicit input→output label, e.g. { from: "DOCX", to: "PDF" }.
    * When omitted it is inferred from `accept`, `cat` and `name` by
@@ -203,7 +205,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "merge",
     name: "Merge PDF",
-    desc: "Combine PDFs — drag the pages into the order you want",
+    desc: "Combine PDFs - drag the pages into the order you want",
     icon: Combine,
     cat: "Organize",
     multi: true,
@@ -238,7 +240,7 @@ export const PDF_TOOLS: Tool[] = [
         label: "Split before pages",
         type: "text",
         placeholder: "e.g. 4, 8, 12",
-        hint: "1-based page numbers where each new file starts",
+        hint: "Page numbers where each new file should start",
       },
     ],
     run: (f, p) => pdf.splitAtPages(f[0], p.points || ""),
@@ -357,15 +359,15 @@ export const PDF_TOOLS: Tool[] = [
         type: "select",
         default: "png",
         options: [
-          { value: "png", label: "PNG — transparent" },
-          { value: "jpeg", label: "JPG — white background" },
+          { value: "png", label: "PNG - transparent" },
+          { value: "jpeg", label: "JPG - white background" },
           { value: "webp", label: "WebP" },
           { value: "pdf", label: "PDF" },
         ],
       },
       {
         key: "svgScale",
-        label: "Scale (×) — higher = sharper",
+        label: "Scale (×) - higher = sharper",
         type: "number",
         default: "2",
         min: 1,
@@ -391,14 +393,14 @@ export const PDF_TOOLS: Tool[] = [
     fields: [
       {
         key: "tracePreset",
-        label: "Vectorize style",
+        label: "Artwork type",
         type: "select",
         default: "photo",
         options: [
-          { value: "photo", label: "Photo / detailed — full color" },
-          { value: "logo", label: "Logo / flat art — clean" },
-          { value: "bw", label: "Black & white — line art" },
-          { value: "pixel", label: "Sharp — pixel-precise" },
+          { value: "photo", label: "Photo / detailed - full color" },
+          { value: "logo", label: "Logo / flat art - clean" },
+          { value: "bw", label: "Black & white - line art" },
+          { value: "pixel", label: "Sharp - pixel-precise" },
         ],
         hint: "Logos & illustrations vectorize cleanly; photos make large SVGs.",
       },
@@ -497,7 +499,7 @@ export const PDF_TOOLS: Tool[] = [
     fields: [
       {
         key: "rasterScale",
-        label: "Quality (× DPI) — 1–4",
+        label: "Sharpness (1 = fastest, 4 = sharpest)",
         type: "number",
         default: "2",
         min: 1,
@@ -510,8 +512,8 @@ export const PDF_TOOLS: Tool[] = [
         type: "select",
         default: "no",
         options: [
-          { value: "no", label: "No — keep colour" },
-          { value: "yes", label: "Yes — smaller, ink-saving" },
+          { value: "no", label: "No - keep colour" },
+          { value: "yes", label: "Yes - smaller, ink-saving" },
         ],
       },
     ],
@@ -537,7 +539,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "numbers",
     name: "Page Numbers",
-    desc: "Stamp page numbers — format, position, start & colour",
+    desc: "Stamp page numbers - format, position, start & colour",
     icon: Hash,
     cat: "Edit",
     accept: "application/pdf",
@@ -579,7 +581,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "watermark",
     name: "Watermark",
-    desc: "Text watermark — layout, size, opacity & colour",
+    desc: "Text watermark - layout, size, opacity & colour",
     icon: Stamp,
     cat: "Edit",
     accept: "application/pdf",
@@ -657,7 +659,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "reverse",
     name: "Reverse Pages",
-    desc: "Flip the page order — last page first",
+    desc: "Flip the page order - last page first",
     icon: ArrowDownUp,
     cat: "Organize",
     accept: "application/pdf",
@@ -1003,7 +1005,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "rotate-custom",
     name: "Rotate Custom Degrees",
-    desc: "Rotate pages by any angle — page resizes to fit",
+    desc: "Rotate pages by any angle - page resizes to fit",
     icon: RotateCcw,
     cat: "Edit",
     accept: "application/pdf",
@@ -1126,7 +1128,7 @@ export const PDF_TOOLS: Tool[] = [
     fields: [
       {
         key: "rScale",
-        label: "Quality (× DPI) — 1–4",
+        label: "Sharpness (1 = fastest, 4 = sharpest)",
         type: "number",
         default: "2",
         min: 1,
@@ -1284,15 +1286,15 @@ export const PDF_TOOLS: Tool[] = [
     fields: [
       {
         key: "userPassword",
-        label: "Open password",
+        label: "Password needed to open the file",
         type: "password",
-        placeholder: "required to open",
+        placeholder: "Anyone opening the PDF types this",
       },
       {
         key: "ownerPassword",
-        label: "Owner password (optional)",
+        label: "Password to change permissions (optional)",
         type: "password",
-        placeholder: "for full control",
+        placeholder: "Lets you edit permissions later",
       },
     ],
     run: async (f, p) => [
@@ -1329,7 +1331,7 @@ export const PDF_TOOLS: Tool[] = [
     fields: [
       {
         key: "ownerPassword",
-        label: "Owner password",
+        label: "Password to change permissions",
         type: "password",
         placeholder: "required",
       },
@@ -1391,19 +1393,15 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "fill-form",
     name: "Fill Form",
-    desc: "Fill text fields, checkboxes & dropdowns from JSON",
+    desc: "Type into the PDF's own form fields, then download the filled copy",
     icon: FileType2,
     cat: "Data",
     accept: "application/pdf",
-    fields: [
-      {
-        key: "data",
-        label: "Field data (JSON)",
-        type: "textarea",
-        default: '{\n "Name": "Ada Lovelace",\n "Agree": true\n}',
-        hint: 'Object of { "Field Name": value }. Run “List Form Fields” to get names.',
-      },
-    ],
+    // Interactive: the panel reads the field names out of the uploaded PDF and
+    // renders one input each. It used to ask the user to hand-write JSON and to
+    // go run "List Form Fields" first just to learn the names.
+    interactive: "fill-form",
+    fields: [],
     run: async (f, p) => [await pdf.fillForm(f[0], p.data || "{}")],
   },
   {
@@ -1420,7 +1418,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "esign",
     name: "E-Sign Document",
-    desc: "Sign any file — PDF, image, scan or Office doc",
+    desc: "Sign any file - PDF, image, scan or Office doc",
     icon: PenTool,
     cat: "Edit",
     accept:
@@ -1577,13 +1575,11 @@ function FieldControl({
 }) {
   if (f.type === "select") {
     return (
-      <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
-        {f.options?.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <SelectMenu
+        value={value}
+        onChange={(v) => onChange(v)}
+        options={(f.options ?? []).map((o) => ({ value: o.value, label: o.label }))}
+      />
     );
   }
   if (f.type === "color") {

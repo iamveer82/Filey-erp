@@ -15,7 +15,8 @@ import {
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-import { Card, FilterChip, PageHeader } from "../components/ui";
+import { Card, FilterChip, PageHeader, SearchInput } from "../components/ui";
+import { plural } from "../lib/format";
 import FileCard from "../components/FileCard";
 import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
@@ -35,6 +36,7 @@ import {
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import ESignStudio from "../components/ESignStudio";
+import FormFillPanel from "../components/FormFillPanel";
 import LivePreview from "../components/LivePreview";
 import MergeStudio from "../components/MergeStudio";
 import OrganizeStudio from "../components/OrganizeStudio";
@@ -61,6 +63,8 @@ export default function ToolsPage() {
   const [showAll, setShowAll] = useState(false);
   // Reset to 8-tool view when switching category tabs.
   const [cat, setCat] = useState<string>("All Tools");
+  // 88 tools across 7 categories: chips alone meant scrolling to find one.
+  const [query, setQuery] = useState("");
   const [params, setParams] = useSearchParams();
   const closeActive = () => setParams({});
 
@@ -90,7 +94,7 @@ export default function ToolsPage() {
           const paths = await uploadOutputs(runId, outputs);
           if (paths.length) await toolRuns.setPaths(runId, paths, total);
         } else {
-          toast.info("Storage quota full — output downloaded but not archived.");
+          toast.info("Storage quota full - output downloaded but not archived.");
         }
       }
     } catch {
@@ -107,10 +111,16 @@ export default function ToolsPage() {
   const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
   // Full set per tab â€” the grid shows the first 8 and "View all" reveals the
   // rest. (Previously capped at 11, which silently hid most of the ~50 tools.)
-  const filteredTools =
-    cat === "All Tools"
-      ? PDF_TOOLS
-      : PDF_TOOLS.filter((t) => t.cat === cat);
+  const needle = query.trim().toLowerCase();
+  const filteredTools = PDF_TOOLS.filter((t) => {
+    if (cat !== "All Tools" && t.cat !== cat) return false;
+    if (!needle) return true;
+    return (
+      t.name.toLowerCase().includes(needle) ||
+      t.desc.toLowerCase().includes(needle) ||
+      t.cat.toLowerCase().includes(needle)
+    );
+  });
 
   if (active) {
     return (
@@ -126,8 +136,20 @@ export default function ToolsPage() {
     <div className="animate-fade-up">
       <PageHeader
         title="Tools"
-        subtitle="Convert, merge, split & edit your files — all on-device"
+        subtitle="Convert, merge, split & edit your files, all on-device"
       />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search tools by name or what they do…"
+          className="w-full max-w-sm"
+        />
+        <span className="text-[12.5px] text-muted-foreground">
+          {plural(filteredTools.length, "tool")}
+        </span>
+      </div>
 
       {/* CATEGORY TABS */}
       <div className="mb-5 flex flex-wrap items-center gap-1.5">
@@ -145,19 +167,21 @@ export default function ToolsPage() {
         ))}
       </div>
 
-      {/* TOOLS GRID — joined quiet cards (DEMO parity): shared hairlines
+      {/* TOOLS GRID - joined quiet cards (DEMO parity): shared hairlines
           inside one rounded-xl border via .joined-kpis. */}
       <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 joined-kpis">
-        {cat === "All Tools" && (
+        {cat === "All Tools" && !needle && (
           <ToolMiniCard
             name="E-sign PDF"
-            desc="Draw, type or upload — place & download"
+            desc="Draw, type or upload - place & download"
             Icon={Signature}
             flow={{ from: "PDF", to: "PDF" }}
             onUse={() => setParams({ tool: "esign" })}
           />
         )}
-        {(showAll ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
+        {/* A search is already a narrowing action, so don't re-hide its results
+            behind "View all". */}
+        {(showAll || needle ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
           <ToolMiniCard
             key={t.id}
             name={t.name}
@@ -169,11 +193,23 @@ export default function ToolsPage() {
         ))}
       </div>
 
-      {filteredTools.length > 8 && !showAll && (
+      {filteredTools.length > 8 && !showAll && !needle && (
         <div className="mb-4 flex justify-center">
           <button onClick={() => setShowAll(true)} className="btn-ghost">
             <LayoutGrid size={14} /> View all {filteredTools.length} tools
           </button>
+        </div>
+      )}
+
+      {needle && filteredTools.length === 0 && (
+        <div className="mb-4 rounded-xl border border-border bg-card px-5 py-10 text-center">
+          <p className="text-[13px] font-medium text-foreground">
+            No tool matches “{query}”
+          </p>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">
+            Try a different word, or clear the search to browse all{" "}
+            {PDF_TOOLS.length} tools.
+          </p>
         </div>
       )}
 
@@ -191,7 +227,7 @@ export default function ToolsPage() {
 
       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <CheckCircle2 size={12} className="text-success" />
-        All processing happens locally — files never leave this device.
+        All processing happens locally - files never leave this device.
       </p>
     </div>
   );
@@ -295,7 +331,7 @@ function PdfToolWorkspace({
       for (const o of result) downloadFile(o);
       onComplete(tool.id, tool.name, files[0].name, result);
       toast.success(
-        `Done — ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
+        `Done - ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -306,70 +342,77 @@ function PdfToolWorkspace({
 
   return (
     <div className="animate-fade-up">
-      <div className="sticky top-0 z-30 -mx-4 mb-4 flex items-center gap-3 border-b border-border bg-background px-4 py-3">
-        <button onClick={onBack} className="btn-ghost">
-          <ArrowLeft size={14} /> All tools
-        </button>
-        <span className="hidden h-5 w-px bg-border sm:block" />
-        <span className="truncate text-sm font-medium text-ink">{tool.name}</span>
-        {canSave && (
-          <button
-            onClick={saveToMyFiles}
-            disabled={savingFiles}
-            className="btn-ghost ml-auto"
-          >
-            {savingFiles ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <FolderPlus size={14} />
-            )}
-            Save to My Files
+      {/* One header, not two. The tool name used to appear in a sticky bar and
+          again in a card 90px below it, with the category floating unanchored in
+          the top-right corner. Everything identifying the tool now sits on one
+          row, and it stays sticky so Upload stays reachable while scrolling. */}
+      <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-page px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button onClick={onBack} className="btn-ghost shrink-0">
+            <ArrowLeft size={14} /> All tools
           </button>
-        )}
-        <span
-          className={`hidden text-xs text-brand-400 sm:inline ${canSave ? "" : "ml-auto"}`}
-        >
-          {tool.cat}
-        </span>
-      </div>
-
-      <div className="card mb-4 flex flex-wrap items-center gap-3">
-        <span className="grid h-12 w-12 place-items-center rounded-full bg-muted text-foreground">
-          <Icon size={22} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-base font-medium text-ink">{tool.name}</p>
-            {(() => {
-              const fl = toolFlow(tool);
-              return (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
-                  title={`${fl.from} to ${fl.to}`}
-                >
-                  {fl.from}
-                  <ArrowRight size={10} className="text-primary-400" />
-                  {fl.to}
-                </span>
-              );
-            })()}
+          <span className="hidden h-8 w-px bg-border sm:block" />
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
+            <Icon size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate text-[15px] font-medium text-ink">{tool.name}</p>
+              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {tool.cat}
+              </span>
+              {(() => {
+                const fl = toolFlow(tool);
+                return fl.from === fl.to ? null : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    title={`${fl.from} to ${fl.to}`}
+                  >
+                    {fl.from}
+                    <ArrowRight size={10} className="text-primary-400" />
+                    {fl.to}
+                  </span>
+                );
+              })()}
+            </div>
+            <p className="truncate text-xs text-brand-500">{tool.desc}</p>
           </div>
-          <p className="line-clamp-2 text-xs text-brand-500">{tool.desc}</p>
+          {canSave && (
+            <button onClick={saveToMyFiles} disabled={savingFiles} className="btn-ghost">
+              {savingFiles ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <FolderPlus size={14} />
+              )}
+              Save to My Files
+            </button>
+          )}
+          <label className="btn-primary cursor-pointer">
+            <Upload size={14} /> {files.length ? plural(files.length, "file") : "Upload"}
+            <input
+              type="file"
+              accept={tool.accept}
+              multiple={tool.multi}
+              className="hidden"
+              onChange={(e) => pickFiles(e.target.files)}
+            />
+          </label>
         </div>
-        <label className="btn-primary cursor-pointer">
-          <Upload size={14} />{" "}
-          {files.length ? `${files.length} file${files.length > 1 ? "s" : ""}` : "Upload"}
-          <input
-            type="file"
-            accept={tool.accept}
-            multiple={tool.multi}
-            className="hidden"
-            onChange={(e) => pickFiles(e.target.files)}
-          />
-        </label>
       </div>
 
-      {tool.interactive === "esign" ? (
+      {tool.interactive === "fill-form" ? (
+        <div className="card">
+          <FormFillPanel
+            file={files[0] ?? undefined}
+            onDone={(out) => {
+              setOuts([out]);
+              downloadFile(out);
+              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
+              toast.success("Filled form downloaded.");
+            }}
+          />
+        </div>
+      ) : tool.interactive === "esign" ? (
         <div className="card min-h-[480px]">
           <ESignStudio
             file={files[0] ?? undefined}
@@ -613,7 +656,7 @@ function FilePreview({ file }: { file: File }) {
         <FileText size={28} className="mx-auto text-muted-foreground" />
         <p className="mt-1 text-ink">{file.name}</p>
         <p className="text-xs">
-          Preview not available for this format — Run will still process it.
+          Preview not available for this format - Run will still process it.
         </p>
       </div>
     </div>

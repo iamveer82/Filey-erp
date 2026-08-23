@@ -1771,7 +1771,7 @@ export async function splitAtPages(
     )
   ).sort((a, b) => a - b);
   if (!cuts.length)
-    throw new Error('Enter split points, e.g. "4, 8" (1-based page numbers).');
+    throw new Error('Enter the page numbers where each new file should start, e.g. 4, 8.');
   const bounds = [1, ...cuts, total + 1];
   const out: OutFile[] = [];
   for (let s = 0; s < bounds.length - 1; s++) {
@@ -3077,6 +3077,45 @@ export async function listFormFields(file: File): Promise<OutFile> {
     ? `# name\ttype\t[options]\n${lines.join("\n")}`
     : "(this PDF has no form fields)";
   return { name: `${base(file.name)}-fields.txt`, bytes: new TextEncoder().encode(txt) };
+}
+
+export interface PdfFormField {
+  name: string;
+  kind: "Text" | "CheckBox" | "Dropdown" | "RadioGroup" | "OptionList" | "Field";
+  options?: string[];
+  /** Whatever the PDF already has in the field, so the UI can prefill it. */
+  value?: string | boolean;
+}
+
+/**
+ * The same fields listFormFields dumps to text, but structured, so the UI can
+ * render a real input per field instead of asking someone to hand-write JSON.
+ */
+export async function readFormFields(file: File): Promise<PdfFormField[]> {
+  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  return doc
+    .getForm()
+    .getFields()
+    .map((f) => {
+      const kind = fieldKind(f) as PdfFormField["kind"];
+      const out: PdfFormField = { name: f.getName(), kind };
+      if (
+        f instanceof PDFDropdown ||
+        f instanceof PDFOptionList ||
+        f instanceof PDFRadioGroup
+      )
+        out.options = f.getOptions();
+      try {
+        if (f instanceof PDFTextField) out.value = f.getText() ?? "";
+        else if (f instanceof PDFCheckBox) out.value = f.isChecked();
+        else if (f instanceof PDFDropdown) out.value = f.getSelected()[0] ?? "";
+        else if (f instanceof PDFRadioGroup) out.value = f.getSelected() ?? "";
+        else if (f instanceof PDFOptionList) out.value = f.getSelected()[0] ?? "";
+      } catch {
+        /* a malformed field just starts empty */
+      }
+      return out;
+    });
 }
 
 const TRUTHY = new Set(["true", "yes", "on", "1", "checked", "x"]);
