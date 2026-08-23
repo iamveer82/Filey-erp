@@ -38,7 +38,11 @@ import {
 } from "../lib/aiChats";
 import { buildAiContext } from "../lib/aiContext";
 import { memoryDigest } from "../lib/aiMemory";
-import { setAttachment } from "../lib/aiTools";
+import {
+  setTurnFile,
+  endTurn,
+  type FileOutput,
+} from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
@@ -125,14 +129,26 @@ export default function Copilot() {
 
   const save = (patch: Partial<AiPersona>) => setPersonaState(setPersona(patch));
   const tones = orbTones(persona.orbColor);
-  const persist = (next: Chat[]) => {
+  // Mirror for async reads: send() needs the latest list after an await, and
+  // building the next state from the mirror keeps the setChats call pure (the
+  // localStorage write used to run inside the updater — a side effect React
+  // forbids, doubled under StrictMode).
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  // toast is recreated each render — read it through a ref so persist/select
+  // can be stable useCallbacks.
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const persist = useCallback((next: Chat[]) => {
+    chatsRef.current = next;
     setChats(next);
-    saveChats(next);
-  };
-  const select = (id: string | null) => {
+    if (!saveChats(next))
+      toastRef.current?.error("Chat history couldn't be saved - browser storage is full.");
+  }, []);
+  const select = useCallback((id: string | null) => {
     setActiveIdState(id);
     setActiveId(id);
-  };
+  }, []);
 
   const active = chats.find((c) => c.id === activeId) ?? null;
   const turns = active?.turns ?? [];
@@ -246,9 +262,29 @@ export default function Copilot() {
     persist(afterUser);
     setInput("");
     setBusy(true);
-    setAttachment(file); // available to run_file_tool
+    // This turn's slot in the file toolbox: attachment in, produced files out.
+    // Keyed per turn — the full-page agent can be mid-run at the same time, and
+    // the two used to share one module-global file.
+    const turnId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    setTurnFile(turnId, file);
     const attached = file;
     const convo = afterUser.find((c) => c.id === id)?.turns ?? [];
+    /** Append an assistant turn to chat `id` from the mirror and persist. */
+    const appendReply = (text: string, files?: FileOutput[]) => {
+      const next = chatsRef.current.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              turns: [
+                ...c.turns,
+                { role: "assistant" as const, text, ...(files?.length ? { files } : {}) },
+              ],
+              updatedAt: Date.now(),
+            }
+          : c
+      );
+      persist(next);
+    };
     try {
       const messages: AiMessage[] = [
         {
@@ -269,34 +305,21 @@ export default function Copilot() {
           console.warn("Failed to attach image for AI vision:", e);
         }
       }
-      const reply = await aiAgent(messages, { maxTokens: 900 });
-      setChats((prev) => {
-        const next = prev.map((c) =>
-          c.id === id
-            ? {
-                ...c,
-                turns: [
-                  ...c.turns,
-                  { role: "assistant" as const, text: reply || "(no response)" },
-                ],
-                updatedAt: Date.now(),
-              }
-            : c
-        );
-        saveChats(next);
-        return next;
-      });
+      const reply = await aiAgent(messages, { maxTokens: 900, turnId });
+      appendReply(reply || "(no response)", endTurn(turnId));
     } catch (e) {
       setErr(
         e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e)
       );
+      endTurn(turnId); // never leak into the next turn's reply
+      // The user turn is already on screen; a bare question with no answer and
+      // no marker reads as "seen but ignored". Mark the failure instead.
+      appendReply("(no reply — the request failed. Resend to try again.)");
     } finally {
       setBusy(false);
       setFile(null);
-      setAttachment(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, busy, chats, activeId, ctx, file]);
+  }, [input, busy, chats, activeId, ctx, file, persist, select]);
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

@@ -20,6 +20,10 @@ const CHATS_KEY = "filey.ai.chats";
 const ACTIVE_KEY = "filey.ai.active";
 const LEGACY_KEY = "filey.ai.history"; // single-history from earlier builds
 export const TURN_CAP = 30;
+/** Total sessions kept. Chats used to be unbounded, so a long-lived install
+ *  crept toward the ~5 MB localStorage ceiling and then silently stopped
+ *  persisting — newest wins now, and history stays readable. */
+export const MAX_CHATS = 50;
 
 function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -64,7 +68,12 @@ export function loadChats(): Chat[] {
   }
 }
 
-export function saveChats(chats: Chat[]): void {
+let saveFailed = false;
+
+/** Persist the session list. Returns false when the write failed (quota full,
+ *  storage blocked) so a caller that cares can tell the user — history used to
+ *  stop saving with nothing but a console line. */
+export function saveChats(chats: Chat[]): boolean {
   try {
     // A blob URL dies with the page that made it, so persisting one leaves a
     // download chip that silently does nothing tomorrow. Paths survive; URLs
@@ -77,13 +86,22 @@ export function saveChats(chats: Chat[]): void {
           : t
       ),
     }));
-    localStorage.setItem(CHATS_KEY, JSON.stringify(clean));
-  } catch {
-    console.error("Failed to save chats to localStorage");
+    // Newest sessions win when over the cap.
+    const bounded = [...clean]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_CHATS);
+    localStorage.setItem(CHATS_KEY, JSON.stringify(bounded));
+    saveFailed = false;
+    return true;
+  } catch (e) {
+    if (!saveFailed) {
+      saveFailed = true; // once per incident — don't toast every turn
+      console.error("Failed to save chats to localStorage", e);
+      window.dispatchEvent(new CustomEvent("filey:chats:save-failed"));
+    }
+    return false;
   }
 }
-
-/** Set once per app run; its absence is what marks a fresh launch. */
 
 /**
  * The chat to open, given where in the app's life we are.

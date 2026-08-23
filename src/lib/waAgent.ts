@@ -87,7 +87,12 @@ const HISTORY_LIMIT = 20; // user+assistant turns kept per chat
  *  ponytail: signature is JSON.stringify of the args, so a re-proposal with the
  *  keys in a different order reads as a different call and is re-asked. Erring
  *  towards asking twice is the right side to err on here. */
-const pendingApproval = new Map<string, string>();
+const pendingApproval = new Map<string, { sig: string; at: number }>();
+
+/** How long a proposed call stays approvable. A "yes" hours later used to
+ *  authorise whatever was last proposed — the owner has no way to see the old
+ *  wording by then, so it expires and the agent simply asks again. */
+const APPROVAL_TTL_MS = 15 * 60_000;
 
 /** Identity of a proposed call, for matching an approval to it. */
 const callSig = (name: string, args: Record<string, unknown>) =>
@@ -205,10 +210,13 @@ async function handle(m: WaMessage): Promise<void> {
   try {
     const key = m.from || "unknown";
     // A "yes" approves the ONE call that was proposed last turn, not sensitive
-    // tools in general. Anything else the run tries is refused and re-proposed.
-    const approvedSig = AFFIRMATIVE.test(m.text.trim())
+    // tools in general — and only while that proposal is fresh. Anything else
+    // the run tries is refused and re-proposed.
+    const pending = AFFIRMATIVE.test(m.text.trim())
       ? pendingApproval.get(key)
       : undefined;
+    const approvedSig =
+      pending && Date.now() - pending.at <= APPROVAL_TTL_MS ? pending.sig : undefined;
     const allowSensitive = !!approvedSig;
 
     // The first refused call becomes the new pending proposal, so the reply the
@@ -258,7 +266,7 @@ async function handle(m: WaMessage): Promise<void> {
     if (next.length > HISTORY_LIMIT) next.splice(0, next.length - HISTORY_LIMIT);
     history.set(key, next);
 
-    if (proposedSig) pendingApproval.set(key, proposedSig);
+    if (proposedSig) pendingApproval.set(key, { sig: proposedSig, at: Date.now() });
     else pendingApproval.delete(key); // nothing outstanding — a stale "yes" must not land
 
     await answer(text);

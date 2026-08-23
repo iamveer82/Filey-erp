@@ -39,7 +39,13 @@ function load(): Memory[] {
 function save(list: Memory[]): void {
   // Keep the most recent MAX_MEMORIES (list is oldest→newest).
   const trimmed = list.slice(-MAX_MEMORIES);
-  localStorage.setItem(KEY, JSON.stringify(trimmed));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(trimmed));
+  } catch (e) {
+    // A full store must not crash the `remember` tool mid-run — the memory is
+    // reported lost instead.
+    console.error("Failed to save AI memory to localStorage", e);
+  }
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -148,7 +154,11 @@ export function deleteMemory(id: string): void {
 }
 
 export function clearMemories(): void {
-  localStorage.removeItem(KEY);
+  try {
+    localStorage.removeItem(KEY);
+  } catch (e) {
+    console.error("Failed to clear AI memory from localStorage", e);
+  }
 }
 
 /** Compact bullet digest of recent memories for the system prompt. Returns ""

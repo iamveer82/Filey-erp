@@ -88,30 +88,63 @@ const lc = (v: unknown) => str(v).toLowerCase();
 const numOf = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 const today = () => todayYmd();
 
-// The file the user attached to the current chat turn (for run_file_tool).
-let attachment: File | null = null;
-export function setAttachment(f: File | null) {
-  attachment = f;
-}
-export function getAttachment(): File | null {
-  return attachment;
-}
-
-// Files produced by run_file_tool, surfaced as chips in the chat. The chat UI
-// drains this right after each turn (blob URLs live until reload). On the
-// desktop the file is already written to disk, so the chip carries a path to
-// reveal rather than a URL to download.
+/* ── Per-turn working state for the file toolbox ────────────────────────────
+ * The attached file (in) and produced files (out) belong to ONE chat turn.
+ * They used to be two module globals shared by every surface — but the popover
+ * and the full-page agent are mounted at the same time and can both be
+ * mid-run, so they wrote into each other's slots: an attachment vanished
+ * mid-turn, produced files piled up unclaimed, and the next unrelated turn
+ * drained them under its own reply. Turns are now keyed by an id their owner
+ * generates per send; tools resolve that id through `activeTurnId`, which
+ * runTool sets immediately before each tool.run and tools capture as their
+ * FIRST statement — synchronously, so interleaved runs cannot cross wires.
+ *
+ * Files produced by the file toolbox are surfaced as chips in the chat that
+ * made them (blob URLs live until reload). On the desktop the file is already
+ * written to disk, so the chip carries a path to reveal rather than a URL to
+ * download. */
 export interface FileOutput {
   name: string;
   url?: string;
   path?: string;
 }
-let fileOutputs: FileOutput[] = [];
-export function drainFileOutputs(): FileOutput[] {
-  const out = fileOutputs;
-  fileOutputs = [];
+interface TurnSlot {
+  file: File | null;
+  outputs: FileOutput[];
+}
+const turnSlots = new Map<string, TurnSlot>();
+const slotFor = (id: string): TurnSlot => {
+  let s = turnSlots.get(id);
+  if (!s) {
+    s = { file: null, outputs: [] };
+    turnSlots.set(id, s);
+  }
+  return s;
+};
+
+/** Hand the user's attachment to this turn's file tools. */
+export function setTurnFile(turnId: string, f: File | null): void {
+  const slot = slotFor(turnId);
+  slot.file = f;
+  if (!f && !slot.outputs.length) turnSlots.delete(turnId);
+}
+
+/** Files this turn produced, as chat chips. Ends the turn. Call this exactly
+ *  once when the reply lands — on success AND on failure — or outputs sit in
+ *  the map until something else drains them. */
+export function endTurn(turnId: string): FileOutput[] {
+  const out = turnSlots.get(turnId)?.outputs ?? [];
+  turnSlots.delete(turnId);
   return out;
 }
+
+/** Set by runTool around each tool.run; captured at tool entry before any
+ *  await, which is what makes concurrent runs safe. */
+let activeTurnId = "";
+const turnFile = (tid: string): File | null => turnSlots.get(tid)?.file ?? null;
+const pushTurnOutput = (tid: string, o: FileOutput): void => {
+  slotFor(tid).outputs.push(o);
+};
 
 /** Warn when a document is being raised for a party nobody has heard of.
  *
@@ -1124,7 +1157,8 @@ export const TOOLS: ToolDef[] = [
       },
     },
     run: async (a) => {
-      const f = getAttachment();
+      const tid = activeTurnId;
+      const f = turnFile(tid);
       if (!f)
         return {
           error: "No file attached — ask the user to attach a PDF or image first.",
@@ -1178,7 +1212,7 @@ export const TOOLS: ToolDef[] = [
       for (const o of out) {
         const d = await deliverFile(o);
         saved.push(d);
-        fileOutputs.push({ name: d.name, path: d.path, url: d.url });
+        pushTurnOutput(tid, { name: d.name, path: d.path, url: d.url });
         if (a.save_to_app) {
           try {
             await (await import("./files")).saveOutput(o, tool.name);
@@ -1240,6 +1274,7 @@ export const TOOLS: ToolDef[] = [
       required: ["name"],
     },
     run: async (a) => {
+      const tid = activeTurnId;
       const { listFiles, fileBytes } = await import("./files");
       const q = lc(a.name);
       if (!q) return { error: "Which file? Give me its name." };
@@ -1255,8 +1290,11 @@ export const TOOLS: ToolDef[] = [
       const bytes = await fileBytes(hit);
       if (!bytes) return { error: `Could not read "${hit.name}" back out of storage.` };
       // A File, not a Blob: the tools read .name for the output filename and
-      // .type to decide whether they are looking at a PDF or an image.
-      setAttachment(
+      // .type to decide whether they are looking at a PDF or an image. Filed
+      // under this turn's slot, so a later run_file_tool call in the SAME turn
+      // picks it up — and no other surface's run ever sees it.
+      setTurnFile(
+        tid,
         new File([bytes as BlobPart], hit.name, {
           type: hit.mime || "application/octet-stream",
         })
@@ -1274,7 +1312,8 @@ export const TOOLS: ToolDef[] = [
       "Read the TEXT of the file the user attached to this chat, so you can act on its contents (e.g. read an invoice/receipt then create a draft). PDFs are extracted to text; images are already visible to you directly. Returns the document text (truncated for long files).",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const f = getAttachment();
+      const tid = activeTurnId;
+      const f = turnFile(tid);
       if (!f)
         return {
           error: "No file attached — ask the user to attach a PDF or image first.",
@@ -2415,6 +2454,7 @@ export const TOOLS: ToolDef[] = [
       required: ["from", "to"],
     },
     run: async (a) => {
+      const tid = activeTurnId;
       const [{ buildSif, validateWps }, company, staff] = await Promise.all([
         import("./wps"),
         billing.getCompany(),
@@ -2457,7 +2497,7 @@ export const TOOLS: ToolDef[] = [
       const { deliverFile, outputDir } = await import("./agentFiles");
       const bytes = new TextEncoder().encode(file.content);
       const saved = await deliverFile({ name: file.filename, bytes });
-      fileOutputs.push({ name: saved.name, path: saved.path, url: saved.url });
+      pushTurnOutput(tid, { name: saved.name, path: saved.path, url: saved.url });
       const where = await outputDir();
       return {
         ok: true,
@@ -2889,6 +2929,7 @@ export const TOOLS: ToolDef[] = [
       required: ["prompt"],
     },
     run: async (a) => {
+      const tid = activeTurnId;
       const { generateImage } = await import("./aiImage");
       let made;
       try {
@@ -2898,7 +2939,7 @@ export const TOOLS: ToolDef[] = [
       }
       const { deliverFile, outputDir } = await import("./agentFiles");
       const saved = await deliverFile({ name: made.name, bytes: made.bytes });
-      fileOutputs.push({ name: saved.name, path: saved.path, url: saved.url });
+      pushTurnOutput(tid, { name: saved.name, path: saved.path, url: saved.url });
       let filed = false;
       if (a.save_to_app) {
         try {
@@ -3751,7 +3792,7 @@ export const TOOLS: ToolDef[] = [
  *  save_secret's value outright, plus any key that reads like it carries a
  *  secret — including nested ones like http_fetch headers. */
 const SECRET_KEY_RE = /secret|passwo?rd|token|api_?key|authorization|credential/i;
-function redactArgs(
+export function redactArgs(
   name: string,
   args: Record<string, unknown>
 ): Record<string, unknown> {
@@ -3774,7 +3815,10 @@ export async function runTool(
   name: string,
   args: Record<string, unknown>,
   confirm?: ConfirmFn,
-  isOwner?: boolean
+  isOwner?: boolean,
+  /** The calling chat turn's id — scopes file-toolbox state to THIS run, so
+   *  two surfaces running at once never share an attachment slot. */
+  turnId?: string
 ): Promise<unknown> {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) {
@@ -3816,6 +3860,9 @@ export async function runTool(
   }
   try {
     log.info("agent", `${name} running`, redactArgs(name, args));
+    // Stamped immediately before the call and captured as each tool's first
+    // statement — synchronous, so interleaved runs resolve their own turn.
+    activeTurnId = turnId ?? "";
     const out = await tool.run(args);
     if (out && typeof out === "object" && "error" in out) {
       log.warn("agent", `${name} returned an error`, (out as { error: unknown }).error);

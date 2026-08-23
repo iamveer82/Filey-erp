@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Plus,
@@ -58,9 +58,11 @@ import {
   type Memory,
 } from "../lib/aiMemory";
 import {
-  setAttachment,
+  setTurnFile,
   setToolConfirm,
-  drainFileOutputs,
+  endTurn,
+  redactArgs,
+  type FileOutput,
 } from "../lib/aiTools";
 import { fileToImage } from "../lib/docScan";
 import { MenuPopover, MenuItemRow, MenuSep } from "../components/ui-menu";
@@ -152,9 +154,15 @@ export default function AgentChat() {
   const plusRef = useRef<HTMLDivElement>(null);
 
   // Ctrl+U opens the file picker from anywhere on the page, as the "+" menu's
-  // shortcut promises.
+  // shortcut promises — but not while typing, where Ctrl+U belongs to the
+  // browser and the field.
   useEffect(() => {
     const keys = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing =
+        !!t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (typing) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
         e.preventDefault();
         fileRef.current?.click();
@@ -166,8 +174,11 @@ export default function AgentChat() {
 
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const ready = useMemo(() => aiReady(), []);
-  const model = useMemo(() => getAiConfig().model, []);
+  // Read fresh every render: frozen-at-mount values kept showing a stale model
+  // chip (and a stale "connect first" gate) after the key changed in Settings.
+  // These are cheap localStorage reads.
+  const ready = aiReady();
+  const model = getAiConfig().model;
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
   /** The tools run so far this turn ("Looking up customers…"), shown as a chip
    *  trail while the agent works so a long turn reads as work, not a hang. */
@@ -204,12 +215,23 @@ export default function AgentChat() {
 
   // Route the agent's sensitive-action approvals through an in-app modal
   // instead of the browser's native confirm() while this page is mounted.
+  // pendingRef mirrors pendingConfirm so unmount cleanup can settle whatever
+  // is on screen: leaving with the dialog up used to strand its resolver
+  // unreached — the awaiting runTool promise (and the whole turn) hung forever.
+  const pendingRef = useRef<{ resolve: (ok: boolean) => void } | null>(null);
   useEffect(() => {
     setToolConfirm(
       (name, args) =>
-        new Promise<boolean>((resolve) => setPendingConfirm({ name, args, resolve }))
+        new Promise<boolean>((resolve) => {
+          const pc = { name, args, resolve };
+          pendingRef.current = pc;
+          setPendingConfirm(pc);
+        })
     );
     return () => {
+      pendingRef.current?.resolve(false); // deny rather than hang
+      pendingRef.current = null;
+      setPendingConfirm(null);
       setToolConfirm((n) =>
         typeof window !== "undefined" && typeof window.confirm === "function"
           ? window.confirm(`Allow the assistant to run "${n}"?`)
@@ -217,6 +239,14 @@ export default function AgentChat() {
       );
     };
   }, []);
+
+  /** Settle the dialog one way or the other. The ref is cleared alongside the
+   *  state so cleanup can never double-resolve a stale entry. */
+  const settleConfirm = (ok: boolean) => {
+    pendingConfirm?.resolve(ok);
+    pendingRef.current = null;
+    setPendingConfirm(null);
+  };
 
   // Persist the conversation (shared store with the popover copilot).
   useEffect(() => {
@@ -265,6 +295,10 @@ export default function AgentChat() {
     const goalText = attached
       ? `${q || "Process the attached file."}\n\n[A file named "${attached.name}" is attached - use the run_file_tool to edit/convert it, or read it to act on its contents.]`
       : q;
+    // This turn's slot in the file toolbox: the attachment in, produced files
+    // out. Scoped per turn so a popover run mid-flight can't swap this one's
+    // file, and this turn's outputs can't surface under another reply.
+    const turnId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const withUser: Chat = {
       ...chat,
       turns: [...chat.turns, { role: "user", text: shownText }],
@@ -276,7 +310,7 @@ export default function AgentChat() {
     abortRef.current = ctl;
 
     // Make the file available to run_file_tool; convert images for vision.
-    setAttachment(attached);
+    setTurnFile(turnId, attached);
     let images: AiImage[] | undefined;
     if (attached && attached.type.startsWith("image/")) {
       try {
@@ -286,6 +320,10 @@ export default function AgentChat() {
       }
     }
 
+    /** Files this turn produced, drained exactly once in finally — success,
+     *  stop or error — so they always land with THIS message and never leak
+     *  into whichever turn ends next. */
+    let made: FileOutput[] = [];
     try {
       let reply: string;
       if (auto) {
@@ -294,6 +332,7 @@ export default function AgentChat() {
           images,
           isOwner: true,
           signal: ctl.signal,
+          turnId,
           onProgress: (t) => {
             if (!t) return;
             steps.push(t);
@@ -331,6 +370,7 @@ export default function AgentChat() {
           maxTokens: 2048,
           isOwner: true,
           signal: ctl.signal,
+          turnId,
         });
         let sofar = "";
         for (;;) {
@@ -356,7 +396,7 @@ export default function AgentChat() {
       // Files belong to the message that produced them. They used to live in
       // one shared slot above the composer, so asking a second question threw
       // away the first answer's output.
-      const made = drainFileOutputs();
+      made = endTurn(turnId);
       setChat((c) => ({
         ...c,
         turns: [
@@ -370,23 +410,28 @@ export default function AgentChat() {
       // for interrupting, which is the opposite of what the button is for.
       if (ctl.signal.aborted) {
         const partial = streamedRef.current.trim();
+        const stoppedFiles = endTurn(turnId);
         setChat((c) => ({
           ...c,
           turns: [
             ...c.turns,
-            { role: "assistant", text: partial ? `${partial}\n\n_Stopped._` : "_Stopped._" },
+            {
+              role: "assistant",
+              text: partial ? `${partial}\n\n_Stopped._` : "_Stopped._",
+              ...(stoppedFiles.length ? { files: stoppedFiles } : {}),
+            },
           ],
         }));
       } else {
         setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
       }
     } finally {
+      endTurn(turnId); // no-op when already drained above — never leaks
       abortRef.current = null;
       streamedRef.current = "";
       setBusy(false);
       setStreaming("");
       setActivity([]);
-      setAttachment(null); // don't leak into the next turn
     }
   };
 
@@ -839,11 +884,18 @@ export default function AgentChat() {
             className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="agent-confirm-title"
+            tabIndex={-1}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") settleConfirm(false);
+            }}
           >
             <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg">
               <div className="flex items-center gap-2">
                 <ShieldAlert size={18} className="text-warning" />
-                <p className="font-semibold text-foreground">Approve action</p>
+                <p className="font-semibold text-foreground" id="agent-confirm-title">
+                  Approve action
+                </p>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 The assistant wants to run{" "}
@@ -852,25 +904,28 @@ export default function AgentChat() {
               </p>
               {Object.keys(pendingConfirm.args).length > 0 && (
                 <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-[11px] text-muted-foreground">
-                  {JSON.stringify(pendingConfirm.args, null, 2)}
+                  {JSON.stringify(
+                    // Credential-shaped args are masked here just as they are in
+                    // the logs — the dialog renders on screen and into screenshots.
+                    // save_secret's value is deliberately masked: the agent chose
+                    // the value, and the owner approves storing it sight-unseen.
+                    redactArgs(pendingConfirm.name, pendingConfirm.args),
+                    null,
+                    2
+                  )}
                 </pre>
               )}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   className="btn-ghost"
-                  onClick={() => {
-                    pendingConfirm.resolve(false);
-                    setPendingConfirm(null);
-                  }}
+                  autoFocus
+                  onClick={() => settleConfirm(false)}
                 >
                   Deny
                 </button>
                 <button
                   className="btn-primary"
-                  onClick={() => {
-                    pendingConfirm.resolve(true);
-                    setPendingConfirm(null);
-                  }}
+                  onClick={() => settleConfirm(true)}
                 >
                   Allow
                 </button>
@@ -1074,7 +1129,7 @@ function toolLabel(name: string): string {
     get_stats: "Checking the numbers",
     find_customers: "Looking up customers",
     find_products: "Looking up products",
-    find_invoices: "Looking up invoices",
+    list_invoices: "Looking up invoices",
     list_whatsapp_messages: "Reading WhatsApp",
     send_whatsapp: "Sending on WhatsApp",
     read_web_page: "Reading the page",

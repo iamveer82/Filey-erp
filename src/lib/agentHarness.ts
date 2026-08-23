@@ -183,6 +183,9 @@ export interface HarnessOpts {
   /** Whether this run may use owner-only tools (true in-app, and for the owner's
    *  own WhatsApp number; false for customers). */
   isOwner?: boolean;
+  /** The chat turn this run belongs to — scopes per-turn file state (the
+   *  attachment, produced files) to this run alone. */
+  turnId?: string;
 }
 
 export interface HarnessDeps {
@@ -511,6 +514,20 @@ export async function* runAgentStream(
     const outcomes: ToolOutcome[] = [];
     for (const call of calls) {
       if (opts.finishToolName && call.name === opts.finishToolName) {
+        // The finish tool must be called ALONE. If it arrives alongside other
+        // calls, answering it here would strand the rest: the assistant turn is
+        // already on the wire, so a later conversation would believe those
+        // calls ran when nothing did. Refuse just this call instead — every
+        // call in the turn gets a result, and the model finishes cleanly next
+        // round.
+        if (call !== calls[calls.length - 1]) {
+          const result = {
+            error: `Call ${opts.finishToolName} by itself — finish no other tools in the same turn.`,
+          };
+          yield { type: "tool_result", id: call.id, name: call.name, result };
+          outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
+          continue;
+        }
         const summary = String(
           call.args.summary ?? text ?? "Task complete."
         ).trim();
@@ -545,7 +562,7 @@ export async function* runAgentStream(
       const raw =
         "short" in decided
           ? decided.short
-          : await runTool(call.name, call.args, opts.confirm, opts.isOwner);
+          : await runTool(call.name, call.args, opts.confirm, opts.isOwner, opts.turnId);
       if (!("short" in decided)) guard.after(call.name, call.args, raw);
       const result = coachResult(raw, maxRounds - round - 1);
 

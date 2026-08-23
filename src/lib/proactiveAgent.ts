@@ -14,8 +14,27 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_KEY = "filey.proactive.daily";
 const ALERTS_KEY = "filey.proactive.alerts";
+/** After a failed run, wait this long before trying again — short enough that
+ *  a transient outage isn't a full-day blackout, long enough that a WhatsApp
+ *  reconnect storm can't fire an agent run per flap. */
+const FAILURE_RETRY_MS = 10 * 60 * 1000;
 
 const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+
+function readStamp(key: string): number {
+  try {
+    return Number(localStorage.getItem(key) || "0") || 0;
+  } catch {
+    return 0;
+  }
+}
+function writeStamp(key: string, at: number): void {
+  try {
+    localStorage.setItem(key, String(at));
+  } catch (e) {
+    console.error(`Failed to write "${key}" to localStorage`, e);
+  }
+}
 
 /** The JID to notify: the CONNECTED account's own chat.
  *
@@ -45,10 +64,13 @@ const ALERTS_GOAL =
   "Check for (1) products at or below their reorder point and (2) invoices past their due date still unpaid. Look up the real numbers with your tools. If nothing needs attention, reply with exactly the word NONE. Otherwise list each item: product name and current stock; invoice number, customer, days overdue, and amount. " +
   WA_STYLE;
 
-async function run(kind: "daily" | "alerts"): Promise<void> {
-  if (!aiReady()) return;
+/** Run one proactive sweep. Returns whether it COMPLETED — a failed run must
+ *  not consume its slot's throttle, or a transient failure blacks the alert
+ *  out for a whole day and nobody is told why it went quiet. */
+async function run(kind: "daily" | "alerts"): Promise<boolean> {
+  if (!aiReady()) return false;
   const to = await ownerJid();
-  if (!to) return; // bridge not paired — nothing to send through
+  if (!to) return false; // bridge not paired — nothing to send through
   try {
     const text = (
       await aiAutonomous(kind === "daily" ? DAILY_GOAL : ALERTS_GOAL, {
@@ -59,16 +81,20 @@ async function run(kind: "daily" | "alerts"): Promise<void> {
         confirm: DENY_SENSITIVE,
       })
     ).trim();
-    if (!text) return;
-    if (kind === "alerts" && text.toUpperCase() === "NONE") return; // stay quiet
+    if (!text) return true; // nothing worth sending — done, don't retry
+    if (kind === "alerts" && text.toUpperCase() === "NONE") return true;
     await sendWa(to, waFormat(text));
+    return true;
   } catch (e) {
     log.warn("agent", `proactive ${kind} failed`, e);
+    return false;
   }
 }
 
-/** Fire any reminders that have come due, rescheduling repeats. One-off
- *  reminders are dropped after firing. Each is sent to the owner over WhatsApp. */
+/** Fire any reminders that have come due, rescheduling repeats. A one-off
+ *  reminder is only dropped once its WhatsApp send actually succeeded — a
+ *  transient failure used to delete it outright, silently losing whatever the
+ *  owner had asked to be told about. */
 async function fireDueReminders(): Promise<void> {
   const now = Date.now();
   const list = loadReminders();
@@ -82,9 +108,17 @@ async function fireDueReminders(): Promise<void> {
     }
     changed = true;
     const to = await ownerJid();
-    if (to) await sendWa(to, waFormat(`*REMINDER* — ${r.text}`)).catch(() => {});
+    const sent = to
+      ? await sendWa(to, waFormat(`*REMINDER* — ${r.text}`)).then(
+          () => true,
+          () => false
+        )
+      : false;
     if (r.repeat && r.repeat !== "none") {
+      // Repeats move forward regardless — a missed ping shouldn't stack up.
       remaining.push({ ...r, at: nextOccurrence(r.at, r.repeat, now) });
+    } else if (!sent) {
+      remaining.push(r); // keep until it actually goes out
     }
   }
   if (changed) saveReminders(remaining);
@@ -97,12 +131,14 @@ export function startProactiveAgent(): void {
 
   /** Run at most once per `every` ms, across restarts. A dropped WhatsApp
    *  socket reconnects freely, and every reconnect used to fire a fresh agent
-   *  run — an LLM bill and a WhatsApp message per flap. */
+   *  run — an LLM bill and a WhatsApp message per flap. The timestamp is
+   *  written AFTER the run: a failed run only buys a short backoff, not a
+   *  full day of silence. */
   const throttled = async (kind: "daily" | "alerts", key: string, every: number) => {
-    const last = Number(localStorage.getItem(key) || "0");
+    const last = readStamp(key);
     if (Date.now() - last < every) return;
-    localStorage.setItem(key, String(Date.now()));
-    await run(kind);
+    const ok = await run(kind);
+    writeStamp(key, ok ? Date.now() : Date.now() - every + FAILURE_RETRY_MS);
   };
 
   onBridgeState((s) => {

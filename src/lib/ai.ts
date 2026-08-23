@@ -32,6 +32,20 @@ export interface AiConfig {
 
 const STORE_KEY = "filey.ai.config";
 
+/** localStorage writes throw where reads often don't (quota exceeded, storage
+ *  blocked in private mode). Every write in this file goes through here so a
+ *  full store degrades to a console line instead of crashing whoever called —
+ *  including per-keystroke settings updates. */
+function safeSetItem(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    console.error(`Failed to write "${key}" to localStorage`, e);
+    return false;
+  }
+}
+
 const DEFAULTS: AiConfig = {
   provider: "anthropic",
   baseUrl: "https://api.anthropic.com/v1",
@@ -52,7 +66,7 @@ export function getAiConfig(): AiConfig {
 
 export function setAiConfig(patch: Partial<AiConfig>): AiConfig {
   const next = { ...getAiConfig(), ...patch };
-  localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  safeSetItem(STORE_KEY, JSON.stringify(next));
   return next;
 }
 
@@ -105,7 +119,7 @@ export function getPersona(): AiPersona {
 
 export function setPersona(patch: Partial<AiPersona>): AiPersona {
   const next = { ...getPersona(), ...patch };
-  localStorage.setItem(PERSONA_KEY, JSON.stringify(next));
+  safeSetItem(PERSONA_KEY, JSON.stringify(next));
   return next;
 }
 
@@ -189,6 +203,9 @@ interface AgentOpts extends ChatOpts {
   confirm?: (name: string, args: Record<string, unknown>) => boolean | Promise<boolean>;
   /** Whether this run may use owner-only tools. */
   isOwner?: boolean;
+  /** The chat turn this run belongs to — scopes per-turn file state (the
+   *  attachment, produced files) to this run alone. */
+  turnId?: string;
 }
 
 export async function aiChat(
@@ -203,6 +220,19 @@ export async function aiChat(
   return cfg.provider === "anthropic"
     ? anthropicChat(cfg, messages, opts)
     : openaiChat(cfg, messages, opts);
+}
+
+/** Ceiling for one model request when the caller passes no signal of its own.
+ *  A hung provider used to stall a turn forever; this matches the desktop
+ *  native proxy's own 180s timeout so both transports behave the same. */
+const REQUEST_TIMEOUT_MS = 180_000;
+
+function effectiveSignal(signal?: AbortSignal): AbortSignal | undefined {
+  if (signal) return signal;
+  return typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    : undefined;
 }
 
 async function openaiChat(
@@ -235,10 +265,28 @@ async function openaiChat(
       authorization: `Bearer ${cfg.apiKey}`,
     },
     body: JSON.stringify(body),
-    signal: opts.signal,
+    signal: effectiveSignal(opts.signal),
   });
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content?.trim() ?? "";
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: unknown } }[];
+  };
+  // Several OpenAI-compatible servers answer vision/tool turns with a block
+  // array instead of a plain string — `.trim()` on that was a TypeError that
+  // surfaced as an unexplained failure. Flatten blocks to their text.
+  const raw = data?.choices?.[0]?.message?.content;
+  const text =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw
+            .map((b) =>
+              b && typeof b === "object" && "text" in b
+                ? String((b as { text?: unknown }).text ?? "")
+                : ""
+            )
+            .join("")
+        : "";
+  return text.trim();
 }
 
 async function anthropicChat(
@@ -246,9 +294,11 @@ async function anthropicChat(
   messages: AiMessage[],
   opts: ChatOpts
 ): Promise<string> {
-  const base = cfg.baseUrl.includes("anthropic")
-    ? cfg.baseUrl.replace(/\/+$/, "")
-    : "https://api.anthropic.com/v1";
+  // A custom baseUrl is honoured as given. It used to be silently swapped for
+  // api.anthropic.com unless the string contained "anthropic" — which sent a
+  // proxy's URL nowhere and, worse, its API key to the wrong host.
+  const base =
+    (cfg.baseUrl.trim() || "https://api.anthropic.com/v1").replace(/\/+$/, "");
   const system = messages
     .filter((m) => m.role === "system")
     .map((m) => m.text)
@@ -284,7 +334,7 @@ async function anthropicChat(
       system: system || undefined,
       messages: turns,
     }),
-    signal: opts.signal,
+    signal: effectiveSignal(opts.signal),
   });
   const data = await res.json();
   return (data?.content ?? [])
@@ -441,6 +491,8 @@ export async function aiAutonomous(
     /** Approval policy for THIS run. Unattended callers pass DENY_SENSITIVE —
      *  see the note there. Omitted, the global agent mode decides. */
     confirm?: ConfirmFn;
+    /** The chat turn this run belongs to (scopes file-toolbox state). */
+    turnId?: string;
   } = {}
 ): Promise<string> {
   if (!goal.trim()) throw new AiError("No goal provided.");
@@ -468,6 +520,7 @@ export async function aiAutonomous(
     signal: opts.signal,
     isOwner: opts.isOwner,
     confirm: opts.confirm,
+    turnId: opts.turnId,
   });
 
   const events: AgentEvent[] = [];

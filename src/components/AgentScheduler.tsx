@@ -18,35 +18,44 @@ export default function AgentScheduler() {
   const toastRef = useRef(ui.toast);
   toastRef.current = ui.toast;
   const running = useRef<Set<string>>(new Set());
+  // A tick is a loop of awaits; the interval fires regardless. Two sweeps used
+  // to interleave — doubling agent runs when several tasks came due together.
+  const ticking = useRef(false);
 
   useEffect(() => {
     let alive = true;
 
     const tick = async () => {
-      if (!alive || !aiReady()) return;
-      for (const t of loadTasks()) {
-        if (!isDue(t) || running.current.has(t.id)) continue;
-        running.current.add(t.id);
-        try {
-          const summary = await aiAutonomous(t.goal, {
-            maxRounds: 15,
-            confirm: DENY_SENSITIVE,
-          });
-          updateTask(t.id, {
-            lastRun: Date.now(),
-            lastResult: summary,
-            lastError: undefined,
-          });
-          toastRef.current?.success(`Automation "${t.name}" ran`);
-        } catch (e) {
-          updateTask(t.id, {
-            lastRun: Date.now(),
-            lastError: e instanceof Error ? e.message : String(e),
-          });
-          toastRef.current?.error(`Automation "${t.name}" failed`);
-        } finally {
-          running.current.delete(t.id);
+      if (!alive || ticking.current || !aiReady()) return;
+      ticking.current = true;
+      try {
+        for (const t of loadTasks()) {
+          if (!alive) return;
+          if (!isDue(t) || running.current.has(t.id)) continue;
+          running.current.add(t.id);
+          try {
+            const summary = await aiAutonomous(t.goal, {
+              maxRounds: 15,
+              confirm: DENY_SENSITIVE,
+            });
+            updateTask(t.id, {
+              lastRun: Date.now(),
+              lastResult: summary,
+              lastError: undefined,
+            });
+            toastRef.current?.success(`Automation "${t.name}" ran`);
+          } catch (e) {
+            updateTask(t.id, {
+              lastRun: Date.now(),
+              lastError: e instanceof Error ? e.message : String(e),
+            });
+            toastRef.current?.error(`Automation "${t.name}" failed`);
+          } finally {
+            running.current.delete(t.id);
+          }
         }
+      } finally {
+        ticking.current = false;
       }
     };
 

@@ -9,9 +9,18 @@
 // chat model key — an image key is a spending credential like any other and
 // does not belong in synced settings.
 
-import { getAiConfig } from "./ai";
+import { aiFetch, getAiConfig } from "./ai";
 
 const STORE_KEY = "filey.ai.image";
+/** Image generation can legitimately take a while; the download of a
+ *  provider-hosted result should not. */
+const GENERATE_TIMEOUT_MS = 180_000;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+const timeoutSignal = (ms: number): AbortSignal | undefined =>
+  typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(ms)
+    : undefined;
 
 export interface ImageConfig {
   /** Blank = borrow the chat provider's baseUrl and key. */
@@ -40,7 +49,11 @@ export function getImageConfig(): ImageConfig {
 
 export function setImageConfig(patch: Partial<ImageConfig>): ImageConfig {
   const next = { ...getImageConfig(), ...patch };
-  localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.error("Failed to save image config", e);
+  }
   return next;
 }
 
@@ -105,19 +118,27 @@ export async function generateImage(
   if (!ep.usable) throw new ImageError(ep.why ?? "Image generation isn't configured.");
   const size = opts.size || getImageConfig().size || DEFAULTS.size;
 
-  const res = await fetch(`${ep.baseUrl}/images/generations`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${ep.apiKey}`,
-      "Content-Type": "application/json",
+  // Through the shared AI transport, not raw fetch: on the desktop that is the
+  // native proxy, so providers without CORS headers work here exactly as they
+  // do for chat — and transient failures get the same retry/backoff.
+  const res = await aiFetch(
+    `${ep.baseUrl}/images/generations`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ep.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: opts.model || ep.model,
+        prompt: text,
+        n: 1,
+        size,
+      }),
+      signal: timeoutSignal(GENERATE_TIMEOUT_MS),
     },
-    body: JSON.stringify({
-      model: opts.model || ep.model,
-      prompt: text,
-      n: 1,
-      size,
-    }),
-  });
+    { retries: 1 }
+  );
   const body = (await res.json().catch(() => ({}))) as {
     data?: { b64_json?: string; url?: string }[];
     error?: { message?: string };
@@ -136,8 +157,14 @@ export async function generateImage(
   } else if (first.url) {
     // Some providers hand back a short-lived URL instead of bytes. Fetch it
     // now — the link expires, and a saved file that 404s later is worse than
-    // no file at all.
-    const img = await fetch(first.url);
+    // no file at all. Same transport as the request (desktop CORS), with a
+    // timeout so a stalled CDN can't hang the turn.
+    let img: Response;
+    try {
+      img = await aiFetch(first.url, { signal: timeoutSignal(DOWNLOAD_TIMEOUT_MS) });
+    } catch {
+      throw new ImageError("Could not download the generated image.");
+    }
     if (!img.ok) throw new ImageError("Could not download the generated image.");
     bytes = new Uint8Array(await img.arrayBuffer());
   } else {
