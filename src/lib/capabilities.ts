@@ -16,7 +16,8 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "sales",
     name: "Sales documents",
-    description: "Create/send invoices & quotes, mark paid, recurring, orders",
+    description:
+      "Create/send invoices & quotes, mark paid, recurring, orders, templates",
     tools: [
       "create_invoice_draft",
       "revise_invoice",
@@ -25,13 +26,18 @@ export const CAPABILITIES: Capability[] = [
       "set_recurring",
       "create_order",
       "create_quote",
+      "set_invoice_template",
     ],
   },
   {
     id: "purchasing",
     name: "Purchasing",
-    description: "Create purchase orders",
-    tools: ["create_purchase_order"],
+    description: "Create purchase orders, supplier bills and supplier records",
+    tools: [
+      "create_purchase_order",
+      "create_purchase_invoice_draft",
+      "create_supplier",
+    ],
   },
   {
     id: "logistics",
@@ -53,9 +59,16 @@ export const CAPABILITIES: Capability[] = [
   },
   {
     id: "crm",
-    name: "Customers",
-    description: "Add customer records",
-    tools: ["create_customer"],
+    name: "Customers & CRM",
+    description: "Add customer records, deals, leads and activity notes",
+    tools: [
+      "create_customer",
+      "create_deal",
+      "set_deal_stage",
+      "set_deal_contact",
+      "log_activity",
+      "create_lead",
+    ],
   },
   {
     id: "hr",
@@ -90,8 +103,20 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "reminders",
     name: "Reminders",
-    description: "Add follow-up reminders",
-    tools: ["add_reminder"],
+    description: "Add and cancel follow-up reminders",
+    tools: ["add_reminder", "remind_me", "cancel_reminder"],
+  },
+  {
+    id: "marketing",
+    name: "Marketing",
+    description: "Draft marketing campaigns (sending stays a human decision)",
+    tools: ["create_campaign"],
+  },
+  {
+    id: "cheques",
+    name: "Cheque register",
+    description: "Record issued and received cheques in the register",
+    tools: ["record_cheque"],
   },
   {
     // A saved skill is replayed into every later prompt, so writing one changes

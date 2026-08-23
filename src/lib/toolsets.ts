@@ -98,7 +98,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     ],
   },
   crm: {
-    about: "Leads, deals, pipeline and activity history",
+    about: "Leads, deals, pipeline, deal contacts and activity history",
     tools: [
       "create_lead",
       "find_leads",
@@ -108,6 +108,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "crm_pipeline",
       "log_activity",
       "list_activities",
+      "get_deal_contacts",
+      "set_deal_contact",
       "score_lead",
     ],
   },
@@ -156,6 +158,12 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "enrich_company_website",
       "find_prospects",
       "browser",
+      "read_github",
+      "read_github_file",
+      "search_github",
+      "watch_youtube",
+      "read_rss",
+      "read_social_page",
     ],
   },
   social: {

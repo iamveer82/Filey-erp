@@ -23,6 +23,11 @@ import { createGuard, coachResult } from "./agentGuard";
 import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
 import { CORE_TOOLS, TOOLSETS, toolsetIndex } from "./toolsets";
+import {
+  compressForModel,
+  headroomRetrieve,
+  HEADROOM_RETRIEVE,
+} from "./headroom";
 import { log } from "./log";
 import type { AiConfig, AiMessage } from "./ai";
 
@@ -37,6 +42,20 @@ export const MAX_TOOL_ROUNDS = 16;
  *  app. */
 const LIST_TOOLSETS = "list_toolsets";
 const USE_TOOLSET = "use_toolset";
+
+/** Answered here like the two above: it reaches into this run's compression
+ *  store, not the app. Only offered once something was actually compressed,
+ *  so the model never sees a tool that has nothing to retrieve. */
+const headroomTool: AgentToolDef = {
+  name: HEADROOM_RETRIEVE,
+  description:
+    "Fetch the FULL original of an earlier tool output that came back with a [headroom] compressed marker. Pass the exact id from that marker. Use it when the digest is not enough — for example you need one row the table clipped.",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string" } },
+    required: ["id"],
+  },
+};
 
 const toolsetTools: AgentToolDef[] = [
   {
@@ -135,7 +154,9 @@ export type AgentDoneReason =
   /** The model called the caller's finish tool (autonomous runs). */
   | "finished"
   /** The round budget ran out with work still outstanding. */
-  | "exhausted";
+  | "exhausted"
+  /** The provider call failed mid-run; whatever was already done stands. */
+  | "error";
 
 /** One observable step of a run. */
 export type AgentEvent =
@@ -332,6 +353,7 @@ const anthropicAdapter: Adapter = {
         body: JSON.stringify({
           model: cfg.model,
           max_tokens: opts.maxTokens ?? 2048,
+          temperature: opts.temperature ?? 0.3,
           system: wire.system || undefined,
           messages: wire.convo,
           tools: tools.map((t) => ({
@@ -382,6 +404,55 @@ export function adapterFor(provider: AiConfig["provider"]): Adapter {
   return provider === "anthropic" ? anthropicAdapter : openaiAdapter;
 }
 
+/** Context hygiene between rounds.
+ *
+ *  Images only need to be SEEN once: after the first round every earlier
+ *  turn's base64 payload goes, otherwise a single screenshot is re-uploaded —
+ *  and re-billed — on every remaining call of a 16-round run. Very old tool
+ *  outputs shrink to a marker too, so a long run cannot grow without bound;
+ *  recent results are kept whole because the model is usually iterating on
+ *  exactly those. Both wire shapes carry content either as a string or as a
+ *  block array, so the walk handles both. */
+const OLD_TOOL_CLIP = 400;
+
+function trimWire(wire: Wire, dropImages: boolean): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convo = wire.convo as any[];
+  for (let i = 0; i < convo.length; i++) {
+    const m = convo[i];
+    if (!m || typeof m !== "object") continue;
+    const isLast = i === convo.length - 1;
+    if (Array.isArray(m.content)) {
+      let blocks = m.content;
+      if (dropImages && !isLast) {
+        blocks = blocks.filter(
+          (b: { type?: string }) => b?.type !== "image" && b?.type !== "image_url"
+        );
+        if (!blocks.length) blocks = [{ type: "text", text: "[attachment seen earlier]" }];
+        m.content = blocks;
+      }
+      if (!isLast) {
+        // Anthropic-shaped tool results ride as blocks inside a user message.
+        for (const b of blocks) {
+          if (
+            b?.type === "tool_result" &&
+            typeof b.content === "string" &&
+            b.content.length > OLD_TOOL_CLIP
+          ) {
+            b.content = `${b.content.slice(0, OLD_TOOL_CLIP)}…[older output trimmed]`;
+          }
+        }
+      }
+    } else if (typeof m.content === "string") {
+      // OpenAI-shaped tool results and old assistant text. The last message is
+      // always fresh; everything older than that has already been read once.
+      if (!isLast && m.role === "tool" && m.content.length > OLD_TOOL_CLIP) {
+        m.content = `${m.content.slice(0, OLD_TOOL_CLIP)}…[older output trimmed]`;
+      }
+    }
+  }
+}
+
 /**
  * Run the agent, yielding each step as it happens and returning the final text.
  *
@@ -399,12 +470,34 @@ export async function* runAgentStream(
   const guard = createGuard();
   /** Domains the model has asked for this run (see toolsets.ts). */
   const opened = new Set<string>();
+  /** Flips on the first compressed output; from then on the retrieve tool is
+   *  offered so the model can pull originals back. */
+  let compressedThisRun = false;
 
   for (let round = 0; round < maxRounds; round++) {
-    const tools = offeredTools(opts, opened);
+    trimWire(wire, round > 0);
+    const offered = offeredTools(opts, opened);
+    const tools = compressedThisRun ? [...offered, headroomTool] : offered;
     const { url, init } = adapter.buildRequest(wire, tools, opts, deps.cfg);
-    const res = await deps.fetchFn(url, init);
-    const data = await res.json();
+
+    // A provider hiccup is not a crashed run: everything already done stands,
+    // and the caller gets a done event (plus a journal-able reason) instead of
+    // a generator that dies silently mid-stream.
+    let data: unknown;
+    try {
+      const res = await deps.fetchFn(url, init);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}${body ? `: ${body.slice(0, 300)}` : ""}`);
+      }
+      data = await res.json();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.error("agent", "model call failed", msg);
+      const text = `The model call failed (${msg}). Anything I did before that is saved — ask me to continue and I'll pick up from there.`;
+      yield { type: "done", text, reason: "error" };
+      return text;
+    }
     const { text, calls } = adapter.readTurn(wire, data);
 
     if (text) yield { type: "text", text };
@@ -427,13 +520,19 @@ export async function* runAgentStream(
 
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
 
-      // Answered here, not in the app: these two decide what the model can see
-      // on the next round, which is this loop's business rather than the ERP's.
+      // Answered here, not in the app: these decide what the model can see on
+      // the next round, which is this loop's business rather than the ERP's.
       if (call.name === LIST_TOOLSETS || call.name === USE_TOOLSET) {
         const result =
           call.name === LIST_TOOLSETS
             ? { toolsets: toolsetIndex() }
             : openToolset(String(call.args.name ?? ""), opened, opts);
+        yield { type: "tool_result", id: call.id, name: call.name, result };
+        outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
+        continue;
+      }
+      if (call.name === HEADROOM_RETRIEVE) {
+        const result = headroomRetrieve(String(call.args.id ?? ""));
         yield { type: "tool_result", id: call.id, name: call.name, result };
         outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
         continue;
@@ -451,11 +550,12 @@ export async function* runAgentStream(
       const result = coachResult(raw, maxRounds - round - 1);
 
       yield { type: "tool_result", id: call.id, name: call.name, result };
-      outcomes.push({
-        id: call.id,
-        name: call.name,
-        content: JSON.stringify(result).slice(0, 6000),
-      });
+      // The UI event carries the full result; the WIRE gets the compressed
+      // form (headroom), with the original retrievable by id. The clip inside
+      // compressForModel is the same 6000-char backstop as before.
+      const wireText = compressForModel(call.name, JSON.stringify(result));
+      if (wireText.ccrId) compressedThisRun = true;
+      outcomes.push({ id: call.id, name: call.name, content: wireText.text });
     }
     adapter.pushResults(wire, outcomes);
   }

@@ -139,13 +139,14 @@ function refuses traffic until it's set.
 | `TELEGRAM_BOT_TOKEN` | for Telegram | From @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | for Telegram | Any long random string; Telegram echoes it back so we can verify |
 | `TELEGRAM_OWNER_CHAT_ID` | for Telegram | The owner's chat id — the only chat the agent answers |
+| `TELEGRAM_OWNER_USER_ID` | for Telegram groups | The owner's numeric user id — group chats must ALSO match this sender id or messages are refused (fail-closed). Private chats don't need it. |
 | `WHATSAPP_TOKEN` | for WhatsApp | Permanent access token from your Meta app |
 | `WHATSAPP_PHONE_NUMBER_ID` | for WhatsApp | The business number's id in Meta Cloud API |
 | `WHATSAPP_VERIFY_TOKEN` | for WhatsApp | Random string you invent; Meta checks it during webhook setup |
-| `WHATSAPP_APP_SECRET` | optional | Meta app secret — enables HMAC signature checks on payloads |
+| `WHATSAPP_APP_SECRET` | for WhatsApp | Meta app secret — every payload's `X-Hub-Signature-256` HMAC is verified against it; unsigned posts are **rejected** |
 | `WHATSAPP_OWNER_PHONE` | for WhatsApp | Owner's number in international format (e.g. `9715XXXXXXXX`) — the only sender the agent answers |
 | `SLACK_BOT_TOKEN` | for Slack | Bot OAuth token (`xoxb-…`) |
-| `SLACK_SIGNING_SECRET` | for Slack | From your Slack app's Basic Information page |
+| `SLACK_SIGNING_SECRET` | for Slack | From your Slack app's Basic Information page — every request's `X-Slack-Signature` is verified against it; unsigned requests are **rejected** |
 | `SLACK_OWNER_USER_ID` | for Slack | Owner's Slack member id (`U…`) — the only user the agent answers |
 | `AGENT_MODEL` | optional | Default `claude-haiku-4-5-20251001` |
 | `RESEND_API_KEY` | optional | Needed to actually send approved payment-reminder emails |
@@ -245,13 +246,23 @@ This is the part to read before trusting the agent with a business.
   or an additive record (customer, product). No tool can send, finalize, pay,
   delete, or edit an existing record. Drafts get an `-A####` number suffix so
   you can spot agent-created documents; you review and finalize in the app.
-- **Confirm-gated external actions.** Anything that leaves the org (today:
-  payment-reminder emails) is never executed by the model. The agent creates
-  a pending action in `agent_pending_actions` with a 4-digit code; you reply
-  `APPROVE <code>` (or `CANCEL <code>`) on a connected channel. Codes expire
-  after 24 hours, and approvals bypass the model entirely — a confirm is
-  deterministic, not something an injected prompt can talk the agent into.
+- **Confirm-gated external actions.** Anything that leaves the org or moves
+  money in the books (today: payment-reminder emails, marking an invoice
+  paid) is never executed by the model. The agent creates a pending action in
+  `agent_pending_actions` with a 4-digit code; you reply `APPROVE <code>` (or
+  `CANCEL <code>`) on a connected channel. Codes are drawn from a
+  cryptographic RNG, expire after 24 hours, can't collide while live, and
+  approvals bypass the model entirely — a confirm is deterministic, and a
+  double-`APPROVE` (or an `APPROVE` racing a `CANCEL`) executes exactly once.
+  Once an action is decided, its parked credentials are scrubbed from the
+  row.
+- **At-most-once inbound processing.** Every provider message id
+  (Telegram update_id, WhatsApp message id, Slack event_id) is claimed in
+  `channel_seen_messages` before any work; redelivered webhooks are swallowed
+  with a plain ack instead of answering twice.
 - **Rate limits.** 30 messages per hour per install; bursts get a 429.
+  Pairing codes are throttled to 5 failed attempts per hour per sender, and
+  each failed attempt lands in the audit log.
 - **Audit trail.** Every draft, record, and executed action is written to
   `audit_log` with `actor = "agent"`, and both directions of every channel
   conversation land in `channel_messages`.
@@ -307,15 +318,20 @@ full instructions when a task matches. Corrections you'd repeat every session
 
 **Reads** (org-scoped): `get_financial_summary` (receivables, payables,
 cash/bank, income/expense balances) · `list_invoices` (filter
-draft/sent/paid/overdue) · `list_low_stock` · `run_report`
-(`sales_by_month` | `top_customers` | `receivables_aging`) · `find_customer`.
+draft/sent/paid/overdue) · `get_invoice_detail` (one invoice, line items +
+computed subtotal/VAT/total) · `get_vat_summary` (output vs input VAT over a
+period) · `list_expenses` · `expense_totals` (spend by category) ·
+`stock_valuation` (inventory at cost & retail) · `list_low_stock` ·
+`run_report` (`sales_by_month` | `top_customers` | `receivables_aging`) ·
+`find_customer`.
 
 **Draft writes** (you review in Filey): `create_draft_invoice` (default VAT
 5%) · `create_draft_quote` · `create_draft_po` · `add_customer` ·
-`add_product`.
+`add_product` · `log_expense`.
 
 **Confirm-gated**: `request_payment_reminder` — proposes the email, you
-approve with `APPROVE <code>`.
+approve with `APPROVE <code>`; `propose_mark_invoice_paid` — same gate for
+flipping an invoice to paid in the books.
 
 ### In-app extras
 
@@ -327,6 +343,15 @@ etc.). Tools that move money or send things outbound — `send_invoice`,
 Composio actions — are flagged *sensitive* and always ask for your click
 first, even in autonomous mode. The agent will refuse to touch Settings,
 passwords, or security configuration, full stop.
+
+### Built-in context compression (headroom)
+
+Large tool results are compressed before they reach the model: long JSON
+lists become columnar digests, repeated log lines collapse to counts. Every
+compressed result carries a `[headroom]` marker with an id — the agent can
+call `headroom_retrieve(id)` to see the full original at any time, so
+compression never loses data the task needs. Prose is never rewritten and
+error messages always pass through whole.
 
 ---
 

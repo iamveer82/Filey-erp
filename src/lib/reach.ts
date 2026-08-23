@@ -78,19 +78,78 @@ function publicHttpUrl(raw: string): string {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:")
     throw new ReachError(`Only http(s) URLs can be read, not ${u.protocol}`);
-  const host = u.hostname.toLowerCase();
-  const internal =
-    host === "localhost" ||
-    host === "::1" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-  if (internal) throw new ReachError(`Refusing to read a private address: ${host}`);
+  if (u.username || u.password)
+    throw new ReachError("URLs carrying embedded credentials are refused.");
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (privateHost(host)) throw new ReachError(`Refusing to read a private address: ${host}`);
   return u.toString();
+}
+
+const IPV4_PART_RE = /^(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)$/;
+
+/** One dotted/hex/octal label → its integer value, or null if not numeric. */
+function ipv4Part(p: string): number | null {
+  if (!IPV4_PART_RE.test(p)) return null;
+  const v = p.toLowerCase().startsWith("0x")
+    ? parseInt(p.slice(2), 16)
+    : /^0/.test(p)
+      ? parseInt(p, 8)
+      : parseInt(p, 10);
+  return Number.isFinite(v) ? v : null;
+}
+
+/** inet_aton semantics: "127.1", "2130706433" and "0x7f.0.0.1" are all
+ *  loopback. Returns the u32 value, or null when the host is not a numeric
+ *  IPv4 form (a name, or something malformed enough to distrust anyway). */
+function parseIpv4Literal(host: string): number | null {
+  const parts = host.split(".");
+  if (parts.length < 1 || parts.length > 4) return null;
+  let head = 0;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const b = ipv4Part(parts[i]);
+    if (b == null || b > 255) return null;
+    head = (head << 8) | b;
+  }
+  const last = ipv4Part(parts[parts.length - 1]);
+  if (last == null) return null;
+  const room = 4 - (parts.length - 1);
+  if (last >= 256 ** room) return null;
+  return (head * 256 ** room + last) >>> 0;
+}
+
+function ipv4IsPrivate(n: number): boolean {
+  const a = n >>> 24;
+  const b = (n >>> 16) & 255;
+  return (
+    a === 0 || // this-network
+    a === 10 || // RFC1918
+    a === 127 || // loopback
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT
+    (a === 169 && b === 254) || // link-local / cloud metadata
+    (a === 172 && b >= 16 && b <= 31) || // RFC1918
+    (a === 192 && b === 168) || // RFC1918
+    (a === 198 && (b === 18 || b === 19)) || // benchmarking
+    a >= 224 // multicast + reserved
+  );
+}
+
+function privateHost(host: string): boolean {
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal"))
+    return true;
+  const v4 = parseIpv4Literal(host);
+  if (v4 != null) return ipv4IsPrivate(v4);
+  if (host.includes(":")) {
+    // IPv6: loopback/unspecified, ULA (fc00::/7), link-local (fe80::/10),
+    // and v4-mapped forms (::ffff:127.0.0.1) that would smuggle a private v4.
+    if (host === "::" || host === "::1") return true;
+    if (host.startsWith("::ffff:")) {
+      const mapped = parseIpv4Literal(host.slice(7));
+      return mapped != null ? ipv4IsPrivate(mapped) : true;
+    }
+    if (/^f[cd]/.test(host)) return true;
+    if (/^fe[89ab]/.test(host)) return true;
+  }
+  return false;
 }
 
 function headers(cfg: ReachConfig, extra: Record<string, string> = {}) {
