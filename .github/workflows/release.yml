@@ -75,12 +75,21 @@ jobs:
       # Required, not optional: `externalBin` in tauri.conf.json now names this
       # binary, so tauri bundling fails without it. Letting the step continue on
       # error only buys a confusing failure two steps later.
+      # Bun pinned: 1.4 migrates package-lock.json on install and drops
+      # Baileys' git dependency on libsignal while doing it — 118 packages
+      # instead of 119, and the compile below dies on "Could not resolve:
+      # libsignal". 1.3.9 installs it. Unpin once bun handles a migrated git
+      # dependency.
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
       - name: Build WhatsApp bridge sidecar
         shell: bash
         run: |
           cd tools/wa-bridge
           bun install --frozen-lockfile || bun install
+          # Fail here, not three steps later inside the bundler.
+          test -d node_modules/libsignal || { echo "libsignal missing"; exit 1; }
           TRIPLE=$(rustc -vV | sed -n 's/host: //p')
           EXT=""
           [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
