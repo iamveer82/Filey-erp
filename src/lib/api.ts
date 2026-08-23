@@ -2297,13 +2297,65 @@ export const crm = {
       sInsert("crm_opportunities", row), -1
     );
   },
-  setOppStage: (oppId: number, stage: string) => {
-    const patch = { stage, probability: STAGE_PROB[stage] ?? 30 };
-    return write(
+  /**
+   * Move a deal to another stage, closing the loop trycompai closes on every
+   * deal: won/lost stamps closed_at + close_reason (both real columns since
+   * 2026-07-26-crm-objects.sql), reopening clears them, and every move leaves a
+   * kind:"stage_change" activity on the deal so the timeline answers "when did
+   * this stall?" without guessing. `reason` is optional and free-text — the
+   * win/loss report groups by exactly what was typed.
+   */
+  setOppStage: async (oppId: number, stage: string, opts?: { reason?: string }) => {
+    const patch: Record<string, unknown> = {
+      stage,
+      probability: STAGE_PROB[stage] ?? 30,
+    };
+    // Read the current row first: only a move INTO a closing stage stamps the
+    // close fields, and only a move OUT of one clears them.
+    const { data } = await sb()
+      .from("crm_opportunities")
+      .select("stage,title")
+      .eq("id", oppId)
+      .maybeSingle();
+    const from = ((data as { stage?: string } | null)?.stage ?? "").toLowerCase();
+    const title =
+      (data as { title?: string } | null)?.title || "Untitled deal";
+    if (!from)
+      throw new Error(`Deal ${oppId} not found — it may have been deleted.`);
+
+    const target = stage.toLowerCase();
+    if (["won", "lost"].includes(target)) {
+      patch.closed_at = new Date().toISOString();
+      // Only sent when given — re-closing without a reason must not wipe one.
+      const reason = opts?.reason?.trim();
+      if (reason) patch.close_reason = reason;
+    } else if (["won", "lost"].includes(from)) {
+      patch.closed_at = null;
+      patch.close_reason = null;
+    }
+
+    await write(
       { k: "update", t: "crm_opportunities", id: oppId, row: patch },
-      () => sUpdate("crm_opportunities", oppId, patch),
+      () => sUpdate("crm_opportunities", oppId, patch as never),
       undefined
     );
+
+    // Best-effort trail: a failed activity insert must never roll back the
+    // stage move itself.
+    if (target !== from) {
+      try {
+        await crm.createActivity({
+          kind: "stage_change",
+          subject:
+            `${title}: ${from || "new"} → ${target}` +
+            (opts?.reason?.trim() ? ` (${opts.reason.trim()})` : ""),
+          target_type: "deal",
+          target_id: oppId,
+        } as Omit<Activity, "id" | "done" | "created_at">);
+      } catch {
+        /* trail is advisory */
+      }
+    }
   },
   deleteOpportunity: (oppId: number) =>
     write({ k: "delete", t: "crm_opportunities", id: oppId }, () =>
@@ -2872,6 +2924,15 @@ async function reverseInvoiceOrderAndStock(
 /** Mirror a finalized invoice into Orders, Inventory and Accounting.
  *  Reverses any previous posting first, so re-finalizing or editing an already
  *  posted invoice keeps the three modules in sync. */
+/**
+ * Statuses that mean "this invoice is live and belongs in Orders, Inventory and
+ * the ledger". Only "draft" is unposted. Testing for "sent" alone meant that
+ * collecting payment — which moves the invoice to "paid" — reversed the very
+ * postings the sale had created, emptying the books for work already invoiced.
+ */
+const POSTED_STATUSES = new Set(["sent", "paid"]);
+const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
+
 async function propagateInvoice(
   doc: Record<string, unknown>,
   items: {
@@ -3406,7 +3467,7 @@ export const billing = {
         ...(row as Record<string, unknown>),
         id: docId,
       };
-      if (String(docRow.status ?? "") === "sent") {
+      if (isPostedStatus(docRow.status)) {
         await propagateInvoice(docRow, items);
       } else {
         await unpropagateInvoice(docRow, items);
@@ -3463,7 +3524,7 @@ export const billing = {
             unit_price: i.unit_price,
             custom: i.custom ?? undefined, // keep meta so the order total matches
           }));
-        if (status === "sent") {
+        if (isPostedStatus(status)) {
           await propagateInvoice(doc as Record<string, unknown>, docItems);
         } else {
           await unpropagateInvoice(doc as Record<string, unknown>, docItems);
