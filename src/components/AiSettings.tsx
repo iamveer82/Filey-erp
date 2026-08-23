@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, ShieldCheck, Loader2 } from "lucide-react";
 import {
   getAiConfig,
@@ -93,6 +93,48 @@ const PRESETS: Preset[] = [
     baseUrl: "https://api.together.xyz/v1",
     model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
   },
+  {
+    label: "OpenCode Zen",
+    provider: "openai",
+    baseUrl: "https://opencode.ai/zen/v1",
+    model: "grok-code",
+  },
+  {
+    label: "Cerebras",
+    provider: "openai",
+    baseUrl: "https://api.cerebras.ai/v1",
+    model: "llama-3.3-70b",
+  },
+  {
+    label: "Perplexity",
+    provider: "openai",
+    baseUrl: "https://api.perplexity.ai",
+    model: "sonar",
+  },
+  {
+    label: "DeepInfra",
+    provider: "openai",
+    baseUrl: "https://api.deepinfra.com/v1/openai",
+    model: "meta-llama/Llama-3.3-70B-Instruct",
+  },
+  {
+    label: "Vercel AI Gateway",
+    provider: "openai",
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    model: "openai/gpt-4o-mini",
+  },
+  {
+    label: "GLM (Zhipu)",
+    provider: "openai",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4.6",
+  },
+  {
+    label: "LM Studio (local)",
+    provider: "openai",
+    baseUrl: "http://localhost:1234/v1",
+    model: "insert-loaded-model-id",
+  },
 ];
 
 /** Canonical base URL per provider, used to auto-fill when the provider
@@ -107,16 +149,40 @@ export default function AiSettings() {
   const { toast } = useUI();
   const [cfg, setCfg] = useState<AiConfig>(getAiConfig());
   const [testing, setTesting] = useState(false);
+  // Typing used to write localStorage on every keystroke — with storage
+  // blocked, each keypress threw. Local state updates immediately; the store
+  // is written debounced, and flushed before anything reads it back.
+  const pending = useRef<Partial<AiConfig>>({});
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const update = (patch: Partial<AiConfig>) => {
-    const next = setAiConfig(patch);
-    setCfg(next);
+  const flush = () => {
+    if (!Object.keys(pending.current).length) return;
+    const patch = pending.current;
+    pending.current = {};
+    setAiConfig(patch);
+  };
+
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      flush();
+    },
+    []
+  );
+
+  const update = (patch: Partial<AiConfig>, immediate = false) => {
+    pending.current = { ...pending.current, ...patch };
+    setCfg((c) => ({ ...c, ...patch }));
+    clearTimeout(timer.current);
+    if (immediate) flush();
+    else timer.current = setTimeout(flush, 400);
   };
 
   const applyPreset = (p: Preset) =>
     update({ provider: p.provider, baseUrl: p.baseUrl, model: p.model });
 
   const test = async () => {
+    flush(); // test what's on screen, not the last debounced snapshot
     setTesting(true);
     try {
       const r = await aiChat([{ role: "user", text: "Reply with the single word: ok" }], {
@@ -261,7 +327,7 @@ export default function AiSettings() {
         {cfg.apiKey && (
           <button
             type="button"
-            onClick={() => update({ apiKey: "" })}
+            onClick={() => update({ apiKey: "" }, true)}
             className="btn-ghost"
           >
             Clear key
