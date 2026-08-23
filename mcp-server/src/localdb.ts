@@ -226,9 +226,11 @@ function parseOrTerm(term: string): Filter | null {
   return known.includes(op) ? { col, op, val } : null;
 }
 
+/** Raised once, the first time an org_id filter is dropped (see LocalBuilder.eq). */
+let warnedOrgIdDropped = false;
+
 class LocalBuilder implements PromiseLike<Result> {
-  private op: "select" | "insert" = "select";
-  private filters: Filter[] = [];
+  private op: "select" | "insert" = "select";  private filters: Filter[] = [];
   private orGroups: Filter[][] = [];
   private payload: Row[] = [];
   private orders: { col: string; asc: boolean }[] = [];
@@ -257,10 +259,22 @@ class LocalBuilder implements PromiseLike<Result> {
   }
 
   eq(col: string, val: any): this {
-    // The whole local database belongs to one org, and rows created while
-    // offline carry no org_id at all — honouring the tenant filter would hide
-    // them. Every other filter applies normally.
-    if (col === "org_id") return this;
+    // WHY the tenant filter is dropped here: the whole local database belongs
+    // to one org, and rows created while offline carry no org_id at all —
+    // honouring an org_id filter would silently hide exactly those rows. In
+    // local mode the file's own permissions are the security boundary, not the
+    // org column. Every other filter applies normally. Warned once per process
+    // so nobody has to discover this from missing query results.
+    if (col === "org_id") {
+      if (!warnedOrgIdDropped) {
+        warnedOrgIdDropped = true;
+        console.warn(
+          "[filey-erp-mcp] local mode ignores org_id filters — offline rows carry no " +
+            "org_id; file permissions on filey-erp.db are the boundary"
+        );
+      }
+      return this;
+    }
     return this.push({ col, op: "eq", val });
   }
   neq(col: string, val: any): this {

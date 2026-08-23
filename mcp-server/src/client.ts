@@ -30,7 +30,7 @@ function envError(msg: string): never {
  *   SUPABASE_URL, SUPABASE_ANON_KEY
  * Auth (one of):
  *   SUPABASE_ACCESS_TOKEN  — a user JWT pinned via rest.headers.Authorization so RLS runs as that user
- *   FILEY_EMAIL + FILEY_PASSWORD — we sign in with password and pin the returned access token
+ *   FILEY_EMAIL + FILEY_PASSWORD — we sign in with password and supabase-js keeps the session refreshed
  */
 export function getCtx(): Promise<Ctx> {
   if (!cached) {
@@ -55,6 +55,16 @@ function localDbPath(): string | null {
     );
   }
   return file;
+}
+
+/** Cap every outbound request so a hung connection can never stall the tool
+ *  loop. Merges with any signal the caller already set instead of overwriting. */
+function timedFetch(ms: number): typeof fetch {
+  return async (input, init) => {
+    const timeout = AbortSignal.timeout(ms);
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    return fetch(input, { ...init, signal });
+  };
 }
 
 async function initCtx(): Promise<Ctx> {
@@ -91,17 +101,38 @@ async function initCtx(): Promise<Ctx> {
     );
   }
 
-  const tokenToPin = accessToken ?? (await signIn(url!, anonKey, email!, password!));
+  let userId: string | null;
 
-  const supabase = createClient(url!, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      headers: { Authorization: `Bearer ${tokenToPin}` },
-    },
-  });
+  let supabase: SupabaseClient;
+  if (accessToken) {
+    // Pinned-token path: the JWT comes from outside, so there is no refresh
+    // token to use — keep pinning it exactly as before.
+    supabase = createClient(url!, anonKey!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        fetch: timedFetch(15_000),
+      },
+    });
+    userId = jwtSub(accessToken);
+  } else {
+    // Password grant: sign in ON the main client with sessions enabled, so
+    // supabase-js keeps refreshing the access token for as long as this server
+    // runs. (Pinning the returned JWT used to kill every install after ~1h.)
+    supabase = createClient(url!, anonKey!, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+      global: { fetch: timedFetch(15_000) },
+    });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email!,
+      password: password!,
+    });
+    if (error || !data.session) {
+      envError(`Sign-in failed for ${email}: ${error?.message ?? "no session"}`);
+    }
+    userId = jwtSub(data.session!.access_token);
+  }
 
-  // Resolve user id from the JWT payload (sub claim).
-  const userId = jwtSub(tokenToPin);
   if (!userId) {
     envError("Could not determine user id from the access token.");
   }
@@ -113,9 +144,17 @@ async function initCtx(): Promise<Ctx> {
     .single();
 
   if (error || !profile) {
+    const expired =
+      !!error &&
+      ((error as any).code === "PGRST301" ||
+        /expired|jwt|401|invalid signature/i.test(error.message ?? ""));
     envError(
-      `Failed to load profile for user ${userId}: ${error?.message ?? "not found"}. ` +
-        "Check that the token belongs to a Filey user with a profiles row."
+      `Failed to load profile for user ${userId}: ${error?.message ?? "not found"}.` +
+        (expired
+          ? " The access token looks expired — restart the MCP server or re-authenticate " +
+            "(refresh SUPABASE_ACCESS_TOKEN, or switch to FILEY_EMAIL + FILEY_PASSWORD so " +
+            "the session refreshes automatically)."
+          : " Check that the token belongs to a Filey user with a profiles row.")
     );
   }
 
@@ -125,17 +164,6 @@ async function initCtx(): Promise<Ctx> {
     orgId: profile!.org_id as string,
     local: false,
   };
-}
-
-async function signIn(url: string, anonKey: string, email: string, password: string): Promise<string> {
-  const authClient = createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
-  if (error || !data.session) {
-    envError(`Sign-in failed for ${email}: ${error?.message ?? "no session"}`);
-  }
-  return data.session!.access_token;
 }
 
 function jwtSub(token: string): string | null {

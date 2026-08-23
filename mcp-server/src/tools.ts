@@ -49,24 +49,163 @@ function lineTotal(items: Array<{ qty?: number | null; unit_price?: number | nul
   return items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0);
 }
 
-function invoiceTotal(
-  head: { tax_rate?: number | null },
-  items: Array<{ qty?: number | null; unit_price?: number | null }>
+// ---------------------------------------------------------------------------
+// Money math, ported from src/lib/money.ts (invoiceTotals) and src/lib/docItems.ts
+// (splitItemMeta/docLineGross/docTotals) so report totals agree to the cent with
+// the app's own Reports page and agent tools. A local port because the MCP
+// server cannot import from src/.
+// ---------------------------------------------------------------------------
+
+const r2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+
+interface DocHead {
+  tax_rate?: number | null;
+  discount?: number | null;
+  round_off?: boolean | null;
+  unit_price_formula?: { a: string; b?: string } | null;
+}
+
+interface DocItemRow {
+  qty?: number | null;
+  unit_price?: number | null;
+  /** Per-line meta is packed inside the item's `custom` jsonb (see src/lib/docItems.ts). */
+  custom?: Record<string, string> | null;
+  tax_category?: string | null;
+}
+
+const CM_KEY = "__calc_mode";
+const MA_KEY = "__manual_amount";
+const FA_KEY = "__formula_a";
+const FB_KEY = "__formula_b";
+const DISC_KEY = "__disc_pct";
+const TAXP_KEY = "__tax_pct";
+
+const num = (v: string): number => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+function splitItemMeta(custom?: Record<string, string> | null) {
+  const c: Record<string, string> = { ...(custom ?? {}) };
+  const calcMode =
+    c[CM_KEY] === "manual" || c[CM_KEY] === "formula"
+      ? (c[CM_KEY] as "manual" | "formula")
+      : undefined;
+  delete c[CM_KEY];
+  const amount = num(c[MA_KEY] ?? "");
+  delete c[MA_KEY];
+  const itemFormula = c[FA_KEY] ? { a: c[FA_KEY], b: c[FB_KEY] || undefined } : undefined;
+  delete c[FA_KEY];
+  delete c[FB_KEY];
+  const discount = num(c[DISC_KEY] ?? "") || undefined;
+  delete c[DISC_KEY];
+  const tax = num(c[TAXP_KEY] ?? "") || undefined;
+  delete c[TAXP_KEY];
+  return { custom: c, calcMode, amount, itemFormula, discount, tax };
+}
+
+/** Gross for a line before doc-level or line-level discount/tax (docLineGross). */
+function docLineGross(
+  it: {
+    qty?: number | null;
+    unit_price?: number | null;
+    custom?: Record<string, string> | null;
+    calcMode?: "manual" | "formula";
+    amount?: number;
+    itemFormula?: { a: string; b?: string } | null;
+  },
+  formula?: { a: string; b?: string } | null
 ): number {
-  const net = lineTotal(items);
-  const tax = (net * (Number(head.tax_rate) || 0)) / 100;
-  return Math.round((net + tax) * 100) / 100;
+  if (it.calcMode === "manual") return r2(it.amount ?? 0);
+  const rate = Number(it.unit_price) || 0;
+  const active = it.calcMode === "formula" && it.itemFormula?.a ? it.itemFormula : formula;
+  if (active?.a) {
+    const multiplier =
+      active.a === "qty" ? Number(it.qty) || 0 : num(String(it.custom?.[active.a] ?? ""));
+    return r2(multiplier * rate);
+  }
+  return r2((Number(it.qty) || 0) * rate);
+}
+
+/** Mirrors src/lib/docItems.ts docTotals(): honours doc-level discount/tax,
+ *  per-line discount/tax packed in `custom`, and UAE tax categories (only
+ *  standard-rated lines carry VAT). Returns unrounded net/tax/total. */
+function computeDocTotals(
+  head: DocHead,
+  items: DocItemRow[]
+): { net: number; tax: number; total: number } {
+  const lines = items.map((it) => ({ ...it, ...splitItemMeta(it.custom), }));
+  const isStandard = (l: any) => (l.tax_category ?? "S") === "S";
+  const hasLineLevel = lines.some((l: any) => (l.discount ?? 0) > 0 || (l.tax ?? 0) > 0);
+
+  let subtotal = 0;
+  let disc = 0;
+  let tax = 0;
+
+  if (!hasLineLevel) {
+    // invoiceTotals() path: every line standard unless its tax_category says otherwise.
+    subtotal = lines.reduce((s: number, l: any) => s + docLineGross(l, head.unit_price_formula), 0);
+    disc = Math.min(Math.max(0, Number(head.discount) || 0), subtotal);
+    const rate = (Number(head.tax_rate) || 0) / 100;
+    if (subtotal > 0) {
+      for (const l of lines) {
+        if (!isStandard(l)) continue;
+        const lineNet = docLineGross(l, head.unit_price_formula);
+        tax += (lineNet / subtotal) * (subtotal - disc) * rate;
+      }
+    }
+  } else {
+    subtotal = lines.reduce((s: number, l: any) => s + docLineGross(l, head.unit_price_formula), 0);
+    const grossOf = (l: any) => docLineGross(l, head.unit_price_formula);
+    const netOf = (l: any) => grossOf(l) * (1 - ((l.discount ?? 0) as number) / 100);
+    const lineDiscount = lines.reduce(
+      (s: number, l: any) => s + grossOf(l) * (((l.discount ?? 0) as number) / 100),
+      0
+    );
+    disc = Math.min(Math.max(0, Number(head.discount) || 0) + lineDiscount, subtotal);
+    const net = subtotal - disc;
+    const lineTax = lines.reduce(
+      (s: number, l: any) =>
+        isStandard(l) ? s + netOf(l) * (((l.tax ?? 0) as number) / 100) : s,
+      0
+    );
+    // Doc-level discount is allocated pro-rata by net, so only the share of net
+    // that is standard-rated AND not explicitly rated per-line gets the doc rate.
+    const netAfterLineDisc = lines.reduce((s: number, l: any) => s + netOf(l), 0);
+    const docRatedNet = lines.reduce(
+      (s: number, l: any) => (isStandard(l) && !((l.tax ?? 0) > 0) ? s + netOf(l) : s),
+      0
+    );
+    const taxableNet = netAfterLineDisc > 0 ? net * (docRatedNet / netAfterLineDisc) : 0;
+    tax = taxableNet * ((Number(head.tax_rate) || 0) / 100) + lineTax;
+    const total = r2(net + tax);
+    return { net: r2(total - r2(tax)), tax: r2(tax), total };
+  }
+
+  const total = r2(subtotal - disc + tax);
+  return { net: r2(total - r2(tax)), tax: r2(tax), total };
+}
+
+/** Round-off nudges the grand total to the whole unit AFTER tax (applyRoundOff). */
+function docTotal(head: DocHead, items: DocItemRow[]): number {
+  const t = computeDocTotals(head, items);
+  return head.round_off ? Math.round(t.total) : t.total;
+}
+
+/** Kept for callers that just need the gross total (draft writes). */
+function invoiceTotal(head: DocHead, items: DocItemRow[]): number {
+  return docTotal(head, items);
 }
 
 async function itemsForInvoices(
   ctx: Ctx,
   invoiceIds: string[]
-): Promise<Map<string, Array<{ description: string; qty: number; unit_price: number; position: number }>>> {
+): Promise<Map<string, DocItemRow[]>> {
   const map = new Map<string, any[]>();
   if (invoiceIds.length === 0) return map;
   const { data, error } = await ctx.supabase
     .from("invoice_doc_items")
-    .select("invoice_id, description, qty, unit_price, position")
+    .select("invoice_id, description, qty, unit_price, position, custom, tax_category")
     .eq("org_id", ctx.orgId)
     .in("invoice_id", invoiceIds)
     .order("position", { ascending: true });
@@ -75,6 +214,22 @@ async function itemsForInvoices(
     const arr = map.get(row.invoice_id) ?? [];
     arr.push(row);
     map.set(row.invoice_id, arr);
+  }
+  return map;
+}
+
+/** Payments recorded against invoices — receivables must age the outstanding
+ *  balance, not the billed total, or partly paid invoices are chased in full. */
+async function paymentsForInvoices(ctx: Ctx, invoiceIds: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (invoiceIds.length === 0) return map;
+  const { data, error } = await ctx.supabase
+    .from("invoice_payments")
+    .select("invoice_id, amount")
+    .in("invoice_id", invoiceIds);
+  if (error) throw new Error(`invoice_payments query failed: ${error.message}`);
+  for (const p of data ?? []) {
+    map.set(p.invoice_id, (map.get(p.invoice_id) ?? 0) + (Number(p.amount) || 0));
   }
   return map;
 }
@@ -117,6 +272,14 @@ function safe(fn: (args: any) => Promise<unknown>): (args: any) => Promise<unkno
   };
 }
 
+/** 4-digit approval code from the platform CSPRNG — Math.random is predictable,
+ *  and this code is the only thing gating an outbound email. */
+function approvalCode(): string {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return String(1000 + (buf[0] % 9000));
+}
+
 const InvoiceItem = z.object({
   description: z.string().min(1),
   qty: z.number().positive().optional().describe("Quantity (default 1)"),
@@ -146,7 +309,7 @@ export const tools: ToolDef[] = [
 
       const { data: invoices, error: invErr } = await ctx.supabase
         .from("invoice_docs")
-        .select("id, status, tax_rate, due_date")
+        .select("id, status, tax_rate, discount, round_off, unit_price_formula, due_date")
         .eq("org_id", ctx.orgId)
         .or(SALES_ONLY);
       if (invErr) throw new Error(`invoice_docs query failed: ${invErr.message}`);
@@ -201,7 +364,7 @@ export const tools: ToolDef[] = [
       const limit = Math.min(args.limit ?? 10, 25);
       let q = ctx.supabase
         .from("invoice_docs")
-        .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, tax_rate")
+        .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, tax_rate, discount, round_off, unit_price_formula")
         .eq("org_id", ctx.orgId)
         .or(SALES_ONLY)
         .order("issue_date", { ascending: false })
@@ -235,7 +398,7 @@ export const tools: ToolDef[] = [
       const ctx = await getCtx();
       const { data: head, error } = await ctx.supabase
         .from("invoice_docs")
-        .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, doc_type, tax_rate")
+        .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, doc_type, tax_rate, discount, round_off, unit_price_formula")
         .eq("org_id", ctx.orgId)
         .eq("number", args.number)
         .maybeSingle();
@@ -243,15 +406,14 @@ export const tools: ToolDef[] = [
       if (!head) return { error: `Invoice '${args.number}' not found.` };
       const itemsMap = await itemsForInvoices(ctx, [head.id]);
       const items = itemsMap.get(head.id) ?? [];
-      const net = lineTotal(items);
-      const tax = (net * (Number(head.tax_rate) || 0)) / 100;
+      const { net, tax } = computeDocTotals(head, items);
       const { id: _id, ...headOut } = head;
       return {
         ...headOut,
         items,
-        net: Math.round(net * 100) / 100,
-        tax: Math.round(tax * 100) / 100,
-        total: Math.round((net + tax) * 100) / 100,
+        net,
+        tax,
+        total: docTotal(head, items),
       };
     }),
   },
@@ -395,7 +557,7 @@ export const tools: ToolDef[] = [
         since.setMonth(since.getMonth() - 6);
         const { data, error } = await ctx.supabase
           .from("invoice_docs")
-          .select("id, issue_date, tax_rate")
+          .select("id, issue_date, tax_rate, discount, round_off, unit_price_formula")
           .eq("org_id", ctx.orgId)
           .or(SALES_ONLY)
           .neq("status", "draft")
@@ -425,7 +587,7 @@ export const tools: ToolDef[] = [
       if (args.report === "top_customers") {
         const { data, error } = await ctx.supabase
           .from("invoice_docs")
-          .select("id, customer_name, tax_rate")
+          .select("id, customer_name, tax_rate, discount, round_off, unit_price_formula")
           .eq("org_id", ctx.orgId)
           .or(SALES_ONLY)
           .neq("status", "draft")
@@ -454,15 +616,20 @@ export const tools: ToolDef[] = [
         };
       }
 
-      // receivables_aging
+      // receivables_aging — mirrors src/lib/aiTools.ts: the OUTSTANDING balance
+      // of anything not draft/paid/cancelled (a partly paid invoice is chased
+      // for its balance only; a settled one drops out entirely).
       const { data, error } = await ctx.supabase
         .from("invoice_docs")
-        .select("id, number, customer_name, due_date, tax_rate")
+        .select("id, number, customer_name, status, due_date, tax_rate, discount, round_off, unit_price_formula")
         .eq("org_id", ctx.orgId)
         .or(SALES_ONLY)
-        .eq("status", "sent");
+        .neq("status", "draft")
+        .neq("status", "paid")
+        .neq("status", "cancelled");
       if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
       const itemsMap = await itemsForInvoices(ctx, (data ?? []).map((i) => i.id));
+      const paidMap = await paymentsForInvoices(ctx, (data ?? []).map((i) => i.id));
       const buckets: Record<string, { total: number; invoices: string[] }> = {
         current: { total: 0, invoices: [] },
         "1-30": { total: 0, invoices: [] },
@@ -470,11 +637,17 @@ export const tools: ToolDef[] = [
         "61-90": { total: 0, invoices: [] },
         "90+": { total: 0, invoices: [] },
       };
-      const now = Date.now();
+      const todayMs = Date.parse(today());
       for (const inv of data ?? []) {
-        const total = invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
+        const total = docTotal(inv, itemsMap.get(inv.id) ?? []);
+        // Fall back to total less paid so docs written before balances were
+        // tracked still count.
+        const due = total - (paidMap.get(inv.id) ?? 0);
+        if (due <= 0.005) continue;
+        // Calendar-day diff from UTC midnight — same as the app's aging, so an
+        // invoice never lands in a different bucket depending on the hour.
         const daysOverdue = inv.due_date
-          ? Math.floor((now - new Date(inv.due_date).getTime()) / 86_400_000)
+          ? Math.floor((todayMs - Date.parse(inv.due_date)) / 86_400_000)
           : 0;
         const key =
           daysOverdue <= 0 ? "current"
@@ -482,7 +655,7 @@ export const tools: ToolDef[] = [
           : daysOverdue <= 60 ? "31-60"
           : daysOverdue <= 90 ? "61-90"
           : "90+";
-        buckets[key].total += total;
+        buckets[key].total += due;
         buckets[key].invoices.push(inv.number);
       }
       return {
@@ -765,8 +938,12 @@ const writeTools: ToolDef[] = [
         return { error: `Invoice ${inv.number} has no customer_email on file; cannot send a reminder.` };
       }
 
-      const code = String(Math.floor(1000 + Math.random() * 9000)); // 4-digit approval code
-      const { error: insErr } = await ctx.supabase.from("agent_pending_actions").insert({
+      const code = approvalCode();
+      // expires_at matches the migration's backfill rule (created_at + 24h) so
+      // the row is valid under the new schema and the edge function can expire
+      // stale proposals.
+      const expiresAt = new Date(Date.now() + 24 * 86_400_000).toISOString();
+      const row: Record<string, unknown> = {
         user_id: ctx.userId,
         org_id: ctx.orgId,
         code,
@@ -779,18 +956,32 @@ const writeTools: ToolDef[] = [
           due_date: inv.due_date,
         },
         status: "pending",
-      });
+        expires_at: expiresAt,
+      };
+      // The partial unique index on (user_id, code) where status='pending' can
+      // reject a colliding live code — regenerate and retry instead of failing.
+      let insErr: { message: string } | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await ctx.supabase.from("agent_pending_actions").insert(row);
+        insErr = error ?? null;
+        if (!insErr) break;
+        const collision =
+          (insErr as any).code === "23505" || /duplicate key|unique constraint/i.test(insErr.message);
+        if (!collision) break;
+        row.code = approvalCode();
+      }
       if (insErr) throw new Error(`Failed to create pending action: ${insErr.message}`);
+      const finalCode = row.code as string;
 
       await audit(ctx, "request_payment_reminder", "agent_pending_actions", {
         invoice: inv.number,
-        code,
+        code: finalCode,
       });
       return {
-        approval_code: code,
+        approval_code: finalCode,
         invoice: inv.number,
         status: "pending",
-        note: `owner replies APPROVE ${code} on a connected channel`,
+        note: `owner replies APPROVE ${finalCode} on a connected channel`,
       };
     }),
   },

@@ -67,7 +67,7 @@ Notes:
 | `SUPABASE_URL` | cloud mode | Your Supabase project URL, e.g. `https://xyz.supabase.co` |
 | `SUPABASE_ANON_KEY` | cloud mode | Supabase anon/public key |
 | `SUPABASE_ACCESS_TOKEN` | one of the two auth options | A Filey **user JWT**. Pinned as the `Authorization` header on every request so Postgres RLS runs as that user. |
-| `FILEY_EMAIL` + `FILEY_PASSWORD` | one of the two auth options | Alternative to a token: the server signs in with password on first use and pins the returned access token. |
+| `FILEY_EMAIL` + `FILEY_PASSWORD` | one of the two auth options | Alternative to a token: the server signs in with password and supabase-js keeps the session refreshed automatically (no expiry babysitting). |
 
 The server also resolves your `user_id` and `org_id` from the `profiles` table on
 first tool call; every query is pinned to `org_id` and every insert carries
@@ -143,7 +143,7 @@ Add to your MCP settings JSON (e.g. `~/.cursor/mcp.json` or your Hermes config):
 | `create_draft_po` | write (draft) | Draft purchase order `PO-<year>-A####`; links `supplier_id` by fuzzy name match when possible |
 | `add_customer` | write | Insert a CRM customer |
 | `add_product` | write | Insert a product (quantity starts at 0) |
-| `request_payment_reminder` | confirm-gated | Creates an `agent_pending_actions` row and returns a 4-digit `approval_code`; the reminder is only sent after the owner replies `APPROVE <code>` on a connected channel |
+| `request_payment_reminder` | confirm-gated | Creates an `agent_pending_actions` row and returns a 4-digit `approval_code`; the reminder is only sent after the owner replies `APPROVE <code>` on a connected channel. Codes are unique among live proposals and expire after 24h (`expires_at`). |
 
 All write tools record an `audit_log` entry with actor `mcp-agent`. Every tool
 returns `{error: "..."}` payloads on failure instead of crashing.
@@ -161,8 +161,9 @@ returns `{error: "..."}` payloads on failure instead of crashing.
 - **Draft-only writes.** Invoices, quotes and POs are created with `status: 'draft'`
   — a human reviews and sends them in the Filey UI.
 - **APPROVE flow.** Outbound side effects (payment reminders) go through
-  `agent_pending_actions` with a one-time 4-digit code; nothing is sent until the
-  owner approves on a connected channel.
+  `agent_pending_actions` with a one-time 4-digit code drawn from the platform
+  CSPRNG; codes are unique among live proposals and expire after 24h, so nothing
+  is sent until the owner approves on a connected channel.
 - **Stdio hygiene.** All logging goes to stderr; stdout carries JSON-RPC only.
 
 ## Troubleshooting
@@ -174,6 +175,7 @@ returns `{error: "..."}` payloads on failure instead of crashing.
 | `Sign-in failed for ...` | Check FILEY_EMAIL/FILEY_PASSWORD; prefer the JWT if your org uses SSO. |
 | `Failed to load profile for user ...` | The token doesn't belong to a Filey user with a `profiles` row — re-copy the access token from a signed-in session. |
 | `new row violates row-level security policy` | Expired or wrong-user JWT; get a fresh token. |
+| `...JWT expired` / `Expired authentication token` / `PGRST301` | The pinned `SUPABASE_ACCESS_TOKEN` ran out — restart the MCP server with a fresh token, or switch to `FILEY_EMAIL`/`FILEY_PASSWORD` so the session refreshes automatically. |
 | `Could not list orders: ...` from `list_orders` | Expected on deployments without an `orders` table — use `list_invoices` / `list_purchase_orders`. |
 | Tools don't show up in the client | Run `npm run smoke` in the package dir; it handshakes the server offline and prints the 17 tool names. |
 | `Local mode requested but no Filey database found` | The desktop app hasn't run on this machine, or its data folder was moved — set `FILEY_LOCAL_DB` to the full path of `filey-erp.db`. |
