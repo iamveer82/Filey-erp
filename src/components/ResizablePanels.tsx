@@ -82,6 +82,7 @@ export function ResizablePanels({
           onMouseDown={onMouseDown}
           className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 hidden xl:grid place-items-center w-5 h-12 rounded-full border border-brand-200 bg-white text-brand-400 hover:text-ink hover:border-brand-400 cursor-col-resize shadow-sm"
           title="Drag to resize preview"
+          aria-label="Drag to resize preview"
         >
           <GripVertical size={12} />
         </button>

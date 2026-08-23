@@ -117,3 +117,11 @@ export function errMsg(e: unknown): string {
   }
   return String(e);
 }
+
+/**
+ * Count plus its noun, pluralised. Guards the "1 invoices" reading that shows
+ * up wherever a count is interpolated straight into a fixed plural label.
+ */
+export function plural(n: number, one: string, many = one + "s"): string {
+  return num(n) + " " + (Math.abs(n) === 1 ? one : many);
+}

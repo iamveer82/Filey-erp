@@ -115,7 +115,7 @@ export default function DocTemplateGallery({
             className="btn-ghost text-xs flex items-center gap-1"
             onClick={onDesign}
           >
-            <Plus size={13} /> Create Template
+            <Plus size={13} /> Create template
           </button>
         </div>
       </div>

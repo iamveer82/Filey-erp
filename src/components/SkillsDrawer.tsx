@@ -126,7 +126,7 @@ export default function SkillsDrawer({
                         updateSkill(s.id, { enabled: !s.enabled });
                         refresh();
                       }}
-                      title={s.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
+                      title={s.enabled ? "Enabled - click to disable" : "Disabled - click to enable"}
                       className={cn(
                         "relative h-5 w-9 shrink-0 rounded-full transition-colors",
                         s.enabled ? "bg-primary-400" : "bg-brand-300"

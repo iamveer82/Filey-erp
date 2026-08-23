@@ -139,7 +139,7 @@ export default function IntegrationConnect() {
               </span>
               <span className="block text-xs text-brand-500 mt-0.5">
                 Off by default. Pages are fetched only when the assistant needs one to
-                answer you — nothing is crawled in the background.
+                answer you - nothing is crawled in the background.
               </span>
             </span>
           </label>
@@ -149,13 +149,13 @@ export default function IntegrationConnect() {
               className="input"
               type="password"
               autoComplete="off"
-              placeholder="Raises the rate limit — reading works without one"
+              placeholder="Raises the rate limit. Reading works without one"
               value={cfg.apiKey}
               onChange={(e) => save({ apiKey: e.target.value })}
             />
           </Field>
           <p className="text-xs text-brand-500">
-            Stored on this device only, like your AI model key — it never syncs to the
+            Stored on this device only, like your AI model key - it never syncs to the
             cloud.
           </p>
         </InfoCard>
@@ -169,7 +169,7 @@ export default function IntegrationConnect() {
               className="input"
               placeholder={
                 app === "lead-enrichment"
-                  ? "acme-trading.ae"
+                  ? "gulflinetrading.ae"
                   : "https://example.com/about"
               }
               value={probe}
@@ -205,7 +205,7 @@ export default function IntegrationConnect() {
             ))}
           </ul>
           <p className="mt-3 text-xs text-brand-500">
-            These sit in the "{capability?.name}" capability — switch the whole group off
+            These sit in the "{capability?.name}" capability - switch the whole group off
             any time in Settings → Capabilities.
           </p>
         </InfoCard>
@@ -221,7 +221,7 @@ export default function IntegrationConnect() {
           </p>
           <p className="mt-2 text-xs text-brand-500">
             Those break the platforms' terms, collect personal data with no lawful basis
-            under the UAE PDPL and GDPR, and get your sending domain blocklisted — which
+            under the UAE PDPL and GDPR, and get your sending domain blocklisted - which
             would stop your invoices arriving. See docs/LEAD-DATA.md.
           </p>
         </InfoCard>

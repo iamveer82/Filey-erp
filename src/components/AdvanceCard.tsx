@@ -4,6 +4,7 @@ import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
 import { aed, errMsg, fmtDate, todayYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { Modal, Field } from "./ui";
+import { SelectMenu } from "./ui-menu";
 
 /** Per-party advance/prepayment card. Shows the credit balance, lets the user
  *  record or remove advances, and (when `outstanding` is given) the net still
@@ -132,7 +133,7 @@ export default function AdvanceCard({
 
       {loadErr ? (
         <p className="text-sm text-danger">
-          Could not load advances, so no credit balance is shown here — it would
+          Could not load advances, so no credit balance is shown here - it would
           read as zero and overstate what is owed. ({loadErr})
         </p>
       ) : (
@@ -165,7 +166,7 @@ export default function AdvanceCard({
                 <span className="font-medium text-ink">{aed(a.amount)}</span>
                 <span className="text-brand-400"> · {fmtDate(a.paid_at)}</span>
                 {a.note && (
-                  <span className="text-brand-500"> — {a.note}</span>
+                  <span className="text-brand-500"> - {a.note}</span>
                 )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -388,7 +389,7 @@ export function CustomerAdvancesPanel() {
                           <span className="font-medium text-ink">{aed(a.amount)}</span>
                           <span className="text-brand-400"> · {fmtDate(a.paid_at)}</span>
                           {a.note && (
-                            <span className="text-brand-500"> — {a.note}</span>
+                            <span className="text-brand-500"> - {a.note}</span>
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
@@ -417,7 +418,7 @@ export function CustomerAdvancesPanel() {
         </div>
       ) : (
         <p className="text-xs text-brand-400">
-          No advances on file. Record one when a customer pays up front — it's
+          No advances on file. Record one when a customer pays up front - it's
           subtracted on their next invoice.
         </p>
       )}
@@ -431,18 +432,18 @@ export function CustomerAdvancesPanel() {
           )}
           {!editing && (
             <Field label="Customer">
-              <select
-                className="select"
+              <SelectMenu
+                ariaLabel="Customer"
                 value={custId}
-                onChange={(e) => setCustId(e.target.value)}
-              >
-                <option value="">Select customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.company || c.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setCustId}
+                options={[
+                  { value: "", label: "Select customer…" },
+                  ...customers.map((c) => ({
+                    value: String(c.id),
+                    label: c.company || c.name,
+                  })),
+                ]}
+              />
             </Field>
           )}
           <Field label="Amount (AED)">

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Upload, Sparkles, Loader2, Receipt } from "lucide-react";
 import { Modal } from "./ui";
+import { SelectMenu } from "./ui-menu";
 import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";
 import { extractExpenseFromImage, aiReady, type ExtractedExpense } from "../lib/ai";
@@ -66,7 +67,7 @@ export default function ExpenseScanModal({
     setSaving(true);
     try {
       const today = todayYmd();
-      const desc = [data.vendor, data.description].filter(Boolean).join(" — ") || null;
+      const desc = [data.vendor, data.description].filter(Boolean).join(" - ") || null;
       await fin.createExpense(
         data.category || "Other",
         desc,
@@ -107,7 +108,7 @@ export default function ExpenseScanModal({
               : fileName || "Upload a receipt (PDF or image)"}
           </span>
           <span className="text-xs text-brand-400">
-            Your AI model extracts the details — nothing is sent to Filey.
+            Your AI model extracts the details - nothing is sent to Filey.
           </span>
           <input
             type="file"
@@ -120,7 +121,7 @@ export default function ExpenseScanModal({
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-xs text-brand-400">
-            <Receipt size={14} /> {fileName} — review &amp; save.
+            <Receipt size={14} /> {fileName} - review &amp; save.
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Labeled label="Vendor">
@@ -145,17 +146,11 @@ export default function ExpenseScanModal({
               />
             </Labeled>
             <Labeled label="Category">
-              <select
-                className="select"
+              <SelectMenu
                 value={data.category || "Other"}
-                onChange={(e) => setData({ ...data, category: e.target.value })}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setData({ ...data, category: v })}
+                options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+              />
             </Labeled>
           </div>
           <Labeled label="Note">

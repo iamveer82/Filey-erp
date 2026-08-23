@@ -258,7 +258,7 @@ export function StampSigAdjust({
       <div className="flex items-center gap-2 text-ink font-medium text-xs">
         {icon} {label}
       </div>
-      {/* live preview — mirrors the on-page watermark blend */}
+      {/* live preview - mirrors the on-page watermark blend */}
       <div className="relative mt-2 flex items-center justify-center py-3 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[72px]">
         <CompanyAssetImage
           src={value.data}

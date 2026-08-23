@@ -103,13 +103,13 @@ export default function InsightsCard() {
         </div>
       ) : incomplete.length ? (
         <p className="text-sm text-danger">
-          Could not read {incomplete.join(", ")}, so these insights are incomplete — treat
+          Could not read {incomplete.join(", ")}, so these insights are incomplete - treat
           "nothing to flag" as unknown rather than fine.
         </p>
       ) : insights.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-brand-500">
           <CheckCircle2 size={15} className="text-success" />
-          All clear — cash, receivables, spend and stock look healthy.
+          All clear - cash, receivables, spend and stock look healthy.
         </p>
       ) : (
         <>

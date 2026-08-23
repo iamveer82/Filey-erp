@@ -203,7 +203,7 @@ export default function Marketing() {
             rowKey={(l) => l.customer.id}
             empty={
               customers.length === 0
-                ? "No customers yet — add one and they'll be ranked here"
+                ? "No customers yet - add one and they'll be ranked here"
                 : "No leads match your search or filters"
             }
             onRowClick={(l) => nav(`/customers/${l.customer.id}`)}
@@ -268,7 +268,7 @@ export default function Marketing() {
                       !reachReady()
                         ? "Turn on web access in Integrations"
                         : !l.domain
-                          ? "No company domain — their email is personal or missing"
+                          ? "No company domain - their email is personal or missing"
                           : `Read ${l.domain}`
                     }
                     onClick={(e) => {
@@ -290,7 +290,7 @@ export default function Marketing() {
                 {duplicates.length} possible duplicate{duplicates.length > 1 ? "s" : ""}
               </p>
               <p className="mt-0.5 text-[12.5px] text-brand-500">
-                Same business on more than one record — merging is left to you, since
+                Same business on more than one record - merging is left to you, since
                 picking the wrong survivor loses its invoice history.
               </p>
               <ul className="mt-3 space-y-2">
@@ -396,7 +396,7 @@ function EnrichModal({
   return (
     <Modal open onClose={onClose} title={`Enrich ${c.name}`}>
       <p className="text-[12.5px] text-brand-500">
-        Reading {lead.domain} — only what the company publishes on its own site.
+        Reading {lead.domain} - only what the company publishes on its own site.
       </p>
 
       {busy && <p className="mt-4 text-sm text-brand-500">Reading their website…</p>}
@@ -411,7 +411,7 @@ function EnrichModal({
           <Row label="Address" value={details.address || "—"} />
           {fields.length === 0 && (
             <p className="pt-2 text-[12.5px] text-brand-500">
-              Nothing to add — this record already has everything the site lists.
+              Nothing to add - this record already has everything the site lists.
             </p>
           )}
         </div>

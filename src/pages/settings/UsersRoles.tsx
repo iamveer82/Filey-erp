@@ -6,6 +6,7 @@ import { Plus, Trash2, Building, Cloud } from "lucide-react";
 import { org, type OrgMember, type Organization, type Invitation } from "../../lib/api";
 import { isLocalMode } from "../../lib/dataMode";
 import { supabase } from "../../lib/supabase";
+import { SelectMenu } from "../../components/ui-menu";
 import { useEffect, useState } from "react";
 
 /* ---------------- Users & Roles (Organization) ---------------- */
@@ -223,7 +224,7 @@ export default function UsersRoles() {
           <div className="flex gap-2">
             <input
               className="input"
-              placeholder="Acme Trading LLC"
+              placeholder="Gulf Line Trading LLC"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -276,7 +277,7 @@ export default function UsersRoles() {
           </div>
         )}
 
-      {/* Members & Roles — team management */}
+      {/* Members & Roles - team management */}
       <div className="card">
         <div className="mb-4">
           <p className="text-lg font-medium text-ink">Members &amp; Roles</p>
@@ -319,20 +320,16 @@ export default function UsersRoles() {
 
                   <div className="flex shrink-0 items-center gap-2">
                     {editable ? (
-                      <select
-                        className="select !h-8 !w-[118px] !py-1 text-xs"
+                      <SelectMenu
+                        size="sm"
+                        className="w-[118px]"
                         value={m.role}
-                        onChange={async (e) => {
-                          await org.setRole(m.id, e.target.value);
+                        onChange={async (v) => {
+                          await org.setRole(m.id, v);
                           load();
                         }}
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
+                        options={ROLES.map((r) => ({ value: r, label: r }))}
+                      />
                     ) : (
                       <Badge tone="info">{m.role}</Badge>
                     )}
@@ -394,17 +391,14 @@ export default function UsersRoles() {
             />
           </Field>
           <Field label="Role">
-            <select
-              className="select"
+            <SelectMenu
               value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value)}
-            >
-              {ROLES.filter((r) => r !== "owner").map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setInviteRole(v)}
+              options={ROLES.filter((r) => r !== "owner").map((r) => ({
+                value: r,
+                label: r,
+              }))}
+            />
           </Field>
           <p className="text-xs text-brand-400">
             They sign up with this email, then accept from their Settings → Users &amp;
@@ -481,7 +475,7 @@ function MemberAccessModal({
   };
 
   return (
-    <Modal open={!!member} onClose={onClose} title={`App access — ${member?.name ?? ""}`}>
+    <Modal open={!!member} onClose={onClose} title={`App access - ${member?.name ?? ""}`}>
       <p className="text-xs text-brand-400 mb-3">
         Choose which apps this member can open. Overview &amp; Settings are always
         available.

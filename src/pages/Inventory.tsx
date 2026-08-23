@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -19,6 +19,7 @@ import {
   ShoppingCart,
   ClipboardList,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 import {
   RowActions,
@@ -28,6 +29,7 @@ import {
 } from "../components/RowActions";
 import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
+import { MenuPopover, MenuItemRow } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
@@ -95,7 +97,7 @@ export default function Inventory() {
       const nums = await pos.createDraftsFromLowStock();
       toast.success(
         nums.length
-          ? `Created ${nums.join(", ")} — see Purchase Orders.`
+          ? `Created ${nums.join(", ")} - see Purchase Orders.`
           : "Nothing to reorder (set reorder levels first)."
       );
     } catch (e) {
@@ -160,7 +162,7 @@ export default function Inventory() {
         is_serialized: p.is_serialized,
         custom_fields: p.custom_fields,
       } as Omit<Product, "id" | "created_at">);
-      toast.success(`Duplicated ${p.name} — stock starts at 0.`);
+      toast.success(`Duplicated ${p.name} - stock starts at 0.`);
       load();
     } catch (e) {
       toast.error(
@@ -171,7 +173,7 @@ export default function Inventory() {
 
   const shareProduct = (kind: ShareKind, p: Product) => {
     const url = `${location.origin}${location.pathname}#/inventory`;
-    const text = `${p.name} (${p.sku}) — In stock: ${p.quantity}, Unit price: ${aed(p.unit_price)}`;
+    const text = `${p.name} (${p.sku}) - In stock: ${p.quantity}, Unit price: ${aed(p.unit_price)}`;
     shareVia(kind, { text, url });
     if (kind === "copyLink") toast.success("Inventory link copied");
   };
@@ -307,8 +309,8 @@ export default function Inventory() {
             >
               <ClipboardList size={15} /> Stocktake
             </button>
-            <button className="btn-primary" aria-label="Add Item" onClick={() => setOpen(true)}>
-              <Plus size={16} /> Add Item
+            <button className="btn-primary" aria-label="Add item" onClick={() => setOpen(true)}>
+              <Plus size={16} /> Add item
             </button>
           </div>
         }
@@ -474,21 +476,11 @@ export default function Inventory() {
             ))}
           </div>
           {uniqueBatches.length > 0 && (
-            <div className="flex items-center gap-1.5 ml-2">
-              <Hash size={13} className="text-brand-400" />
-              <select
-                className="select !h-8 text-xs"
-                value={batchFilter}
-                onChange={(e) => setBatchFilter(e.target.value)}
-              >
-                <option value="">All batches</option>
-                {uniqueBatches.map((b: string) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <BatchFilter
+              batches={uniqueBatches}
+              value={batchFilter}
+              onChange={setBatchFilter}
+            />
           )}
           <span className="ml-auto text-[11px] font-medium text-brand-500 tracking-tight">
             {filtered.length} shown
@@ -831,6 +823,69 @@ export default function Inventory() {
           { key: "reorder_level", label: "Reorder Level" },
         ]}
       />
+    </div>
+  );
+}
+
+/** Toolbar batch filter — the app's shared menu instead of a native select,
+ *  so the filter row reads like every other dropdown in the app. */
+function BatchFilter({
+  batches,
+  value,
+  onChange,
+}: {
+  batches: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  return (
+    <div className="flex items-center gap-1.5 ml-2">
+      <Hash size={13} className="text-brand-400" />
+      <button
+        type="button"
+        ref={btnRef}
+        aria-label="Filter by batch"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs text-foreground transition-colors hover:bg-hover"
+      >
+        <span className="max-w-[120px] truncate">{value || "All batches"}</span>
+        <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        closeOnScroll
+        className="w-44"
+      >
+        <MenuItemRow
+          label="All batches"
+          checked={value === ""}
+          onClick={() => {
+            onChange("");
+            setOpen(false);
+          }}
+        />
+        {batches.length > 0 && batches.some((b) => b !== "") && (
+          <div className="mx-2 my-1 border-t border-border" />
+        )}
+        {batches.map((b) =>
+          b === "" ? null : (
+            <MenuItemRow
+              key={b}
+              label={b}
+              checked={value === b}
+              onClick={() => {
+                onChange(b);
+                setOpen(false);
+              }}
+            />
+          )
+        )}
+      </MenuPopover>
     </div>
   );
 }
@@ -1213,7 +1268,7 @@ function StocktakeModal({
           `Counted ${d.counted}, book ${d.p.quantity}`
         );
       }
-      toast.success(`Stocktake posted — ${diffs.length} adjustment(s).`);
+      toast.success(`Stocktake posted - ${diffs.length} adjustment(s).`);
       onSaved();
       onClose();
     } catch (e) {
@@ -1224,7 +1279,7 @@ function StocktakeModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Stocktake — physical count" size="2xl">
+    <Modal open={open} onClose={onClose} title="Stocktake: physical count" size="2xl">
       <div className="mb-3 flex items-center justify-between gap-3">
         <input
           className="input max-w-xs"
@@ -1417,7 +1472,7 @@ function IssueStockModal({
   };
 
   return (
-    <Modal open={!!product} onClose={onClose} title={`Stock entry — ${product.name}`}>
+    <Modal open={!!product} onClose={onClose} title={`Stock entry - ${product.name}`}>
       {/* entry type */}
       <div className="mb-4 flex items-center gap-1 rounded-xl bg-brand-50 p-1 dark:bg-white/5 w-fit">
         {(

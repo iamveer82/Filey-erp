@@ -182,9 +182,9 @@ export const Folder = ({
         <div className={cn(s.flapBody, "rounded-tr-xl", c.flap)} />
       </div>
 
-      {/* Papers — fanned at rest, no hover motion. */}
+      {/* Papers - fanned at rest, no hover motion. */}
       <div className={cn("absolute z-10", s.papers)}>
-        {/* Back paper — fans right */}
+        {/* Back paper - fans right */}
         <div
           style={{ transform: "rotate(4deg)", transformOrigin: "center bottom" }}
           className={cn(
@@ -194,7 +194,7 @@ export const Folder = ({
             c.paperBack
           )}
         />
-        {/* Back paper — fans left */}
+        {/* Back paper - fans left */}
         <div
           style={{ transform: "rotate(-4deg)", transformOrigin: "center bottom" }}
           className={cn(
@@ -204,7 +204,7 @@ export const Folder = ({
             c.paperBack
           )}
         />
-        {/* Front paper — sits flat */}
+        {/* Front paper - sits flat */}
         <div
           className={cn(
             "absolute inset-x-0 top-0 rounded-xl border-t",

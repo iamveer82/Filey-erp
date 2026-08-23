@@ -17,6 +17,7 @@ import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useUI } from "../lib/ui";
 import type { OutFile } from "../lib/pdfTools";
+import { SelectMenu } from "./ui-menu";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -412,16 +413,18 @@ export default function ESignStudio({
               className="w-8 h-8 rounded border border-brand-200 cursor-pointer p-0.5"
               disabled={drawTool === "eraser"}
             />
-            <select
-              value={drawWidth}
-              onChange={(e) => setDrawWidth(Number(e.target.value))}
-              className="text-xs border border-brand-200 rounded-xl px-2 py-1.5 bg-white"
-            >
-              <option value={2}>Thin</option>
-              <option value={4}>Medium</option>
-              <option value={7}>Thick</option>
-              <option value={10}>Heavy</option>
-            </select>
+            <SelectMenu
+              size="sm"
+              className="w-auto"
+              value={String(drawWidth)}
+              onChange={(v) => setDrawWidth(Number(v))}
+              options={[
+                { value: "2", label: "Thin" },
+                { value: "4", label: "Medium" },
+                { value: "7", label: "Thick" },
+                { value: "10", label: "Heavy" },
+              ]}
+            />
             <button onClick={clearCanvas} className="btn-ghost text-xs">
               <RotateCcw size={14} /> Clear
             </button>
@@ -594,15 +597,17 @@ export default function ESignStudio({
                       onChange={(e) => setDrawColor(e.target.value)}
                       className="w-6 h-6 rounded border cursor-pointer p-0"
                     />
-                    <select
-                      value={drawWidth}
-                      onChange={(e) => setDrawWidth(Number(e.target.value))}
-                      className="text-xs border rounded px-1.5 py-1"
-                    >
-                      <option value={2}>Thin</option>
-                      <option value={4}>Medium</option>
-                      <option value={7}>Thick</option>
-                    </select>
+                    <SelectMenu
+                      size="sm"
+                      className="w-auto"
+                      value={String(drawWidth)}
+                      onChange={(v) => setDrawWidth(Number(v))}
+                      options={[
+                        { value: "2", label: "Thin" },
+                        { value: "4", label: "Medium" },
+                        { value: "7", label: "Thick" },
+                      ]}
+                    />
                     <button onClick={clearCanvas} className="btn-ghost text-xs">
                       <RotateCcw size={14} /> Clear
                     </button>

@@ -23,7 +23,10 @@ export default function StatStrip({
   return (
     <div
       className={cn(
-        "grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border",
+        // No gap and a card-coloured ground: the strip reads as one continuous
+        // surface. A 1px gap over bg-border is what drew hairlines between the
+        // stats, which is the look we do not want here.
+        "grid grid-cols-2 gap-0 overflow-hidden rounded-xl border border-border bg-card",
         // Literal classes so Tailwind keeps them.
         items.length >= 4
           ? "lg:grid-cols-4"

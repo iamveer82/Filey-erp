@@ -64,7 +64,7 @@ export default function OptOutsPanel() {
         <ShieldCheck size={16} className="text-brand-400" />
         <span className="text-sm text-foreground">
           Campaigns skip every address here. Someone who replies "unsubscribe" goes on
-          this list — add them below.
+          this list - add them below.
         </span>
       </div>
 

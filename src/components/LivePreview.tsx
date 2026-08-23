@@ -129,7 +129,7 @@ export default function LivePreview({
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
         {note ||
-          `Live preview of “${tool.name}” on page 1 — Run to apply to every page and download.`}
+          `Live preview of “${tool.name}” on page 1 - Run to apply to every page and download.`}
       </p>
     </div>
   );

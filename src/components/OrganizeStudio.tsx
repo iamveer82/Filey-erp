@@ -160,7 +160,7 @@ export default function OrganizeStudio({
       }
       onApply(outs);
       toast.success(
-        `Done — ${outs.length} file${outs.length > 1 ? "s" : ""} downloaded.`
+        `Done - ${outs.length} file${outs.length > 1 ? "s" : ""} downloaded.`
       );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));

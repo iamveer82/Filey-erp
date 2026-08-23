@@ -13,7 +13,9 @@ export function Card({
   return (
     <div
       className={cn(
-        "relative rounded-xl bg-card border border-border",
+        // Outline matches the fill, same as the .card class: separation comes
+        // from the --page ground behind the card, not from a grey hairline.
+        "relative rounded-xl bg-card card-edge",
         className
       )}
       onClick={onClick}

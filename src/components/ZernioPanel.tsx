@@ -60,7 +60,7 @@ export default function ZernioPanel() {
       .join(", ");
     const ok = await confirm({
       title: when ? "Schedule this post?" : "Publish this post now?",
-      message: `It will go out on ${names}. A published post is public — deleting it afterwards is the platform's business, not Filey's.`,
+      message: `It will go out on ${names}. A published post is public - deleting it afterwards is the platform's business, not Filey's.`,
       confirmLabel: when ? "Schedule" : "Publish",
     });
     if (!ok) return;
@@ -125,7 +125,7 @@ export default function ZernioPanel() {
           />
         </Field>
         <p className="text-xs text-brand-500">
-          Stored on this device only, like your AI model key — it never syncs to the cloud
+          Stored on this device only, like your AI model key - it never syncs to the cloud
           and never leaves except to zernio.com.
         </p>
         <button
@@ -150,7 +150,7 @@ export default function ZernioPanel() {
           </p>
         ) : accounts.length === 0 ? (
           <p className="text-sm text-brand-500">
-            No accounts connected yet — connect them in your Zernio dashboard, then hit
+            No accounts connected yet - connect them in your Zernio dashboard, then hit
             Test connection.
           </p>
         ) : (
@@ -206,7 +206,7 @@ export default function ZernioPanel() {
             <ul className="mt-1">
               {tooLong.map((t) => (
                 <li key={t.platform} className="text-[12px] text-foreground">
-                  {t.platform} — {t.over} over the {t.limit} limit
+                  {t.platform} - {t.over} over the {t.limit} limit
                 </li>
               ))}
             </ul>
@@ -242,7 +242,7 @@ export default function ZernioPanel() {
       >
         <p className="text-sm text-ink">
           Filey publishes only to accounts you tick, and the AI assistant has to ask
-          before it posts anything — the same confirm step that guards sending money.
+          before it posts anything - the same confirm step that guards sending money.
         </p>
         <p className="mt-2 text-xs text-brand-500">
           There is no "post to all" shortcut on purpose. A social post is public and

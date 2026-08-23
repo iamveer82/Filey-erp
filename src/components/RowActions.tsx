@@ -1,11 +1,8 @@
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -22,6 +19,7 @@ import {
   X,
   Printer,
 } from "lucide-react";
+import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { cn } from "../lib/format";
 
 /**
@@ -31,54 +29,11 @@ import { cn } from "../lib/format";
  *  - align: "right" | "left"
  */
 /** Row menus sit inside the DataTable wrapper, which clips (overflow-hidden +
- *  overflow-x-auto in ui.tsx) — an absolutely-positioned dropdown was cut off
- *  and put a scrollbar on the table instead of showing Delete. Fixed position
- *  isn't clipped by an ancestor's overflow, so the menu is measured off its
- *  trigger button instead. Anchored to `bottom` when the trigger sits near the
- *  viewport floor, so the menu grows upward without having to measure it.
- *
- *  The menu is also rendered through a portal (see MenuSurface). Position
- *  fixed alone was not enough on the desktop build: WebView2 composited the
- *  menu into the scrolling table's layer and then only repainted the first
- *  row of it, so Send appeared to offer WhatsApp and nothing else — the Email
- *  and SMS entries were laid out at full size but never painted. */
-function useMenuPosition(open: boolean, anchor: RefObject<HTMLElement | null>) {
-  const [pos, setPos] = useState<{
-    top?: number;
-    bottom?: number;
-    right: number;
-  } | null>(null);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const place = () => {
-      const el = anchor.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const right = Math.max(8, window.innerWidth - r.right);
-      setPos(
-        spaceBelow < 160
-          ? { bottom: window.innerHeight - r.top + 4, right }
-          : { top: r.bottom + 4, right }
-      );
-    };
-    place();
-    // A fixed menu doesn't follow a scrolling table — close rather than drift.
-    const onScroll = () => setPos(null);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [open, anchor]);
-
-  return pos;
-}
+ *  overflow-x-auto in ui.tsx), and WebView2 composites non-ported menus into
+ *  the scrolling layer and partially repaints them — so the panels render
+ *  through the shared MenuPopover portal, anchored to their trigger button.
+ *  closeOnScroll keeps the table behaviour: a scrolling table closes its row
+ *  menu rather than dragging it along. */
 
 export function RowActions({
   onView,
@@ -102,38 +57,8 @@ export function RowActions({
 }) {
   const [openSend, setOpenSend] = useState(false);
   const [openMore, setOpenMore] = useState(false);
-  const sendRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
   const sendBtn = useRef<HTMLButtonElement>(null);
   const moreBtn = useRef<HTMLButtonElement>(null);
-  // The menus render in a portal, so they are no longer inside sendRef/moreRef
-  // in the DOM. Without their own refs the mousedown below would count a click
-  // on a menu item as "outside", unmount the menu, and the click would never
-  // reach the item — the action would silently do nothing.
-  const sendMenu = useRef<HTMLDivElement>(null);
-  const moreMenu = useRef<HTMLDivElement>(null);
-  const sendPos = useMenuPosition(openSend, sendBtn);
-  const morePos = useMenuPosition(openMore, moreBtn);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      const t = e.target as Node;
-      if (
-        sendRef.current &&
-        !sendRef.current.contains(t) &&
-        !sendMenu.current?.contains(t)
-      )
-        setOpenSend(false);
-      if (
-        moreRef.current &&
-        !moreRef.current.contains(t) &&
-        !moreMenu.current?.contains(t)
-      )
-        setOpenMore(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
 
   const btn =
     "h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
@@ -185,7 +110,7 @@ export function RowActions({
         </button>
       )}
       {onSend && (
-        <div className="relative" ref={sendRef}>
+        <div className="relative">
           <button
             ref={sendBtn}
             onClick={(e) => {
@@ -194,64 +119,67 @@ export function RowActions({
             }}
             title="Send"
             aria-label="Send"
+            aria-expanded={openSend}
             className={btn}
           >
             <Send className="h-3.5 w-3.5" />
           </button>
-          {openSend && sendPos && (
-            <MenuSurface style={sendPos} width="w-44" ref={sendMenu}>
-              {onSend.whatsapp && (
-                <MenuItem
-                  icon={MessageCircle}
-                  label="WhatsApp"
+          <MenuPopover
+            open={openSend}
+            onClose={() => setOpenSend(false)}
+            anchorRef={sendBtn}
+            align="end"
+            closeOnScroll
+            className="w-44"
+          >
+            {onSend.whatsapp && (
+              <MenuItemRow
+                icon={<MessageCircle size={14} />}
+                label="WhatsApp"
+                onClick={() => {
+                  setOpenSend(false);
+                  onSend.whatsapp!();
+                }}
+              />
+            )}
+            {onSend.email && (
+              <MenuItemRow
+                icon={<Mail size={14} />}
+                label="Email"
+                onClick={() => {
+                  setOpenSend(false);
+                  onSend.email!();
+                }}
+              />
+            )}
+            {onSend.sms && (
+              <MenuItemRow
+                icon={<Phone size={14} />}
+                label="SMS"
+                onClick={() => {
+                  setOpenSend(false);
+                  onSend.sms!();
+                }}
+              />
+            )}
+            {onSend.copyLink && (
+              <>
+                <MenuSep />
+                <MenuItemRow
+                  icon={<Link2 size={14} />}
+                  label="Copy link"
                   onClick={() => {
                     setOpenSend(false);
-                    onSend.whatsapp!();
+                    onSend.copyLink!();
                   }}
-                  iconClass="text-emerald-500"
                 />
-              )}
-              {onSend.email && (
-                <MenuItem
-                  icon={Mail}
-                  label="Email"
-                  onClick={() => {
-                    setOpenSend(false);
-                    onSend.email!();
-                  }}
-                  iconClass="text-sky-500"
-                />
-              )}
-              {onSend.sms && (
-                <MenuItem
-                  icon={Phone}
-                  label="SMS"
-                  onClick={() => {
-                    setOpenSend(false);
-                    onSend.sms!();
-                  }}
-                  iconClass="text-amber-500"
-                />
-              )}
-              {onSend.copyLink && (
-                <>
-                  <div className="my-1 border-t border-border" />
-                  <MenuItem
-                    icon={Link2}
-                    label="Copy link"
-                    onClick={() => {
-                      setOpenSend(false);
-                      onSend.copyLink!();
-                    }}
-                  />
-                </>
-              )}
-            </MenuSurface>
-          )}
+              </>
+            )}
+          </MenuPopover>
         </div>
       )}
       {onDelete && (
-        <div className="relative" ref={moreRef}>
+        <div className="relative">
           <button
             ref={moreBtn}
             onClick={(e) => {
@@ -260,80 +188,32 @@ export function RowActions({
             }}
             title="More"
             aria-label="More actions"
+            aria-expanded={openMore}
             className={btn}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
-          {openMore && morePos && (
-            <MenuSurface style={morePos} width="w-40" ref={moreMenu}>
-              <MenuItem
-                icon={Trash2}
-                label="Delete"
-                onClick={() => {
-                  setOpenMore(false);
-                  onDelete();
-                }}
-                iconClass="text-red-500"
-                labelClass="text-red-500"
-              />
-            </MenuSurface>
-          )}
+          <MenuPopover
+            open={openMore}
+            onClose={() => setOpenMore(false)}
+            anchorRef={moreBtn}
+            align="end"
+            closeOnScroll
+            className="w-40"
+          >
+            <MenuItemRow
+              danger
+              icon={<Trash2 size={14} />}
+              label="Delete"
+              onClick={() => {
+                setOpenMore(false);
+                onDelete();
+              }}
+            />
+          </MenuPopover>
         </div>
       )}
     </div>
-  );
-}
-
-/** The floating menu panel, rendered into <body> so no ancestor's overflow or
- *  compositing layer owns it. The theme class lives on <html>, so the portal
- *  keeps dark mode. */
-function MenuSurface({
-  style,
-  width,
-  ref,
-  children,
-}: {
-  style: CSSProperties;
-  width: string;
-  ref: RefObject<HTMLDivElement | null>;
-  children: ReactNode;
-}) {
-  return createPortal(
-    <div
-      ref={ref}
-      style={style}
-      className={cn(
-        "fixed z-50 rounded-md border border-border bg-card shadow-lg py-1 text-[13px]",
-        width
-      )}
-    >
-      {children}
-    </div>,
-    document.body
-  );
-}
-
-function MenuItem({
-  icon: Icon,
-  label,
-  onClick,
-  iconClass = "text-muted-foreground",
-  labelClass = "text-foreground",
-}: {
-  icon: typeof Eye;
-  label: string;
-  onClick: () => void;
-  iconClass?: string;
-  labelClass?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-hover transition-colors"
-    >
-      <Icon className={cn("h-3.5 w-3.5", iconClass)} />
-      <span className={labelClass}>{label}</span>
-    </button>
   );
 }
 

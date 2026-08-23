@@ -174,7 +174,7 @@ export default function ScanDocModal({
               {busy ? "Reading the document…" : fileName || "Upload a PDF or image"}
             </span>
             <span className="text-xs text-brand-400">
-              Your AI model extracts the fields — nothing is sent to Filey.
+              Your AI model extracts the fields - nothing is sent to Filey.
             </span>
             <input
               type="file"
@@ -188,7 +188,7 @@ export default function ScanDocModal({
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-xs text-brand-400">
-            <FileText size={14} /> {fileName} — review &amp; edit, then create the draft.
+            <FileText size={14} /> {fileName} - review &amp; edit, then create the draft.
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">

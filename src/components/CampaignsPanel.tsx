@@ -11,6 +11,7 @@ import {
 } from "../lib/api";
 import type { Lead } from "../lib/marketing";
 import { HOT_SCORE } from "../lib/marketing";
+import { SelectMenu } from "./ui-menu";
 import {
   buildRecipients,
   renderTemplate,
@@ -64,7 +65,7 @@ export default function CampaignsPanel({ leads }: { leads: Lead[] }) {
     const replyTo = company?.email?.trim();
     if (!replyTo)
       return toast.error(
-        "Add a company email in Settings → Company first — it is the unsubscribe address."
+        "Add a company email in Settings → Company first - it is the unsubscribe address."
       );
 
     const ok = await confirm({
@@ -152,7 +153,7 @@ export default function CampaignsPanel({ leads }: { leads: Lead[] }) {
         loading={loading}
         pageSize={10}
         rowKey={(c) => c.id}
-        empty="No campaigns yet — write one and it'll appear here"
+        empty="No campaigns yet - write one and it'll appear here"
         columns={[
           {
             key: "name",
@@ -291,7 +292,7 @@ function ComposeModal({
         audience: { filter: "leads", min_score: minScore || undefined },
         recipients,
       });
-      toast.success(`Draft saved — ${willSend.length} to send.`);
+      toast.success(`Draft saved - ${willSend.length} to send.`);
       onCreated();
     } catch (e) {
       toast.error(errMsg(e) || "Could not save campaign");
@@ -335,15 +336,15 @@ function ComposeModal({
               : ""}
           </p>
           <Field label="Only leads scoring at least">
-            <select
-              className="select"
-              value={minScore}
-              onChange={(e) => setMinScore(Number(e.target.value))}
-            >
-              <option value={0}>Everyone with an email</option>
-              <option value={30}>30+ — some history</option>
-              <option value={HOT_SCORE}>{HOT_SCORE}+ — hot leads only</option>
-            </select>
+            <SelectMenu
+              value={String(minScore)}
+              onChange={(v) => setMinScore(Number(v))}
+              options={[
+                { value: "0", label: "Everyone with an email" },
+                { value: "30", label: "30+ - some history" },
+                { value: String(HOT_SCORE), label: `${HOT_SCORE}+ - hot leads only` },
+              ]}
+            />
           </Field>
         </div>
 
@@ -357,7 +358,7 @@ function ComposeModal({
             </p>
             <p className="text-[12.5px] text-brand-500">
               {skipped.length
-                ? `${skipped.length} skipped — unsubscribed, duplicate address, or no email on file.`
+                ? `${skipped.length} skipped - unsubscribed, duplicate address, or no email on file.`
                 : "Nobody skipped."}
             </p>
             {skipped.length > 0 && (
@@ -367,7 +368,7 @@ function ComposeModal({
                     key={`${r.customer_id}-${r.email}`}
                     className="text-[11.5px] text-brand-400"
                   >
-                    {r.name} — {r.error}
+                    {r.name} - {r.error}
                   </li>
                 ))}
               </ul>

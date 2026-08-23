@@ -77,7 +77,7 @@ export default function PayslipPage() {
     if (recorded || saving) return;
     const ok = await confirm({
       title: "Record this payslip?",
-      message: `${employee.name} — ${periodLabel}, net ${aed(net)}. This posts the salary to your accounts as an expense paid from cash.`,
+      message: `${employee.name} - ${periodLabel}, net ${aed(net)}. This posts the salary to your accounts as an expense paid from cash.`,
       confirmLabel: "Record payslip",
     });
     if (!ok) return;
@@ -96,7 +96,7 @@ export default function PayslipPage() {
   return (
     <div className="animate-fade-up">
       <PageHeader
-        title={`Payslip — ${employee.name}`}
+        title={`Payslip - ${employee.name}`}
         subtitle={periodLabel}
         action={
           <div className="flex gap-2">
@@ -220,7 +220,7 @@ export default function PayslipPage() {
                 </tfoot>
               </table>
               <p className="text-[11px] text-gray-400 mt-6">
-                Computer-generated payslip — no signature required.
+                Computer-generated payslip - no signature required.
               </p>
             </div>
           </div>

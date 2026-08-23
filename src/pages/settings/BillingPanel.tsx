@@ -56,7 +56,7 @@ export default function BillingPanel() {
   // endless "Subscription updated" toasts after returning from Stripe.
   useEffect(() => {
     const c = params.get("checkout");
-    if (c === "success") toast.success("Subscription updated — welcome aboard!");
+    if (c === "success") toast.success("Subscription updated - welcome aboard!");
     else if (c === "cancel") toast.info("Checkout canceled.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -146,12 +146,12 @@ export default function BillingPanel() {
           {limit === Infinity
             ? "Unlimited on your plan."
             : pctUsed >= 90
-              ? "You're nearly out of space — upgrade your plan for more."
+              ? "You're nearly out of space - upgrade your plan for more."
               : "Counts customers, products, invoices, orders and quotes."}
         </p>
       </div>
 
-      {/* Two plans now, so two columns — a 4-up grid left them stranded at
+      {/* Two plans now, so two columns - a 4-up grid left them stranded at
           half width on desktop. */}
       <div className="grid gap-4 sm:grid-cols-2 items-stretch">
         {PLANS.map((p) => (
@@ -213,7 +213,7 @@ export default function BillingPanel() {
                     : p.kind === "contact"
                       ? "Contact sales"
                       : p.kind === "license"
-                        ? `Get ${p.name} — ${p.price}`
+                        ? `Get ${p.name} - ${p.price}`
                         : `Get ${p.name}`}
                 </button>
               )}

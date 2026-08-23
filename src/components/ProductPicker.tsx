@@ -139,7 +139,7 @@ export default function ProductPicker({
         <div className="flex-1 overflow-y-auto -mx-1 px-1 min-h-[140px]">
           {cart.length === 0 && (
             <p className="text-xs text-brand-400 text-center py-8">
-              No items yet — add products from the list.
+              No items yet - add products from the list.
             </p>
           )}
           {cart.map((item) => (

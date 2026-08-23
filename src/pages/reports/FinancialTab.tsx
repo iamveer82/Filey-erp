@@ -97,7 +97,7 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
           <div className="text-[14px] font-semibold text-foreground">Profit & Loss</div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Current period — from account balances
+            Current period - from account balances
           </div>
           <div className="mt-4 space-y-1">
             {/* Revenue */}

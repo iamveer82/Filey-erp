@@ -76,7 +76,7 @@ export default function FollowUpsPage() {
     <div className="animate-fade-up">
       <PageHeader
         title="Follow-ups"
-        subtitle="Reminders and to-dos — we surface them in-app when they're due"
+        subtitle="Reminders and to-dos. We surface them in-app when they're due"
       />
 
       <StatStrip className="mb-6" items={stats} />

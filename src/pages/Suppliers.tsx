@@ -27,6 +27,7 @@ import { aed, num, money, cn } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { Button, Card, Field, Badge, Modal, PageHeader, ErrorBanner } from "../components/primitives";
+import { keyActivate } from "../components/ui";
 import {
   RowActions,
   QuickViewModal,
@@ -199,7 +200,7 @@ export default function Suppliers() {
     <div className="animate-fade-up">
       <PageHeader
         title="Suppliers"
-        subtitle="Vendors you buy from — track balances and purchase history"
+        subtitle="Vendors you buy from: track balances and purchase history"
         action={
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="md" onClick={() => setManageOpen(true)}>
@@ -241,7 +242,7 @@ export default function Suppliers() {
                 setOpen(true);
               }}
             >
-              <Plus size={16} /> New Supplier
+              <Plus size={16} /> New supplier
             </Button>
           </div>
         }
@@ -351,7 +352,9 @@ export default function Suppliers() {
               {filtered.map((s) => (
                 <tr
                   key={s.id}
+                  tabIndex={0}
                   onClick={() => nav(`/suppliers/${s.id}`)}
+                  onKeyDown={keyActivate(() => nav(`/suppliers/${s.id}`))}
                   className="row-hover cursor-pointer"
                 >
                   <td className="td">
@@ -465,7 +468,7 @@ export default function Suppliers() {
         ))}
         {groups.length === 0 && (
           <Card className="col-span-full text-center text-sm text-brand-500">
-            No supplier groups yet — add products with categories to see sourcing
+            No supplier groups yet - add products with categories to see sourcing
             performance.
           </Card>
         )}
@@ -681,7 +684,7 @@ function SupplierModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={initial ? "Edit Supplier" : "New Supplier"}
+      title={initial ? "Edit Supplier" : "New supplier"}
     >
       <div className="space-y-3">
         <Field label="Name *">

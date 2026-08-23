@@ -11,7 +11,9 @@ import {
   ArrowLeft,
   Stamp,
   PenTool,
+  ChevronDown,
 } from "lucide-react";
+import { MenuPopover, MenuItemRow, MenuSep } from "../components/ui-menu";
 import {
   billing,
   tools,
@@ -211,7 +213,7 @@ function resolveBody(form: DeclForm): string {
 }
 
 /* ================================================================== */
-/*  List page — all created letters; "New Letter" opens the editor    */
+/*  List page — all created letters; "New letter" opens the editor    */
 /* ================================================================== */
 
 export default function DeclarationLetter() {
@@ -319,7 +321,7 @@ export default function DeclarationLetter() {
               })
             }
           >
-            <Plus size={16} /> New Letter
+            <Plus size={16} /> New letter
           </button>
         }
       />
@@ -347,7 +349,7 @@ export default function DeclarationLetter() {
         empty={
           search
             ? "No letters match your search"
-            : "No declaration letters yet — create your first one"
+            : "No declaration letters yet - create your first one"
         }
         rowKey={(d) => d.id}
         onRowClick={(d) => setEditing(d)}
@@ -632,7 +634,7 @@ function DeclarationEditor({
     <div className="animate-fade-up">
       <PageHeader
         title={isNew ? "New Declaration Letter" : "Edit Declaration Letter"}
-        subtitle="VAT supply declaration in the standard UAE format — print or email to your supplier"
+        subtitle="VAT supply declaration in the standard UAE format. Print or email to your supplier"
         action={
           <div className="flex items-center gap-2">
             <button className="btn-ghost" onClick={onBack}>
@@ -644,7 +646,7 @@ function DeclarationEditor({
             <button className="btn-ghost" onClick={downloadPdf}>
               <Download size={15} /> PDF
             </button>
-            <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            <button className="btn-ghost" onClick={handleSave} disabled={saving}>
               <Save size={15} /> {saving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -691,31 +693,11 @@ function DeclarationEditor({
             {(supplierList.length > 0 || customerList.length > 0) && (
               <div className="mb-3">
                 <Field label="Fill from saved supplier / buyer">
-                  <select
-                    className="input"
-                    value=""
-                    onChange={(e) => fillRecipient(e.target.value)}
-                  >
-                    <option value="">Select to auto-fill…</option>
-                    {supplierList.length > 0 && (
-                      <optgroup label="Suppliers">
-                        {supplierList.map((s) => (
-                          <option key={`s${s.id}`} value={`s:${s.id}`}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {customerList.length > 0 && (
-                      <optgroup label="Buyers (Customers)">
-                        {customerList.map((c) => (
-                          <option key={`c${c.id}`} value={`c:${c.id}`}>
-                            {c.company || c.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
+                  <RecipientFillMenu
+                    suppliers={supplierList}
+                    customers={customerList}
+                    onPick={fillRecipient}
+                  />
                 </Field>
               </div>
             )}
@@ -1073,5 +1055,81 @@ function DeclarationEditor({
         }
       />
     </div>
+  );
+}
+
+/** Auto-fill picker for the recipient block — the shared menu primitive with
+ *  Suppliers / Buyers groups instead of an optgroup <select>. Always shows the
+ *  placeholder label because picking is an action, not a persisted value. */
+function RecipientFillMenu({
+  suppliers,
+  customers,
+  onPick,
+}: {
+  suppliers: Supplier[];
+  customers: CrmCustomer[];
+  onPick: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        type="button"
+        ref={btnRef}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-9 w-full items-center justify-between gap-1.5 rounded-md border border-border bg-background px-3 text-[13px] text-foreground transition-colors hover:bg-hover"
+      >
+        <span className="min-w-0 flex-1 truncate text-left">
+          Select to auto-fill…
+        </span>
+        <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        closeOnScroll
+        className="max-h-72 overflow-y-auto"
+      >
+        {suppliers.length > 0 && (
+          <>
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-muted-foreground">
+              Suppliers
+            </div>
+            {suppliers.map((s) => (
+              <MenuItemRow
+                key={`s${s.id}`}
+                label={s.name}
+                onClick={() => {
+                  onPick(`s:${s.id}`);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </>
+        )}
+        {suppliers.length > 0 && customers.length > 0 && <MenuSep />}
+        {customers.length > 0 && (
+          <>
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-muted-foreground">
+              Buyers (Customers)
+            </div>
+            {customers.map((c) => (
+              <MenuItemRow
+                key={`c${c.id}`}
+                label={c.company || c.name}
+                onClick={() => {
+                  onPick(`c:${c.id}`);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </>
+        )}
+      </MenuPopover>
+    </>
   );
 }

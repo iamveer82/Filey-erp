@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Building2, Wallet, Coins, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
+import { log } from "../lib/log";
 import { aed, fmtDate, money, numInput } from "../lib/format";
 import {
   PageHeader,
@@ -20,6 +21,7 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { fin, tools } from "../lib/api";
+import { SelectMenu } from "../components/ui-menu";
 import {
   parseStatementCsv,
   matchStatement,
@@ -28,7 +30,7 @@ import {
 } from "../lib/bankRecon";
 
 const BANK_KEY = "filey_bank_accounts"; // device-local cache
-const BANK_SETTING_KEY = "bank_accounts"; // app_settings — synced + backed up
+const BANK_SETTING_KEY = "bank_accounts"; // app_settings - synced + backed up
 
 interface BankAccount {
   id: number;
@@ -58,7 +60,12 @@ function save(a: BankAccount[]) {
   }
   // Write-through to app_settings: bare localStorage never syncs across
   // devices and the desktop backup doesn't include it (same as challans).
-  void tools.setSetting(BANK_SETTING_KEY, JSON.stringify(a)).catch(() => {});
+  void tools.setSetting(BANK_SETTING_KEY, JSON.stringify(a)).catch((e) =>
+    // Local storage already holds it, so nothing is lost here — but a failed
+    // write-through means other devices never see it. Surface that in
+    // Settings -> Diagnostics instead of dropping it on the floor.
+    log.warn("sync", "bank accounts did not reach app_settings", e)
+  );
 }
 
 /** Pull accounts saved on the user's other devices; remote wins when present. */
@@ -131,7 +138,7 @@ export default function BankAccounts() {
   // shareVia just opens the channel with the details prefilled.
   const shareAccount = (kind: ShareKind, a: BankAccount) => {
     const text = [
-      `Bank details — ${a.bank_name}`,
+      `Bank details - ${a.bank_name}`,
       `Account: ${a.account_name}`,
       a.account_number ? `Account #: ${a.account_number}` : null,
       a.iban ? `IBAN: ${a.iban}` : null,
@@ -139,7 +146,7 @@ export default function BankAccounts() {
     ]
       .filter(Boolean)
       .join("\n");
-    shareVia(kind, { text, url: `Bank details — ${a.bank_name}` });
+    shareVia(kind, { text, url: `Bank details - ${a.bank_name}` });
   };
 
   const q = search.trim().toLowerCase();
@@ -171,7 +178,7 @@ export default function BankAccounts() {
                 setOpen(true);
               }}
             >
-              <Plus size={16} /> Add Account
+              <Plus size={16} /> Add account
             </button>
           </div>
         }
@@ -321,7 +328,7 @@ export default function BankAccounts() {
         data={
           quickView
             ? {
-                title: `${quickView.bank_name} — ${quickView.account_name}`,
+                title: `${quickView.bank_name} - ${quickView.account_name}`,
                 subtitle: "Company bank account",
                 badge: <Badge tone="info">{quickView.currency}</Badge>,
                 meta: [
@@ -444,7 +451,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       />
       <p className="text-xs text-brand-500 mt-1.5">
-        Upload a statement CSV (Date, Description, Amount — or Debit/Credit
+        Upload a statement CSV (Date, Description, Amount - or Debit/Credit
         columns). Lines are matched to your cash/bank ledger by amount and date
         (±4 days).
       </p>
@@ -480,7 +487,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
           {result.unmatchedLines.length > 0 && (
             <ReconList
               title="On the statement, not in your books"
-              hint="Money out can be recorded as an expense here; money in usually belongs to an invoice payment — record it there."
+              hint="Money out can be recorded as an expense here; money in usually belongs to an invoice payment - record it there."
               rows={result.unmatchedLines.map((l, i) => ({
                 date: l.date,
                 desc: l.description,
@@ -620,16 +627,17 @@ function BankModal({
           />
         </Field>
         <Field label="Currency">
-          <select
-            className="select"
+          <SelectMenu
+            ariaLabel="Currency"
             value={f.currency}
-            onChange={(e) => setF({ ...f, currency: e.target.value })}
-          >
-            <option value="AED">AED</option>
-            <option value="USD">USD</option>
-            <option value="EUR">EUR</option>
-            <option value="GBP">GBP</option>
-          </select>
+            onChange={(currency) => setF({ ...f, currency })}
+            options={[
+              { value: "AED", label: "AED" },
+              { value: "USD", label: "USD" },
+              { value: "EUR", label: "EUR" },
+              { value: "GBP", label: "GBP" },
+            ]}
+          />
         </Field>
         <Field label="Opening Balance">
           <input
@@ -655,7 +663,7 @@ function BankModal({
           disabled={!valid}
           onClick={() => onSaved(f as BankAccount)}
         >
-          {edit ? "Update" : "Add Account"}
+          {edit ? "Update" : "Add account"}
         </button>
       </div>
     </Modal>

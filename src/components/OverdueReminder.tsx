@@ -31,7 +31,7 @@ export default function OverdueReminder() {
         if (overdue.length > 0) {
           toast.notify({
             title: "Overdue invoices",
-            message: `${overdue.length} invoice${overdue.length > 1 ? "s are" : " is"} past due — time to follow up.`,
+            message: `${overdue.length} invoice${overdue.length > 1 ? "s are" : " is"} past due - time to follow up.`,
           });
         }
         sessionStorage.setItem(FLAG, "1");

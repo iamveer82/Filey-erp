@@ -41,6 +41,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "../components/ui-menu";
 import { aed, fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import {
   docLineAmount,
@@ -420,7 +421,7 @@ export default function PurchaseOrders() {
       const eta = r.expected_date ? ` ETA ${fmtDate(r.expected_date)}.` : "";
       const text = `Purchase Order ${doc.po_number} to ${
         doc.supplier_name || r.supplier_name
-      } — ${doc.items.length} item(s), ${money(r.total, ccy)}.${eta}`;
+      } - ${doc.items.length} item(s), ${money(r.total, ccy)}.${eta}`;
       if (kind === "email") {
         await sendShareEmail(email, `Purchase Order ${doc.po_number}`, text);
         toast.success(`Purchase order emailed to ${email}`);
@@ -543,7 +544,7 @@ export default function PurchaseOrders() {
         empty={
           search || statusFilter !== "all"
             ? "No purchase orders match your filters"
-            : "No purchase orders yet — create your first one"
+            : "No purchase orders yet - create your first one"
         }
         rowKey={(r) => r.id}
         bulkActions={[
@@ -1041,7 +1042,7 @@ function Editor({
   };
 
   const addItemFromProduct = (p: Product) => {
-    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" - ");
     setForm({
       ...form,
       items: [
@@ -1345,13 +1346,13 @@ function Editor({
 
           {form.status === "draft" && (
             <button className="btn-primary" onClick={() => setStatus("sent")} disabled={saving}>
-              <Send size={15} /> Mark Sent
+              <Send size={15} /> Mark sent
             </button>
           )}
           {form.status === "sent" && (
             <>
               <button className="btn-primary" onClick={handleReceive} disabled={saving}>
-                <Truck size={15} /> Mark Received
+                <Truck size={15} /> Mark received
               </button>
               <button className="btn-ghost" onClick={() => setStatus("cancelled")} disabled={saving}>
                 <X size={15} /> Cancel
@@ -1431,23 +1432,22 @@ function Editor({
                 <div className="space-y-3">
                   <Field label="Supplier">
                     <div className="flex gap-2">
-                      <select
-                        className="select"
+                      <SelectMenu
                         value={form.supplier_id ? String(form.supplier_id) : ""}
-                        onChange={(e) => {
-                          const s = suppliers.find((x) => String(x.id) === e.target.value);
+                        onChange={(v) => {
+                          const s = suppliers.find((x) => String(x.id) === v);
                           if (s) applySupplier(s);
                         }}
-                      >
-                        <option value="">
-                          {suppliers.length ? "Select saved supplier…" : "No saved suppliers yet"}
-                        </option>
-                        {suppliers.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          {
+                            value: "",
+                            label: suppliers.length
+                              ? "Select saved supplier…"
+                              : "No saved suppliers yet",
+                          },
+                          ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
+                        ]}
+                      />
                       <button
                         type="button"
                         className="btn-ghost shrink-0"
@@ -1461,7 +1461,7 @@ function Editor({
                   <Field label="Supplier Name">
                     <input
                       className="input"
-                      placeholder="Acme Supplies LLC"
+                      placeholder="Emirates Steel Supplies LLC"
                       value={form.supplier_name}
                       onChange={(e) => set("supplier_name", e.target.value)}
                     />
@@ -1522,17 +1522,14 @@ function Editor({
                     />
                   </Field>
                   <Field label="Currency">
-                    <select
-                      className="select"
+                    <SelectMenu
                       value={form.currency || "AED"}
-                      onChange={(e) => set("currency", e.target.value)}
-                    >
-                      {CURRENCIES.map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.code} — {c.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => set("currency", v)}
+                      options={CURRENCIES.map((c) => ({
+                        value: c.code,
+                        label: `${c.code} - ${c.name}`,
+                      }))}
+                    />
                   </Field>
                   <button className="btn-ghost w-full" onClick={onEditCompany}>
                     <Building2 size={15} /> Apply company defaults
@@ -1567,21 +1564,22 @@ function Editor({
                 </div>
                 {form.unit_price_formula && (
                   <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      className="input text-xs py-1.5 h-8"
+                    <SelectMenu
+                      size="sm"
+                      className="w-auto"
                       value={form.unit_price_formula.a || ""}
-                      onChange={(e) =>
-                        set("unit_price_formula", { a: e.target.value, b: "unit_price" })
+                      onChange={(v) =>
+                        set("unit_price_formula", { a: v, b: "unit_price" })
                       }
-                    >
-                      <option value="">Select field</option>
-                      <option value="qty">Qty</option>
-                      {form.customColumns.map((c) => (
-                        <option key={c.key} value={c.key}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: "Select field" },
+                        { value: "qty", label: "Qty" },
+                        ...form.customColumns.map((c) => ({
+                          value: c.key,
+                          label: c.label,
+                        })),
+                      ]}
+                    />
                     <span className="text-brand-400">× unit cost</span>
                     <span className="text-[10px] text-brand-400">→ Amount</span>
                   </div>
@@ -1807,13 +1805,13 @@ function Editor({
 
               <div className="flex flex-wrap gap-2 mt-3">
                 <button className="btn-primary" onClick={addItem}>
-                  <Plus size={14} /> Add Item
+                  <Plus size={14} /> Add item
                 </button>
                 <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
                   <PackageCheck size={13} /> Import from Inventory
                 </button>
                 <button className="btn-ghost text-xs" onClick={addCustomColumn}>
-                  <Plus size={12} /> Add Field
+                  <Plus size={12} /> Add field
                 </button>
                 <button
                   type="button"
@@ -1911,17 +1909,14 @@ function Editor({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold text-brand-500">Status</p>
-                    <select
-                      className="select"
+                    <SelectMenu
                       value={form.status}
-                      onChange={(e) => set("status", e.target.value)}
-                    >
-                      {["draft", "sent", "received", "cancelled"].map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => set("status", v)}
+                      options={["draft", "sent", "received", "cancelled"].map((s) => ({
+                        value: s,
+                        label: s,
+                      }))}
+                    />
                   </div>
                   <Field label="Notes">
                     <textarea
@@ -2018,13 +2013,10 @@ function Editor({
             <div className="card !p-4">
               <div className="no-print flex items-start justify-between mb-3">
                 <div>
-                  <p className="font-semibold text-ink flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold">
-                      2
-                    </span>
-                    Preview
-                  </p>
-                  <p className="text-xs text-brand-500 mt-0.5 ml-8">
+                  {/* Not a numbered step, same as the invoice editor. This badge
+                      read "2", colliding with the real step 2 in the form. */}
+                  <p className="font-semibold text-ink">Preview</p>
+                  <p className="text-xs text-brand-500 mt-0.5">
                     This is how your PO will look
                   </p>
                 </div>
@@ -2151,7 +2143,7 @@ function Editor({
         }
       />
 
-      {/* Off-screen export container — always mounted so PDF export works
+      {/* Off-screen export container - always mounted so PDF export works
           even when the preview panel is collapsed. */}
       {(() => {
         const exportPages = paginateItems(docItems);
@@ -2559,7 +2551,7 @@ function PoPaymentsModal({
 
   const ccy = po.currency || "AED";
   return (
-    <Modal open onClose={onClose} title={`Payments — ${po.po_number}`}>
+    <Modal open onClose={onClose} title={`Payments - ${po.po_number}`}>
       <div className="grid grid-cols-3 gap-2 mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[10px] uppercase text-brand-400">Total</p>
@@ -2590,12 +2582,17 @@ function PoPaymentsModal({
         </div>
         <div className="w-32">
           <label className="text-[10px] font-semibold text-brand-400 block mb-1">Method</label>
-          <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option>bank transfer</option>
-            <option>cash</option>
-            <option>cheque</option>
-            <option>online</option>
-          </select>
+          <SelectMenu
+            ariaLabel="Payment method"
+            value={method}
+            onChange={(v) => setMethod(v)}
+            options={[
+              { value: "bank transfer", label: "bank transfer" },
+              { value: "cash", label: "cash" },
+              { value: "cheque", label: "cheque" },
+              { value: "online", label: "online" },
+            ]}
+          />
         </div>
         <div className="w-32">
           <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>

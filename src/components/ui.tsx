@@ -67,8 +67,8 @@ export function ShareToggle({
       onClick={() => onToggle(!shared)}
       title={
         shared
-          ? "Shared with your team — click to make private"
-          : "Private to you — click to share with your team"
+          ? "Shared with your team - click to make private"
+          : "Private to you - click to share with your team"
       }
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors",
@@ -203,8 +203,10 @@ export function MetricCard({
       : changeTone === "warn"
         ? "text-warning"
         : "text-success";
+  // No border-color transition: the base colour is a theme custom property, and
+  // animating it leaves the previous theme's colour painted on a flip.
   return (
-    <CardPrimitive className="p-4 h-full transition-[border-color] duration-200 hover:border-muted-foreground/40">
+    <CardPrimitive className="p-4 h-full hover:border-border">
       <div className="flex items-start gap-3 h-full min-h-0">
         {icon && (
           <div
@@ -331,6 +333,28 @@ export interface BulkAction<T> {
   icon?: ReactNode;
   run: (selected: T[]) => Promise<void> | void;
   danger?: boolean;
+}
+
+/** A click landing on one of these is the control's own, not the row's. */
+const ROW_CLICK_IGNORE =
+  "button, a, input, select, label, [role='menu'], [data-no-row-click]";
+
+/**
+ * Enter/Space activation for something clickable that can't be a real <button>:
+ * a table row, or a control nested inside another button. Native buttons get
+ * this from the browser and must not use it.
+ */
+export function keyActivate(fn: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    // A control *inside* us handles its own Enter/Space; the keydown bubbles up
+    // here anyway, so bail. An interactive *ancestor* is not our problem.
+    const hit = (e.target as HTMLElement).closest(ROW_CLICK_IGNORE);
+    if (hit && hit !== e.currentTarget && e.currentTarget.contains(hit)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    fn();
+  };
 }
 
 export function DataTable<T>({
@@ -568,19 +592,16 @@ export function DataTable<T>({
                 return (
                   <tr
                     key={k}
+                    tabIndex={onRowClick ? 0 : undefined}
                     onClick={
                       onRowClick
                         ? (e) => {
-                            if (
-                              (e.target as HTMLElement).closest(
-                                "button, a, input, select, label, [role='menu'], [data-no-row-click]"
-                              )
-                            )
-                              return;
+                            if ((e.target as HTMLElement).closest(ROW_CLICK_IGNORE)) return;
                             onRowClick(row);
                           }
                         : undefined
                     }
+                    onKeyDown={onRowClick ? keyActivate(() => onRowClick(row)) : undefined}
                     className={cn(
                       "row-hover",
                       checked && "bg-primary-50/40",

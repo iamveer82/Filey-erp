@@ -21,6 +21,7 @@ import { downloadCsv } from "../lib/csv";
 import { num, cn } from "../lib/format";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { inputTypeFor, validateCustomValue, type CustomFieldDef } from "../lib/customFields";
+import { SelectMenu } from "../components/ui-menu";
 import {
   PageHeader,
   Modal,
@@ -29,6 +30,7 @@ import {
   Field,
   ErrorBanner,
   InfoCard,
+  keyActivate,
 } from "../components/ui";
 import {
   Tabs,
@@ -160,7 +162,7 @@ export default function Customers() {
     <div className="animate-fade-up">
       <PageHeader
         title="Customers"
-        subtitle="Your customer directory — names, TRN and addresses pulled onto invoices & quotations"
+        subtitle="Your customer directory: names, TRN and addresses pulled onto invoices & quotations"
         action={
           <div className="flex gap-2 flex-wrap">
             <button
@@ -323,7 +325,9 @@ export default function Customers() {
               {filtered.map((c) => (
                 <tr
                   key={c.id}
+                  tabIndex={0}
                   onClick={() => nav(`/customers/${c.id}`)}
+                  onKeyDown={keyActivate(() => nav(`/customers/${c.id}`))}
                   className="row-hover cursor-pointer"
                 >
                   <td className="td">
@@ -841,7 +845,7 @@ function CustomerModal({
             className="input"
             value={f.company}
             onChange={(e) => setF({ ...f, company: e.target.value })}
-            placeholder="Acme Trading LLC"
+            placeholder="Gulf Line Trading LLC"
           />
         </Field>
         <Field label="TRN">
@@ -890,18 +894,17 @@ function CustomerModal({
             />
           </Field>
           <Field label="Emirate">
-            <select
-              className="select"
+            <SelectMenu
+              ariaLabel="Emirate"
               value={f.country_subdivision}
-              onChange={(e) => setF({ ...f, country_subdivision: e.target.value })}
-            >
-              <option value="">Select…</option>
-              {EMIRATES.map((em) => (
-                <option key={em.code} value={em.code}>
-                  {em.label}
-                </option>
-              ))}
-            </select>
+              onChange={(country_subdivision) =>
+                setF({ ...f, country_subdivision })
+              }
+              options={[
+                { value: "", label: "Select…" },
+                ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
+              ]}
+            />
           </Field>
           <Field label="Country">
             <input
@@ -978,26 +981,27 @@ function CustomerModal({
                           </span>
                         </label>
                       ) : def.type === "select" ? (
-                        <select
-                          className={cn("select", err && "border-danger")}
+                        <SelectMenu
+                          ariaLabel={def.label}
+                          className={cn(err && "border-danger")}
                           value={v}
-                          onChange={(e) =>
+                          onChange={(value) =>
                             setF({
                               ...f,
                               custom_fields: {
                                 ...f.custom_fields,
-                                [def.key]: e.target.value,
+                                [def.key]: value,
                               },
                             })
                           }
-                        >
-                          <option value="">— Select —</option>
-                          {def.options?.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: "", label: "Select…" },
+                            ...(def.options ?? []).map((o) => ({
+                              value: o,
+                              label: o,
+                            })),
+                          ]}
+                        />
                       ) : (
                         <input
                           className={cn("input", err && "border-danger")}

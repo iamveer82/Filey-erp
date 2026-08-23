@@ -34,7 +34,7 @@ const humanError = (e: unknown): string => {
 };
 
 /* The primary action deliberately mirrors the sign-up page on gofiley.com —
-   same amber gradient, same 44px height — so signing up on the site and
+   same amber gradient, same 44px height - so signing up on the site and
    signing in here read as one product rather than two. It is fixed brand
    colour rather than the user's accent: this screen is pre-auth, before any
    accent preference has loaded. */
@@ -476,7 +476,7 @@ export default function Login() {
                     setMethod("otp");
                     setErr(null);
                     setMsg(
-                      "No problem — we'll email you a one-time code to sign in. You can set a new password afterwards in Settings → Security."
+                      "No problem. We'll email you a one-time code to sign in. You can set a new password afterwards in Settings → Security."
                     );
                   }}
                 >
@@ -503,7 +503,7 @@ export default function Login() {
               {localMode && offline && (
                 <Msg kind="msg">
                   {deviceClaimed
-                    ? "You're offline. Sign in with the account already on this device — your data is here and stays here."
+                    ? "You're offline. Sign in with the account already on this device. Your data is here and stays here."
                     : "You're offline. This device isn't linked to a Filey account yet, and creating one needs a connection just this once."}
                 </Msg>
               )}

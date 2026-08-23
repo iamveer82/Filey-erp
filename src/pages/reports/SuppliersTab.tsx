@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { aed, num, cn } from "../../lib/format";
 import { useChartColors } from "../../lib/accent";
+import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
   useTopSuppliers,
@@ -33,9 +34,9 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
   /* Payables aging bar chart data */
   const agingData = [
     { name: "Current", value: aging.current },
-    { name: "1–30", value: aging.d30 },
-    { name: "31–60", value: aging.d60 },
-    { name: "61–90", value: aging.d90 },
+    { name: "1-30", value: aging.d30 },
+    { name: "31-60", value: aging.d60 },
+    { name: "61-90", value: aging.d90 },
     { name: "90+", value: aging.d90p },
   ];
 
@@ -118,6 +119,9 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
+              {allZero(topSuppliers, "total") ? (
+                <ChartEmpty hint="Your biggest suppliers rank here once purchases exist." />
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={topSuppliers}
@@ -160,6 +164,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                   />
                 </BarChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
         </div>
@@ -173,6 +178,9 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             Open purchase orders by age bucket
           </div>
           <div className="h-[280px] mt-3">
+            {allZero(agingData, "value") ? (
+              <ChartEmpty hint="Open purchase orders sit here once you raise one." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={agingData}
@@ -210,6 +218,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>

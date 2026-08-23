@@ -107,7 +107,7 @@ export default function FitPreview({
         </div>
       ) : (
         /* Scale up (zoom in): use CSS zoom so browser re-layouts at the
-           larger size — crisper than bitmap-scaling a full-size render.
+           larger size - crisper than bitmap-scaling a full-size render.
            Overflow on fp-box enables scrolling when zoomed past 100%. */
         <div
           className="invoice-print bg-white mx-auto"

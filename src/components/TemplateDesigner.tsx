@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/format";
 import { tools } from "../lib/api";
+import { SelectMenu } from "./ui-menu";
 import {
   LetterheadConfig,
   loadLetterhead,
@@ -531,17 +532,11 @@ export default function TemplateDesigner({
                 <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Type size={13} /> Font Family
                 </label>
-                <select
-                  className="select h-9"
+                <SelectMenu
                   value={tpl.font}
-                  onChange={(e) => set("font", e.target.value)}
-                >
-                  {FONTS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => set("font", v)}
+                  options={FONTS.map((f) => ({ value: f.value, label: f.label }))}
+                />
               </div>
 
               {/* Layout */}
@@ -661,7 +656,7 @@ export default function TemplateDesigner({
                 disabled={!tpl.name.trim()}
                 className="btn-primary w-full h-10 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Plus size={16} /> Create Template
+                <Plus size={16} /> Create template
               </button>
             </>
           ) : tab === "upload" ? (
@@ -706,7 +701,7 @@ export default function TemplateDesigner({
                           <FileText size={48} />
                           <div className="text-left">
                             <p className="font-medium text-sm text-ink">{file?.name}</p>
-                            <p className="text-xs">PDF — first page used as background</p>
+                            <p className="text-xs">PDF - first page used as background</p>
                           </div>
                         </div>
                       )}

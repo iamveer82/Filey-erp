@@ -9,6 +9,8 @@ import {
   ScanText,
   Check,
   Download,
+  TrendingUp,
+  TrendingDown,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -28,7 +30,7 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string }[] = [
   {
     icon: Boxes,
     title: "ERP that fits",
-    desc: "Inventory, orders, suppliers and purchasing — one connected source of truth.",
+    desc: "Inventory, orders, suppliers and purchasing in one connected source of truth.",
   },
   {
     icon: Target,
@@ -43,7 +45,7 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string }[] = [
   {
     icon: Wrench,
     title: "Document tools",
-    desc: "Merge, split, convert, sign and OCR — a full PDF suite, processed in the cloud.",
+    desc: "Merge, split, convert, sign and OCR. A full PDF suite, processed in the cloud.",
   },
   {
     icon: Sparkles,
@@ -57,10 +59,28 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string }[] = [
   },
 ];
 
+/** Sample figures for the hero preview. Not real customer data, and the panel
+ *  says so on screen — do not present these as product metrics. */
+const PREVIEW_STATS: {
+  label: string;
+  value: string;
+  delta: string;
+  dir: "up" | "down";
+}[] = [
+  { label: "Total items", value: "1,284", delta: "+12%", dir: "up" },
+  { label: "Inventory value", value: "AED 482k", delta: "+4%", dir: "up" },
+  { label: "Open orders", value: "37", delta: "+8", dir: "up" },
+  { label: "Overdue", value: "4", delta: "-1", dir: "down" },
+];
+
+const PREVIEW_REVENUE = [35, 48, 52, 62, 58, 44, 70, 65, 78, 85, 72, 90];
+
+/** Counted, not estimated: MODULES in src/modules/registry, PDF_TOOLS and its
+ *  `cat` values in src/components/PdfToolbox. Recount before changing these. */
 const STATS: { value: string; label: string }[] = [
-  { value: "14", label: "modules" },
-  { value: "95+", label: "document tools" },
-  { value: "1", label: "place for everything" },
+  { value: "28", label: "modules" },
+  { value: "88", label: "document tools" },
+  { value: "7", label: "tool categories" },
 ];
 
 export default function Landing({ onGetStarted }: { onGetStarted: () => void }) {
@@ -84,12 +104,14 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             >
               Sign in
             </button>
+            {/* One label per intent: the hero, the pricing card and the closing
+                band all say "Get started free", so the nav says it too. */}
             <button
-              aria-label="Get started"
+              aria-label="Get started free"
               onClick={onGetStarted}
               className="btn-primary"
             >
-              Get started
+              Get started free
             </button>
           </div>
         </div>
@@ -98,20 +120,15 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
       {/* ───────── Hero ───────── */}
       <section className="relative overflow-hidden">
         <div className="relative mx-auto max-w-3xl px-6 pt-20 pb-10 text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-            <Sparkles size={13} className="text-primary-600 dark:text-primary-400" />
-            AI-powered business suite
-          </span>
-
-          <h1 className="mt-5 text-4xl font-medium leading-[1.08] text-ink sm:text-6xl">
+          <h1 className="text-4xl font-medium leading-[1.08] text-ink sm:text-6xl">
             Run your whole business
             <br className="hidden sm:block" /> in{" "}
             <span className="text-primary-700 dark:text-primary-300">one place</span>
           </h1>
 
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-brand-500 sm:text-lg">
-            ERP, CRM, invoicing and a full document-tools suite — with AI built in. Filey
-            replaces a stack of tools with one clean, online workspace.
+            ERP, CRM, invoicing and a full document-tools suite, with AI built in. One
+            workspace instead of a stack of tools.
           </p>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
@@ -129,31 +146,18 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
           </p>
         </div>
 
-        {/* Product preview */}
+        {/* Product preview. This is the app's own dashboard components rendered with
+            sample figures, labelled as such - not a mock-up of a browser window.
+            TODO: replace with a real screenshot of the running app once one exists. */}
         <div className="relative mx-auto -mb-10 max-w-5xl px-6">
           <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <div className="flex items-center gap-1.5 border-b border-border px-4 py-2.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
-              <span className="h-2.5 w-2.5 rounded-full bg-brand-300" />
-              <span className="ml-2 text-[11px] font-medium text-brand-400">
-                app.filey — Dashboard
-              </span>
+            <div className="flex items-baseline justify-between border-b border-border px-5 py-3">
+              <h3 className="text-base font-medium">Al Reem Trading</h3>
+              <span className="text-[11px] font-medium text-brand-400">Sample data</span>
             </div>
             <div className="p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium text-base">Welcome back, Acme Corp</h3>
-                <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-0.5 text-[10px] font-medium text-success">
-                  <span className="h-1.5 w-1.5 rounded-full bg-success" /> Connected
-                </span>
-              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  ["Total Items", "1,284", "+12%", "success"],
-                  ["Inventory Value", "AED 482k", "+4%", "success"],
-                  ["Open Orders", "37", "+8", "warning"],
-                  ["Overdue", "4", "-1", "danger"] as const,
-                ].map(([label, value, delta, tone]) => (
+                {PREVIEW_STATS.map(({ label, value, delta, dir }) => (
                   <div
                     key={label}
                     className="rounded-xl border border-border bg-card p-3"
@@ -162,24 +166,25 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
                     <p className="mt-1 text-lg tabular-nums">{value}</p>
                     <span
                       className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${
-                        tone === "success"
-                          ? "text-success"
-                          : tone === "warning"
-                            ? "text-warning"
-                            : "text-danger"
+                        dir === "up" ? "text-success" : "text-danger"
                       }`}
                     >
-                      <ArrowRight size={12} /> {delta}
+                      {dir === "up" ? (
+                        <TrendingUp size={12} />
+                      ) : (
+                        <TrendingDown size={12} />
+                      )}{" "}
+                      {delta}
                     </span>
                   </div>
                 ))}
               </div>
               <div className="rounded-xl border border-border bg-muted p-4">
                 <p className="text-[10px] font-medium text-brand-400 mb-3">
-                  Monthly Revenue
+                  Monthly revenue
                 </p>
                 <div className="flex items-end gap-1.5 h-20">
-                  {[35, 48, 52, 62, 58, 44, 70, 65, 78, 85, 72, 90].map((h, i) => (
+                  {PREVIEW_REVENUE.map((h, i) => (
                     <div
                       key={i}
                       className="flex-1 rounded-full bg-primary-400"
@@ -195,7 +200,10 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
 
       {/* ───────── Features ───────── */}
       <section className="mx-auto max-w-6xl px-6 pt-24 pb-16">
-        <div className="mx-auto max-w-2xl text-center">
+        {/* Left-aligned on purpose. The hero, pricing and closing band are all
+            centred, and a fourth centred header made the page read as one
+            templated rhythm rather than a sequence of distinct sections. */}
+        <div className="max-w-2xl">
           <h2 className="text-3xl font-medium sm:text-4xl">
             Everything your business runs on
           </h2>
@@ -232,7 +240,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-3xl font-medium sm:text-4xl">Simple, honest pricing</h2>
           <p className="mt-3 text-brand-500">
-            Start free, or own it outright — one payment, yours for good.
+            Start free, or own it outright: one payment, yours for good.
           </p>
         </div>
 
@@ -295,8 +303,8 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
             className="font-medium text-ink hover:underline"
           >
             Download the desktop app
-          </a>{" "}
-          — every plan starts with the free download.
+          </a>
+          . Every plan starts with the free download.
         </p>
       </section>
 
@@ -309,7 +317,7 @@ export default function Landing({ onGetStarted }: { onGetStarted: () => void }) 
               Start running Filey today
             </h2>
             <p className="mx-auto mt-3 max-w-md opacity-70">
-              Bring inventory, sales, finance and documents into one place — free to
+              Bring inventory, sales, finance and documents into one place. Free to
               start.
             </p>
             <button

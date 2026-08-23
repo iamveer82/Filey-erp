@@ -22,6 +22,7 @@ import {
   type ReceiptSummary,
 } from "../lib/api";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "../components/ui-menu";
 import { fmtDate, money, CURRENCIES, errMsg, todayYmd } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import ColorPicker from "../components/ColorPicker";
@@ -490,7 +491,7 @@ export default function PaymentReceipt() {
               <Download size={14} /> Export
             </button>
             <button className="btn-primary" onClick={newReceipt}>
-              <Plus size={16} /> Record Payment
+              <Plus size={16} /> Record payment
             </button>
           </div>
         }
@@ -536,7 +537,7 @@ export default function PaymentReceipt() {
             </div>
           </div>
 
-          {/* DataTable draws its own card — the extra wrapper here was the
+          {/* DataTable draws its own card - the extra wrapper here was the
               reason receipts looked boxed-in next to the other sections. */}
           <DataTable
               pageSize={10}
@@ -664,7 +665,7 @@ export default function PaymentReceipt() {
                 >
                   <ArrowLeft size={14} /> Back to list
                 </button>
-                <button className="btn-primary flex items-center gap-1.5" onClick={save} disabled={saving}>
+                <button className="btn-ghost flex items-center gap-1.5" onClick={save} disabled={saving}>
                   <Save size={14} /> {saving ? "Saving…" : "Save"}
                 </button>
                 <button className="btn-secondary flex items-center gap-1.5" onClick={downloadPdf}>
@@ -754,17 +755,14 @@ export default function PaymentReceipt() {
 
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Field label="Currency">
-                          <select
-                            className="select"
+                          <SelectMenu
                             value={form.currency || "AED"}
-                            onChange={(e) => update({ currency: e.target.value })}
-                          >
-                            {CURRENCIES.map((c) => (
-                              <option key={c.code} value={c.code}>
-                                {c.code} — {c.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(v) => update({ currency: v })}
+                            options={CURRENCIES.map((c) => ({
+                              value: c.code,
+                              label: `${c.code} - ${c.name}`,
+                            }))}
+                          />
                         </Field>
                         <Field label="Amount">
                           <input

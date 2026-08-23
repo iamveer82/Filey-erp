@@ -4,6 +4,7 @@ import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
 import { RowActions } from "../components/RowActions";
 import { tools } from "../lib/api";
+import { SelectMenu } from "../components/ui-menu";
 
 const TMPL_KEY = "filey_email_templates";
 /** Mirror key in Supabase (app_settings) for cross-device sync. */
@@ -71,7 +72,7 @@ const DEFAULT_TEMPLATES: Omit<EmailTemplate, "id" | "created_at">[] = [
   },
   {
     name: "Payment Received",
-    subject: "Payment Received — Receipt {{number}}",
+    subject: "Payment Received - Receipt {{number}}",
     body: "Dear {{customer}},\n\nWe have received your payment of {{amount}}.\n\nReceipt: {{number}}\nDate: {{date}}\n\nThank you for your business.\n{{company}}",
     category: "Payment Receipt",
   },
@@ -148,7 +149,7 @@ export default function EmailTemplates() {
               setOpen(true);
             }}
           >
-            <Plus size={16} /> New Template
+            <Plus size={16} /> New template
           </button>
         }
       />
@@ -254,7 +255,7 @@ function TemplateModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={edit ? "Edit Template" : "New Template"}
+      title={edit ? "Edit Template" : "New template"}
       size="lg"
     >
       <div className="space-y-3">
@@ -268,17 +269,12 @@ function TemplateModal({
             />
           </Field>
           <Field label="Category">
-            <select
-              className="select"
+            <SelectMenu
+              ariaLabel="Category"
               value={f.category}
-              onChange={(e) => setF({ ...f, category: e.target.value })}
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              onChange={(category) => setF({ ...f, category })}
+              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+            />
           </Field>
         </div>
         <Field label="Subject *">
@@ -312,7 +308,7 @@ function TemplateModal({
           disabled={!valid}
           onClick={() => onSaved(f as EmailTemplate)}
         >
-          {edit ? "Update" : "Create Template"}
+          {edit ? "Update" : "Create template"}
         </button>
       </div>
     </Modal>

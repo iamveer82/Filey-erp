@@ -12,6 +12,11 @@
   :root {
     /* Light theme */
     --background: 0 0% 100%;
+    /* Ground behind the page content. Cards are pure white and their outline is
+       white too, so this soft tint is what makes each card read as a separate
+       tile. In dark mode the card is already lighter than the page, so --page
+       just matches --background there. */
+    --page: 240 5% 97%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -20,7 +25,15 @@
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    /* 46.1% fell to 4.4:1 against the muted panel background, just under AA. */
+    --muted-foreground: 240 4% 42%;
+    /* Status colours are theme-scoped: the bright amber/green/red below read
+       at 2.1-2.5:1 as text on white. These darker light-mode values clear AA,
+       and .dark restores the bright ones, which need to be light on near-black. */
+    --success: 163 94% 24%;
+    --warning: 26 90% 37%;
+    --danger: 0 74% 42%;
+    --info: 201 96% 32%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
@@ -56,6 +69,7 @@
   .dark {
     /* Dark theme — near-black */
     --background: 0 0% 4%;
+    --page: 0 0% 4%;
     --foreground: 0 0% 93%;
     --card: 0 0% 6%;
     --card-foreground: 0 0% 93%;
@@ -65,6 +79,10 @@
     --secondary-foreground: 0 0% 93%;
     --muted: 0 0% 10%;
     --muted-foreground: 0 0% 62%;
+    --success: 156 49% 49%;
+    --warning: 38 92% 50%;
+    --danger: 358 75% 59%;
+    --info: 199 89% 48%;
     --accent: 0 0% 14%;
     --accent-foreground: 0 0% 93%;
     --destructive: 0 62% 40%;
@@ -205,23 +223,39 @@
   /* Cards — flat token surface, 12px radius, hairline border (reference:
      rounded-xl border border-border bg-card). `.bento-card` kept as an
      alias so existing pages reskin automatically. */
+  /* The outline matches the card fill (white in light mode) rather than being a
+     grey hairline. Separation comes from the --page ground behind the card, so
+     each one reads as its own tile instead of a boxed-off region. The 1px is
+     kept so nothing shifts when a hover or state adds a visible edge. */
+  /* Written as plain CSS rather than a `border-card` utility: the utility was
+     resolving to white in dark mode, which put a hard white ring around a
+     near-black card. hsl(var(--card)) always tracks the fill in both themes. */
+  .card-edge {
+    border: 1px solid hsl(var(--card));
+  }
+  /* No border-color transition here: the colour comes from a custom property
+     that flips with the theme, and animating it left the old theme's colour
+     painted until the next full reload. .card-hover still transitions. */
   .card,
   .bento-card {
-    @apply relative rounded-xl bg-card border border-border p-5
-           transition-[border-color] duration-200;
+    @apply relative rounded-xl bg-card p-5;
+    border: 1px solid hsl(var(--card));
   }
-  /* Quiet hover — border lift only, no shadow/movement. */
+  /* Quiet hover — the edge appears on hover only, no shadow/movement. */
   .card-hover,
   .bento-card-hover {
-    @apply hover:border-muted-foreground/40 cursor-pointer;
+    @apply hover:border-border cursor-pointer;
   }
   .card-dark {
     @apply relative rounded-xl bg-foreground text-background ring-1 ring-inset ring-white/10 p-5;
   }
   /* Quiet accent card — card surface with an amber left rule. */
   .card-accent {
-    @apply relative overflow-hidden rounded-xl bg-card border border-border
+    @apply relative overflow-hidden rounded-xl bg-card
            border-l-4 border-l-primary-400 p-5 text-foreground;
+    border-top: 1px solid hsl(var(--card));
+    border-right: 1px solid hsl(var(--card));
+    border-bottom: 1px solid hsl(var(--card));
   }
 
   /* Legacy decorative hooks — neutralized for the minimal theme. Kept as
@@ -491,14 +525,12 @@
     @apply bg-hover;
   }
 
-  /* Joined KPI grid (reference JoinedKpi): put on a `grid grid-cols-*`
-     wrapper of MetricCards — cells share hairlines inside one bordered box.
-     Pair with gap-px on the wrapper (replaces gap-3). */
+  /* Joined KPI grid: put on a `grid grid-cols-*` wrapper of MetricCards so the
+     stats read as one continuous bordered box. No gap and a card-coloured
+     ground: a 1px gap over bg-border is what drew the grey hairlines between
+     cards, which we do not want. */
   .joined-kpis {
-    @apply gap-px overflow-hidden rounded-xl border border-border bg-border;
-  }
-  .joined-kpis > * {
-    @apply rounded-none border-0;
+    @apply gap-3;
   }
 }
 

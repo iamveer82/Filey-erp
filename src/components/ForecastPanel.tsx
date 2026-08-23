@@ -62,7 +62,7 @@ export default function ForecastPanel({
         className="lg:col-span-2"
       >
         <p className="text-[12.5px] text-brand-500">
-          Weighted multiplies each open deal by its own probability — the number worth
+          Weighted multiplies each open deal by its own probability - the number worth
           planning against. Best case assumes everything lands.
         </p>
         <div className="mt-3 overflow-x-auto">
@@ -160,7 +160,7 @@ export default function ForecastPanel({
       >
         {wl.winRate == null ? (
           <p className="text-sm text-brand-500">
-            Nothing has closed yet — mark a deal won or lost and this fills in.
+            Nothing has closed yet - mark a deal won or lost and this fills in.
           </p>
         ) : (
           <>
@@ -169,7 +169,7 @@ export default function ForecastPanel({
                 {wl.winRate}%
               </span>
               <span className="text-[12.5px] text-brand-500">
-                won — {wl.won} of {wl.won + wl.lost} decided
+                won - {wl.won} of {wl.won + wl.lost} decided
               </span>
             </div>
             <dl className="mt-3 space-y-1.5 text-[13px]">

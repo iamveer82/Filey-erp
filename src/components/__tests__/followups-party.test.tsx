@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 
 // Hoisted: vi.mock factories run before module-level consts exist.
 const { create, rows } = vi.hoisted(() => ({
@@ -83,7 +83,10 @@ describe("FollowUps party split", () => {
     fireEvent.change(screen.getByPlaceholderText(/Ask Mr Sharma/), {
       target: { value: "Ask about the delayed drum order" },
     });
-    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "3" } });
+    // The party picker is now a SelectMenu: open it, then pick the row.
+    fireEvent.click(screen.getByLabelText("Supplier"));
+    await waitFor(() => expect(screen.getByRole("menu")).toBeInTheDocument());
+    fireEvent.click(within(screen.getByRole("menu")).getByText("ACME"));
     fireEvent.click(screen.getByText("Add"));
 
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));

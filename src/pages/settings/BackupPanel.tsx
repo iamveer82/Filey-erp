@@ -40,7 +40,7 @@ export default function BackupPanel() {
         .map(([name]) => name);
       if (failed.length)
         throw new Error(
-          `Could not read ${failed.join(", ")}. Nothing was downloaded — a backup missing data is worse than none.`
+          `Could not read ${failed.join(", ")}. Nothing was downloaded - a backup missing data is worse than none.`
         );
       const [company, products, orders, invoices, quotations, customers, expenses] =
         settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
@@ -128,7 +128,7 @@ export default function BackupPanel() {
                 Restore from backup
               </div>
               <div className="text-[12.5px] text-muted-foreground">
-                Your source of truth is your Supabase project — restore from a
+                Your source of truth is your Supabase project - restore from a
                 Supabase backup (Dashboard → Database → Backups), or contact the
                 owner to re-import an exported file. In-app restore is on the
                 roadmap.

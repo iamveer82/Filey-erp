@@ -162,7 +162,7 @@ export default function PortalView() {
       <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-8 text-foreground">
         {(paid || status === "paid") && (
           <div className="mb-4 rounded-xl bg-success/10 px-4 py-2.5 text-sm font-medium text-success">
-            Payment received — thank you!
+            Payment received - thank you!
           </div>
         )}
 

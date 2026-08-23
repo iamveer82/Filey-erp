@@ -10,6 +10,7 @@ import { Badge } from "./ui";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { cn, fmtDate, todayYmd } from "../lib/format";
+import { SelectMenu } from "./ui-menu";
 import { DateField } from "./DatePicker";
 
 const todayISO = () => todayYmd();
@@ -95,7 +96,7 @@ export default function FollowUps({
       setCust("");
       setRepeat("none");
       load();
-      toast.success("Reminder added — we'll surface it when it's due.");
+      toast.success("Reminder added - we'll surface it when it's due.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -108,7 +109,7 @@ export default function FollowUps({
       if (!f.done && f.repeat && f.repeat !== "none") {
         await followups.complete(f);
         toast.success(
-          `Done — next ${f.repeat} reminder on ${fmtDate(nextFollowUpDate(f.due_date, f.repeat))}.`
+          `Done - next ${f.repeat} reminder on ${fmtDate(nextFollowUpDate(f.due_date, f.repeat))}.`
         );
       } else {
         await followups.update(f.id, { done: !f.done });
@@ -226,21 +227,22 @@ export default function FollowUps({
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
         {!customerId && parties && (
-          <select
-            className="select w-auto"
-            aria-label={party === "supplier" ? "Supplier" : "Customer"}
-            value={cust}
-            onChange={(e) => setCust(e.target.value === "" ? "" : Number(e.target.value))}
-          >
-            <option value="">
-              {party === "supplier" ? "No supplier" : "No customer"}
-            </option>
-            {parties.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.company || c.name}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            className="w-auto"
+            ariaLabel={party === "supplier" ? "Supplier" : "Customer"}
+            value={cust === "" ? "" : String(cust)}
+            onChange={(v) => setCust(v === "" ? "" : Number(v))}
+            options={[
+              {
+                value: "",
+                label: party === "supplier" ? "No supplier" : "No customer",
+              },
+              ...(parties ?? []).map((c) => ({
+                value: String(c.id),
+                label: c.company || c.name,
+              })),
+            ]}
+          />
         )}
         <DateField
           className="w-44"
@@ -248,17 +250,18 @@ export default function FollowUps({
           onChange={setDue}
           clearable={false}
         />
-        <select
-          className="select w-auto"
-          aria-label="Repeat"
+        <SelectMenu
+          className="w-auto"
+          ariaLabel="Repeat"
           value={repeat}
-          onChange={(e) => setRepeat(e.target.value as FollowUpRepeat)}
-        >
-          <option value="none">No repeat</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
+          onChange={(v) => setRepeat(v as FollowUpRepeat)}
+          options={[
+            { value: "none", label: "No repeat" },
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+            { value: "monthly", label: "Monthly" },
+          ]}
+        />
         <button className="btn-primary" disabled={busy || !title.trim()} onClick={add}>
           <Plus size={16} /> Add
         </button>
@@ -347,7 +350,7 @@ export default function FollowUps({
           <div>
             <p className="text-sm font-medium text-brand-700">No reminders yet</p>
             <p className="text-xs text-brand-500 mt-1">
-              Add a note with a date — we'll remind you that day.
+              Add a note with a date - we'll remind you that day.
             </p>
           </div>
         </div>

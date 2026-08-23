@@ -31,6 +31,7 @@ import {
   Field,
   SearchInput,
   FilterChip,
+  keyActivate,
 } from "../components/ui";
 import {
   RowActions,
@@ -40,6 +41,7 @@ import {
 } from "../components/RowActions";
 import { sendShareEmail } from "../lib/email";
 import { DateField } from "../components/DatePicker";
+import { SelectMenu } from "../components/ui-menu";
 import {
   loadCompanyStampSig,
   EMPTY_STAMP_SIG,
@@ -301,7 +303,7 @@ export default function DeliveryChallan() {
             className="btn-primary"
             onClick={() => setForm(blankDc(records.map((r) => r.number)))}
           >
-            <Plus size={16} /> Assign Driver
+            <Plus size={16} /> Assign driver
           </button>
         }
       />
@@ -361,7 +363,7 @@ export default function DeliveryChallan() {
         empty={
           search || statusFilter !== "all"
             ? "No shipments match your filters"
-            : "No deliveries yet — assign your first driver"
+            : "No deliveries yet - assign your first driver"
         }
         onRowClick={(r) => setQuickView(r)}
         columns={[
@@ -753,6 +755,7 @@ function DcEditor({
                           e.stopPropagation();
                           removeTpl(tpl.id, tpl.name);
                         }}
+                        onKeyDown={keyActivate(() => removeTpl(tpl.id, tpl.name))}
                         className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer"
                       >
                         <Trash2 size={11} />
@@ -776,15 +779,21 @@ function DcEditor({
               <span className="text-xs font-medium text-brand-500">Accent</span>
               <ColorPicker value={form.accent} onChange={(hex) => set("accent", hex)} />
               <span className="text-xs font-medium text-brand-500 ml-2">Font</span>
-              <select
-                className="select h-8 text-xs flex-1"
+              <SelectMenu
+                ariaLabel="Font"
+                size="sm"
+                className="flex-1"
                 value={form.font}
-                onChange={(e) => set("font", e.target.value)}
-              >
-                <option value="'Plus Jakarta Sans', system-ui, sans-serif">Sans</option>
-                <option value="'Lora', Georgia, serif">Serif</option>
-                <option value="'IBM Plex Mono', monospace">Mono</option>
-              </select>
+                onChange={(font) => set("font", font)}
+                options={[
+                  {
+                    value: "'Plus Jakarta Sans', system-ui, sans-serif",
+                    label: "Sans",
+                  },
+                  { value: "'Lora', Georgia, serif", label: "Serif" },
+                  { value: "'IBM Plex Mono', monospace", label: "Mono" },
+                ]}
+              />
             </div>
           </Step>
 
@@ -793,17 +802,15 @@ function DcEditor({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <Field label="Challan Type">
-                  <select
-                    className="select"
+                  <SelectMenu
+                    ariaLabel="Challan Type"
                     value={form.dc_type}
-                    onChange={(e) => set("dc_type", e.target.value as any)}
-                  >
-                    {DC_TYPES.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(dc_type) => set("dc_type", dc_type as any)}
+                    options={DC_TYPES.map((t) => ({
+                      value: t.id,
+                      label: t.label,
+                    }))}
+                  />
                 </Field>
                 <Field label="Party Name">
                   <input
@@ -871,17 +878,15 @@ function DcEditor({
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Status">
-                    <select
-                      className="select"
+                    <SelectMenu
+                      ariaLabel="Status"
                       value={form.status}
-                      onChange={(e) => set("status", e.target.value as DcStatus)}
-                    >
-                      {DC_STATUSES.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(status) => set("status", status as DcStatus)}
+                      options={DC_STATUSES.map((s) => ({
+                        value: s.id,
+                        label: s.label,
+                      }))}
+                    />
                   </Field>
                   <Field label="ETA">
                     <DateField
@@ -1010,7 +1015,7 @@ function DcEditor({
         }
       />
 
-      {/* Portaled out of <main>'s scrolling subtree — WebView2 half-paints a
+      {/* Portaled out of <main>'s scrolling subtree - WebView2 half-paints a
           `fixed` overlay that stays inside it. */}
       {viewOpen && createPortal(
         <div

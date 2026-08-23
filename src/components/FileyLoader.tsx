@@ -10,11 +10,11 @@ export default function FileyLoader() {
       className="grid h-full min-h-full place-items-center bg-canvas"
     >
       <div className="flex flex-col items-center gap-4">
-        {/* wordmark — single h1, the entire boot surface is type. */}
+        {/* wordmark - single h1, the entire boot surface is type. */}
         <h1 className="text-2xl font-bold tracking-tight text-ink">
           Filey
         </h1>
-        {/* spinner — single rotating arc, 1s linear (built-in). */}
+        {/* spinner - single rotating arc, 1s linear (built-in). */}
         <svg
           width="16"
           height="16"

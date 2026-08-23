@@ -173,14 +173,14 @@ export default function Integrations() {
       // there is no opener plugin, and a new tab is the same thing.
       if (hasDesktop) await openUrl(link.redirect_url);
       else window.open(link.redirect_url, "_blank", "noopener");
-      setMsg(`Authorize ${slug} in the browser window — this flips to Connected when you're done.`);
+      setMsg(`Authorize ${slug} in the browser window - this flips to Connected when you're done.`);
       const id = link.connected_account_id;
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         const st = await composioStatus(id).catch(() => null);
         if ((st?.status ?? "").toUpperCase() === "ACTIVE") {
           setActive((prev) => new Set(prev).add(slug));
-          setMsg(`${slug} connected ✓ — the Filey AI agent can now use it.`);
+          setMsg(`${slug} connected ✓ - the Filey AI agent can now use it.`);
           break;
         }
       }
@@ -229,7 +229,7 @@ export default function Integrations() {
         category: "Messaging",
         icon: <BrandIcon name="whatsapp" className="h-5 w-5" />,
         builtin: true,
-        note: "No setup — use Send → WhatsApp.",
+        note: "No setup - use Send → WhatsApp.",
       },
       {
         key: "templates",
@@ -273,7 +273,7 @@ export default function Integrations() {
       {
         key: "pdf",
         name: "PDF Tools",
-        desc: "Merge, split, compress and convert PDFs on-device — no network needed.",
+        desc: "Merge, split, compress and convert PDFs on-device - no network needed.",
         category: "Documents",
         icon: <BrandIcon name="pdf" className="h-5 w-5" />,
         to: "/tools",
@@ -363,7 +363,7 @@ export default function Integrations() {
     <div className="animate-fade-up pb-10">
       <PageHeader
         title="Integrations"
-        subtitle="Connect Filey with the tools you already use — and let the AI agent work in them"
+        subtitle="Connect Filey with the tools you already use, and let the AI agent work in them"
       />
 
       <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2">
@@ -375,7 +375,7 @@ export default function Integrations() {
       <div className="mb-4 flex gap-2">
         <input
           className="input flex-1"
-          placeholder="Search every app — Instagram, Zoho, Xero, Shopify…"
+          placeholder="Search every app: Instagram, Zoho, Xero, Shopify…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void runSearch()}
@@ -383,7 +383,12 @@ export default function Integrations() {
         <button className="btn-secondary" onClick={runSearch} disabled={searching}>
           {searching ? <Loader2 size={15} className="animate-spin" /> : "Search"}
         </button>
-        <button className="btn-ghost" onClick={refresh} title="Refresh connected apps">
+        <button
+          className="btn-ghost"
+          onClick={refresh}
+          title="Refresh connected apps"
+          aria-label="Refresh connected apps"
+        >
           <RefreshCw size={14} />
         </button>
       </div>
@@ -443,7 +448,7 @@ export default function Integrations() {
                   className="btn-secondary"
                   onClick={() =>
                     void notice({
-                      message: `${i.name} isn't available yet. Sorry for the inconvenience — we're working to improve your experience.`,
+                      message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
                     })
                   }
                 >
@@ -524,14 +529,14 @@ function SourceBadge({ source, own }: { source: KeySource; own: boolean }) {
   if (own)
     return (
       <p className="rounded-xl bg-hover px-3 py-2 text-[12px] font-medium text-muted-foreground">
-        Running on <b>your own key</b> — calls go straight to the provider and
+        Running on <b>your own key</b>. Calls go straight to the provider and
         aren't metered by Filey.
       </p>
     );
   if (source === "platform")
     return (
       <p className="rounded-xl bg-success/10 px-3 py-2 text-[12px] font-medium text-success">
-        <Check size={11} className="inline" /> Included in your Filey plan —
+        <Check size={11} className="inline" /> Included in your Filey plan.
         nothing to configure. Daily limits apply on the free tier.
       </p>
     );
@@ -595,7 +600,7 @@ function ComposioProvider({
     try {
       await clearComposioKey();
       setHasKey(false);
-      setMsg("Your key was removed — integrations fall back to your Filey plan.");
+      setMsg("Your key was removed - integrations fall back to your Filey plan.");
       void composioKeySource().then(onSourceChange);
       onSaved();
     } catch (e) {
@@ -613,7 +618,7 @@ function ComposioProvider({
       </div>
       <p className="mb-3 text-[12.5px] text-muted-foreground">
         Powers every app below. Once an app is connected, the Filey AI agent can
-        work in it — read the form response, book the meeting, send the follow-up.
+        work in it - read the form response, book the meeting, send the follow-up.
       </p>
 
       <SourceBadge source={source} own={hasKey} />
@@ -632,7 +637,7 @@ function ComposioProvider({
             <p className="mt-2 text-[12px] text-muted-foreground">
               {hasDesktop
                 ? "Kept in this device's encrypted store. Calls go straight to Composio on your key, so nothing is metered by Filey."
-                : "Kept in your workspace, where the browser can replace or remove it but never read it back. Calls still go through Filey's proxy — it just spends your key, so they aren't metered against your plan."}
+                : "Kept in your workspace, where the browser can replace or remove it but never read it back. Calls still go through Filey's proxy - it just spends your key, so they aren't metered against your plan."}
             </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="field flex-1">
@@ -640,7 +645,7 @@ function ComposioProvider({
                 <input
                   type="password"
                   className="input"
-                  placeholder={hasKey ? "•••••••• (saved — paste to replace)" : "ak_…"}
+                  placeholder={hasKey ? "•••••••• (saved - paste to replace)" : "ak_…"}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
                 />
@@ -688,7 +693,7 @@ function ZernioProvider() {
       setCfg(setZernioConfig({ apiKey: key.trim(), enabled: true }));
       setKey("");
       const accounts = await listAccounts();
-      setMsg(`Key works — ${accounts.length} account(s) connected.`);
+      setMsg(`Key works - ${accounts.length} account(s) connected.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -703,7 +708,7 @@ function ZernioProvider() {
       const accounts = await listAccounts();
       setMsg(
         accounts.length
-          ? `Working — ${accounts.length} account(s) connected.`
+          ? `Working - ${accounts.length} account(s) connected.`
           : "Working, but no social accounts are linked at zernio.com yet."
       );
     } catch (e) {
@@ -715,7 +720,7 @@ function ZernioProvider() {
 
   const removeOwn = () => {
     setCfg(setZernioConfig({ apiKey: "", enabled: false }));
-    setMsg("Your key was removed — publishing falls back to your Filey plan.");
+    setMsg("Your key was removed - publishing falls back to your Filey plan.");
   };
 
   return (
@@ -725,7 +730,7 @@ function ZernioProvider() {
         <p className="text-[14px] font-semibold text-foreground">Social publishing</p>
       </div>
       <p className="mb-3 text-[12.5px] text-muted-foreground">
-        Post and schedule to Instagram, LinkedIn, X, TikTok and more — by hand or
+        Post and schedule to Instagram, LinkedIn, X, TikTok and more - by hand or
         by asking the agent. Link the accounts themselves at zernio.com.
       </p>
 
@@ -751,7 +756,7 @@ function ZernioProvider() {
             <input
               type="password"
               className="input"
-              placeholder={own ? "•••••••• (saved — paste to replace)" : "sk_…"}
+              placeholder={own ? "•••••••• (saved - paste to replace)" : "sk_…"}
               value={key}
               onChange={(e) => setKey(e.target.value)}
             />
@@ -821,7 +826,7 @@ function WhatsAppBridgeProvider() {
     connecting: "Waiting for the QR to be scanned",
     connected: "Connected",
     reconnecting: "Reconnecting…",
-    logged_out: "Logged out on the phone — re-pair to continue",
+    logged_out: "Logged out on the phone - re-pair to continue",
   };
 
   return (
@@ -841,7 +846,7 @@ function WhatsAppBridgeProvider() {
       <p className="mb-3 text-[12.5px] text-muted-foreground">
         Pairs to a WhatsApp account you own, so chatting with your agent costs
         nothing per message. This drives a real account through an unofficial
-        connection — against WhatsApp's terms, and the number can be banned. Use
+        connection - against WhatsApp's terms, and the number can be banned. Use
         one you can afford to lose.
       </p>
 
@@ -866,7 +871,7 @@ function WhatsAppBridgeProvider() {
         />
         <span className="mt-1 block">
           The agent answers you and nobody else. Leave this empty if you paired
-          your own phone — messaging yourself already works. Fill it in when the
+          your own phone - messaging yourself already works. Fill it in when the
           paired account is a second number, so Filey knows which number is you.
         </span>
       </label>
@@ -880,7 +885,7 @@ function WhatsAppBridgeProvider() {
         </button>
         <button
           className="btn-ghost"
-          title="Forget the pairing and show a fresh QR — use this if your phone shows “Waiting for this message”."
+          title="Forget the pairing and show a fresh QR. Use this if your phone shows “Waiting for this message”."
           onClick={() => {
             if (
               window.confirm(

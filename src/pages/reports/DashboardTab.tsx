@@ -2,6 +2,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { aed, num, cn } from "../../lib/format";
 import { useChartColors } from "../../lib/accent";
+import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
   useRevenueTotal,
@@ -113,6 +114,9 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
         </div>
         <div className="p-5">
           <div className="h-[280px]">
+            {allZero(trend, "invoiced", "received") ? (
+              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
                 <defs>
@@ -163,6 +167,7 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>

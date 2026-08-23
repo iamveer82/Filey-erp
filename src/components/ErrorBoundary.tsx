@@ -36,7 +36,7 @@ export default class ErrorBoundary extends Component<Props, State> {
         <div className="card max-w-md text-center">
           <p className="text-lg font-medium text-ink">Sorry for the inconvenience</p>
           <p className="text-sm text-brand-500 mt-2">
-            This part of the app isn't working as it should. Your data is safe — we're
+            This part of the app isn't working as it should. Your data is safe - we're
             working to improve your experience. Try again, or reload to continue.
           </p>
           {/* Kept, but folded away: users get an apology, support still gets the cause. */}

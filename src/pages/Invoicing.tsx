@@ -60,6 +60,7 @@ import {
   errMsg,
   todayYmd,
   localYmd,
+  plural,
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
@@ -69,6 +70,7 @@ import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
+import { SelectMenu } from "../components/ui-menu";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -148,6 +150,7 @@ import {
   SearchInput,
   FilterChip,
   ToggleTile,
+  keyActivate,
 } from "../components/ui";
 import {
   RowActions,
@@ -834,7 +837,7 @@ const editInvoice = async (id: number) => {
       await loadDocs();
       toast.success(
         status === "sent"
-          ? "Invoice finalized — posted to Orders, Accounting & Inventory."
+          ? "Invoice finalized - posted to Orders, Accounting & Inventory."
           : "Moved back to draft."
       );
     } catch (e) {
@@ -1125,9 +1128,9 @@ const editInvoice = async (id: number) => {
           const ccy = d.currency || doc.currency || "AED";
           await sendEmail({
             to: doc.customer_email,
-            subject: `Payment reminder — Invoice ${doc.number}`,
+            subject: `Payment reminder - Invoice ${doc.number}`,
             html: emailShell(
-              `Payment reminder — ${doc.number}`,
+              `Payment reminder - ${doc.number}`,
               `<p>Dear ${esc(doc.customer_name || "customer")},</p>
                <p>This is a friendly reminder that invoice <b>${esc(doc.number)}</b> for <b>${money(
                 d.balance ?? d.total,
@@ -1153,7 +1156,7 @@ const editInvoice = async (id: number) => {
       if (sent)
         toast.success(
           `Sent ${sent} reminder${sent > 1 ? "s" : ""}${
-            skipped ? ` — ${skipped} skipped (no email)` : ""
+            skipped ? ` - ${skipped} skipped (no email)` : ""
           }.`
         );
       else
@@ -1173,7 +1176,7 @@ const editInvoice = async (id: number) => {
         title={isPurchase ? "Purchase Invoices" : "Invoicing"}
         subtitle={
           isPurchase
-            ? "Record supplier bills — receives stock and posts to Inventory & Payables"
+            ? "Record supplier bills - receives stock and posts to Inventory & Payables"
             : "Create, send and track invoices"
         }
         action={
@@ -1192,11 +1195,11 @@ const editInvoice = async (id: number) => {
             )}
             {isPurchase ? (
               <button className="btn-primary" onClick={newInvoice}>
-                <Plus size={16} /> New Purchase Invoice
+                <Plus size={16} /> New purchase invoice
               </button>
             ) : (
               <button className="btn-primary" onClick={newInvoice}>
-                <Plus size={16} /> New Invoice
+                <Plus size={16} /> New invoice
               </button>
             )}
           </div>
@@ -1209,7 +1212,7 @@ const editInvoice = async (id: number) => {
         <MetricCard
           label="Total billed"
           value={aed(billedTotal)}
-          change={`${num(docs.filter((d) => d.status !== "draft").length)} invoices`}
+          change={plural(docs.filter((d) => d.status !== "draft").length, "invoice")}
           changeTone="up"
         />
         <MetricCard
@@ -1365,7 +1368,7 @@ const editInvoice = async (id: number) => {
         empty={
           search || statusFilter !== "all"
             ? "No invoices match your filter"
-            : "No invoices yet — create your first one"
+            : "No invoices yet - create your first one"
         }
         rowKey={(d) => d.id}
         bulkActions={[
@@ -1546,7 +1549,7 @@ const editInvoice = async (id: number) => {
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
 
-      {/* Free-tier invoice cap — upgrade path instead of a bare error toast. */}
+      {/* Free-tier invoice cap - upgrade path instead of a bare error toast. */}
       <Modal
         open={capOpen}
         onClose={() => setCapOpen(false)}
@@ -1558,11 +1561,11 @@ const editInvoice = async (id: number) => {
         </p>
         <ul className="mt-3 space-y-1.5 text-[13px] text-brand-500 list-disc pl-5">
           <li>
-            <b className="text-ink">Offline</b> — one-time purchase, fully offline,
+            <b className="text-ink">Offline</b>. One-time purchase, fully offline,
             no monthly cap.
           </li>
           <li>
-            <b className="text-ink">Pro</b> — cloud sync and multi-device, no monthly
+            <b className="text-ink">Pro</b>. Cloud sync and multi-device, no monthly
             cap.
           </li>
         </ul>
@@ -1688,7 +1691,7 @@ function PaymentsModal({
   if (!doc) return null;
   const ccy = doc.currency || "AED";
   return (
-    <Modal open={!!doc} onClose={onClose} title={`Payments — ${doc.number}`}>
+    <Modal open={!!doc} onClose={onClose} title={`Payments - ${doc.number}`}>
       <div className="grid grid-cols-3 joined-kpis mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Total</p>
@@ -1746,17 +1749,17 @@ function PaymentsModal({
           />
         </Field>
         <Field label="Method">
-          <select
-            className="select"
+          <SelectMenu
             value={method}
-            onChange={(e) => setMethod(e.target.value)}
-          >
-            <option value="bank transfer">Bank transfer</option>
-            <option value="cash">Cash</option>
-            <option value="card">Card</option>
-            <option value="cheque">Cheque</option>
-            <option value="other">Other</option>
-          </select>
+            onChange={(v) => setMethod(v)}
+            options={[
+              { value: "bank transfer", label: "Bank transfer" },
+              { value: "cash", label: "Cash" },
+              { value: "card", label: "Card" },
+              { value: "cheque", label: "Cheque" },
+              { value: "other", label: "Other" },
+            ]}
+          />
         </Field>
         <button className="btn-primary" disabled={busy || amount <= 0} onClick={add}>
           <Plus size={15} /> Add
@@ -1894,7 +1897,7 @@ function Editor({
   const exportXml = () => {
     const v = validateEInvoice(form as never);
     if (v.errors.length) {
-      toast.error(`Can't export e-Invoice XML — missing: ${v.errors.join(", ")}`);
+      toast.error(`Can't export e-Invoice XML - missing: ${v.errors.join(", ")}`);
       return;
     }
     const xml = buildInvoiceXml(form as never);
@@ -2083,7 +2086,7 @@ function Editor({
   // Append an inventory product as an invoice line item (fills description &
   // unit price); drops a leftover empty row so the first import replaces it.
   const addItemFromProduct = (p: Product) => {
-    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+    const desc = [p.name, p.description?.trim()].filter(Boolean).join(" - ");
     setForm({
       ...form,
       items: [
@@ -2328,7 +2331,7 @@ function Editor({
               className="btn-primary"
               onClick={handleFinalize}
               disabled={saving}
-              title="Finalize — posts to Orders & Accounting, updates inventory for linked products, and shows in reports & the dashboard"
+              title="Finalize: posts to Orders & Accounting, updates inventory for linked products, and shows in reports & the dashboard"
             >
               <CheckCircle2 size={15} /> Mark as done
             </button>
@@ -2393,7 +2396,7 @@ function Editor({
                   className="btn-ghost text-xs flex items-center gap-1"
                   onClick={() => setDesigning(true)}
                 >
-                  <Plus size={13} /> Create Template
+                  <Plus size={13} /> Create template
                 </button>
               </div>
             }
@@ -2434,6 +2437,7 @@ function Editor({
                             e.stopPropagation();
                             removeTpl(tpl.id, tpl.name);
                           }}
+                          onKeyDown={keyActivate(() => removeTpl(tpl.id, tpl.name))}
                           className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer shadow-sm border border-brand-100"
                         >
                           <Trash2 size={11} />
@@ -2467,29 +2471,30 @@ function Editor({
               <div className="space-y-3">
                 <Field label={partyLabel}>
                   <div className="flex gap-2">
-                    <select
-                      className="select"
+                    <SelectMenu
                       value=""
-                      onChange={(e) => {
-                        const c = customers.find((x) => String(x.id) === e.target.value);
+                      onChange={(v) => {
+                        const c = customers.find((x) => String(x.id) === v);
                         if (c) applyCustomer(c);
                       }}
-                    >
-                      <option value="">
-                        {customers.length
-                          ? "Select saved customer…"
-                          : "No saved customers yet"}
-                      </option>
-                      {customers.map((c) => {
-                        const bal = balFor(c.company || c.name);
-                        return (
-                          <option key={c.id} value={c.id}>
-                            {c.company || c.name}
-                            {bal > 0 ? ` — BAL ${Math.round(bal).toLocaleString()}` : ""}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      options={[
+                        {
+                          value: "",
+                          label: customers.length
+                            ? "Select saved customer…"
+                            : "No saved customers yet",
+                        },
+                        ...customers.map((c) => {
+                          const bal = balFor(c.company || c.name);
+                          return {
+                            value: String(c.id),
+                            label: `${c.company || c.name}${
+                              bal > 0 ? ` · BAL ${Math.round(bal).toLocaleString()}` : ""
+                            }`,
+                          };
+                        }),
+                      ]}
+                    />
                     <button
                       type="button"
                       className="btn-ghost shrink-0"
@@ -2503,7 +2508,7 @@ function Editor({
                 <Field label={`${partyLabel} / Company Name`}>
                   <input
                     className="input"
-                    placeholder="Acme Corporation LLC"
+                    placeholder="Gulf Line Trading LLC"
                     value={form.customer_name}
                     onChange={(e) => set("customer_name", e.target.value)}
                   />
@@ -2516,7 +2521,7 @@ function Editor({
                       return (
                         <p className={`text-xs mt-1 ${over ? "text-danger" : "text-brand-500"}`}>
                           Outstanding: {money(bal, "AED")}
-                          {over && ` — over credit limit (${money(limit!, "AED")})`}
+                          {over && ` - over credit limit (${money(limit!, "AED")})`}
                         </p>
                       );
                     })()}
@@ -2598,18 +2603,14 @@ function Editor({
                       value={form.buyer_city ?? ""}
                       onChange={(e) => set("buyer_city", e.target.value)}
                     />
-                    <select
-                      className="input"
+                    <SelectMenu
                       value={form.buyer_country_subdivision ?? ""}
-                      onChange={(e) => set("buyer_country_subdivision", e.target.value)}
-                    >
-                      <option value="">Emirate…</option>
-                      {EMIRATES.map((em) => (
-                        <option key={em.code} value={em.code}>
-                          {em.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => set("buyer_country_subdivision", v)}
+                      options={[
+                        { value: "", label: "Emirate…" },
+                        ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
+                      ]}
+                    />
                     <input
                       className="input"
                       placeholder="AE"
@@ -2667,24 +2668,20 @@ function Editor({
                   />
                 </Field>
                 <Field label="Currency">
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={form.currency || "AED"}
-                    onChange={(e) => set("currency", e.target.value)}
-                  >
-                    {CURRENCIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.code} — {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => set("currency", v)}
+                    options={CURRENCIES.map((c) => ({
+                      value: c.code,
+                      label: `${c.code} - ${c.name}`,
+                    }))}
+                  />
                 </Field>
                 <Field label="Payment Terms">
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={form.payment_terms || ""}
-                    onChange={(e) => {
-                      const id = e.target.value;
+                    onChange={(v) => {
+                      const id = v;
                       const days = PAYMENT_TERMS.find((t) => t.id === id)?.days;
                       setForm({
                         ...form,
@@ -2695,14 +2692,11 @@ function Editor({
                             : addDaysTo(form.issue_date, days),
                       });
                     }}
-                  >
-                    <option value="">Custom / none</option>
-                    {PAYMENT_TERMS.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "Custom / none" },
+                      ...PAYMENT_TERMS.map((t) => ({ value: t.id, label: t.label })),
+                    ]}
+                  />
                 </Field>
                 <Field label="Due Date (optional)">
                   <DateField
@@ -2731,17 +2725,14 @@ function Editor({
                   />
                 </Field>
                 <Field label="Invoice Type Code (e-invoice)">
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE}
-                    onChange={(e) => set("invoice_type_code", e.target.value)}
-                  >
-                    {INVOICE_TYPE_CODES.map((t) => (
-                      <option key={t.code} value={t.code}>
-                        {t.code} — {t.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => set("invoice_type_code", v)}
+                    options={INVOICE_TYPE_CODES.map((t) => ({
+                      value: t.code,
+                      label: `${t.code} - ${t.label}`,
+                    }))}
+                  />
                 </Field>
                 {CORRECTIVE_TYPE_CODES.includes(
                   form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE
@@ -2784,17 +2775,14 @@ function Editor({
                   </Field>
                 )}
                 <Field label="Payment Means (e-invoice)">
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={form.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE}
-                    onChange={(e) => set("payment_means_code", e.target.value)}
-                  >
-                    {PAYMENT_MEANS_CODES.map((p) => (
-                      <option key={p.code} value={p.code}>
-                        {p.code} — {p.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => set("payment_means_code", v)}
+                    options={PAYMENT_MEANS_CODES.map((p) => ({
+                      value: p.code,
+                      label: `${p.code} - ${p.label}`,
+                    }))}
+                  />
                 </Field>
                 <Field label="Transaction Type (e-invoice)">
                   <div className="grid grid-cols-2 gap-1.5">
@@ -2817,28 +2805,25 @@ function Editor({
                     ))}
                   </div>
                 </Field>
-                <Field label="Tax Category — set all lines">
+                <Field label="Tax category, applied to all lines">
                   {/* Bulk-set every line's category (the common single-rate case).
                       Mixed-rate invoices override per line in the items table. */}
-                  <select
-                    className="select"
+                  <SelectMenu
                     value={form.items[0]?.tax_category || DEFAULT_TAX_CATEGORY}
-                    onChange={(e) =>
+                    onChange={(v) =>
                       setForm({
                         ...form,
                         items: form.items.map((it) => ({
                           ...it,
-                          tax_category: e.target.value,
+                          tax_category: v,
                         })),
                       })
                     }
-                  >
-                    {TAX_CATEGORY_CODES.map((t) => (
-                      <option key={t.code} value={t.code}>
-                        {t.code} — {t.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={TAX_CATEGORY_CODES.map((t) => ({
+                      value: t.code,
+                      label: `${t.code} - ${t.label}`,
+                    }))}
+                  />
                 </Field>
                 <p className="col-span-full text-[11px] text-brand-400">
                   The PDF is the human-readable copy your customer sees. Under the
@@ -2876,22 +2861,25 @@ function Editor({
               </div>
               {form.unit_price_formula && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <select
-                    className="input text-xs py-1.5 h-8"
+                  <SelectMenu
+                    className="w-auto"
+                    size="sm"
                     value={form.unit_price_formula.a || ""}
-                    onChange={(e) =>
+                    onChange={(v) =>
                       set("unit_price_formula", {
-                        a: e.target.value,
+                        a: v,
                         b: "unit_price",
                       })
                     }
-                  >
-                    <option value="">Select field</option>
-                    <option value="qty">Qty</option>
-                    {form.customColumns.map((c) => (
-                      <option key={c.key} value={c.key}>{c.label}</option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "Select field" },
+                      { value: "qty", label: "Qty" },
+                      ...form.customColumns.map((c) => ({
+                        value: c.key,
+                        label: c.label,
+                      })),
+                    ]}
+                  />
                   <span className="text-brand-400">× unit price</span>
                   <span className="text-[10px] text-brand-400">→ Amount</span>
                 </div>
@@ -3011,8 +2999,7 @@ function Editor({
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <select
-                          className="input text-right !px-2 !py-1 text-xs"
+                        <SelectMenu
                           value={
                             it.calcMode === "manual"
                               ? "manual"
@@ -3022,8 +3009,7 @@ function Editor({
                                   : `formula:${it.itemFormula.a}`
                                 : "auto"
                           }
-                          onChange={(e) => {
-                            const v = e.target.value;
+                          onChange={(v) => {
                             if (v === "auto") {
                               setItem(i, { calcMode: "auto", itemFormula: null });
                             } else if (v === "manual") {
@@ -3047,33 +3033,28 @@ function Editor({
                               });
                             }
                           }}
-                        >
-                          <option value="auto">Auto</option>
-                          <option value="manual">Manual</option>
-                          <option value="qty">Formula: Qty</option>
-                          {form.customColumns.map((c) => (
-                            <option key={c.key} value={`formula:${c.key}`}>
-                              Formula: {c.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: "auto", label: "Auto" },
+                            { value: "manual", label: "Manual" },
+                            { value: "qty", label: "Formula: Qty" },
+                            ...form.customColumns.map((c) => ({
+                              value: `formula:${c.key}`,
+                              label: `Formula: ${c.label}`,
+                            })),
+                          ]}
+                        />
                       </td>
                       {(form.tax_rate || 0) > 0 && (
                         <td className="py-2 px-2">
-                          <select
-                            className="input text-right !px-2 !py-1 text-xs"
+                          <SelectMenu
+                            ariaLabel="UAE e-invoice tax category"
                             value={it.tax_category || DEFAULT_TAX_CATEGORY}
-                            title="UAE e-invoice tax category"
-                            onChange={(e) =>
-                              setItem(i, { tax_category: e.target.value })
-                            }
-                          >
-                            {TAX_CATEGORY_CODES.map((t) => (
-                              <option key={t.code} value={t.code} title={t.label}>
-                                {t.code}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(v) => setItem(i, { tax_category: v })}
+                            options={TAX_CATEGORY_CODES.map((t) => ({
+                              value: t.code,
+                              label: t.code,
+                            }))}
+                          />
                         </td>
                       )}
                       {form.customColumns.map((col) => (
@@ -3243,13 +3224,13 @@ function Editor({
             )}
             <div className="flex flex-wrap gap-2 mt-3">
               <button className="btn-primary" onClick={addItem}>
-                <Plus size={14} /> Add Item
+                <Plus size={14} /> Add item
               </button>
               <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
                 <PackageSearch size={13} /> Import from Inventory
               </button>
               <button className="btn-ghost text-xs" onClick={addCustomColumn}>
-                <Plus size={12} /> Add Field
+                <Plus size={12} /> Add field
               </button>
               <datalist id="unit-suggestions">
                 <option value="pcs" />
@@ -3348,7 +3329,7 @@ function Editor({
                 label="Company stamp"
                 desc={
                   companyStampSig.stamp?.data
-                    ? "Show official stamp — adjust below"
+                    ? "Show official stamp - adjust below"
                     : "Upload a stamp in Settings first"
                 }
                 active={!!form.show_stamp}
@@ -3383,7 +3364,7 @@ function Editor({
                 label="Signature"
                 desc={
                   companyStampSig.signature?.data
-                    ? "Show signature block — adjust below"
+                    ? "Show signature block - adjust below"
                     : "Upload a signature in Settings first"
                 }
                 active={!!form.show_signature}
@@ -3419,7 +3400,7 @@ function Editor({
           </Step>
 
           {/* 5 · Additional settings */}
-          <Step n={5} title="Additional Settings">
+          <Step n={4} title="Additional Settings">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
@@ -3467,17 +3448,19 @@ function Editor({
                       onChange={(e) => set("tax_rate", numInput(e.target.value))}
                     />
                   )}
-                  <select
-                    className="select"
+                  {/* These must be the statuses the rest of the app understands.
+                      "issued"/"cancelled" used to be offered here: saveDoc only
+                      posts to Orders/Inventory/Accounting on "sent", so picking
+                      one silently un-posted the invoice while the dashboard kept
+                      counting it, and the list's status chips could not match it. */}
+                  <SelectMenu
                     value={form.status}
-                    onChange={(e) => set("status", e.target.value)}
-                  >
-                    {["draft", "issued", "paid", "cancelled"].map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => set("status", v)}
+                    options={["draft", "sent", "paid", "overdue"].map((s) => ({
+                      value: s,
+                      label: s,
+                    }))}
+                  />
                   <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 border border-brand-200 rounded-xl px-3 py-2">
                     <span className="text-brand-500">Page breaks are manual only</span>
                     <span className="text-[10px] text-brand-400">Use the row action in the items table</span>
@@ -3554,7 +3537,7 @@ function Editor({
         right={
           <div className="sticky top-4 space-y-4">
             
-          {/* Template Designer — shown above preview when creating */}
+          {/* Template Designer - shown above preview when creating */}
           {designing && (
             <TemplateDesigner
               onSave={(tpl) => {
@@ -3567,24 +3550,22 @@ function Editor({
             />
           )}
 
-          {/* Live Preview — always visible */}
+          {/* Live Preview - always visible */}
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
               <div>
-                <p className="font-semibold text-ink flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold">
-                    4
-                  </span>
-                  Preview
-                </p>
-                <p className="text-xs text-brand-500 mt-0.5 ml-8">
+                {/* Not a numbered step: this panel sits alongside the whole form
+                    and stays live throughout, so a step badge here made the left
+                    column read 1, 2, 3, 5 with a stray 4 floating beside step 1. */}
+                <p className="font-semibold text-ink">Preview</p>
+                <p className="text-xs text-brand-500 mt-0.5">
                   This is how your invoice will look
                 </p>
               </div>
             </div>
 
             <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
-              {/* ponytail: data-no-i18n + dir=ltr — invoice preview stays English
+              {/* ponytail: data-no-i18n + dir=ltr - invoice preview stays English
                   (text + layout) regardless of app language; PDF export clones
                   this subtree so the exemption carries into the captured pages. */}
               <div ref={invoiceRef} data-no-i18n dir="ltr">
@@ -3607,7 +3588,7 @@ function Editor({
                       minHeight: device === "desktop" ? 1027 : 498,
                     }}
                   >
-                  {/* Stamp & Signature — draggable, watermark-style overlay.
+                  {/* Stamp & Signature - draggable, watermark-style overlay.
                       Per-document copy (form.stamp/signature) seeded from the
                       company asset; falls back to the company asset itself. */}
                   <StampSignatureLayer
@@ -3957,7 +3938,7 @@ function CustomerModal({
         <Field label="Company / Legal Name">
           <input
             className="input"
-            placeholder="Acme Corporation LLC"
+            placeholder="Gulf Line Trading LLC"
             value={f.company}
             onChange={(e) => setF({ ...f, company: e.target.value })}
           />

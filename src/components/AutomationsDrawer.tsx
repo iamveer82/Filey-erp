@@ -13,6 +13,7 @@ import {
 import { aiAutonomous, aiReady } from "../lib/ai";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
+import { SelectMenu } from "./ui-menu";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -131,15 +132,16 @@ export default function AutomationsDrawer({
               onChange={(e) => setGoal(e.target.value)}
             />
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                className="select w-auto"
+              <SelectMenu
+                className="w-auto"
                 value={type}
-                onChange={(e) => setType(e.target.value as Schedule["type"])}
-              >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="interval">Every…</option>
-              </select>
+                onChange={(v) => setType(v as Schedule["type"])}
+                options={[
+                  { value: "daily", label: "Daily" },
+                  { value: "weekly", label: "Weekly" },
+                  { value: "interval", label: "Every…" },
+                ]}
+              />
               {type === "interval" ? (
                 <span className="inline-flex items-center gap-1">
                   <input
@@ -154,17 +156,12 @@ export default function AutomationsDrawer({
               ) : (
                 <>
                   {type === "weekly" && (
-                    <select
-                      className="select w-auto"
-                      value={day}
-                      onChange={(e) => setDay(Number(e.target.value))}
-                    >
-                      {DAYS.map((d, i) => (
-                        <option key={i} value={i}>
-                          {d}
-                        </option>
-                      ))}
-                    </select>
+                    <SelectMenu
+                      className="w-auto"
+                      value={String(day)}
+                      onChange={(v) => setDay(Number(v))}
+                      options={DAYS.map((d, i) => ({ value: String(i), label: d }))}
+                    />
                   )}
                   <input
                     type="time"
@@ -184,7 +181,7 @@ export default function AutomationsDrawer({
           <div className="mt-4 space-y-2">
             {tasks.length === 0 ? (
               <p className="py-6 text-center text-sm text-brand-500">
-                No automations yet. Create one above — it runs while the app is open.
+                No automations yet. Create one above - it runs while the app is open.
               </p>
             ) : (
               tasks.map((t) => (
@@ -211,7 +208,7 @@ export default function AutomationsDrawer({
                         updateTask(t.id, { enabled: !t.enabled });
                         refresh();
                       }}
-                      title={t.enabled ? "Enabled — click to pause" : "Paused — click to enable"}
+                      title={t.enabled ? "Enabled - click to pause" : "Paused - click to enable"}
                       className={cn(
                         "relative h-5 w-9 shrink-0 rounded-full transition-colors",
                         t.enabled ? "bg-primary-400" : "bg-brand-300"
@@ -261,7 +258,7 @@ export default function AutomationsDrawer({
 
         <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400">
           Automations run while Filey is open. Sensitive actions (send/pay) still
-          ask for approval — best for summaries & reports.
+          ask for approval - best for summaries & reports.
         </p>
       </div>
     </div>,

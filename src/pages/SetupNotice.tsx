@@ -23,7 +23,7 @@ export default function SetupNotice() {
       choose("local");
     } else {
       setLicenseMsg(
-        "Offline mode comes with Filey Freedom (AED 499, one-time). Start free in the cloud — then buy Freedom or redeem a voucher under Settings → Desktop License."
+        "Offline mode comes with Filey Freedom (AED 1,499, one-time). Start free in the cloud, then buy Freedom or redeem a voucher under Settings → Desktop License."
       );
     }
   };
@@ -34,7 +34,7 @@ export default function SetupNotice() {
         style={{ "--materialize-origin": "center" } as CSSProperties}
         className="materialize-surface w-full max-w-md"
       >
-        {/* Identity — Geist Pixel wordmark on a clean Apple surface: the
+        {/* Identity - Geist Pixel wordmark on a clean Apple surface: the
             pixel display face is the one distinctive brand moment (design.md
             §3), everything around it stays quiet. */}
         <div className="flex flex-col items-center text-center mb-8">
@@ -47,7 +47,7 @@ export default function SetupNotice() {
 
         {cloudConfigured && (
           <>
-            {/* Primary path — cloud. The free default: account, sync, team. */}
+            {/* Primary path - cloud. The free default: account, sync, team. */}
             <button
               onClick={() => choose("cloud")}
               className="group w-full text-left rounded-xl border border-brand-200 dark:border-white/12
@@ -69,7 +69,7 @@ export default function SetupNotice() {
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-brand-500">
-                    Sign up in the app — your data is stored securely and synced.
+                    Sign up in the app. Your data is stored securely and synced.
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
@@ -98,7 +98,7 @@ export default function SetupNotice() {
               <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
             </div>
 
-            {/* Secondary path — offline, the licensed tier. Quiet by design. */}
+            {/* Secondary path - offline, the licensed tier. Quiet by design. */}
             <button
               onClick={() => void chooseLocal()}
               className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
@@ -120,7 +120,7 @@ export default function SetupNotice() {
                     )}
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Everything stays on this computer — no account, no internet.
+                    Everything stays on this computer. No account, no internet.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
@@ -135,7 +135,7 @@ export default function SetupNotice() {
         )}
         {!cloudConfigured && (
           <>
-            {/* No cloud in this build — offline is the only working path. */}
+            {/* No cloud in this build - offline is the only working path. */}
             <button
               onClick={() => void chooseLocal()}
               className="mb-4 w-full text-left rounded-xl border border-brand-200 dark:border-white/10
@@ -150,7 +150,7 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-ink">Use offline</h2>
                   <p className="text-[13px] text-brand-500">
-                    Everything stays on this computer — no account, no internet.
+                    Everything stays on this computer. No account, no internet.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

@@ -30,18 +30,45 @@ import {
   type QuotationSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { num, aed, cn, fmtDate, todayYmd, localYmd } from "../lib/format";
+import { num, aed, cn, fmtDate, todayYmd, localYmd, plural } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import { Badge, statusTone, ErrorBanner, PageHeader, Skeleton } from "../components/ui";
+import {
+  Badge,
+  statusTone,
+  ErrorBanner,
+  PageHeader,
+  Skeleton,
+  keyActivate,
+} from "../components/ui";
 import { useChartColors } from "../lib/accent";
 import { useAuth } from "../lib/auth";
 
 /* ── Overview (Emergent reference layout) ──────────────────────────────────
    JoinedGrid KPIs → Sales/Received bar + segments pie → Recent invoices +
-   activity → Cash movement area. Data loaders unchanged — reskin only. */
+   activity → Cash movement area. Data loaders unchanged - reskin only. */
 
 type Range = "7d" | "30d" | "90d";
 const RANGE_DAYS: Record<Range, number> = { "7d": 8, "30d": 30, "90d": 90 };
+
+/** saveDoc posts an invoice to Orders, Inventory and Accounting only when its
+ *  status is "sent", and un-posts it for anything else. Counting "everything
+ *  that isn't a draft" therefore showed revenue on the dashboard that the books
+ *  deliberately exclude, so the two never reconciled. */
+const isPosted = (status?: string | null) => status === "sent" || status === "paid";
+
+/** Recharts draws a full axis grid for an all-zero series: eight zero-height
+ *  bars, or a line pinned flat to the baseline. On a fresh workspace that reads
+ *  as a broken chart rather than an empty one, so show this instead. */
+function ChartEmpty({ hint }: { hint: string }) {
+  return (
+    <div className="grid h-full place-items-center px-4 text-center">
+      <div>
+        <p className="text-[13px] font-medium text-foreground">Nothing to chart yet</p>
+        <p className="mt-1 max-w-[34ch] text-[12px] text-muted-foreground">{hint}</p>
+      </div>
+    </div>
+  );
+}
 
 /** Relative timestamp: "just now" / "Nm ago" / "Nh ago" / "Nd ago", else date. */
 const relTime = (iso: string): string => {
@@ -154,7 +181,7 @@ export default function ModernOverview() {
     let revCur = 0;
     let revPrev = 0;
     for (const i of invoices) {
-      if (i.status === "draft" || !i.issue_date) continue;
+      if (!isPosted(i.status) || !i.issue_date) continue;
       const t = +new Date(i.issue_date);
       const collected = (i.total || 0) - (i.balance ?? 0);
       if (t >= curStart) revCur += collected;
@@ -194,7 +221,7 @@ export default function ModernOverview() {
     const series: { d: string; invoiced: number; received: number }[] = [];
     const byDay = new Map<string, { invoiced: number; received: number }>();
     for (const i of invoices) {
-      if (i.status === "draft" || !i.issue_date) continue;
+      if (!isPosted(i.status) || !i.issue_date) continue;
       const key = i.issue_date.slice(0, 10);
       const row = byDay.get(key) || { invoiced: 0, received: 0 };
       row.invoiced += i.total || 0;
@@ -219,6 +246,17 @@ export default function ModernOverview() {
   const barTrend = useMemo(
     () => (range === "7d" ? trend : trend.slice(-8)),
     [trend, range]
+  );
+
+  // Drafts and anything outside the window contribute nothing, so a workspace
+  // with invoices in it can still produce an all-zero series.
+  const hasBarData = useMemo(
+    () => barTrend.some((r) => r.invoiced > 0 || r.received > 0),
+    [barTrend]
+  );
+  const hasTrendData = useMemo(
+    () => trend.some((r) => r.invoiced > 0 || r.received > 0),
+    [trend]
   );
 
   // Customer segments pie
@@ -279,7 +317,7 @@ export default function ModernOverview() {
       label: "Revenue",
       value: aed(revenue.collected),
       delta: deltas.revenue,
-      hint: `${num(revenue.count)} invoices`,
+      hint: plural(revenue.count, "invoice"),
       to: "/invoicing",
     },
     {
@@ -339,7 +377,7 @@ export default function ModernOverview() {
     <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
         title={`Welcome back, ${firstName}`}
-        subtitle="Live view of your business — driven by real data in your workspace."
+        subtitle="Live view of your business, driven by real data in your workspace."
         action={
           <>
             <button onClick={onExport} className="btn-ghost">
@@ -410,9 +448,12 @@ export default function ModernOverview() {
             </span>
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Last 8 days — from your invoices &amp; receipts
+            Last 8 days, from your invoices &amp; receipts
           </div>
           <div className="h-[280px] mt-4">
+            {!hasBarData ? (
+              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barTrend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
                 <defs>
@@ -434,6 +475,7 @@ export default function ModernOverview() {
                 <Bar dataKey="received" name="Received" fill={c.primary} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
         <div className="p-5">
@@ -517,7 +559,9 @@ export default function ModernOverview() {
                 {recent.map((r) => (
                   <tr
                     key={r.id}
+                    tabIndex={0}
                     onClick={() => nav(`/invoicing?open=${r.id}`)}
+                    onKeyDown={keyActivate(() => nav(`/invoicing?open=${r.id}`))}
                     className="border-b border-border last:border-0 hover:bg-hover transition-colors cursor-pointer"
                   >
                     <td className="px-5 py-3 text-foreground font-medium">{r.number}</td>
@@ -557,7 +601,7 @@ export default function ModernOverview() {
                 </div>
                 <div className="min-w-0">
                   <div className="text-[13px] text-foreground leading-snug">
-                    <span className="font-medium">{a.title}</span> — {a.status}
+                    <span className="font-medium">{a.title}</span> · {a.status}
                   </div>
                   <div className="text-[11.5px] text-muted-foreground mt-0.5">
                     System • {relTime(a.when)}
@@ -596,6 +640,9 @@ export default function ModernOverview() {
           </div>
         </div>
         <div className="px-4 pb-4 h-[260px]">
+          {!hasTrendData ? (
+            <ChartEmpty hint="Money in and money out appear here once invoices are sent and paid." />
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
               <defs>
@@ -617,6 +664,7 @@ export default function ModernOverview() {
               <Area type="monotone" dataKey="invoiced" name="Sales" stroke={c.primary} fill="url(#cashOut)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </div>
       </div>
 

@@ -17,6 +17,7 @@ import {
 import { aed, num, cn } from "../../lib/format";
 import { useChartColors } from "../../lib/accent";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
+import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 
 const CLOSED = ["paid", "draft", "cancelled"];
 
@@ -116,9 +117,12 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             Revenue trend
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Invoiced vs received — last 8 days
+            Invoiced vs received - last 8 days
           </div>
           <div className="h-[280px] mt-3">
+            {allZero(trend, "invoiced", "received") ? (
+              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
                 data={trend}
@@ -166,6 +170,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
               </LineChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -174,9 +179,12 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             Monthly sales
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Invoiced totals — last 6 months
+            Invoiced totals - last 6 months
           </div>
           <div className="h-[280px] mt-3">
+            {allZero(monthlySales, "total") ? (
+              <ChartEmpty hint="Monthly totals build up as you invoice through the year." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={monthlySales}
@@ -215,6 +223,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -229,6 +238,9 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             Distribution by status
           </div>
           <div className="h-[280px] mt-3">
+            {allZero(pie, "value") ? (
+              <ChartEmpty hint="Invoice statuses appear here once you have invoices." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -250,6 +262,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
               </PieChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 

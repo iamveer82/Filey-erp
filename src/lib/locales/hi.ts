@@ -59,7 +59,7 @@ const hi: Record<string, string> = {
   "Loading…": "लोड हो रहा है…",
 
   // ---- shell / common labels ----
-  "New Invoice": "नया चालान",
+  "New invoice": "नया चालान",
   Invoices: "चालान",
   Outstanding: "बकाया",
   Paid: "भुगतान किया",
@@ -103,10 +103,10 @@ const hi: Record<string, string> = {
   View: "देखें",
   Duplicate: "प्रतिलिपि",
   Send: "भेजें",
-  "Record Payment": "भुगतान दर्ज करें",
+  "Record payment": "भुगतान दर्ज करें",
   "Mark as Paid": "भुगतान के रूप में चिह्नित करें",
   "Mark Paid": "भुगतान चिह्नित करें",
-  "Add Item": "आइटम जोड़ें",
+  "Add item": "आइटम जोड़ें",
   "Add Row": "पंक्ति जोड़ें",
   "Add Line": "लाइन जोड़ें",
   Remove: "हटाएं",

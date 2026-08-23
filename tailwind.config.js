@@ -70,17 +70,19 @@ export default {
           800: "hsl(var(--foreground) / <alpha-value>)",
           900: "hsl(var(--foreground) / <alpha-value>)",
         },
-        // design.md §2 — exact spec hex
-        success: "#3FB984",
-        info: "#0EA5E9",
-        warning: "#F59E0B",
-        danger: "#E5484D",
+        // Theme-scoped so each mode gets a value that clears AA as text: the
+        // single bright hex these used to be read at 2.1-2.5:1 on white.
+        success: "hsl(var(--success) / <alpha-value>)",
+        info: "hsl(var(--info) / <alpha-value>)",
+        warning: "hsl(var(--warning) / <alpha-value>)",
+        danger: "hsl(var(--danger) / <alpha-value>)",
         accentpurple: "#7C3AED",
         // Legacy aliases → tokens (ink = primary text, hairline = border,
         // surface = card, canvas = page background).
         ink: "hsl(var(--foreground) / <alpha-value>)",
         surface: "hsl(var(--card) / <alpha-value>)",
         canvas: "hsl(var(--background) / <alpha-value>)",
+        page: "hsl(var(--page) / <alpha-value>)",
         hairline: "hsl(var(--border) / <alpha-value>)",
         chartdark: "#1E293B",
       },

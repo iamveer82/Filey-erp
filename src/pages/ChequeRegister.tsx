@@ -8,6 +8,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
+import { log } from "../lib/log";
 import { aed, fmtDate, numInput, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
@@ -28,13 +29,14 @@ import {
 import { DateField } from "../components/DatePicker";
 import { tools } from "../lib/api";
 import { saveOutput, listFiles, fileObjectUrl } from "../lib/files";
+import { SelectMenu } from "../components/ui-menu";
 
 /* ------------------------------------------------------------------ */
 /*  Cheque Register — issued & received cheques                        */
 /* ------------------------------------------------------------------ */
 
 const CHEQUE_KEY = "filey_cheques"; // device-local cache
-const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings — synced + backed up
+const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings - synced + backed up
 
 interface Cheque {
   id: number;
@@ -71,7 +73,12 @@ function saveCheques(c: Cheque[]) {
   }
   // Write-through to app_settings: bare localStorage never syncs across
   // devices and the desktop backup doesn't include it (same as challans).
-  void tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(c)).catch(() => {});
+  void tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(c)).catch((e) =>
+    // Local storage already holds it, so nothing is lost here — but a failed
+    // write-through means other devices never see it. Surface that in
+    // Settings -> Diagnostics instead of dropping it on the floor.
+    log.warn("sync", "cheques did not reach app_settings", e)
+  );
 }
 
 /** Pull cheques saved on the user's other devices; remote wins when present. */
@@ -200,7 +207,7 @@ export default function ChequeRegister() {
               setOpen(true);
             }}
           >
-            <Plus size={16} /> New Cheque
+            <Plus size={16} /> New cheque
           </button>
         }
       />
@@ -441,7 +448,7 @@ function ChequeModal({
   );
   const valid = f.cheque_no.trim() && f.party.trim() && f.amount > 0;
   return (
-    <Modal open={open} onClose={onClose} title={edit ? "Edit Cheque" : "New Cheque"}>
+    <Modal open={open} onClose={onClose} title={edit ? "Edit Cheque" : "New cheque"}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Cheque Number *">
           <input
@@ -451,14 +458,15 @@ function ChequeModal({
           />
         </Field>
         <Field label="Type">
-          <select
-            className="select"
+          <SelectMenu
+            ariaLabel="Type"
             value={f.type}
-            onChange={(e) => setF({ ...f, type: e.target.value as any })}
-          >
-            <option value="issued">Issued</option>
-            <option value="received">Received</option>
-          </select>
+            onChange={(type) => setF({ ...f, type: type as any })}
+            options={[
+              { value: "issued", label: "Issued" },
+              { value: "received", label: "Received" },
+            ]}
+          />
         </Field>
         <Field label="Party *">
           <input
@@ -483,16 +491,17 @@ function ChequeModal({
           />
         </Field>
         <Field label="Status">
-          <select
-            className="select"
+          <SelectMenu
+            ariaLabel="Status"
             value={f.status}
-            onChange={(e) => setF({ ...f, status: e.target.value as any })}
-          >
-            <option value="pending">Pending</option>
-            <option value="cleared">Cleared</option>
-            <option value="bounced">Bounced</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+            onChange={(status) => setF({ ...f, status: status as any })}
+            options={[
+              { value: "pending", label: "Pending" },
+              { value: "cleared", label: "Cleared" },
+              { value: "bounced", label: "Bounced" },
+              { value: "cancelled", label: "Cancelled" },
+            ]}
+          />
         </Field>
         <Field label="Issue Date">
           <DateField

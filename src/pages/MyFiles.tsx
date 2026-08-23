@@ -251,7 +251,7 @@ export default function MyFiles() {
 
   const doDeleteFolder = async (f: UserFolder) => {
     if (!isEmptyFolder(f.id)) {
-      toast.error("Folder isn't empty — move or delete its contents first.");
+      toast.error("Folder isn't empty - move or delete its contents first.");
       return;
     }
     const ok = await confirm({
@@ -377,7 +377,7 @@ export default function MyFiles() {
 
   const share = async (f: SavedFile) => {
     if (isLocalMode()) {
-      toast.error("Share links need Cloud mode — use Download instead.");
+      toast.error("Share links need Cloud mode - use Download instead.");
       return;
     }
     setBusyId(f.id);
@@ -385,7 +385,7 @@ export default function MyFiles() {
       const url = await shareFileLink(f);
       if (!url) throw new Error("Could not create a share link.");
       await navigator.clipboard.writeText(url);
-      toast.success("Share link copied — valid for 7 days.");
+      toast.success("Share link copied - valid for 7 days.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -408,7 +408,7 @@ export default function MyFiles() {
       <div className="animate-fade-up">
         <PageHeader
           title="My Files"
-          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+          subtitle="Organise documents into folders: drag, drop, and arrange your way"
         />
         <div className="rounded-xl border border-border bg-card p-5 text-[13px] text-muted-foreground">
           Sign in to save and access your files across devices.
@@ -422,7 +422,7 @@ export default function MyFiles() {
       <div className="animate-fade-up">
         <PageHeader
           title="My Files"
-          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+          subtitle="Organise documents into folders: drag, drop, and arrange your way"
         />
         <div className="grid h-60 place-items-center">
           <Loader2 size={22} className="animate-spin text-muted-foreground" />
@@ -458,7 +458,7 @@ export default function MyFiles() {
       <div className="animate-fade-up">
         <PageHeader
           title="My Files"
-          subtitle="Organise documents into folders — drag, drop, and arrange your way"
+          subtitle="Organise documents into folders: drag, drop, and arrange your way"
           action={
             <div className="flex items-center gap-2">
               <button className="btn-ghost" onClick={newFolder}>
@@ -498,7 +498,7 @@ export default function MyFiles() {
             <EmptyState
               icon={FolderOpen}
               title="No saved files yet"
-              description="Generate a document — a copy is filed here automatically — or create a folder to organise things your way."
+              description="Generate a document - a copy is filed here automatically - or create a folder to organise things your way."
               action={
                 <label
                   htmlFor="file-upload"
@@ -565,7 +565,7 @@ export default function MyFiles() {
               </div>
             )}
 
-            {/* Files in this folder — quiet joined rows (DEMO parity) */}
+            {/* Files in this folder - quiet joined rows (DEMO parity) */}
             {visibleFiles.length > 0 && (
               <div className="overflow-hidden rounded-xl border border-border bg-card divide-y divide-border">
                 {visibleFiles.map((f) => (

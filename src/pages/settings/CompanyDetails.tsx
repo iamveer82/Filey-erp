@@ -2,6 +2,7 @@ import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
+import { SelectMenu } from "../../components/ui-menu";
 import {
   Building2,
   Upload,
@@ -243,18 +244,14 @@ export default function CompanyDetails() {
         </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Business Type">
-            <select
-              className="select"
+            <SelectMenu
               value={c.business_type ?? ""}
-              onChange={(e) => set("business_type", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {BUSINESS_TYPES.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("business_type", v)}
+              options={[
+                { value: "", label: "Select…" },
+                ...BUSINESS_TYPES.map((b) => ({ value: b, label: b })),
+              ]}
+            />
           </FormField>
           <FormField label="TRN (Tax Registration Number)" hint="15-digit number">
             <input
@@ -279,37 +276,29 @@ export default function CompanyDetails() {
             />
           </FormField>
           <FormField label="ID Type" hint="UAE e-invoice">
-            <select
-              className="select"
+            <SelectMenu
               value={c.legal_id_type ?? ""}
-              onChange={(e) => set("legal_id_type", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {LEGAL_ID_TYPES.map((t) => (
-                <option key={t.code} value={t.code}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("legal_id_type", v)}
+              options={[
+                { value: "", label: "Select…" },
+                ...LEGAL_ID_TYPES.map((t) => ({ value: t.code, label: t.label })),
+              ]}
+            />
           </FormField>
           <FormField label="Emirate" hint="Country subdivision">
-            <select
-              className="select"
+            <SelectMenu
               value={c.country_subdivision ?? ""}
-              onChange={(e) => set("country_subdivision", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {EMIRATES.map((em) => (
-                <option key={em.code} value={em.code}>
-                  {em.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("country_subdivision", v)}
+              options={[
+                { value: "", label: "Select…" },
+                ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
+              ]}
+            />
           </FormField>
         </div>
         <FormField
           label="WhatsApp number"
-          hint="The number customers message — often not the same as your phone"
+          hint="The number customers message - often not the same as your phone"
         >
           <input
             className="input"
@@ -320,11 +309,11 @@ export default function CompanyDetails() {
           />
         </FormField>
         {/* Employer half of a UAE WPS salary file. Blank unless payroll is
-            filed through WPS — nothing else reads these. */}
+            filed through WPS - nothing else reads these. */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField
             label="MOHRE establishment ID"
-            hint="13 digits — for the WPS salary file"
+            hint="13 digits - for the WPS salary file"
           >
             <input
               className="input"
@@ -336,7 +325,7 @@ export default function CompanyDetails() {
           </FormField>
           <FormField
             label="WPS bank routing code"
-            hint="9 digits — from your paying bank"
+            hint="9 digits - from your paying bank"
           >
             <input
               className="input"
@@ -409,17 +398,11 @@ export default function CompanyDetails() {
             />
           </FormField>
           <FormField label="Currency">
-            <select
-              className="select"
+            <SelectMenu
               value={c.currency ?? "AED"}
-              onChange={(e) => set("currency", e.target.value)}
-            >
-              {CURRENCIES.map((cur) => (
-                <option key={cur} value={cur}>
-                  {cur}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("currency", v)}
+              options={CURRENCIES.map((cur) => ({ value: cur, label: cur }))}
+            />
           </FormField>
         </div>
       </div>
@@ -431,17 +414,14 @@ export default function CompanyDetails() {
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <FormField label="Tax Type">
-            <select
-              className="select"
+            <SelectMenu
               value={c.tax_type ?? "VAT"}
-              onChange={(e) => set("tax_type", e.target.value)}
-            >
-              {["VAT", "GST", "Sales Tax", "None"].map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("tax_type", v)}
+              options={["VAT", "GST", "Sales Tax", "None"].map((t) => ({
+                value: t,
+                label: t,
+              }))}
+            />
           </FormField>
           <FormField label="VAT Registration Number">
             <input
@@ -467,8 +447,8 @@ export default function CompanyDetails() {
           <Bookmark size={16} /> Document Presets
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          The template each section starts a new document on. Set once here — or
-          from the preset row above any section's list — instead of choosing on
+          The template each section starts a new document on. Set once here - or
+          from the preset row above any section's list - instead of choosing on
           every document.
         </p>
         <DocPresetsPanel />
@@ -520,7 +500,7 @@ export default function CompanyDetails() {
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
           Upload your full A4 letterhead (logo, header and footer artwork on one page).
           Toggle “Use letterhead” on an LPO, declaration letter or other document to print
-          the body on top of it — then adjust the header and footer spacing on that
+          the body on top of it - then adjust the header and footer spacing on that
           document so the text clears your artwork.
         </p>
         <LetterheadConfig
@@ -538,7 +518,7 @@ export default function CompanyDetails() {
         </p>
         <p className="text-sm text-brand-500 mt-0.5 mb-4">
           Set how each document type numbers itself. Put the part that should count up
-          inside braces — its digits set the width and the starting value, so{" "}
+          inside braces - its digits set the width and the starting value, so{" "}
           <span className="font-mono">{"{001}"}</span> means 001, 002, 003… Everything
           outside the braces stays fixed. Use <span className="font-mono">{"{YY}"}</span>{" "}
           or <span className="font-mono">{"{YYYY}"}</span> for the year. Leave a type
@@ -574,7 +554,7 @@ export default function CompanyDetails() {
       <div className="flex items-center justify-end gap-3 mt-6">
         {saved && (
           <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
-            <Check size={15} /> Saved — applied to all documents
+            <Check size={15} /> Saved - applied to all documents
           </span>
         )}
         <button className="btn-primary" disabled={saving} onClick={save}>

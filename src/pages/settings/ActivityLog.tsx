@@ -1,10 +1,65 @@
 import { useLiveSync } from "../../lib/realtime";
 import { fmtDate } from "../../lib/format";
 import { DataTable, Badge } from "../../components/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { tools, AuditEntry } from "../../lib/api";
+import { MenuPopover, MenuItemRow } from "../../components/ui-menu";
 
 /* ---------------- Activity Log ---------------- */
+
+/** Toolbar filter dropdown: a quiet button showing the current choice, opening
+ *  the shared app menu with a check on it. Replaces the old native selects so
+ *  every toolbar dropdown in the app behaves and looks the same. */
+function FilterMenu({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const current = options.find((o) => o.value === value);
+  return (
+    <>
+      <button
+        type="button"
+        ref={btnRef}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] text-foreground transition-colors hover:bg-hover"
+      >
+        {current?.label ?? value}
+        <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        closeOnScroll
+        className="w-44"
+      >
+        {options.map((o) => (
+          <MenuItemRow
+            key={o.value}
+            label={o.label}
+            checked={o.value === value}
+            onClick={() => {
+              onChange(o.value);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </MenuPopover>
+    </>
+  );
+}
 
 const ACTION_TONE: Record<string, "success" | "warn" | "danger" | "info"> = {
   insert: "success",
@@ -75,28 +130,26 @@ export default function ActivityLog() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <select
-          className="select !w-auto"
+        <FilterMenu
+          label="Filter by action"
           value={action}
-          onChange={(e) => setAction(e.target.value)}
-        >
-          <option value="all">All actions</option>
-          <option value="insert">Created</option>
-          <option value="update">Updated</option>
-          <option value="delete">Deleted</option>
-        </select>
-        <select
-          className="select !w-auto"
+          onChange={setAction}
+          options={[
+            { value: "all", label: "All actions" },
+            { value: "insert", label: "Created" },
+            { value: "update", label: "Updated" },
+            { value: "delete", label: "Deleted" },
+          ]}
+        />
+        <FilterMenu
+          label="Filter by type"
           value={entity}
-          onChange={(e) => setEntity(e.target.value)}
-        >
-          <option value="all">All types</option>
-          {entities.map((e) => (
-            <option key={e} value={e}>
-              {prettyEntity(e)}
-            </option>
-          ))}
-        </select>
+          onChange={setEntity}
+          options={[
+            { value: "all", label: "All types" },
+            ...entities.map((e) => ({ value: e, label: prettyEntity(e) })),
+          ]}
+        />
       </div>
       <DataTable<AuditEntry>
         rows={filtered}

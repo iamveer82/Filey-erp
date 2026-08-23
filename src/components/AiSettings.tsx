@@ -8,6 +8,7 @@ import {
   type AiProvider,
 } from "../lib/ai";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "./ui-menu";
 
 /* Settings → AI Assistant. Bring-your-own-key: the key lives only in this
  * browser (localStorage) and requests go straight to the chosen provider. */
@@ -21,7 +22,7 @@ interface Preset {
 
 const PRESETS: Preset[] = [
   {
-    label: "Anthropic (Claude) — recommended",
+    label: "Anthropic (Claude) - recommended",
     provider: "anthropic",
     baseUrl: "https://api.anthropic.com/v1",
     model: "claude-opus-5",
@@ -122,7 +123,7 @@ export default function AiSettings() {
         maxTokens: 8,
         temperature: 0,
       });
-      toast.success(`Connected — model replied: "${r.slice(0, 40)}"`);
+      toast.success(`Connected - model replied: "${r.slice(0, 40)}"`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -148,15 +149,15 @@ export default function AiSettings() {
         <p className="font-medium mb-1">What this powers:</p>
         <ul className="space-y-0.5 list-disc pl-4">
           <li>
-            <strong>Ask AI</strong> — chat about your business data (inventory, orders,
+            <strong>Ask AI</strong> - chat about your business data (inventory, orders,
             invoices)
           </li>
           <li>
-            <strong>Document scanning</strong> — extract data from receipts, invoices, and
+            <strong>Document scanning</strong> - extract data from receipts, invoices, and
             scanned PDFs
           </li>
           <li>
-            <strong>AI Briefing</strong> — daily summary on your dashboard
+            <strong>AI Briefing</strong> - daily summary on your dashboard
           </li>
         </ul>
         <p className="mt-2 text-brand-500">
@@ -192,17 +193,18 @@ export default function AiSettings() {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="field">
           <label className="label">Provider API</label>
-          <select
-            className="select"
+          <SelectMenu
+            ariaLabel="Provider API"
             value={cfg.provider}
-            onChange={(e) => {
-              const provider = e.target.value as AiProvider;
+            onChange={(v) => {
+              const provider = v as AiProvider;
               update({ provider, baseUrl: PROVIDER_DEFAULT_URL[provider] });
             }}
-          >
-            <option value="openai">OpenAI-compatible</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-          </select>
+            options={[
+              { value: "openai", label: "OpenAI-compatible" },
+              { value: "anthropic", label: "Anthropic (Claude)" },
+            ]}
+          />
         </div>
         <div className="field">
           <label className="label">Model</label>

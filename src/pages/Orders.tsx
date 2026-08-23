@@ -13,6 +13,7 @@ import {
 import { erp, crm, CrmCustomer, Order, OrderItem, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "../components/ui-menu";
 import { aed, fmtDate, numInput, num, cn, getDisplayCurrency } from "../lib/format";
 import {
   pickDocNumber,
@@ -184,7 +185,7 @@ export default function Orders() {
 
   const doShare = async (kind: ShareKind, o: Order) => {
     const cust = findCustomer(o);
-    const text = `Order ${o.order_number} for ${o.customer_name} — total ${aed(o.total)}. Status: ${o.status}.`;
+    const text = `Order ${o.order_number} for ${o.customer_name} - total ${aed(o.total)}. Status: ${o.status}.`;
     if (kind === "email") {
       try {
         await sendShareEmail(cust?.email || "", `Order ${o.order_number}`, text);
@@ -676,17 +677,11 @@ function EditOrderModal({
               />
             </Field>
             <Field label="Status">
-              <select
-                className="select"
+              <SelectMenu
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
-              >
-                {FLOW.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setStatus(v)}
+                options={FLOW.map((s) => ({ value: s, label: s }))}
+              />
             </Field>
           </div>
 
@@ -918,7 +913,7 @@ function BuildOrderModal({
         <Field label="Customer">
           <input
             className="input"
-            placeholder="e.g. Acme Corp"
+            placeholder="e.g. Gulf Line Trading"
             value={customer}
             onChange={(e) => setCustomer(e.target.value)}
           />

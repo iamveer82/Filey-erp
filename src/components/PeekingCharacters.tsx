@@ -249,7 +249,7 @@ export default function PeekingCharacters({
 
   return (
     <div className="relative" style={{ width: 460, height: 360, maxWidth: "100%" }}>
-      {/* Purple — back */}
+      {/* Purple - back */}
       <div
         ref={purpleRef}
         className="absolute bottom-0 transition-all duration-700 ease-in-out"
@@ -288,7 +288,7 @@ export default function PeekingCharacters({
         </div>
       </div>
 
-      {/* Black — middle */}
+      {/* Black - middle */}
       <div
         ref={blackRef}
         className="absolute bottom-0 transition-all duration-700 ease-in-out"
@@ -328,7 +328,7 @@ export default function PeekingCharacters({
         </div>
       </div>
 
-      {/* Orange — front left */}
+      {/* Orange - front left */}
       <div
         ref={orangeRef}
         className="absolute bottom-0 transition-all duration-700 ease-in-out"
@@ -361,7 +361,7 @@ export default function PeekingCharacters({
         </div>
       </div>
 
-      {/* Yellow — front right */}
+      {/* Yellow - front right */}
       <div
         ref={yellowRef}
         className="absolute bottom-0 transition-all duration-700 ease-in-out"

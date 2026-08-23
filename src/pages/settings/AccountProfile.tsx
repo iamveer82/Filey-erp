@@ -5,6 +5,7 @@ import { useUI } from "../../lib/ui";
 import { useEffect, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
+import { SelectMenu } from "../../components/ui-menu";
 import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
 
 /* ---------------- Account & Profile ---------------- */
@@ -304,17 +305,13 @@ export default function AccountProfile() {
                 />
               </FormField>
               <FormField label="Role">
-                <select
-                  className="select"
+                <SelectMenu
                   value={p.role}
-                  onChange={(e) => set("role", e.target.value)}
-                >
-                  {["Administrator", "Manager", "Accountant", "Staff"].map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => set("role", v)}
+                  options={["Administrator", "Manager", "Accountant", "Staff"].map(
+                    (r) => ({ value: r, label: r })
+                  )}
+                />
               </FormField>
             </div>
           </div>
@@ -329,7 +326,7 @@ export default function AccountProfile() {
           {cloudChecked && !cloudAccount && (
             <p className="text-sm text-brand-500 rounded-lg bg-muted px-3 py-2.5">
               This device isn't signed in to a Filey account yet, so there's no
-              login email to manage. Sign in under Data &amp; Sync — it works in
+              login email to manage. Sign in under Data &amp; Sync - it works in
               offline mode too, and is what enables sync, sharing and licensing.
             </p>
           )}
@@ -451,53 +448,46 @@ export default function AccountProfile() {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Language">
-              <select
-                className="select"
+              <SelectMenu
                 value={p.language}
-                onChange={(e) => set("language", e.target.value)}
-              >
-                {["English (US)", "English (UK)", "Arabic", "Hindi"].map((l) => (
-                  <option key={l}>{l}</option>
-                ))}
-              </select>
+                onChange={(v) => set("language", v)}
+                options={["English (US)", "English (UK)", "Arabic", "Hindi"].map((l) => ({
+                  value: l,
+                  label: l,
+                }))}
+              />
             </FormField>
             <FormField label="Timezone">
-              <select
-                className="select"
+              <SelectMenu
                 value={p.timezone}
-                onChange={(e) => set("timezone", e.target.value)}
-              >
-                {[
+                onChange={(v) => set("timezone", v)}
+                options={[
                   "(GMT+04:00) Dubai, UAE",
                   "(GMT+00:00) UTC",
                   "(GMT+05:30) India",
                   "(GMT+01:00) Central Europe",
-                ].map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
+                ].map((t) => ({ value: t, label: t }))}
+              />
             </FormField>
             <FormField label="Date Format">
-              <select
-                className="select"
+              <SelectMenu
                 value={p.date_format}
-                onChange={(e) => set("date_format", e.target.value)}
-              >
-                {["DD MMM, YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].map((d) => (
-                  <option key={d}>{d}</option>
-                ))}
-              </select>
+                onChange={(v) => set("date_format", v)}
+                options={["DD MMM, YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].map((d) => ({
+                  value: d,
+                  label: d,
+                }))}
+              />
             </FormField>
             <FormField label="Time Format">
-              <select
-                className="select"
+              <SelectMenu
                 value={p.time_format}
-                onChange={(e) => set("time_format", e.target.value)}
-              >
-                {["12 Hour (02:30 PM)", "24 Hour (14:30)"].map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
+                onChange={(v) => set("time_format", v)}
+                options={["12 Hour (02:30 PM)", "24 Hour (14:30)"].map((t) => ({
+                  value: t,
+                  label: t,
+                }))}
+              />
             </FormField>
           </div>
           <div className="flex items-center justify-end gap-3 mt-4">

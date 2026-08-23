@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Building2, Bookmark } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Building2, Bookmark, ChevronDown } from "lucide-react";
 import CompanyModal from "./CompanyModal";
 import { templatesForDocType, type DocType } from "./DocTemplates";
 import { loadCustomTemplates } from "./TemplateDesigner";
@@ -14,6 +14,7 @@ import {
 import { billing, type CompanyProfile } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { errMsg } from "../lib/format";
+import { MenuPopover, MenuItemRow, SelectMenu } from "./ui-menu";
 
 /** The preset row every document section carries above its list: which
  *  template new documents of this type open on, and which company they are
@@ -37,6 +38,8 @@ export default function DocPresetBar({
   const { toast } = useUI();
   const [presets, setPresets] = useState<DocPresets>({});
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
+  const tplBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     loadDocPresets().then(setPresets).catch(() => {});
@@ -63,7 +66,7 @@ export default function DocPresetBar({
     try {
       setPresets(await saveDocPreset(docType, id));
       onPresetChange?.(id);
-      toast.success("Preset saved — new documents will use it.");
+      toast.success("Preset saved - new documents will use it.");
     } catch (e) {
       toast.error(`Could not save preset: ${errMsg(e)}`);
     }
@@ -76,21 +79,42 @@ export default function DocPresetBar({
       </div>
 
       {docType && (
-        <label className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
+        <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
           Template
-          <select
-            className="select w-auto"
+          <button
+            type="button"
+            ref={tplBtnRef}
             aria-label="Default template"
-            value={current}
-            onChange={(e) => pick(e.target.value)}
+            aria-expanded={tplOpen}
+            onClick={() => setTplOpen((v) => !v)}
+            title="Template new documents of this type open on"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] text-foreground transition-colors hover:bg-hover"
+          >
+            <span className="max-w-[200px] truncate">
+              {options.find((t) => t.id === current)?.name ?? current}
+            </span>
+            <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
+          </button>
+          <MenuPopover
+            open={tplOpen}
+            onClose={() => setTplOpen(false)}
+            anchorRef={tplBtnRef}
+            closeOnScroll
+            className="w-56"
           >
             {options.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
+              <MenuItemRow
+                key={t.id}
+                label={t.name}
+                checked={t.id === current}
+                onClick={() => {
+                  setTplOpen(false);
+                  void pick(t.id);
+                }}
+              />
             ))}
-          </select>
-        </label>
+          </MenuPopover>
+        </span>
       )}
 
       <div className="ml-auto flex items-center gap-2">
@@ -151,22 +175,16 @@ export function DocPresetsPanel() {
         return (
           <label key={docType} className="block">
             <span className="label">{DOC_TYPE_LABELS[docType]}</span>
-            <select
-              className="select"
+            <SelectMenu
               value={presetTemplate(
                 presets,
                 docType,
                 company?.default_template,
                 options[0]?.id ?? "minimal"
               )}
-              onChange={(e) => pick(docType, e.target.value)}
-            >
-              {options.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => pick(docType, v)}
+              options={options.map((t) => ({ value: t.id, label: t.name }))}
+            />
           </label>
         );
       })}

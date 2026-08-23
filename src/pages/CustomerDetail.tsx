@@ -529,8 +529,8 @@ export default function CustomerDetail() {
   const emailStatement = () => {
     shareVia("email", {
       email: customer?.email,
-      text: `Statement of account for ${display} — balance ${money(netBalance, currency)}. View: ${window.location.href}`,
-      url: `Statement of account — ${display}`,
+      text: `Statement of account for ${display} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
+      url: `Statement of account - ${display}`,
     });
   };
 
@@ -642,7 +642,7 @@ export default function CustomerDetail() {
     try {
       const token = await billing.publicLink(d.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Invoice ${d.number} — ${aed(d.total)}. View & pay online: ${url}`;
+      const text = `Invoice ${d.number} - ${aed(d.total)}. View & pay online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
       if (kind === "email") {
@@ -668,7 +668,7 @@ export default function CustomerDetail() {
     try {
       const token = await quotes.publicLink(q.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Quotation ${q.number} — ${aed(q.total)}. View online: ${url}`;
+      const text = `Quotation ${q.number} - ${aed(q.total)}. View online: ${url}`;
       if (kind === "email") {
         await sendShareEmail(customer?.email || "", `Quotation ${q.number}`, text);
         toast.success(`Quotation emailed to ${customer?.email}`);
@@ -798,7 +798,7 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {/* DEMO parity: joined 4-cell KPI grid — identity + statement metrics
+      {/* DEMO parity: joined 4-cell KPI grid - identity + statement metrics
           sharing hairline dividers; every figure derives from buildStatement. */}
       <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
@@ -906,7 +906,7 @@ export default function CustomerDetail() {
             >
               {aed(opening)}
               <span className="text-[11px] text-muted-foreground ml-2 font-normal">
-                {opening > 0 ? "Debit — they owe" : opening < 0 ? "Credit" : ""}
+                {opening > 0 ? "Debit, they owe" : opening < 0 ? "Credit" : ""}
               </span>
             </div>
           </div>
@@ -992,7 +992,7 @@ export default function CustomerDetail() {
         </div>
       </div>
 
-      {/* DEMO parity: download panel — template picker + selected-template
+      {/* DEMO parity: download panel - template picker + selected-template
           summary. The header's amber button smooth-scrolls here. */}
       <div
         id="download-panel"
@@ -1005,7 +1005,7 @@ export default function CustomerDetail() {
                 Download statement
               </div>
               <div className="text-[12.5px] text-muted-foreground">
-                Choose a template — preview updates instantly
+                Choose a template - preview updates instantly
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -1073,7 +1073,7 @@ export default function CustomerDetail() {
                 <div className="h-10 w-10 rounded-lg bg-neutral-900 grid place-items-center text-white text-[11px] font-bold">J</div>
                 <div>
                   <div className="text-[13px] font-medium text-foreground">Sales & Collections Journal</div>
-                  <div className="text-[11.5px] text-muted-foreground">Itemised invoice lines with VAT, qty, rate & payments — DUNE-style.</div>
+                  <div className="text-[11.5px] text-muted-foreground">Itemised invoice lines with VAT, qty, rate & payments, DUNE-style.</div>
                 </div>
               </div>
             )}
@@ -1119,7 +1119,7 @@ export default function CustomerDetail() {
       {/* Live preview of the selected statement template */}
       <div className="rounded-xl border border-border bg-card p-4 mb-5">
         <div className="text-[13px] text-muted-foreground mb-3">
-          Live preview — how the exported{" "}
+          Live preview - how the exported{" "}
           {journalMode ? "Sales & Collections Journal" : tplMeta.name} will look
         </div>
         {journalMode ? (
@@ -1131,7 +1131,7 @@ export default function CustomerDetail() {
             </FitPreview>
           ) : (
             <div className="py-16 text-center text-[13px] text-muted-foreground">
-              No invoice data — the journal appears once this customer has
+              No invoice data - the journal appears once this customer has
               non-draft invoices on record.
             </div>
           )
@@ -1141,7 +1141,7 @@ export default function CustomerDetail() {
           <Skeleton className="h-[420px] w-full" />
         ) : !built.hasContent ? (
           <div className="py-16 text-center text-[13px] text-muted-foreground">
-            No statement activity yet — the preview appears once this customer
+            No statement activity yet - the preview appears once this customer
             has invoices, receipts or advances on record.
           </div>
         ) : (
@@ -1153,7 +1153,7 @@ export default function CustomerDetail() {
         )}
       </div>
 
-      {/* Off-screen A4 stack captured for the PDF export — every slice a real
+      {/* Off-screen A4 stack captured for the PDF export - every slice a real
           page (same pattern as the StatementModal export). */}
       {built.hasContent && (
         <div
@@ -1174,7 +1174,7 @@ export default function CustomerDetail() {
         </div>
       )}
 
-      {/* Invoices — full table in its own card (its old joined-card slot now
+      {/* Invoices - full table in its own card (its old joined-card slot now
           holds the Sales & Collections ledger). */}
       <div className="border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
@@ -1436,6 +1436,7 @@ export default function CustomerDetail() {
           <DataTable<Opportunity>
             pageSize={5}
             rows={myOpps}
+            empty="No opportunities for this customer"
             columns={[
               {
                 key: "title",

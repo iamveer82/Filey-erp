@@ -118,7 +118,7 @@ export default function MergeStudio({
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-brand-500">
           {items.length} file{items.length === 1 ? "" : "s"} · {totalPages} page
-          {totalPages === 1 ? "" : "s"} — drag to reorder
+          {totalPages === 1 ? "" : "s"} - drag to reorder
         </p>
         <label className="btn-ghost h-8 cursor-pointer text-xs" aria-label="Add PDFs">
           <Upload size={13} /> Add PDFs

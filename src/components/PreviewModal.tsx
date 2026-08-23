@@ -165,7 +165,7 @@ export default function PreviewModal({
             <p className="text-xs text-brand-400">
               {paths.length
                 ? "Stored securely in your account"
-                : "Rendered locally — nothing is uploaded"}
+                : "Rendered locally - nothing is uploaded"}
             </p>
           </div>
           <div className="flex items-center gap-2">

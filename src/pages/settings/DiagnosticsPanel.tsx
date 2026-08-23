@@ -3,6 +3,7 @@ import { Copy, Check, Trash2 } from "lucide-react";
 import { clearLog, logAsText, logEntries, onLog, type LogEntry, type LogLevel } from "../../lib/log";
 import { clearJournal, listRuns, type RunNote } from "../../lib/agentJournal";
 import { cn } from "../../lib/format";
+import { SelectMenu } from "../../components/ui-menu";
 
 /* What the app has been doing, for when it stops doing it.
  *
@@ -114,35 +115,35 @@ export default function DiagnosticsPanel() {
         <h2 className="text-[15px] font-semibold text-foreground">Diagnostics</h2>
         <p className="mt-1 text-[12.5px] text-muted-foreground">
           What the agent, WhatsApp and sync have been doing since the app
-          started. Kept in memory only — it clears when you close Filey. If
+          started. Kept in memory only - it clears when you close Filey. If
           something misbehaves, copy this and send it over.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className="input h-8 w-auto text-[12.5px]"
+        <SelectMenu
+          size="sm"
+          className="w-auto"
+          ariaLabel="Filter by area"
           value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          aria-label="Filter by area"
-        >
-          <option value="">All areas</option>
-          {scopes.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input h-8 w-auto text-[12.5px]"
+          onChange={(v) => setScope(v)}
+          options={[
+            { value: "", label: "All areas" },
+            ...scopes.map((s) => ({ value: s, label: s })),
+          ]}
+        />
+        <SelectMenu
+          size="sm"
+          className="w-auto"
+          ariaLabel="Filter by level"
           value={level}
-          onChange={(e) => setLevel(e.target.value as LogLevel | "")}
-          aria-label="Filter by level"
-        >
-          <option value="">Everything</option>
-          <option value="warn">Warnings and errors</option>
-          <option value="error">Errors only</option>
-        </select>
+          onChange={(v) => setLevel(v as LogLevel | "")}
+          options={[
+            { value: "", label: "Everything" },
+            { value: "warn", label: "Warnings and errors" },
+            { value: "error", label: "Errors only" },
+          ]}
+        />
 
         <div className="ml-auto flex items-center gap-2">
           <button

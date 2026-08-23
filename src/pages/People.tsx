@@ -134,7 +134,7 @@ export default function People() {
 
   const shareEmployee = (kind: "whatsapp" | "email" | "sms", e: Employee) => {
     const text = [
-      `${e.name}${e.position ? ` — ${e.position}` : ""}${
+      `${e.name}${e.position ? ` - ${e.position}` : ""}${
         e.department ? `, ${e.department}` : ""
       }`,
       e.email ? `Email: ${e.email}` : "",
@@ -159,7 +159,7 @@ export default function People() {
               <Sliders size={15} /> Customize fields
             </button>
             <button className="btn-primary" onClick={() => setOpen(true)}>
-              <Plus size={16} /> Add Person
+              <Plus size={16} /> Add person
             </button>
           </div>
         }
@@ -542,7 +542,7 @@ function PayslipModal({
   };
 
   return (
-    <Modal open={!!employee} onClose={onClose} title={`Payslip — ${employee.name}`}>
+    <Modal open={!!employee} onClose={onClose} title={`Payslip - ${employee.name}`}>
       <div className="grid grid-cols-3 joined-kpis mb-4 no-print">
         <Field label="Month">
           <input
@@ -631,7 +631,7 @@ function PayslipModal({
             </tfoot>
           </table>
           <p className="text-[11px] text-gray-400 mt-6">
-            Computer-generated payslip — no signature required.
+            Computer-generated payslip - no signature required.
           </p>
         </div>
       </div>
@@ -702,7 +702,7 @@ function EmployeeModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={employee ? `Edit ${employee.name}` : "Add Person"}
+      title={employee ? `Edit ${employee.name}` : "Add person"}
     >
       <div className="grid grid-cols-2 gap-3">
         <Field label="Employee Code">
@@ -768,11 +768,11 @@ function EmployeeModal({
         </Field>
       </div>
 
-      {/* Only needed to file a UAE WPS salary file — left blank, nothing here
+      {/* Only needed to file a UAE WPS salary file - left blank, nothing here
           affects the rest of the app. */}
       <details className="mt-4 group">
         <summary className="cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground">
-          Payroll (WPS) details — optional
+          Payroll (WPS) details - optional
         </summary>
         <div className="grid grid-cols-2 gap-3 mt-3">
           <Field label="Labour card no. (14 digits)">
@@ -879,7 +879,7 @@ function LeaveModal({
     }
   };
   return (
-    <Modal open={!!employee} onClose={onClose} title={`Mark leave — ${employee.name}`}>
+    <Modal open={!!employee} onClose={onClose} title={`Mark leave - ${employee.name}`}>
       <MultiDatePicker value={dates} onChange={setDates} onConfirm={save} />
       <p className="text-xs text-brand-400 mt-3">
         {dates.length === 0

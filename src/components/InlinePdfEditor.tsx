@@ -18,6 +18,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
+import { SelectMenu } from "./ui-menu";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -484,25 +485,27 @@ export default function InlinePdfEditor({
         )}
         {tool === "text" && (
           <div className="flex items-center gap-1.5">
-            <select
-              className="select h-7 !py-0 text-xs"
+            <SelectMenu
+              size="sm"
+              className="w-auto h-7"
               value={textOpt.family}
-              onChange={(e) =>
-                setTextOpt({ ...textOpt, family: e.target.value as Family })
-              }
-            >
-              <option>Sans</option>
-              <option>Serif</option>
-              <option>Mono</option>
-            </select>
-            <select
-              className="select h-7 !py-0 text-xs"
-              value={textOpt.weight}
-              onChange={(e) => setTextOpt({ ...textOpt, weight: Number(e.target.value) })}
-            >
-              <option value={400}>Normal</option>
-              <option value={700}>Bold</option>
-            </select>
+              onChange={(v) => setTextOpt({ ...textOpt, family: v as Family })}
+              options={[
+                { value: "Sans", label: "Sans" },
+                { value: "Serif", label: "Serif" },
+                { value: "Mono", label: "Mono" },
+              ]}
+            />
+            <SelectMenu
+              size="sm"
+              className="w-auto h-7"
+              value={String(textOpt.weight)}
+              onChange={(v) => setTextOpt({ ...textOpt, weight: Number(v) })}
+              options={[
+                { value: "400", label: "Normal" },
+                { value: "700", label: "Bold" },
+              ]}
+            />
             <input
               type="range"
               min={8}

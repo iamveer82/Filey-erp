@@ -30,7 +30,7 @@ export const PLANS: PlanCard[] = [
     price: "AED 0",
     blurb: "Start free with the essentials.",
     features: [
-      "Core ERP & CRM — all modules",
+      "Core ERP & CRM, all modules",
       "5 invoices/month",
       "Cloud sync & backup included",
       "“Made with Filey” on documents",
@@ -45,10 +45,10 @@ export const PLANS: PlanCard[] = [
     price: "AED 1,499",
     period: " one-time",
     recommended: true,
-    blurb: "Own it outright — yours, on your machine.",
+    blurb: "Own it outright. Yours, on your machine.",
     features: [
-      "Unlimited invoices — no monthly cap",
-      "Works fully offline — data stays on your device",
+      "Unlimited invoices, no monthly cap",
+      "Works fully offline, data stays on your device",
       "Cloud sync on demand, whenever you want it",
       "2 device slots",
       "Free updates included",
@@ -102,7 +102,7 @@ async function invokeStripe(body: Record<string, unknown>): Promise<string> {
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (!data?.url)
-    throw new Error("Billing isn't set up yet — add Stripe keys to the edge function.");
+    throw new Error("Billing isn't set up yet. Add Stripe keys to the edge function.");
   return data.url as string;
 }
 

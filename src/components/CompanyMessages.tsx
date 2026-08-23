@@ -218,7 +218,7 @@ export default function CompanyMessages() {
         <p className="text-sm text-brand-400 py-4 text-center">Loading…</p>
       ) : roots.length === 0 ? (
         <p className="text-sm text-brand-400 py-4 text-center">
-          No messages yet — say hello to your team.
+          No messages yet - say hello to your team.
         </p>
       ) : (
         <ul className="space-y-4 max-h-96 overflow-y-auto">

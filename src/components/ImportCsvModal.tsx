@@ -3,6 +3,7 @@ import { Upload, Loader2, CheckCircle2 } from "lucide-react";
 import { Modal } from "./ui";
 import { useUI } from "../lib/ui";
 import { parseCsvObjects } from "../lib/csv";
+import { SelectMenu } from "./ui-menu";
 
 export interface ImportField {
   key: string;
@@ -117,18 +118,14 @@ export default function ImportCsvModal({
                   {f.label}
                   {f.required && <span className="text-danger"> *</span>}
                 </span>
-                <select
-                  className="select"
+                <SelectMenu
                   value={map[f.key] ?? ""}
-                  onChange={(e) => setMap((m) => ({ ...m, [f.key]: e.target.value }))}
-                >
-                  <option value="">— skip —</option>
-                  {headers.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setMap((m) => ({ ...m, [f.key]: v }))}
+                  options={[
+                    { value: "", label: "— skip —" },
+                    ...headers.map((h) => ({ value: h, label: h })),
+                  ]}
+                />
               </div>
             ))}
           </div>

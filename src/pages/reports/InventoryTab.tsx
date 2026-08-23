@@ -149,7 +149,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
           )}
         </div>
 
-        {/* Category distribution — horizontal bar list */}
+        {/* Category distribution - horizontal bar list */}
         <div className="p-5">
           <div className="text-[14px] font-semibold text-foreground">
             Product Count by Category

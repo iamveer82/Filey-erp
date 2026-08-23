@@ -4,6 +4,7 @@ import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate, num, cn, errMsg, todayYmd } from "../lib/format";
 import { PageHeader, Badge, ErrorBanner, Modal, Field } from "../components/ui";
+import { SelectMenu } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
 
 const CATEGORIES = [
@@ -125,7 +126,7 @@ export default function Purchase() {
         subtitle="Log and track company expenses"
         action={
           <button className="btn-primary" onClick={() => setOpen(true)}>
-            <Plus size={16} /> Log Expense
+            <Plus size={16} /> Log expense
           </button>
         }
       />
@@ -263,15 +264,11 @@ export default function Purchase() {
       >
         <div className="space-y-4">
           <Field label="Category">
-            <select
+            <SelectMenu
               value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
-              className="input"
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+              onChange={(v) => setForm({ ...form, category: v })}
+              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+            />
           </Field>
           <Field label="Description">
             <input

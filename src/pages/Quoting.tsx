@@ -45,6 +45,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "../components/ui-menu";
 import {
   aed,
   fmtDate,
@@ -787,7 +788,7 @@ export default function Quoting() {
       });
 
     const addItemFromProduct = (p: Product) => {
-      const desc = [p.name, p.description?.trim()].filter(Boolean).join(" — ");
+      const desc = [p.name, p.description?.trim()].filter(Boolean).join(" - ");
       setForm({
         ...form,
         items: [
@@ -1081,13 +1082,15 @@ export default function Quoting() {
                   <Pencil size={15} /> Move to draft
                 </button>
               )}
+              {/* Sending is the primary outbound action here exactly as it is in
+                  the invoice editor, so it carries the same label and weight. */}
               <button
-                className="btn-ghost"
+                className="btn-primary"
                 onClick={emailQuote}
                 disabled={!form.customer_email}
-                title="Email quotation"
+                title="Save and email the quotation to the customer"
               >
-                <Send size={15} /> Email
+                <Send size={15} /> Send
               </button>
               <button
                 className="btn-ghost"
@@ -1099,7 +1102,7 @@ export default function Quoting() {
               </button>
               <ShareToggle shared={!!form.shared} onToggle={toggleShared} />
               <button
-                className="btn-primary"
+                className="btn-ghost"
                 onClick={convertToInvoice}
                 disabled={!form.id || converting}
                 title="Convert to invoice"
@@ -1122,7 +1125,7 @@ export default function Quoting() {
                       className="btn-ghost text-xs flex items-center gap-1"
                       onClick={() => setDesigning(true)}
                     >
-                      <Plus size={13} /> Create Template
+                      <Plus size={13} /> Create template
                     </button>
                   }
                 >
@@ -1152,23 +1155,25 @@ export default function Quoting() {
                     <div className="space-y-3">
                       <Field label="Customer">
                         <div className="flex gap-2">
-                          <select
-                            className="select"
-                            value={form.customer_id ?? ""}
-                            onChange={(e) => {
-                              const c = customers.find((x) => String(x.id) === e.target.value);
+                          <SelectMenu
+                            value={form.customer_id != null ? String(form.customer_id) : ""}
+                            onChange={(v) => {
+                              const c = customers.find((x) => String(x.id) === v);
                               if (c) applyCustomer(c);
                             }}
-                          >
-                            <option value="">
-                              {customers.length ? "Select saved customer…" : "No saved customers"}
-                            </option>
-                            {customers.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.company || c.name}
-                              </option>
-                            ))}
-                          </select>
+                            options={[
+                              {
+                                value: "",
+                                label: customers.length
+                                  ? "Select saved customer…"
+                                  : "No saved customers",
+                              },
+                              ...customers.map((c) => ({
+                                value: String(c.id),
+                                label: c.company || c.name,
+                              })),
+                            ]}
+                          />
                           <button
                             type="button"
                             className="btn-ghost shrink-0"
@@ -1182,7 +1187,7 @@ export default function Quoting() {
                       <Field label="Customer / Company Name">
                         <input
                           className="input"
-                          placeholder="Acme Corporation LLC"
+                          placeholder="Gulf Line Trading LLC"
                           value={form.customer_name}
                           onChange={(e) => set("customer_name", e.target.value)}
                         />
@@ -1251,17 +1256,14 @@ export default function Quoting() {
                       </Field>
                       <div className="grid grid-cols-2 gap-3">
                         <Field label="Currency">
-                          <select
-                            className="select"
+                          <SelectMenu
                             value={form.currency || "AED"}
-                            onChange={(e) => set("currency", e.target.value)}
-                          >
-                            {CURRENCIES.map((c) => (
-                              <option key={c.code} value={c.code}>
-                                {c.code} — {c.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(v) => set("currency", v)}
+                            options={CURRENCIES.map((c) => ({
+                              value: c.code,
+                              label: `${c.code} - ${c.name}`,
+                            }))}
+                          />
                         </Field>
                         <Field label="Sales Person">
                           <input
@@ -1287,7 +1289,7 @@ export default function Quoting() {
                         <PackageSearch size={13} /> Import from Inventory
                       </button>
                       <button className="btn-ghost text-xs" onClick={addCustomColumn}>
-                        <Plus size={12} /> Add Field
+                        <Plus size={12} /> Add field
                       </button>
                     </div>
                   }
@@ -1317,24 +1319,25 @@ export default function Quoting() {
                     </div>
                     {form.unit_price_formula && (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <select
-                          className="input text-xs py-1.5 h-8"
+                        <SelectMenu
+                          size="sm"
+                          className="w-auto"
                           value={form.unit_price_formula.a || ""}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             set("unit_price_formula", {
-                              a: e.target.value,
+                              a: v,
                               b: "unit_price",
                             })
                           }
-                        >
-                          <option value="">Select field</option>
-                          <option value="qty">Qty</option>
-                          {form.customColumns.map((c) => (
-                            <option key={c.key} value={c.key}>
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: "", label: "Select field" },
+                            { value: "qty", label: "Qty" },
+                            ...form.customColumns.map((c) => ({
+                              value: c.key,
+                              label: c.label,
+                            })),
+                          ]}
+                        />
                         <span className="text-brand-400">× rate</span>
                         <span className="text-[10px] text-brand-400">→ Amount</span>
                       </div>
@@ -1450,9 +1453,10 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2">
-                              <select
-                                className="input text-right !px-2 !py-1 text-xs"
-                                aria-label="How this line is calculated"
+                              <SelectMenu
+                                size="sm"
+                                className="w-auto"
+                                ariaLabel="How this line is calculated"
                                 value={
                                   it.calcMode === "manual"
                                     ? "manual"
@@ -1462,8 +1466,7 @@ export default function Quoting() {
                                         : `formula:${it.itemFormula.a}`
                                       : "auto"
                                 }
-                                onChange={(e) => {
-                                  const v = e.target.value;
+                                onChange={(v) => {
                                   if (v === "auto") {
                                     setItem(i, { calcMode: "auto", itemFormula: null });
                                   } else if (v === "manual") {
@@ -1495,16 +1498,16 @@ export default function Quoting() {
                                     });
                                   }
                                 }}
-                              >
-                                <option value="auto">Auto</option>
-                                <option value="manual">Manual</option>
-                                <option value="qty">Formula: Qty</option>
-                                {form.customColumns.map((c) => (
-                                  <option key={c.key} value={`formula:${c.key}`}>
-                                    Formula: {c.label}
-                                  </option>
-                                ))}
-                              </select>
+                                options={[
+                                  { value: "auto", label: "Auto" },
+                                  { value: "manual", label: "Manual" },
+                                  { value: "qty", label: "Formula: Qty" },
+                                  ...form.customColumns.map((c) => ({
+                                    value: `formula:${c.key}`,
+                                    label: `Formula: ${c.label}`,
+                                  })),
+                                ]}
+                              />
                             </td>
                             {form.customColumns.map((col) => (
                               <td key={col.key} className="py-2 px-2">
@@ -1723,7 +1726,7 @@ export default function Quoting() {
 
                   <div className="flex flex-wrap gap-2 mt-3">
                     <button className="btn-primary" onClick={addItem}>
-                      <Plus size={14} /> Add Item
+                      <Plus size={14} /> Add item
                     </button>
                     <button
                       type="button"
@@ -1925,13 +1928,10 @@ export default function Quoting() {
                 <div className="card !p-4">
                   <div className="no-print flex items-center justify-between mb-3">
                     <div>
-                      <p className="font-semibold text-ink flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-ink text-white grid place-items-center text-xs font-semibold">
-                          5
-                        </span>
-                        Preview
-                      </p>
-                      <p className="text-xs text-brand-500 mt-0.5 ml-8">
+                      {/* Not a numbered step, same as the invoice editor: this
+                          panel sits alongside the whole form and stays live. */}
+                      <p className="font-semibold text-ink">Preview</p>
+                      <p className="text-xs text-brand-500 mt-0.5">
                         This is how your quotation will look
                       </p>
                     </div>
@@ -2189,7 +2189,7 @@ export default function Quoting() {
             }
           />
 
-          {/* Portaled out of <main>'s scrolling subtree — WebView2 half-paints
+          {/* Portaled out of <main>'s scrolling subtree - WebView2 half-paints
               a `fixed` overlay that stays inside it. */}
           {viewOpen && createPortal(
             <div
@@ -2326,7 +2326,7 @@ export default function Quoting() {
         action={
           <div className="flex gap-2">
             <button className="btn-primary" onClick={newQuote}>
-              <Plus size={16} /> New Quote
+              <Plus size={16} /> New quote
             </button>
           </div>
         }
@@ -2404,7 +2404,7 @@ export default function Quoting() {
         pageSize={10}
         rows={filteredDocs}
         empty={
-          search ? "No quotes match your search" : "No quotes yet — create your first one"
+          search ? "No quotes match your search" : "No quotes yet - create your first one"
         }
         rowKey={(d) => d.id}
         onRowClick={(d) => editQuote(d.id)}
@@ -2692,7 +2692,7 @@ function CustomerModal({
         <Field label="Company / Legal Name">
           <input
             className="input"
-            placeholder="Acme Corporation LLC"
+            placeholder="Gulf Line Trading LLC"
             value={f.company}
             onChange={(e) => setF({ ...f, company: e.target.value })}
           />

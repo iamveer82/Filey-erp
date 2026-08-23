@@ -35,14 +35,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 import { attachSmoothScroll } from "../lib/smoothScroll";
 import { useUI } from "../lib/ui";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./DropdownMenu";
+import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
 
@@ -106,11 +99,11 @@ function Wordmark() {
 export default function Layout({ children }: { children: ReactNode }) {
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
   const { modules, enabledModules } = useModules();
   const navModules = enabledModules();
   const name = profile?.name || "User";
-  const { lang, setLang, t } = useLang();
+  const { t } = useLang();
 
   // Online/offline state for connectivity indicator
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -250,7 +243,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         due.slice(0, 3).forEach((f) =>
           toast.notify({
             title: "Follow-up due",
-            message: `${f.title}${f.customer_name ? ` — ${f.customer_name}` : ""}`,
+            message: `${f.title}${f.customer_name ? ` - ${f.customer_name}` : ""}`,
             to: "/follow-ups",
           })
         );
@@ -325,7 +318,9 @@ export default function Layout({ children }: { children: ReactNode }) {
       </span>
     );
 
-  /** Shared account dropdown content (header avatar + sidebar footer). */
+  /** Shared account dropdown (header avatar + sidebar footer) — the app's one
+   *  menu primitive, so it matches every other dropdown in the app. */
+
   // Smooth wheel scrolling on the main column. <main> is the app's only page
   // scroller — the window never scrolls — so Lenis is bound to it directly.
   const scrollWrapRef = useRef<HTMLElement>(null);
@@ -337,38 +332,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     return attachSmoothScroll(wrap, content);
   }, []);
 
-  const accountMenu = (
-    <DropdownMenuContent align="end" className="min-w-52">
-      <DropdownMenuLabel>{profile?.email || name}</DropdownMenuLabel>
-      <DropdownMenuItem onSelect={() => nav("/settings?section=account")}>
-        <UserRound size={14} /> {t("Account")}
-      </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => nav("/settings")}>
-        <Settings size={14} /> {t("Settings")}
-      </DropdownMenuItem>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel className="flex items-center gap-1.5">
-        <Languages size={12} /> {t("Language")}
-      </DropdownMenuLabel>
-      {(Object.keys(LANGS) as Lang[]).map((code) => (
-        <DropdownMenuItem key={code} onSelect={() => setLang(code)}>
-          <span className={`fi fi-${LANGS[code].flag} rounded-sm`} />
-          <span className="flex-1">{LANGS[code].name}</span>
-          {code === lang && <span className="text-xs text-muted-foreground">✓</span>}
-        </DropdownMenuItem>
-      ))}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        onSelect={() => {
-          signOut().catch(() => toast.error("Failed to sign out"));
-        }}
-        className="text-danger focus:text-danger focus:bg-danger/10"
-      >
-        <LogOut size={14} /> {t("Sign out")}
-      </DropdownMenuItem>
-    </DropdownMenuContent>
-  );
-
   const showSidebar = isDesktop ? !hidden : true;
 
   return (
@@ -377,7 +340,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* Offline banner */}
         {!isOnline && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
-            {t("You are offline — changes will sync when reconnected")}
+            {t("You are offline - changes will sync when reconnected")}
           </div>
         )}
         {/* Mobile drawer backdrop */}
@@ -470,23 +433,18 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="border-t border-border p-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-hover">
-                    <Avatar size={28} />
-                    <span className="leading-tight text-left min-w-0">
-                      <span className="block text-[13px] font-medium text-foreground truncate">
-                        {name}
-                      </span>
-                      <span className="block text-[11px] text-muted-foreground truncate">
-                        {profile?.email ?? profile?.company ?? "Admin"}
-                      </span>
-                    </span>
-                    <ChevronsUpDown className="ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  </button>
-                </DropdownMenuTrigger>
-                {accountMenu}
-              </DropdownMenu>
+              <AccountDropdown className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-hover">
+                <Avatar size={28} />
+                <span className="leading-tight text-left min-w-0">
+                  <span className="block text-[13px] font-medium text-foreground truncate">
+                    {name}
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground truncate">
+                    {profile?.email ?? profile?.company ?? "Admin"}
+                  </span>
+                </span>
+                <ChevronsUpDown className="ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              </AccountDropdown>
             </div>
           </aside>
         )}
@@ -494,7 +452,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* ───────────── Main column ───────────── */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           <header className="shrink-0 z-30 h-14 bg-background/85 backdrop-blur border-b border-border flex items-center px-6 gap-4">
-            {/* Sidebar toggle — desktop hides/shows, mobile opens the drawer */}
+            {/* Sidebar toggle - desktop hides/shows, mobile opens the drawer */}
             <button
               onClick={() => (isDesktop ? setHidden((h) => !h) : setMobileOpen(true))}
               aria-label={t("Toggle sidebar")}
@@ -609,7 +567,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 )}
               </div>
 
-              {/* Display currency — restates every total on every page. */}
+              {/* Display currency - restates every total on every page. */}
               <CurrencySwitcher />
 
               {/* Light / dark theme toggle */}
@@ -719,29 +677,24 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
 
               {/* Account */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button aria-label="Account menu" className="cursor-pointer">
-                    <Avatar size={32} />
-                  </button>
-                </DropdownMenuTrigger>
-                {accountMenu}
-              </DropdownMenu>
+              <AccountDropdown className="cursor-pointer">
+                <Avatar size={32} />
+              </AccountDropdown>
             </div>
           </header>
 
           <main
             ref={scrollWrapRef}
-            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
+            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-page"
           >
             {/* Stable content box for Lenis: the keyed child below is remounted
                 on every navigation, so anchoring to it would lose the node. */}
             <div ref={scrollContentRef}>
-              {/* Route container — pages are content-only; padding lives here
+              {/* Route container - pages are content-only; padding lives here
                   (reference: px-6 pt-6 page gutter). */}
               {/* Currency is part of the key: pages arrive here as a `children`
                   prop, so a state change in Layout alone does not re-render
-                  them — React sees the same element and bails out, and every
+                  them - React sees the same element and bails out, and every
                   total stayed in the old currency. Remounting on switch is
                   heavier than a re-render, but it is a deliberate, occasional
                   action and it restates the whole page correctly. */}
@@ -767,22 +720,123 @@ export default function Layout({ children }: { children: ReactNode }) {
  *  still prints, sends and charges in USD. */
 function CurrencySwitcher() {
   const { currency, setCurrency } = useDisplayCurrency();
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
   return (
-    <label className="relative hidden sm:block">
-      <span className="sr-only">Display currency</span>
-      <select
-        value={currency}
-        onChange={(e) => setCurrency(e.target.value)}
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Display currency"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
         title="Currency used for totals and dashboards"
-        className="h-8 cursor-pointer appearance-none rounded-md border border-transparent bg-transparent pl-2 pr-6 text-[12.5px] font-medium text-foreground hover:bg-hover hover:border-border focus:outline-none"
+        className="hidden h-8 cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 text-[12.5px] font-medium text-foreground transition-colors hover:bg-hover hover:border-border sm:inline-flex"
+      >
+        {currency}
+        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        align="end"
+        className="w-44"
       >
         {CURRENCIES.map((c) => (
-          <option key={c.code} value={c.code}>
-            {c.code}
-          </option>
+          <MenuItemRow
+            key={c.code}
+            label={c.code}
+            hint={c.name}
+            checked={c.code === currency}
+            onClick={() => {
+              setCurrency(c.code);
+              setOpen(false);
+            }}
+          />
         ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-    </label>
+      </MenuPopover>
+    </>
+  );
+}
+
+/** The account menu shared by the header avatar and the sidebar footer —
+ *  account/settings navigation, language pick and sign-out, in the same menu
+ *  style as every other dropdown in the app. */
+function AccountDropdown({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  const nav = useNavigate();
+  const { profile, signOut } = useAuth();
+  const { lang, setLang, t } = useLang();
+  const { toast } = useUI();
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const name = profile?.name || "User";
+  const run = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Account menu"
+        aria-expanded={open}
+        className={className}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {children}
+      </button>
+      <MenuPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
+        align="end"
+        closeOnScroll
+        className="min-w-52"
+      >
+        <div className="truncate px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
+          {profile?.email || name}
+        </div>
+        <MenuItemRow
+          icon={<UserRound size={14} />}
+          label={t("Account")}
+          onClick={() => run(() => nav("/settings?section=account"))}
+        />
+        <MenuItemRow
+          icon={<Settings size={14} />}
+          label={t("Settings")}
+          onClick={() => run(() => nav("/settings"))}
+        />
+        <MenuSep />
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
+          <Languages size={12} /> {t("Language")}
+        </div>
+        {(Object.keys(LANGS) as Lang[]).map((code) => (
+          <MenuItemRow
+            key={code}
+            icon={<span className={`fi fi-${LANGS[code].flag} rounded-sm`} />}
+            label={LANGS[code].name}
+            checked={code === lang}
+            onClick={() => run(() => setLang(code))}
+          />
+        ))}
+        <MenuSep />
+        <MenuItemRow
+          danger
+          icon={<LogOut size={14} />}
+          label={t("Sign out")}
+          onClick={() =>
+            run(() => signOut().catch(() => toast.error("Failed to sign out")))
+          }
+        />
+      </MenuPopover>
+    </>
   );
 }

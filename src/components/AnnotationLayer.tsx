@@ -579,9 +579,9 @@ export default function AnnotationLayer({
             {tool === "pen" ? "P" : tool === "highlight" ? "H" : tool === "rect" ? "R" : tool === "eraser" ? "E" : "T"}
           </span>
           {tool === "pen" && "Draw freehand on the document"}
-          {tool === "highlight" && "Highlight text — drag to create a translucent highlight"}
-          {tool === "rect" && "Draw a rectangle outline — drag to set the shape"}
-          {tool === "eraser" && "Erase annotations — drag over your strokes to remove them"}
+          {tool === "highlight" && "Highlight text - drag to create a translucent highlight"}
+          {tool === "rect" && "Draw a rectangle outline - drag to set the shape"}
+          {tool === "eraser" && "Erase annotations - drag over your strokes to remove them"}
           {tool === "text" && "Click to add a text note on the document"}
         </div>
       )}

@@ -407,8 +407,8 @@ export default function SupplierDetail() {
   const emailStatement = () => {
     shareVia("email", {
       email: supplier?.email,
-      text: `Statement of account for ${supplier?.name || "Supplier"} — balance ${money(netBalance, currency)}. View: ${window.location.href}`,
-      url: `Statement of account — ${supplier?.name || "Supplier"}`,
+      text: `Statement of account for ${supplier?.name || "Supplier"} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
+      url: `Statement of account - ${supplier?.name || "Supplier"}`,
     });
   };
 
@@ -480,7 +480,7 @@ export default function SupplierDetail() {
     try {
       const token = await pos.publicLink(o.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Purchase order ${o.po_number} — ${aed(o.total)}. View online: ${url}`;
+      const text = `Purchase order ${o.po_number} - ${aed(o.total)}. View online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
       if (kind === "email") {
@@ -604,7 +604,7 @@ export default function SupplierDetail() {
         </div>
       </div>
 
-      {/* DEMO parity: joined 4-cell KPI grid — identity + statement metrics
+      {/* DEMO parity: joined 4-cell KPI grid - identity + statement metrics
           sharing hairline dividers; every figure derives from buildStatement. */}
       <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
@@ -831,7 +831,7 @@ export default function SupplierDetail() {
         </div>
       </div>
 
-      {/* DEMO parity: download panel — template picker + selected-template
+      {/* DEMO parity: download panel - template picker + selected-template
           summary. The header's amber button smooth-scrolls here. */}
       <div
         id="download-panel"
@@ -844,7 +844,7 @@ export default function SupplierDetail() {
                 Download supplier statement
               </div>
               <div className="text-[12.5px] text-muted-foreground">
-                Pick a template — preview updates instantly
+                Pick a template - preview updates instantly
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -913,13 +913,13 @@ export default function SupplierDetail() {
       {/* DEMO parity: live preview of the selected statement template */}
       <div className="rounded-xl border border-border bg-card p-4 mb-5">
         <div className="text-[13px] text-muted-foreground mb-3">
-          Live preview — how the exported {tplMeta.name} will look
+          Live preview - how the exported {tplMeta.name} will look
         </div>
         {stmtExtrasLoading && !built.hasContent ? (
           <Skeleton className="h-[420px] w-full" />
         ) : !built.hasContent ? (
           <div className="py-16 text-center text-[13px] text-muted-foreground">
-            No statement activity yet — the preview appears once this supplier
+            No statement activity yet - the preview appears once this supplier
             has purchase orders or payments on record.
           </div>
         ) : (
@@ -929,7 +929,7 @@ export default function SupplierDetail() {
         )}
       </div>
 
-      {/* Off-screen A4 stack captured for the PDF export — every slice a real
+      {/* Off-screen A4 stack captured for the PDF export - every slice a real
           page (same pattern as the StatementModal export). */}
       {built.hasContent && (
         <div
@@ -950,7 +950,7 @@ export default function SupplierDetail() {
         </div>
       )}
 
-      {/* Purchase orders — full table in its own card (its old joined-card
+      {/* Purchase orders - full table in its own card (its old joined-card
           slot now holds the Purchases & Payments ledger). */}
       <div className="border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">

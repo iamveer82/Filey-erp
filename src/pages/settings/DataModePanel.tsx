@@ -131,7 +131,7 @@ function CloudSyncCard() {
       if (signup) {
         const r = await cloudSignUp(email.trim(), password);
         if (r === "confirm") {
-          setInfo("Account created — confirm it from the email we sent, then connect.");
+          setInfo("Account created - confirm it from the email we sent, then connect.");
           setSignup(false);
           return;
         }
@@ -151,7 +151,7 @@ function CloudSyncCard() {
       // instead of leaving them on a dead end.
       if (!signup && /invalid login credentials|invalid email or password/i.test(msg)) {
         setErr(
-          "That email and password didn't match a Filey Cloud account. If you've been using Filey offline, this email has no cloud account yet — creating one takes a moment and your on-device data stays exactly where it is."
+          "That email and password didn't match a Filey Cloud account. If you've been using Filey offline, this email has no cloud account yet - creating one takes a moment and your on-device data stays exactly where it is."
         );
         setOfferSignup(true);
       } else {
@@ -170,7 +170,7 @@ function CloudSyncCard() {
   const uploadAll = async () => {
     if (
       !window.confirm(
-        "Upload ALL local data to the cloud now? Cloud copies of the same records are overwritten — this device wins."
+        "Upload ALL local data to the cloud now? Cloud copies of the same records are overwritten - this device wins."
       )
     )
       return;
@@ -471,7 +471,7 @@ export default function DataModePanel() {
     // Offline/local mode is the licensed tier; cloud is the free default.
     if (m === "local" && !(await canUseLocalMode())) {
       setErr(
-        "Offline mode comes with Filey Freedom (AED 499, one-time). Get it under Settings → Desktop License, then switch."
+        "Offline mode comes with Filey Freedom (AED 1,499, one-time). Get it under Settings → Desktop License, then switch."
       );
       return;
     }
@@ -483,9 +483,9 @@ export default function DataModePanel() {
     if (m === "local" && !(await hasLocalData())) {
       const bring = window.confirm(
         "Bring your cloud data to this device first?\n\n" +
-          "Offline mode keeps its own copy, separate from the cloud, and this device has none yet. Switching without copying opens an empty workspace — your cloud records are not deleted either way.\n\n" +
-          "OK — copy it down now, then switch.\n" +
-          "Cancel — switch to an empty offline workspace."
+          "Offline mode keeps its own copy, separate from the cloud, and this device has none yet. Switching without copying opens an empty workspace - your cloud records are not deleted either way.\n\n" +
+          "OK - copy it down now, then switch.\n" +
+          "Cancel - switch to an empty offline workspace."
       );
       if (bring) {
         setBusy(true);
@@ -538,7 +538,7 @@ export default function DataModePanel() {
   const runPush = async () => {
     if (
       !window.confirm(
-        "Upload this device's local data to your cloud account? The web version will then show the same data. Cloud records with the same id are OVERWRITTEN — this device wins. You must be signed in."
+        "Upload this device's local data to your cloud account? The web version will then show the same data. Cloud records with the same id are OVERWRITTEN - this device wins. You must be signed in."
       )
     )
       return;
@@ -586,7 +586,7 @@ export default function DataModePanel() {
           // someone really does mean "this device wins".
           const ok = await syncCycle(null, { manual: true });
           if (!ok && getSyncStatus().state !== "error")
-            setErr("Sync is on, but nothing moved yet — check you're signed in.");
+            setErr("Sync is on, but nothing moved yet - check you're signed in.");
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -599,7 +599,7 @@ export default function DataModePanel() {
     if (
       !window.confirm(
         "Stop syncing to the cloud?\n\n" +
-          "Filey will copy everything to this computer first, then keep it here and send nothing further. Your cloud copy is left as it is — turning sync back on reconnects this device to it.\n\n" +
+          "Filey will copy everything to this computer first, then keep it here and send nothing further. Your cloud copy is left as it is - turning sync back on reconnects this device to it.\n\n" +
           "You will need sync on again to use the same data on another device."
       )
     )
@@ -692,7 +692,7 @@ export default function DataModePanel() {
       />
       <details className="rounded-xl border border-brand-200 p-3">
         <summary className="text-sm text-brand-500 cursor-pointer">
-          Advanced — choose storage manually
+          Advanced - choose storage manually
         </summary>
         <div className="space-y-3 mt-3">
           <Card
@@ -702,7 +702,7 @@ export default function DataModePanel() {
             desc={
               cloudConfigured
                 ? "Stored in your account and available on every device you sign in to."
-                : "Not available — Supabase isn't configured in this build."
+                : "Not available - Supabase isn't configured in this build."
             }
             disabled={!cloudConfigured}
           />
@@ -763,7 +763,7 @@ export default function DataModePanel() {
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <code className="text-xs bg-brand-100 dark:bg-white/12 px-2 py-1.5 rounded flex-1 min-w-0 truncate">
-                {exportDir || "Not set — documents stay in the app only"}
+                {exportDir || "Not set - documents stay in the app only"}
               </code>
               <button className="btn-ghost shrink-0" onClick={changeExportDir}>
                 {exportDir ? "Change" : "Choose folder"}
@@ -796,7 +796,7 @@ export default function DataModePanel() {
               <Download size={16} /> Backup &amp; restore
             </p>
             <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Save a full copy — database <em>and</em> your files — into a backup
+              Save a full copy - database <em>and</em> your files - into a backup
               folder, or restore from one. Your offline safety net; keep it
               somewhere safe (USB drive, synced folder).
             </p>

@@ -6,6 +6,7 @@ import { errMsg } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
 import { loadCustomTemplates } from "./TemplateDesigner";
+import { SelectMenu } from "./ui-menu";
 
 /** The company-details dialog behind every document section's "Company"
  *  button. Invoicing, Quoting and Purchase Orders each carried their own copy
@@ -47,7 +48,7 @@ export default function CompanyModal({
       try {
         fresh = await billing.getCompany();
       } catch {
-        fresh = c; // server unreachable — use what we saved
+        fresh = c; // server unreachable - use what we saved
       }
       onSaved(fresh);
       toast.success("Company details saved.");
@@ -98,20 +99,14 @@ export default function CompanyModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Default Template">
-            <select
-              className="select"
+            <SelectMenu
               value={c.default_template}
-              onChange={(e) => setC({ ...c, default_template: e.target.value })}
-            >
-              {[
+              onChange={(v) => setC({ ...c, default_template: v })}
+              options={[
                 ...DOC_TEMPLATES,
                 ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
-              ].map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
+              ].map((t) => ({ value: t.id, label: t.name }))}
+            />
           </Field>
           <Field label="Default Accent">
             <input

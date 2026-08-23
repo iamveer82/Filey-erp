@@ -17,6 +17,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { placeStamp, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 import { useAssets } from "../lib/assets";
+import { SelectMenu } from "./ui-menu";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -434,21 +435,17 @@ export default function StampStudio({
       <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
         {mode === "text" ? (
           <>
-            <select
-              className="select h-8 !py-0 text-xs"
+            <SelectMenu
+              size="sm"
+              className="w-auto"
               value={kind}
-              onChange={(e) => {
-                const b = BADGES.find((x) => x.value === e.target.value) ?? BADGES[0];
+              onChange={(v) => {
+                const b = BADGES.find((x) => x.value === v) ?? BADGES[0];
                 setKind(b.value);
                 setBadgeColor(b.color);
               }}
-            >
-              {BADGES.map((b) => (
-                <option key={b.value} value={b.value}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
+              options={BADGES.map((b) => ({ value: b.value, label: b.label }))}
+            />
             <input
               type="color"
               value={badgeColor}

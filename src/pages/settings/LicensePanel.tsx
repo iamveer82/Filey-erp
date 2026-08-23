@@ -64,7 +64,7 @@ export default function LicensePanel() {
     not_activated: "This device isn't activated yet.",
     wrong_device: "The stored license belongs to a different device.",
     bad_signature: "The stored license failed verification.",
-    malformed: "The stored license is damaged — activate again.",
+    malformed: "The stored license is damaged - activate again.",
     wrong_product: "The stored license is for a different product.",
   };
 
@@ -75,7 +75,7 @@ export default function LicensePanel() {
           <KeyRound size={18} /> Desktop License
         </h2>
         <p className="text-sm text-brand-500 mt-1">
-          One-time purchase. Verified offline on this device — no internet
+          One-time purchase. Verified offline on this device - no internet
           needed after activation. Up to 2 devices per license. Cloud sync is
           a separate subscription under Billing.
         </p>
@@ -85,7 +85,7 @@ export default function LicensePanel() {
           {tier === "free" && (
             <span className="text-brand-400">
               {" "}
-              — {FREE_LIMITS.invoicesPerMonth} invoices/month, "Made with Filey"
+              - {FREE_LIMITS.invoicesPerMonth} invoices/month, "Made with Filey"
               on documents
             </span>
           )}
@@ -94,7 +94,7 @@ export default function LicensePanel() {
 
       {!ENFORCE_LICENSING && (
         <p className="text-xs rounded-lg bg-brand-50 dark:bg-white/5 px-3 py-2 text-brand-500">
-          Licensing is not enforced yet — all features work without a license
+          Licensing is not enforced yet - all features work without a license
           while Filey is pre-launch.
         </p>
       )}
@@ -106,7 +106,7 @@ export default function LicensePanel() {
         </p>
         {local?.valid ? (
           <p className="text-sm text-success mt-1 flex items-center gap-1.5">
-            <ShieldCheck size={14} /> Activated — licensed to{" "}
+            <ShieldCheck size={14} /> Activated - licensed to{" "}
             {local.payload?.email || "this account"} (issued {local.payload?.issued}).
             Works fully offline.
           </p>
@@ -134,7 +134,7 @@ export default function LicensePanel() {
                 onClick={() =>
                   run(
                     () => deactivateDevice(thisDevice),
-                    "Device deactivated — slot freed."
+                    "Device deactivated - slot freed."
                   )
                 }
               >
@@ -145,7 +145,7 @@ export default function LicensePanel() {
         )}
         {!cloudConfigured && (
           <p className="text-xs text-brand-400 mt-2">
-            Activation needs the cloud build once — this offline build can only
+            Activation needs the cloud build once - this offline build can only
             verify an already-activated license.
           </p>
         )}
@@ -186,7 +186,7 @@ export default function LicensePanel() {
                           onClick={() =>
                             run(
                               () => deactivateDevice(d.fingerprint),
-                              "Device deactivated — slot freed. Activate your new device now."
+                              "Device deactivated - slot freed. Activate your new device now."
                             )
                           }
                         >
@@ -230,7 +230,7 @@ export default function LicensePanel() {
                   onSubmit={(e) => {
                     e.preventDefault();
                     if (voucher.trim())
-                      run(() => redeemVoucher(voucher), "Voucher redeemed — offline mode unlocked on this device.");
+                      run(() => redeemVoucher(voucher), "Voucher redeemed - offline mode unlocked on this device.");
                   }}
                 >
                   <input
@@ -251,14 +251,14 @@ export default function LicensePanel() {
         </div>
       )}
 
-      {/* Cloud (Pro) devices — 5 per organization, shared with the team */}
+      {/* Cloud (Pro) devices - 5 per organization, shared with the team */}
       {cloudConfigured && (
         <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
           <p className="font-medium text-ink flex items-center gap-2">
             <Cloud size={15} /> Cloud devices
           </p>
           <p className="text-sm text-brand-500 mt-1">
-            Devices signed in to your cloud workspace — yours, employees',
+            Devices signed in to your cloud workspace - yours, employees',
             teammates'. Up to {CLOUD_DEVICE_LIMIT} at a time; release one to
             make room for a new device.{" "}
             {orgDevices.length}/{CLOUD_DEVICE_LIMIT} in use.
@@ -282,7 +282,7 @@ export default function LicensePanel() {
                     onClick={() =>
                       run(
                         () => releaseOrgDevice(d.id),
-                        "Device released — the slot is free."
+                        "Device released - the slot is free."
                       )
                     }
                   >

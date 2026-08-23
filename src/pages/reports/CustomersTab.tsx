@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { aed, num, cn } from "../../lib/format";
 import { useChartColors } from "../../lib/accent";
+import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
   useTopCustomers,
@@ -32,9 +33,9 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
   /* Receivables aging bar chart data */
   const agingData = [
     { name: "Current", value: aging.current },
-    { name: "1–30", value: aging.d30 },
-    { name: "31–60", value: aging.d60 },
-    { name: "61–90", value: aging.d90 },
+    { name: "1-30", value: aging.d30 },
+    { name: "31-60", value: aging.d60 },
+    { name: "61-90", value: aging.d90 },
     { name: "90+", value: aging.d90p },
   ];
 
@@ -121,6 +122,9 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
+              {allZero(topCustomers, "total") ? (
+                <ChartEmpty hint="Your highest-spending customers rank here once invoices exist." />
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={topCustomers}
@@ -163,6 +167,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                   />
                 </BarChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
         </div>
@@ -176,6 +181,9 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
             Outstanding invoices by age bucket
           </div>
           <div className="h-[280px] mt-3">
+            {allZero(agingData, "value") ? (
+              <ChartEmpty hint="Unpaid invoices land in these buckets as they age." />
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={agingData}
@@ -213,6 +221,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>

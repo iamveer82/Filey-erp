@@ -13,6 +13,7 @@ import { fin, Account, Txn, FinanceReport } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import ExpenseScanModal from "../components/ExpenseScanModal";
+import { SelectMenu } from "../components/ui-menu";
 import { aed, fmtDate, numInput, cn, getDisplayCurrency, todayYmd } from "../lib/format";
 import {
   PageHeader,
@@ -87,7 +88,7 @@ export default function Accounting() {
       toast.success(
         removed > 0
           ? `Removed ${removed} duplicate entr${removed === 1 ? "y" : "ies"} and recomputed balances.`
-          : "No duplicates found — balances recomputed."
+          : "No duplicates found - balances recomputed."
       );
       load();
     } catch (e) {
@@ -179,7 +180,7 @@ export default function Accounting() {
   };
 
   const shareTxn = (kind: ShareKind, t: Txn) => {
-    const text = `Journal entry #${t.id} — ${t.account_name}: ${t.txn_type} ${aed(
+    const text = `Journal entry #${t.id} - ${t.account_name}: ${t.txn_type} ${aed(
       t.amount
     )} on ${fmtDate(t.txn_date)}${t.description ? `. ${t.description}` : ""}`;
     shareVia(kind, {
@@ -469,7 +470,7 @@ export default function Accounting() {
           empty={
             search || acctFilter !== "all"
               ? "No accounts match your filters"
-              : "No accounts — add your first chart-of-accounts entry"
+              : "No accounts - add your first chart-of-accounts entry"
           }
           columns={[
             {
@@ -696,17 +697,12 @@ function AccountModal({
             )}
           </Field>
           <Field label="Type">
-            <select
-              className="select"
+            <SelectMenu
+              ariaLabel="Type"
               value={f.account_type}
-              onChange={(e) => setF({ ...f, account_type: e.target.value })}
-            >
-              {ACCOUNT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              onChange={(account_type) => setF({ ...f, account_type })}
+              options={ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
+            />
           </Field>
         </div>
         <Field label="Account Name *">
@@ -820,31 +816,33 @@ function JournalModal({
     >
       <div className="space-y-3">
         <Field label="Account">
-          <select
-            className="select"
-            value={f.account_id}
+          <SelectMenu
+            ariaLabel="Account"
+            value={String(f.account_id)}
             disabled={isEdit}
-            onChange={(e) => setF({ ...f, account_id: numInput(e.target.value) })}
-          >
-            {accounts.length === 0 && <option value={0}>No accounts</option>}
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.code} · {a.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setF({ ...f, account_id: numInput(v) })}
+            options={
+              accounts.length === 0
+                ? [{ value: "0", label: "No accounts" }]
+                : accounts.map((a) => ({
+                    value: String(a.id),
+                    label: `${a.code} · ${a.name}`,
+                  }))
+            }
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
-            <select
-              className="select"
+            <SelectMenu
+              ariaLabel="Type"
               value={f.txn_type}
               disabled={isEdit}
-              onChange={(e) => setF({ ...f, txn_type: e.target.value })}
-            >
-              <option value="debit">Debit</option>
-              <option value="credit">Credit</option>
-            </select>
+              onChange={(txn_type) => setF({ ...f, txn_type })}
+              options={[
+                { value: "debit", label: "Debit" },
+                { value: "credit", label: "Credit" },
+              ]}
+            />
           </Field>
           <Field label={`Amount (${getDisplayCurrency()})`}>
             <input

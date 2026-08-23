@@ -24,7 +24,7 @@ export default function FreedomContactModal({
     setBusy(true);
     try {
       await submitLead({ name, phone, email, message: note, source: "app" });
-      toast.success("Thanks — we'll call you about Filey Freedom shortly.");
+      toast.success("Thanks - we'll call you about Filey Freedom shortly.");
       setName("");
       setPhone("");
       setEmail("");
