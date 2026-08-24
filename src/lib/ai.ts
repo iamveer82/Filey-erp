@@ -120,8 +120,26 @@ export function getPersona(): AiPersona {
 export function setPersona(patch: Partial<AiPersona>): AiPersona {
   const next = { ...getPersona(), ...patch };
   safeSetItem(PERSONA_KEY, JSON.stringify(next));
+  // The assistant's colour is editable from two places (Settings -> Appearance
+  // and the copilot's own customiser) and drawn in a third, so a change has to
+  // reach subscribers that aren't the editor. Same channel the theme and accent
+  // use.
+  window.dispatchEvent(new Event("filey-ui"));
   return next;
 }
+
+/** Colours offered for the assistant. Any hex works — these are the shortcuts,
+ *  shared by the copilot customiser and Settings -> Appearance so both offer
+ *  the same set. */
+export const ORB_PRESETS = [
+  "#FFD600",
+  "#FF7A00",
+  "#EC4899",
+  "#7C3AED",
+  "#2CADF6",
+  "#3FB984",
+  "#E5484D",
+];
 
 /* Safety guardrail injected into every conversation. Filey may read and help
  * across the whole app, but must never touch credentials or settings. */

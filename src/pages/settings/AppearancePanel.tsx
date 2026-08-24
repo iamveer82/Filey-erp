@@ -4,6 +4,8 @@ import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import { getSmoothScroll, setSmoothScroll } from "../../lib/smoothScroll";
 import { Toggle } from "./PreferencesPanel";
 import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
+import { ORB_PRESETS, setPersona } from "../../lib/ai";
+import BloubBot, { useBotSkin } from "../../components/BloubBot";
 import { useUI } from "../../lib/ui";
 import { cn } from "../../lib/format";
 
@@ -136,6 +138,76 @@ export default function AppearancePanel() {
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      <AssistantColor />
+    </div>
+  );
+}
+
+/* ---------------- Assistant colour ----------------
+   Separate from the accent: the accent belongs to the app's chrome, this is the
+   assistant itself, and people pick them apart. Both live on the same device-
+   local persona the copilot's own customiser edits, so changing it in either
+   place shows up in the other. */
+
+function AssistantColor() {
+  const { toast } = useUI();
+  const { color } = useBotSkin();
+
+  const pick = (hex: string) => {
+    setPersona({ orbColor: hex });
+    toast.success("Assistant colour updated");
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="px-6 pt-5 pb-4 border-b border-border">
+        <div className="text-[17px] font-semibold text-foreground">
+          Assistant colour
+        </div>
+        <div className="text-[13px] text-muted-foreground mt-1">
+          The colour Filey AI is drawn in, wherever it appears.
+        </div>
+      </div>
+      <div className="p-6 flex flex-col sm:flex-row sm:items-center gap-6">
+        {/* A live one, not a swatch: this is exactly what the chat will show. */}
+        <div className="grid h-20 w-20 shrink-0 place-items-center rounded-xl bg-hover">
+          <BloubBot size={64} state="idle" label="Assistant preview" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap gap-2">
+            {ORB_PRESETS.map((hex) => (
+              <button
+                key={hex}
+                onClick={() => pick(hex)}
+                aria-label={`Use ${hex}`}
+                aria-pressed={color.toLowerCase() === hex.toLowerCase()}
+                className={cn(
+                  "h-9 w-9 rounded-full grid place-items-center transition-all cursor-pointer",
+                  color.toLowerCase() === hex.toLowerCase()
+                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-card"
+                    : "hover:scale-105"
+                )}
+                style={{ background: hex }}
+              >
+                {color.toLowerCase() === hex.toLowerCase() && (
+                  <Check className="h-4 w-4 text-white" strokeWidth={3} />
+                )}
+              </button>
+            ))}
+          </div>
+          <label className="mt-4 flex items-center gap-3 text-[13px] text-muted-foreground">
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setPersona({ orbColor: e.target.value })}
+              className="h-8 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
+              aria-label="Custom assistant colour"
+            />
+            Or pick any colour
+          </label>
         </div>
       </div>
     </div>

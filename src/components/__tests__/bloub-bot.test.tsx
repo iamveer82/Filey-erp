@@ -1,11 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { act, render, cleanup } from "@testing-library/react";
 import BloubBot from "../BloubBot";
+import { setPersona } from "../../lib/ai";
 import { botExpressionFor, botStateFor } from "../../lib/botMood";
 import { STATES, type StateId } from "../../lib/bloub/states";
 import { EXPRESSION_BY_ID } from "../../lib/bloub/expressions";
 
 afterEach(cleanup);
+beforeEach(() => localStorage.clear());
 
 /* The engine is vendored (src/lib/bloub) and its states are data, not code we
  * wrote — so what's worth pinning here is the seam: every state the mapping can
@@ -40,6 +42,17 @@ describe("BloubBot", () => {
       "fill",
       "#ff0000"
     );
+  });
+
+  it("follows the colour chosen in settings, without a remount", () => {
+    const { container } = render(<BloubBot animate={false} />);
+    const rect = () => container.querySelector("rect")!.getAttribute("fill");
+    expect(rect()).toBe("#FFD600"); // persona default
+
+    act(() => {
+      setPersona({ orbColor: "#2CADF6" });
+    });
+    expect(rect()).toBe("#2CADF6");
   });
 
   it("is hidden from screen readers unless it is given a name", () => {

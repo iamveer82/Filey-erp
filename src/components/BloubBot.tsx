@@ -1,11 +1,18 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { BotEngine, type BotFrame } from "../lib/bloub/engine";
 import { NOTIF_BLUE } from "../lib/bloub/decor";
 import { DEFAULT_EXPRESSION, EXPRESSION_BY_ID } from "../lib/bloub/expressions";
 import { DEMI_VIEWBOX, RAYON } from "../lib/bloub/repere";
 import { DEFAULT_SHAPE, SHAPE_BY_ID, mixHex } from "../lib/bloub/skins";
 import type { StateId } from "../lib/bloub/states";
-import { accentPalette, useAccent } from "../lib/accent";
+import { getPersona } from "../lib/ai";
 
 /* The assistant's face: one filled shape that morphs between states, with two
  * eyes punched out of it as real holes. The geometry lives in src/lib/bloub
@@ -47,6 +54,32 @@ export interface BloubBotProps {
   label?: string;
 }
 
+/* Colour and theme in one subscription. Both arrive on the shared "filey-ui"
+ * event — the colour when it's changed in Settings -> Appearance or the
+ * copilot's customiser, the theme when it's flipped anywhere — and both change
+ * what the bot is painted with. */
+function subscribeSkin(cb: () => void): () => void {
+  window.addEventListener("filey-ui", cb);
+  return () => window.removeEventListener("filey-ui", cb);
+}
+
+function skinSnapshot(): string {
+  const dark = document.documentElement.classList.contains("dark");
+  return `${dark ? "dark" : "light"}:${getPersona().orbColor}`;
+}
+
+/** The assistant's colour and the current theme, kept live. Exported because
+ *  the settings preview wants the same value the bots are using. */
+export function useBotSkin(): { dark: boolean; color: string } {
+  const snap = useSyncExternalStore(
+    subscribeSkin,
+    skinSnapshot,
+    () => "light:#FFD600"
+  );
+  const [mode, color] = snap.split(":");
+  return { dark: mode === "dark", color: color || "#FFD600" };
+}
+
 function prefersReducedMotion(): boolean {
   return (
     typeof matchMedia === "function" &&
@@ -65,13 +98,9 @@ export default function BloubBot({
   className,
   label,
 }: BloubBotProps) {
-  // Re-renders on accent AND theme change: the shared snapshot carries both.
-  const { accent } = useAccent();
-  const dark =
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark");
-  const inkColor = ink ?? accentPalette[accent]?.hex ?? "#0a0a0c";
-  const paperColor = paper ?? (dark ? "#0a0a0a" : "#ffffff");
+  const skin = useBotSkin();
+  const inkColor = ink ?? skin.color;
+  const paperColor = paper ?? (skin.dark ? "#0a0a0a" : "#ffffff");
 
   const shapeRadii = useMemo(
     () => SHAPE_BY_ID.get(shape)?.radii ?? null,

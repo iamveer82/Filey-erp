@@ -20,6 +20,7 @@ import {
   setPersona,
   buildSystemPrompt,
   AI_VIBES,
+  ORB_PRESETS,
   type AiMessage,
   type AiPersona,
   type AiVibe,
@@ -52,16 +53,6 @@ import { botExpressionFor, botStateFor } from "../lib/botMood";
 
 const SYSTEM =
   "You are Filey, a powerful ERP agent with FULL control of the user's business app. You can READ, CREATE, and MODIFY data via tools — not just chat. Available actions: get stats (customers, products, invoices, orders, quotes, overdue); search customers and products; list invoices by status; list employees; create customers, products, quotes, purchase orders, and draft invoices; adjust stock; log expenses; mark invoices sent/paid/recurring; mark employee attendance (present/absent/half_day/leave); email invoices to customers; run PDF/image operations on attached files (compress, convert, rotate, OCR, merge); navigate to any app page. When the user asks you to DO something, execute the tool and confirm what you did in one short line. For destructive or ambiguous requests, ask first. Never invent data — look it up. Be concise and practical.";
-
-const ORB_PRESETS = [
-  "#FFD600",
-  "#FF7A00",
-  "#EC4899",
-  "#7C3AED",
-  "#2CADF6",
-  "#3FB984",
-  "#E5484D",
-];
 
 /** Quick-start prompts shown in an empty chat. */
 const SUGGESTIONS = [
@@ -354,7 +345,6 @@ export default function Copilot() {
             >
               <BloubBot
                 size={22}
-                ink={persona.orbColor}
                 animate={busy}
                 state={botStateFor(busy ? "thinking" : "idle")}
                 expression={botExpressionFor(busy ? "thinking" : "idle")}
@@ -661,7 +651,7 @@ export default function Copilot() {
         {/* The launcher is the assistant's presence on every page, so it stays
             alive: one loop for the whole app, and it stops on its own for
             anyone who asked for reduced motion. */}
-        <BloubBot size={32} ink={persona.orbColor} state="idle" />
+        <BloubBot size={32} state="idle" />
         <span className="text-sm font-medium text-ink">Ask AI</span>
       </button>
     </div>
