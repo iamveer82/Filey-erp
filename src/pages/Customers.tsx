@@ -3,8 +3,6 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { EMIRATES, normalizeEmirate } from "../lib/einvoice";
 import {
   Plus,
-  Mail,
-  BadgeCheck,
   AlarmClock,
   Download,
   Sliders,
@@ -30,6 +28,7 @@ import {
   Field,
   ErrorBanner,
   InfoCard,
+  MetricCard,
   keyActivate,
 } from "../components/ui";
 import {
@@ -224,30 +223,33 @@ export default function Customers() {
         </div>
       )}
 
-      {/* ── KPI tiles (DEMO reference: icon box + value + muted hint) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card mb-4">
-        <KpiTile
-          icon={Users}
-          accent="bg-neutral-500/10 text-neutral-500 dark:text-neutral-300"
+      {/* ── KPI cards — same quiet strip as Invoicing ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
+        <MetricCard
           label="Customers"
           value={num(rows.length)}
-          hint={`${segments.length} segments`}
-          divider
+          change={segments.length > 0 ? `${segments.length} segments` : "No segments yet"}
+          changeTone="up"
         />
-        <KpiTile
-          icon={BadgeCheck}
-          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+        <MetricCard
           label="With TRN"
           value={num(withTrn)}
-          hint={`${rows.length - withTrn} without TRN`}
-          divider
+          change={
+            rows.length - withTrn > 0
+              ? `${num(rows.length - withTrn)} missing TRN`
+              : "All registered"
+          }
+          changeTone={rows.length - withTrn > 0 ? "warn" : "up"}
         />
-        <KpiTile
-          icon={Mail}
-          accent="bg-amber-500/10 text-amber-600 dark:text-amber-500"
+        <MetricCard
           label="With Email"
           value={num(withEmail)}
-          hint={`${rows.length - withEmail} missing`}
+          change={
+            rows.length - withEmail > 0
+              ? `${num(rows.length - withEmail)} missing email`
+              : "All reachable"
+          }
+          changeTone={rows.length - withEmail > 0 ? "warn" : "up"}
         />
       </div>
 
@@ -555,43 +557,6 @@ export default function Customers() {
             : undefined
         }
       />
-    </div>
-  );
-}
-
-/** DEMO reference KPI tile: tinted icon box + value + muted hint. */
-function KpiTile({
-  icon: Icon,
-  accent,
-  label,
-  value,
-  hint,
-  divider,
-}: {
-  icon: typeof Users;
-  accent: string;
-  label: string;
-  value: string;
-  hint: string;
-  divider?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "p-5 flex items-center gap-3",
-        divider && "border-b sm:border-b-0 sm:border-r border-border"
-      )}
-    >
-      <div className={cn("h-10 w-10 rounded-lg grid place-items-center", accent)}>
-        <Icon className="h-5 w-5" strokeWidth={1.75} />
-      </div>
-      <div>
-        <div className="text-[12.5px] text-muted-foreground">{label}</div>
-        <div className="text-[22px] font-semibold text-foreground leading-tight tabular-nums">
-          {value}
-        </div>
-        <div className="text-[11.5px] text-muted-foreground">{hint}</div>
-      </div>
     </div>
   );
 }

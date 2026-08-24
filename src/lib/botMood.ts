@@ -36,8 +36,8 @@ export function botStateFor(mood: AgentMood): StateId {
 }
 
 /** The resting face for a mood. Only states that carry the base face use it —
- *  `thinking` hides the eyes entirely, `alert` prescribes its own — so this is
- *  a preference, not a guarantee. */
+ *  states like `thinking` or `alert` pose their own gaze — so this is a
+ *  preference, not a guarantee. */
 export function botExpressionFor(mood: AgentMood): string {
   switch (mood) {
     case "answered":

@@ -12,6 +12,7 @@ import {
   X,
   Pencil,
   Copy,
+  Maximize2,
   Monitor,
   Smartphone,
   Minus,
@@ -21,8 +22,6 @@ import {
   PackageCheck,
   SeparatorHorizontal,
   Truck,
-  ClipboardList,
-  Wallet,
   Send,
   Landmark,
 } from "lucide-react";
@@ -64,7 +63,7 @@ import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
-import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
+import { startingTemplate } from "../components/DocPresetBar";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import TemplateDesigner, { type CustomTemplate } from "../components/TemplateDesigner";
 import {
@@ -295,6 +294,7 @@ export default function PurchaseOrders() {
         {company && (
           <CompanyModal
             open={companyOpen}
+            docType="po"
             company={company}
             onClose={() => setCompanyOpen(false)}
             onSaved={(c) => {
@@ -335,6 +335,7 @@ export default function PurchaseOrders() {
 
   const statCcy = company?.currency || "AED";
   const totalValue = rows.reduce((s, r) => s + r.total, 0);
+  const draftCount = rows.filter((r) => (r.status || "draft") === "draft").length;
   const sentCount = rows.filter((r) => r.status === "sent").length;
   const receivedCount = rows.filter((r) => r.status === "received").length;
 
@@ -461,31 +462,32 @@ export default function PurchaseOrders() {
         </div>
       )}
 
-      <DocPresetBar docType="po" company={company} onCompanySaved={setCompany} />
-
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
           label="Purchase Orders"
           value={num(rows.length)}
-          icon={<ClipboardList size={20} />}
+          change={
+            draftCount > 0 ? `${num(draftCount)} in draft` : "None waiting"
+          }
+          changeTone={draftCount > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Total Value"
           value={aed(totalValue)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-info/15 text-info"
+          change="Ordered across all suppliers"
+          changeTone="up"
         />
         <MetricCard
           label="Sent"
           value={num(sentCount)}
-          icon={<Send size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
+          change={sentCount > 0 ? "With suppliers" : "None"}
+          changeTone="up"
         />
         <MetricCard
           label="Received"
           value={num(receivedCount)}
-          icon={<PackageCheck size={20} />}
-          iconClass="bg-success/15 text-success"
+          change={receivedCount > 0 ? "Goods checked in" : "None yet"}
+          changeTone={receivedCount > 0 ? "up" : "warn"}
         />
       </div>
 
@@ -703,6 +705,7 @@ export default function PurchaseOrders() {
       {company && (
         <CompanyModal
           open={companyOpen}
+            docType="po"
           company={company}
           onClose={() => setCompanyOpen(false)}
           onSaved={(c) => setCompany(c)}
@@ -1332,7 +1335,7 @@ function Editor({
           {!form.id && <span className="text-xs font-medium text-brand-400">Unsaved</span>}
 
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Plus size={15} /> View
+            <Maximize2 size={15} /> View
           </button>
           <button className="btn-ghost" onClick={downloadPdf} title="Download PDF (Ctrl+P)">
             <Download size={15} /> PDF
@@ -1343,6 +1346,14 @@ function Editor({
           <button className="btn-ghost" onClick={handleSave} disabled={saving}>
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
+          <button
+            className="btn-ghost"
+            onClick={onEditCompany}
+            title="Edit company details & default template"
+          >
+            <Building2 size={15} /> Company
+          </button>
+
 
           {form.status === "draft" && (
             <button className="btn-primary" onClick={() => setStatus("sent")} disabled={saving}>
@@ -2025,12 +2036,25 @@ function Editor({
               <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
                 {/* ponytail: keep PO preview + PDF English regardless of app lang */}
                 <div ref={poRef} data-no-i18n dir="ltr">
+                  {/* Sheet mirrors the off-screen export stack (same A4 size +
+                      padding) so the preview is exactly what the PDF contains. */}
                   <div
                     style={{
+                      width: device === "desktop" ? 794 : 420,
+                      minHeight: device === "desktop" ? 1123 : 594,
                       position: "relative",
-                      minHeight: device === "desktop" ? 1027 : 498,
+                      padding: device === "desktop" ? 48 : 25,
+                      boxSizing: "border-box",
+                      background: "#fff",
                     }}
                   >
+                    <div
+                      style={{
+                        position: "relative",
+                        width: "100%",
+                        minHeight: device === "desktop" ? 1027 : 498,
+                      }}
+                    >
                     <StampSignatureLayer
                       stamp={activeStamp}
                       signature={activeSignature}
@@ -2059,6 +2083,7 @@ function Editor({
                         <BankDetailsBlock bank={bank} accent={form.accent} />
                       </DraggableBlock>
                     )}
+                    </div>
                   </div>
                 </div>
               </FitPreview>

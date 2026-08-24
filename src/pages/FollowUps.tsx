@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlarmClock, CalendarClock, Users, Truck } from "lucide-react";
-import { PageHeader } from "../components/ui";
-import StatStrip from "../components/StatStrip";
+import { PageHeader, MetricCard } from "../components/ui";
 import FollowUps from "../components/FollowUps";
 import StickyNotes from "../components/StickyNotes";
 import {
@@ -42,28 +40,10 @@ export default function FollowUpsPage() {
   // is where unlinked reminders land too.
   const today = todayYmd();
   const open = items.filter((f) => !f.done);
-  const stats = [
-    {
-      label: "Overdue",
-      value: num(open.filter((f) => f.due_date < today).length),
-      icon: <AlarmClock size={16} />,
-    },
-    {
-      label: "Due today",
-      value: num(open.filter((f) => f.due_date === today).length),
-      icon: <CalendarClock size={16} />,
-    },
-    {
-      label: "Open · customers",
-      value: num(open.filter((f) => f.supplier_id == null).length),
-      icon: <Users size={16} />,
-    },
-    {
-      label: "Open · suppliers",
-      value: num(open.filter((f) => f.supplier_id != null).length),
-      icon: <Truck size={16} />,
-    },
-  ];
+  const overdue = open.filter((f) => f.due_date < today).length;
+  const dueToday = open.filter((f) => f.due_date === today).length;
+  const openCustomers = open.filter((f) => f.supplier_id == null).length;
+  const openSuppliers = open.filter((f) => f.supplier_id != null).length;
 
   const customerOpts = customers.map((c) => ({
     id: c.id,
@@ -79,7 +59,32 @@ export default function FollowUpsPage() {
         subtitle="Reminders and to-dos. We surface them in-app when they're due"
       />
 
-      <StatStrip className="mb-6" items={stats} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-6">
+        <MetricCard
+          label="Overdue"
+          value={num(overdue)}
+          change={overdue > 0 ? "Past due date" : "None"}
+          changeTone={overdue > 0 ? "down" : "up"}
+        />
+        <MetricCard
+          label="Due today"
+          value={num(dueToday)}
+          change={dueToday > 0 ? "Needs attention" : "Nothing due"}
+          changeTone={dueToday > 0 ? "warn" : "up"}
+        />
+        <MetricCard
+          label="Open · customers"
+          value={num(openCustomers)}
+          change="Customer reminders"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Open · suppliers"
+          value={num(openSuppliers)}
+          change="Supplier reminders"
+          changeTone="up"
+        />
+      </div>
 
       <section className="mb-8">
         <h2 className="mb-2 text-sm font-bold text-ink">Customers</h2>

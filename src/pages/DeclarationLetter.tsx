@@ -304,6 +304,10 @@ export default function DeclarationLetter() {
       (d.lpo_ref || "").toLowerCase().includes(q)
   );
 
+  const month = new Date().toISOString().slice(0, 7);
+  const thisMonthCount = docs.filter((d) => (d.date || "").slice(0, 7) === month).length;
+  const uniqueRecipients = new Set(docs.map((d) => d.recipient_name).filter(Boolean)).size;
+
   return (
     <div className="animate-fade-up">
       <PageHeader
@@ -326,11 +330,24 @@ export default function DeclarationLetter() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
         <MetricCard
           label="Letters"
           value={String(docs.length)}
-          icon={<FileText size={20} />}
+          change="All time"
+          changeTone="up"
+        />
+        <MetricCard
+          label="This month"
+          value={String(thisMonthCount)}
+          change="Created recently"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Recipients"
+          value={String(uniqueRecipients)}
+          change="Unique parties"
+          changeTone="up"
         />
       </div>
 
@@ -584,8 +601,14 @@ function DeclarationEditor({
   const set = <K extends keyof DeclForm>(k: K, v: DeclForm[K]) =>
     setForm({ ...form, [k]: v });
 
-  const sheetEl = () =>
-    (declRef.current?.closest(".invoice-print") as HTMLElement) || declRef.current;
+  const sheetEl = () => {
+    const el =
+      (declRef.current?.closest(".invoice-print") as HTMLElement) || declRef.current;
+    // The preview root carries floating stamp/signature layers as extra child
+    // divs — mark it so the exporter never splits them into junk pages.
+    if (el) el.dataset.pdfSingle = "true";
+    return el;
+  };
 
   const baseName = () =>
     `Declaration-${(form.lpo_ref || form.ref || form.recipient_name || "letter")
@@ -594,7 +617,7 @@ function DeclarationEditor({
 
   const downloadPdf = () => {
     const el = sheetEl();
-    if (el) downloadElementAsPdf(el, baseName());
+    if (el) void downloadElementAsPdf(el, baseName());
     else window.print();
   };
 

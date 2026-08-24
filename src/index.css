@@ -293,6 +293,33 @@
   animation: fadeIn 0.25s ease-out;
 }
 
+/* The thinking marker: the bot's own dot wave (states.ts dotPulse) — one
+   1.5 s cycle per dot, neighbours half a cycle apart, rising then cut. */
+@keyframes thinking-dot {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  51%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+.thinking-dot {
+  animation: thinking-dot 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
 /* ── Materialize: the one sanctioned enter primitive (design.md §9). ──
    Apple's rule is "materialize, don't just appear" — an overlay that pops
    in with zero motion reads as a computer, not a surface arriving. Kept

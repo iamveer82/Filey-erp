@@ -3,9 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Trash2,
-  Boxes,
   AlertTriangle,
-  Layers,
   Download,
   Upload,
   Users,
@@ -320,32 +318,24 @@ export default function Inventory() {
         <MetricCard
           label="Total SKUs"
           value={num(products.length)}
-          icon={<Boxes size={20} />}
-          iconClass="bg-primary-100 text-ink"
           change={`${categories.length} categories`}
           changeTone="up"
         />
         <MetricCard
           label="Stock Value"
           value={aed(invValue)}
-          icon={<Layers size={20} />}
-          iconClass="bg-primary-100 text-ink"
           change="At cost"
           changeTone="up"
         />
         <MetricCard
           label="Low Stock"
           value={num(lowStock.length)}
-          icon={<AlertTriangle size={20} />}
-          iconClass="bg-warning/15 text-warning"
           change={lowStock.length > 0 ? "Needs reorder" : "All good"}
           changeTone={lowStock.length > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Out of Stock"
           value={num(outOfStock.length)}
-          icon={<PackageMinus size={20} />}
-          iconClass="bg-danger/15 text-danger"
           change={outOfStock.length > 0 ? "Restock needed" : "None"}
           changeTone={outOfStock.length > 0 ? "down" : "up"}
         />

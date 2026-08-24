@@ -48,7 +48,13 @@ export async function saveDocPreset(docType: DocType, template: string): Promise
 
 /** The template a new document of this type should open on: the preset, then
  *  the company's default_template if it names a template this type actually
- *  has, then the caller's own fallback. */
+ *  has, then the caller's own fallback.
+ *
+ *  Receipts skip default_template on purpose: it is one setting shared with
+ *  invoices, and the General templates it names (minimal, classic, modern…)
+ *  render invoice layouts — item grids, totals ladders — which is exactly how
+ *  receipts ended up looking like invoices. A receipt inherits nothing unless
+ *  the user set an explicit receipt preset. */
 export function presetTemplate(
   presets: DocPresets,
   docType: DocType,
@@ -57,6 +63,7 @@ export function presetTemplate(
 ): string {
   const preset = presets[docType];
   if (preset) return resolveTemplateId(preset);
+  if (docType === "receipt") return fallback;
   if (companyDefault) {
     const id = resolveTemplateId(companyDefault);
     if (templatesForDocType(docType).some((t) => t.id === id)) return id;

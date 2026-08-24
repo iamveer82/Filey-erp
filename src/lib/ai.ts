@@ -377,6 +377,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** Origin of the OpenCode Zen gateway. */
+const ZEN_ORIGIN = "https://opencode.ai";
+
 /** One request. In the browser this is plain fetch (CORS applies — only
  *  providers that allow browser calls work). Under Tauri it goes through the
  *  native `ai_proxy` command, which has no CORS, so any OpenAI-compatible /
@@ -384,7 +387,21 @@ const isTauri =
  *  ponytail: the abort signal isn't forwarded to the native call — desktop AI
  *  requests run to completion; add cancellation if it ever matters. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
-  if (!isTauri) return fetch(input, init);
+  if (!isTauri) {
+    // OpenCode Zen serves no CORS headers, so a cross-origin call from a
+    // browser dies as "Failed to fetch" before auth. The dev server proxies
+    // /zen/v1/* to the gateway (vite.config.ts), so in a plain browser the
+    // absolute URL is swapped for its same-origin path and CORS never
+    // applies. Under Tauri the native proxy needs no such detour.
+    if (
+      input.startsWith(ZEN_ORIGIN) &&
+      typeof window !== "undefined" &&
+      /^https?:$/.test(window.location.protocol)
+    ) {
+      return fetch(input.slice(ZEN_ORIGIN.length), init);
+    }
+    return fetch(input, init);
+  }
   const { invoke } = await import("@tauri-apps/api/core");
   const headers: Record<string, string> = {};
   const h = init.headers as Record<string, string> | undefined;

@@ -50,6 +50,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { hasTauri, saveBytes } from "../lib/localPaths";
 import {
   aed,
   fmtDate,
@@ -66,7 +67,7 @@ import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
-import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
+import { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
@@ -854,6 +855,7 @@ const editInvoice = async (id: number) => {
         {company && (
           <CompanyModal
             open={companyOpen}
+            docType="invoice"
             company={company}
             onClose={() => setCompanyOpen(false)}
             onSaved={(c) => {
@@ -1205,8 +1207,6 @@ const editInvoice = async (id: number) => {
           </div>
         }
       />
-
-      <DocPresetBar docType="invoice" company={company} onCompanySaved={setCompany} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
@@ -1582,6 +1582,7 @@ const editInvoice = async (id: number) => {
       {company && (
         <CompanyModal
           open={companyOpen}
+            docType="invoice"
           company={company}
           onClose={() => setCompanyOpen(false)}
           onSaved={(c) => {
@@ -1901,13 +1902,21 @@ function Editor({
       return;
     }
     const xml = buildInvoiceXml(form as never);
-    const blob = new Blob([xml], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${form.number || "invoice"}.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const name = `${form.number || "invoice"}.xml`;
+    // Desktop: blob `<a download>` silently fails in the Tauri WebView2.
+    if (hasTauri) {
+      void saveBytes(name, new TextEncoder().encode(xml)).catch((e) =>
+        toast.error(`XML export failed: ${errMsg(e)}`)
+      );
+    } else {
+      const blob = new Blob([xml], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
     if (v.warnings.length)
       toast.info(`XML exported. Recommended fields still empty: ${v.warnings.join(", ")}`);
     else toast.success("e-Invoice XML exported (PINT-AE).");

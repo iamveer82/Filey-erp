@@ -45,5 +45,15 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    proxy: {
+      // OpenCode Zen sends no CORS headers, so a plain browser can never call
+      // it cross-origin ("Failed to fetch" before auth even runs). Serving it
+      // same-origin makes the preflight — and CORS itself — disappear.
+      "^/zen/v1/": {
+        target: "https://opencode.ai",
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
 }));

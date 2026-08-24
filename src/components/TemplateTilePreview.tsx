@@ -256,8 +256,32 @@ function ReceiptPreview() {
   );
 }
 
-function MonogramPreview() {
+function VoucherPreview() {
   return (
+    <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
+      <rect width="100" height="72" fill="#ffffff" rx="4" />
+      {/* company header */}
+      <rect x="8" y="7" width="42" height="4" fill="#3f6b34" rx="2" />
+      <rect x="8" y="13" width="26" height="2" fill="#8fb086" rx="1" />
+      <rect x="8" y="20" width="84" height="0.5" fill="#e5e7eb" />
+      {/* centred spaced title */}
+      <rect x="34" y="26" width="32" height="2.5" fill="#525252" rx="1" />
+      {/* field rows + amount box */}
+      <rect x="8" y="34" width="16" height="2" fill="#9ca3af" rx="1" />
+      <rect x="26" y="34" width="26" height="0.75" fill="#d1d5db" />
+      <rect x="8" y="41" width="16" height="2" fill="#9ca3af" rx="1" />
+      <rect x="26" y="41" width="26" height="0.75" fill="#d1d5db" />
+      <rect x="66" y="33" width="26" height="13" fill="#5a8f3c" rx="1" />
+      {/* received-from block */}
+      <rect x="8" y="52" width="14" height="2" fill="#d1d5db" rx="1" />
+      <rect x="8" y="57" width="30" height="2.5" fill="#404040" rx="1" />
+      {/* footer band */}
+      <rect x="6" y="64" width="88" height="5" fill="#f3f4f6" />
+    </svg>
+  );
+}
+
+function MonogramPreview() {  return (
     <svg viewBox="0 0 100 72" className="w-full h-full" preserveAspectRatio="none">
       <rect width="100" height="72" fill="#f0fdfa" rx="4" />
       {/* large monogram box - left */}
@@ -349,6 +373,7 @@ const BUILTIN_PREVIEWS: Record<string, React.ComponentType> = {
   tech: TechPreview,
   creative: CreativePreview,
   receipt: ReceiptPreview,
+  voucher: VoucherPreview,
   monogram: MonogramPreview,
   clean: CleanPreview,
   professional: ProfessionalPreview,

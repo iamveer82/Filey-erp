@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, num, cn, errMsg, todayYmd } from "../lib/format";
-import { PageHeader, Badge, ErrorBanner, Modal, Field } from "../components/ui";
+import { aed, fmtDate, num, errMsg, todayYmd } from "../lib/format";
+import { PageHeader, Badge, ErrorBanner, Modal, Field, MetricCard } from "../components/ui";
 import { SelectMenu } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
 
@@ -71,12 +71,7 @@ export default function Purchase() {
 
   const maxCat = byCategory[0]?.[1] || 1;
 
-  const kpis = [
-    { label: "Total expenses", value: aed(totalSpend), hint: `${num(expenses.length)} entries` },
-    { label: "This month", value: aed(thisMonth), hint: "current period" },
-    { label: "Avg per entry", value: expenses.length ? aed(totalSpend / expenses.length) : aed(0), hint: "across all" },
-    { label: "Categories", value: num(byCategory.length), hint: "unique types" },
-  ];
+  const avgEntry = expenses.length ? totalSpend / expenses.length : 0;
 
   const save = async () => {
     const amt = Number(form.amount);
@@ -137,24 +132,32 @@ export default function Purchase() {
         </div>
       )}
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card">
-        {kpis.map((k, i) => (
-          <div
-            key={k.label}
-            className={cn(
-              "p-5 border-b lg:border-b-0 border-border",
-              i < 3 && "lg:border-r",
-              i % 2 === 0 && "sm:border-r lg:border-r"
-            )}
-          >
-            <div className="text-[13px] text-muted-foreground">{k.label}</div>
-            <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
-              {k.value}
-            </div>
-            <div className="mt-2 text-[11.5px] text-muted-foreground">{k.hint}</div>
-          </div>
-        ))}
+      {/* KPI cards — same quiet strip as Invoicing */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+        <MetricCard
+          label="Total expenses"
+          value={aed(totalSpend)}
+          change={`${num(expenses.length)} entries`}
+          changeTone="up"
+        />
+        <MetricCard
+          label="This month"
+          value={aed(thisMonth)}
+          change="Current period"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Avg per entry"
+          value={aed(avgEntry)}
+          change="Across all"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Categories"
+          value={num(byCategory.length)}
+          change="Unique types"
+          changeTone="up"
+        />
       </div>
 
       {/* Category breakdown + expense table */}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Building2, Wallet, Coins, FileCheck2 } from "lucide-react";
+import { Plus, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { log } from "../lib/log";
 import { aed, fmtDate, money, numInput } from "../lib/format";
@@ -187,24 +187,18 @@ export default function BankAccounts() {
         <MetricCard
           label="Accounts"
           value={String(accounts.length)}
-          icon={<Building2 size={20} />}
-          iconClass="bg-primary-100 text-ink"
           change={accounts.length > 0 ? "Connected" : "None yet"}
           changeTone={accounts.length > 0 ? "up" : "warn"}
         />
         <MetricCard
           label="Total Balance"
           value={aed(total)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-success/15 text-success"
           change="Across all accounts"
           changeTone="up"
         />
         <MetricCard
           label="Currencies"
           value={String(currencies)}
-          icon={<Coins size={20} />}
-          iconClass="bg-secondary/20 text-ink"
           change={currencies > 1 ? "Multi-currency" : "Single currency"}
           changeTone="up"
         />

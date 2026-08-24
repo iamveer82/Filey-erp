@@ -2851,7 +2851,9 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
     clone.style.transformOrigin = "top left";
     clone.style.zoom = "1";
     clone.style.margin = "0";
-    clone.style.padding = "0";
+    // The node's own padding is part of the sheet design (the A4 export
+    // stacks carry 48px margins on the captured root). Stripping it used to
+    // lay content out 2×48px wider than the box and clip it at both edges.
     clone.style.border = "none";
     clone.style.maxWidth = "none";
     clone.style.maxHeight = "none";
@@ -2899,7 +2901,16 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
     }
   };
 
-  const pageEls = el.querySelectorAll(":scope > div");
+  // A document whose root IS the sheet (payslip card, challan preview with a
+  // floating stamp layer) opts out of the child-page split with
+  // `data-pdf-single="true"`. The split ALSO requires the element to be a
+  // full-width A4 stack — the only thing that legitimately is one (the
+  // off-screen export sheets). A narrow card with a header strip and a stamp
+  // layer is one sheet, whatever its children look like; treating its second
+  // div as a "page" used to rasterise the header alone and drop the body.
+  const splitAllowed =
+    el.offsetWidth >= A4_CSS_W - 50 && el.dataset.pdfSingle !== "true";
+  const pageEls = splitAllowed ? el.querySelectorAll(":scope > div") : [];
   if (pageEls.length > 1) {
     for (const pe of Array.from(pageEls)) {
       await capturePage(pe as HTMLElement);
@@ -2912,12 +2923,18 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
   return { name: `${name}.pdf`, bytes };
 }
 
+/** Capture and download. Resolves `true` when the file was actually written
+ *  (native save dialog or browser download), `false` when it fell back to the
+ *  print dialog instead — callers that must react to a real export (e.g. to
+ *  record a payslip) check the result. */
 export async function downloadElementAsPdf(el: HTMLElement, name: string) {
   try {
     await downloadFile(await elementToPdfBytes(el, name));
+    return true;
   } catch (e) {
     console.error("PDF export failed:", e);
     window.print();
+    return false;
   }
 }
 

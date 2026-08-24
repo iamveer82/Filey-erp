@@ -2,9 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Check,
-  ArrowUpRight,
-  ArrowDownLeft,
-  CheckCircle2,
   Paperclip,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
@@ -215,20 +212,20 @@ export default function ChequeRegister() {
         <MetricCard
           label="Pending Issued"
           value={aed(totals.issued)}
-          icon={<ArrowUpRight size={20} />}
-          iconClass="bg-secondary/20 text-ink"
+          change={totals.issued > 0 ? "Not yet cleared" : "None outstanding"}
+          changeTone={totals.issued > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Pending Received"
           value={aed(totals.received)}
-          icon={<ArrowDownLeft size={20} />}
-          iconClass="bg-info/15 text-info"
+          change={totals.received > 0 ? "Awaiting deposit" : "None outstanding"}
+          changeTone={totals.received > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Cleared"
           value={aed(totals.cleared)}
-          icon={<CheckCircle2 size={20} />}
-          iconClass="bg-success/15 text-success"
+          change={totals.cleared > 0 ? "Settled at the bank" : "None yet"}
+          changeTone="up"
         />
       </div>
       <div className="flex flex-wrap items-center gap-3 mb-4">

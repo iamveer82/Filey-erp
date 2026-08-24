@@ -4,6 +4,7 @@ import {
   Plus,
   Trash2,
   ArrowLeft,
+  Building2,
   Download,
   Save,
   Check,
@@ -72,7 +73,7 @@ import {
   type DcForm as ChallanForm,
   type DcRecord as ChallanRecord,
 } from "../lib/challans";
-import DocPresetBar from "../components/DocPresetBar";
+import CompanyModal from "../components/CompanyModal";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -164,11 +165,7 @@ export default function DeliveryChallan() {
   const [records, setRecords] = useState<DcRecord[]>([]);
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
-  // Challans carry the company header like every other document, so this
-  // section gets the same company control as the rest.
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
   useEffect(() => {
-    billing.getCompany().then(setCompany).catch(() => {});
     loadDocFormats()
       .then((f) => {
         dcFormats = f;
@@ -307,25 +304,24 @@ export default function DeliveryChallan() {
           </button>
         }
       />
-      <DocPresetBar company={company} onCompanySaved={setCompany} />
-
       <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-6">
         <MetricCard
           label="Challans"
           value={String(records.length)}
-          icon={<Truck size={20} />}
+          change="All time"
+          changeTone="up"
         />
         <MetricCard
           label="In Transit"
           value={String(inTransit)}
-          icon={<MapPin size={20} />}
-          iconClass="bg-warning/15 text-warning"
+          change={inTransit > 0 ? "Out for delivery" : "None"}
+          changeTone={inTransit > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Delivered"
           value={String(delivered)}
-          icon={<Check size={20} />}
-          iconClass="bg-success/15 text-success"
+          change={delivered > 0 ? "Goods received" : "None yet"}
+          changeTone="up"
         />
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -565,7 +561,11 @@ function DcEditor({
   const downloadPdf = () => {
     if (dcRef.current) {
       const sheet = dcRef.current.closest(".invoice-print") as HTMLElement;
-      downloadElementAsPdf(sheet || dcRef.current, form.number || "challan");
+      const el = sheet || dcRef.current;
+      // The preview root carries floating stamp/signature layers as extra
+      // child divs — without this the exporter splits them into junk pages.
+      el.dataset.pdfSingle = "true";
+      void downloadElementAsPdf(el, form.number || "challan");
     } else window.print();
   };
   // Save the record, then archive the challan PDF to My Files (deduped, best-effort).
@@ -574,6 +574,7 @@ function DcEditor({
     onSave();
     if (!el) return;
     try {
+      el.dataset.pdfSingle = "true";
       const base = form.number || "challan";
       const saved = await autoSaveDocument(`${base}.pdf`, "challan", () =>
         elementToPdfBytes(el, base)
@@ -588,6 +589,8 @@ function DcEditor({
     setForm({ ...form, [k]: v });
   const [designing, setDesigning] = useState(false);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [companyOpen, setCompanyOpen] = useState(false);
 
   useEffect(() => {
     loadCompanyStampSig()
@@ -600,6 +603,7 @@ function DcEditor({
     billing
       .getCompany()
       .then((c) => {
+        setCompany(c);
         if (!c) return;
         setForm({
           ...form,
@@ -696,8 +700,33 @@ function DcEditor({
           <button className="btn-ghost" onClick={handleSave}>
             <Save size={15} /> Save
           </button>
+          <button
+            className="btn-ghost"
+            onClick={() => setCompanyOpen(true)}
+            title="Edit company details"
+          >
+            <Building2 size={15} /> Company
+          </button>
         </div>
       </div>
+
+      {company && (
+        <CompanyModal
+          open={companyOpen}
+          company={company}
+          onClose={() => setCompanyOpen(false)}
+          onSaved={(c) => {
+            setCompany(c);
+            setForm({
+              ...form,
+              company_name: c.name || "",
+              company_address: c.address || "",
+              company_trn: c.trn || "",
+            });
+            setCompanyOpen(false);
+          }}
+        />
+      )}
 
             <ResizablePanels
         left={

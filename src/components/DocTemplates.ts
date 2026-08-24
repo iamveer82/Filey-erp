@@ -20,15 +20,18 @@ export interface DocTemplate {
 
 export const DOC_TEMPLATES: DocTemplate[] = [
   // ── General ──
-  { id: "minimal", name: "Minimal", category: "General", docTypes: ["invoice", "quote", "po", "receipt"] },
-  { id: "classic", name: "Classic", category: "General", docTypes: ["invoice", "quote", "po", "receipt"] },
-  { id: "modern", name: "Modern", category: "General", docTypes: ["invoice", "quote", "po", "receipt"] },
-  { id: "corporate", name: "Corporate", category: "General", docTypes: ["invoice", "quote", "po", "receipt"] },
-  { id: "elegant", name: "Elegant", category: "General", docTypes: ["invoice", "quote", "po", "receipt"] },
+  // Invoice layouts, deliberately NOT offered to receipts: a receipt has its
+  // own catalogue (Receipts & Vouchers below) and the General templates render
+  // item grids and totals ladders that make a receipt read as an invoice.
+  // Saved receipts still render on these ids — DocView keeps the renderers.
+  { id: "minimal", name: "Minimal", category: "General", docTypes: ["invoice", "quote", "po"] },
+  { id: "classic", name: "Classic", category: "General", docTypes: ["invoice", "quote", "po"] },
+  { id: "modern", name: "Modern", category: "General", docTypes: ["invoice", "quote", "po"] },
+  { id: "corporate", name: "Corporate", category: "General", docTypes: ["invoice", "quote", "po"] },
+  { id: "elegant", name: "Elegant", category: "General", docTypes: ["invoice", "quote", "po"] },
   { id: "bold", name: "Bold", category: "General", docTypes: ["invoice", "quote", "po"] },
   { id: "tech", name: "Tech", category: "General", docTypes: ["invoice", "quote"] },
   { id: "creative", name: "Creative", category: "General", docTypes: ["invoice", "quote"] },
-  { id: "receipt", name: "Receipt", category: "General", docTypes: ["receipt"] },
   { id: "monogram", name: "Monogram", category: "General", docTypes: ["invoice", "quote", "po"] },
   { id: "green-gold", name: "Green Gold", category: "General", docTypes: ["invoice", "quote"] },
   { id: "industrial", name: "Industrial", category: "General", docTypes: ["invoice", "quote", "po"] },
@@ -65,6 +68,11 @@ export const DOC_TEMPLATES: DocTemplate[] = [
   { id: "uae-purchase-order", name: "UAE Purchase Order", category: "Purchase Orders", docTypes: ["po"] },
 
   // ── Receipts & Vouchers ──
+  // The only catalogue a receipt sees — dedicated money-received layouts, not
+  // general invoice designs. The plain "receipt" id lives here too so saved
+  // receipts on it keep rendering and stay pickable.
+  { id: "voucher", name: "Receipt Voucher", category: "Receipts & Vouchers", docTypes: ["receipt"] },
+  { id: "receipt", name: "Receipt", category: "Receipts & Vouchers", docTypes: ["receipt"] },
   { id: "uae-receipt-voucher", name: "UAE Receipt Voucher", category: "Receipts & Vouchers", docTypes: ["receipt"] },
   { id: "uae-payment-voucher", name: "UAE Payment Voucher", category: "Receipts & Vouchers", docTypes: ["receipt"] },
   { id: "uae-petty-cash", name: "UAE Petty Cash Voucher", category: "Receipts & Vouchers", docTypes: ["receipt"] },
@@ -79,13 +87,13 @@ export const DOC_TEMPLATES: DocTemplate[] = [
   // ── Industry-Specific ──
   { id: "uae-construction", name: "UAE Construction Progress", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-rental", name: "UAE Rental / Lease", category: "Industry-Specific", docTypes: ["invoice"] },
-  { id: "uae-restaurant", name: "UAE Restaurant", category: "Industry-Specific", docTypes: ["invoice", "receipt"] },
+  { id: "uae-restaurant", name: "UAE Restaurant", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-medical", name: "UAE Medical", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-education", name: "UAE Education", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-logistics", name: "UAE Logistics", category: "Industry-Specific", docTypes: ["invoice", "po"] },
-  { id: "uae-ecommerce", name: "UAE E-Commerce", category: "Industry-Specific", docTypes: ["invoice", "receipt"] },
+  { id: "uae-ecommerce", name: "UAE E-Commerce", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-hotel", name: "UAE Hotel Folio", category: "Industry-Specific", docTypes: ["invoice"] },
-  { id: "uae-salon", name: "UAE Salon", category: "Industry-Specific", docTypes: ["invoice", "receipt"] },
+  { id: "uae-salon", name: "UAE Salon", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-garage", name: "UAE Auto Garage", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-realestate", name: "UAE Real Estate Commission", category: "Industry-Specific", docTypes: ["invoice"] },
   { id: "uae-amc", name: "UAE Annual Maintenance Contract", category: "Industry-Specific", docTypes: ["invoice", "quote"] },
@@ -93,7 +101,7 @@ export const DOC_TEMPLATES: DocTemplate[] = [
   { id: "uae-timesheet", name: "UAE IT Timesheet", category: "Industry-Specific", docTypes: ["invoice"] },
 
   // ── Emergent Reference Ports ──
-  { id: "em-minimal", name: "Minimal Pro", category: "Emergent Ports", docTypes: ["invoice", "quote", "po", "receipt"] },
+  { id: "em-minimal", name: "Minimal Pro", category: "Emergent Ports", docTypes: ["invoice", "quote", "po"] },
   { id: "em-uae", name: "UAE FTA Compact", category: "Emergent Ports", docTypes: ["invoice"] },
   { id: "em-classic", name: "Classic Serif", category: "Emergent Ports", docTypes: ["invoice", "quote", "po"] },
   { id: "em-modern", name: "Modern Blue", category: "Emergent Ports", docTypes: ["invoice", "quote", "po"] },

@@ -1,9 +1,6 @@
 import {
   COMET_DOT,
   COMET_RIBBONS,
-  DOT_PEAK,
-  DOT_R,
-  DOT_X,
   NOTIF_ANGLE,
   NOTIF_DIST,
   NOTIF_MARGIN,
@@ -196,13 +193,6 @@ export interface StateDef {
   pose(local: number): Pose
 }
 
-/** Onde de pulsation qui parcourt les trois points de gauche a droite. */
-function dotPulse(t: number, index: number): number {
-  const p = ((((t - index * 0.5) / 1.5) % 1) + 1) % 1
-  const k = p < 0.5 ? 0.5 - 0.5 * Math.cos(p * TAU) : 0
-  return clamp(k * 2)
-}
-
 export const STATES: StateDef[] = [
   {
     id: 'idle',
@@ -216,29 +206,23 @@ export const STATES: StateDef[] = [
 
   {
     id: 'thinking',
-    duration: 2.6,
+    // deux vagues completes de la chaine de points
+    duration: 3.6,
     morph: 0.4,
     baseFace: false,
     baseBody: false,
     blinkIn: true,
     pose: (t) => {
-      const mid = dotPulse(t, 1)
-      // Les points lateraux sortent des flancs de la boule : dans la video ils
-      // restent fusionnes avec elle 1-2 frames avant de se detacher.
-      const emerge = 0.3 + 0.7 * easings.easeOutCubic(clamp(t / 0.3))
+      /**
+       * Penser, sans disparaitre : la boule reste la, visage ouvert, le
+       * regard leve et un frisson de vie propre. Aucun point sur elle —
+       * l'indicateur « en train de reflechir » est la chaine grise du fil,
+       * pas un decor colle a la tete.
+       */
       return base({
-        // la boule DEVIENT le point du milieu : le morph reste continu
-        sil: circle(DOT_R * (1 + (DOT_PEAK - 1) * mid), { cx: DOT_X[1]! }),
-        eyeAlpha: 0,
-        dots: [0, 2].map((i) => {
-          const k = dotPulse(t, i)
-          return {
-            x: DOT_X[i]! * emerge,
-            y: 0,
-            r: DOT_R * (1 + (DOT_PEAK - 1) * k),
-            opacity: 0.55 + 0.45 * k
-          }
-        })
+        sil: circle(1, { cy: Math.sin(t * (TAU / 2.6)) * 0.02 }),
+        gaze: { yaw: 15, pitch: 21, roll: -9 },
+        eyes: pair(0.16, 0.37)
       })
     }
   },

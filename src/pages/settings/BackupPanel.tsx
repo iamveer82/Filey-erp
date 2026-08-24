@@ -3,6 +3,7 @@ import { Download, Info, Upload } from "lucide-react";
 import { billing, erp, crm, fin, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
 import { cn, errMsg, todayYmd } from "../../lib/format";
+import { hasTauri, saveBytes } from "../../lib/localPaths";
 
 /* ---------------- Backup & Restore ----------------
    Reference two-card layout. Export is the real API snapshot; in-app
@@ -44,31 +45,38 @@ export default function BackupPanel() {
         );
       const [company, products, orders, invoices, quotations, customers, expenses] =
         settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
-      const blob = new Blob(
-        [
-          JSON.stringify(
-            {
-              exported_at: new Date().toISOString(),
-              app: "filey-erp",
-              company,
-              products,
-              orders,
-              invoices,
-              quotations,
-              customers,
-              expenses,
-            },
-            null,
-            2
-          ),
-        ],
-        { type: "application/json" }
+      const json = JSON.stringify(
+        {
+          exported_at: new Date().toISOString(),
+          app: "filey-erp",
+          company,
+          products,
+          orders,
+          invoices,
+          quotations,
+          customers,
+          expenses,
+        },
+        null,
+        2
       );
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `filey-backup-${todayYmd()}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      const name = `filey-backup-${todayYmd()}.json`;
+      // Desktop: a blob `<a download>` click silently fails in the Tauri
+      // WebView2 — the backup must go through the native save dialog.
+      if (hasTauri) {
+        const saved = await saveBytes(
+          name,
+          new TextEncoder().encode(json)
+        );
+        if (!saved) return; // user cancelled the dialog
+      } else {
+        const blob = new Blob([json], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      }
       setDone(true);
       set("backup.last_export_at", new Date().toISOString());
     } catch (e) {

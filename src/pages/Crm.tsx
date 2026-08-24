@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Users,
-  UserCheck,
-  UserPlus,
-  Target,
-  TrendingUp,
   Plus,
   CalendarDays,
   Download,
@@ -252,40 +247,30 @@ export default function Crm() {
             <MetricCard
               label="Total Customers"
               value={num(customers.length)}
-              icon={<Users size={20} />}
-              iconClass="bg-primary-100 text-ink"
               change={`${activeCount} active`}
               changeTone="up"
             />
             <MetricCard
               label="Active Customers"
               value={num(activeCount)}
-              icon={<UserCheck size={20} />}
-              iconClass="bg-success/15 text-success"
               change={activeCount > 0 ? "Engaged" : "None"}
               changeTone="up"
             />
             <MetricCard
               label="New Customers"
               value={num(newCount)}
-              icon={<UserPlus size={20} />}
-              iconClass="bg-secondary-400/20 text-secondary-600"
               change="Last 30 days"
               changeTone="up"
             />
             <MetricCard
               label="Total Deals"
               value={num(opps.length)}
-              icon={<Target size={20} />}
-              iconClass="bg-info/15 text-info"
               change={`${tasks.length} open tasks`}
               changeTone={tasks.length > 0 ? "warn" : "up"}
             />
             <MetricCard
               label="Pipeline Value"
               value={aed(pipelineValue)}
-              icon={<TrendingUp size={20} />}
-              iconClass="bg-primary-100 text-primary-700"
               change="Open deals"
               changeTone="up"
             />

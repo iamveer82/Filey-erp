@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Mail, Tags } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
 import { RowActions } from "../components/RowActions";
@@ -157,13 +157,14 @@ export default function EmailTemplates() {
         <MetricCard
           label="Templates"
           value={String(templates.length)}
-          icon={<Mail size={20} />}
+          change="Saved email layouts"
+          changeTone="up"
         />
         <MetricCard
           label="Categories"
           value={String(categories)}
-          icon={<Tags size={20} />}
-          iconClass="bg-secondary-400/20 text-secondary-600"
+          change={categories > 0 ? "Grouped by use" : "None yet"}
+          changeTone="up"
         />
       </div>
       <DataTable<EmailTemplate>

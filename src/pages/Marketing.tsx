@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Copy, Download, Flame, Globe, Sparkles, UserSearch, Users } from "lucide-react";
+import { Copy, Download, Globe, Sparkles, UserSearch } from "lucide-react";
 
 import { crm, billing, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
 import {
@@ -26,8 +26,8 @@ import {
   ErrorBanner,
   FilterChip,
   SearchInput,
+  MetricCard,
 } from "../components/ui";
-import StatStrip from "../components/StatStrip";
 
 /* Marketing: who to contact next, ranked from the books. The scoring is
  * deterministic (lib/marketing → lib/scout); the only network call on this page
@@ -139,28 +139,32 @@ export default function Marketing() {
             </div>
           )}
 
-          <StatStrip
-            className="mb-4"
-            items={[
-              { label: "Leads", value: String(stats.total), icon: <Users size={14} /> },
-              {
-                label: `Hot (${HOT_SCORE}+)`,
-                value: String(stats.hot),
-                icon: <Flame size={14} />,
-                tone: "positive",
-              },
-              {
-                label: "Missing contact",
-                value: String(stats.incomplete),
-                tone: stats.incomplete ? "negative" : "neutral",
-              },
-              {
-                label: "Enrichable",
-                value: String(stats.enrichable),
-                icon: <Sparkles size={14} />,
-              },
-            ]}
-          />
+          <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+            <MetricCard
+              label="Leads"
+              value={String(stats.total)}
+              change="From your trading history"
+              changeTone="up"
+            />
+            <MetricCard
+              label={`Hot (${HOT_SCORE}+)`}
+              value={String(stats.hot)}
+              change={stats.hot > 0 ? "Ready to contact" : "None yet"}
+              changeTone={stats.hot > 0 ? "up" : "warn"}
+            />
+            <MetricCard
+              label="Missing contact"
+              value={String(stats.incomplete)}
+              change={stats.incomplete > 0 ? "Needs email or phone" : "All reachable"}
+              changeTone={stats.incomplete > 0 ? "warn" : "up"}
+            />
+            <MetricCard
+              label="Enrichable"
+              value={String(stats.enrichable)}
+              change="Website found"
+              changeTone="up"
+            />
+          </div>
 
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <SearchInput

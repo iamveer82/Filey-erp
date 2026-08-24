@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
-  TrendingUp,
-  Wallet,
-  Receipt,
-  Banknote,
   Sparkles,
   Download,
   Wrench,
@@ -289,25 +285,26 @@ export default function Accounting() {
         <MetricCard
           label="Net Profit"
           value={aed(report?.net_profit ?? 0)}
-          icon={<TrendingUp size={20} />}
-          iconClass="bg-success/15 text-success"
+          change={(report?.net_profit ?? 0) >= 0 ? "Revenue minus expenses" : "Loss this period"}
+          changeTone={(report?.net_profit ?? 0) >= 0 ? "up" : "down"}
         />
         <MetricCard
           label="Revenue"
           value={aed(report?.total_revenue ?? 0)}
-          icon={<Banknote size={20} />}
+          change="All income"
+          changeTone="up"
         />
         <MetricCard
           label="Expenses"
           value={aed(report?.total_expenses ?? 0)}
-          icon={<Receipt size={20} />}
-          iconClass="bg-danger/15 text-danger"
+          change="All spending"
+          changeTone={(report?.total_expenses ?? 0) > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Cash Position"
           value={aed(report?.cash_position ?? 0)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-info/15 text-info"
+          change="Across bank accounts"
+          changeTone="up"
         />
       </div>
 

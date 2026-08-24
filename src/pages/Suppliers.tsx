@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Building2,
-  Boxes,
-  AlertTriangle,
   Package,
   Plus,
   Sliders,
@@ -27,7 +25,7 @@ import { aed, num, money, cn } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { Button, Card, Field, Badge, Modal, PageHeader, ErrorBanner } from "../components/primitives";
-import { keyActivate } from "../components/ui";
+import { keyActivate, MetricCard } from "../components/ui";
 import {
   RowActions,
   QuickViewModal,
@@ -260,38 +258,31 @@ export default function Suppliers() {
         </div>
       )}
 
-      {/* ── KPI tiles (DEMO reference: icon box + value + muted hint) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-4">
-        <KpiTile
-          icon={Building2}
-          accent="bg-neutral-500/10 text-neutral-500 dark:text-neutral-300"
+      {/* ── KPI cards — same quiet strip as Invoicing ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
+        <MetricCard
           label="Suppliers"
           value={num(suppliers.length)}
-          hint="Vendors registered"
-          divider="border-b sm:border-b-0 sm:border-r"
+          change="Vendors registered"
+          changeTone="up"
         />
-        <KpiTile
-          icon={Boxes}
-          accent="bg-sky-500/10 text-sky-600 dark:text-sky-400"
+        <MetricCard
           label="Sourced SKUs"
           value={num(products.length)}
-          hint={`Across ${groups.length} categories`}
-          divider="border-b sm:border-b-0 lg:border-r"
+          change={`Across ${groups.length} categories`}
+          changeTone="up"
         />
-        <KpiTile
-          icon={Package}
-          accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        <MetricCard
           label="Sourcing Value"
           value={aed(totalValue)}
-          hint="Stock on hand at cost"
-          divider="border-b sm:border-b-0 sm:border-r"
+          change="Stock on hand at cost"
+          changeTone="up"
         />
-        <KpiTile
-          icon={AlertTriangle}
-          accent="bg-amber-500/10 text-amber-600 dark:text-amber-500"
+        <MetricCard
           label="At Reorder"
           value={num(totalLow)}
-          hint="SKUs at/below reorder level"
+          change={totalLow > 0 ? "SKUs at/below reorder level" : "All stocked"}
+          changeTone={totalLow > 0 ? "warn" : "up"}
         />
       </div>
 
@@ -505,38 +496,6 @@ export default function Suppliers() {
             : undefined
         }
       />
-    </div>
-  );
-}
-
-/** DEMO reference KPI tile: tinted icon box + value + muted hint. */
-function KpiTile({
-  icon: Icon,
-  accent,
-  label,
-  value,
-  hint,
-  divider,
-}: {
-  icon: typeof Building2;
-  accent: string;
-  label: string;
-  value: string;
-  hint: string;
-  divider?: string;
-}) {
-  return (
-    <div className={cn("p-5 flex items-center gap-3", divider)}>
-      <div className={cn("h-10 w-10 rounded-lg grid place-items-center", accent)}>
-        <Icon className="h-5 w-5" strokeWidth={1.75} />
-      </div>
-      <div>
-        <div className="text-[12.5px] text-muted-foreground">{label}</div>
-        <div className="text-[22px] font-semibold text-foreground leading-tight tabular-nums">
-          {value}
-        </div>
-        <div className="text-[11.5px] text-muted-foreground">{hint}</div>
-      </div>
     </div>
   );
 }

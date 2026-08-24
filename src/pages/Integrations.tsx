@@ -22,9 +22,9 @@ import {
   Zap,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { PageHeader, Badge, FilterChip } from "../components/ui";
+import { PageHeader, Badge, FilterChip, MetricCard } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
-import { cn } from "../lib/format";
+import { cn, num } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import {
@@ -359,12 +359,37 @@ export default function Integrations() {
   const filtered =
     cat === "All" ? integrations : integrations.filter((i) => i.category === cat);
 
+  const connectedCount = integrations.filter((i) => i.connected).length;
+  const builtinCount = integrations.filter((i) => i.builtin).length;
+  const soonCount = integrations.filter((i) => i.soon).length;
+
   return (
     <div className="animate-fade-up pb-10">
       <PageHeader
         title="Integrations"
         subtitle="Connect Filey with the tools you already use, and let the AI agent work in them"
       />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
+        <MetricCard
+          label="Connected"
+          value={num(connectedCount)}
+          change={connectedCount > 0 ? "Live integrations" : "Nothing connected yet"}
+          changeTone={connectedCount > 0 ? "up" : "warn"}
+        />
+        <MetricCard
+          label="Built in"
+          value={num(builtinCount)}
+          change="Ready to open"
+          changeTone="up"
+        />
+        <MetricCard
+          label="Coming soon"
+          value={num(soonCount)}
+          change="On the roadmap"
+          changeTone="up"
+        />
+      </div>
 
       <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2">
         <ComposioProvider source={source} onSourceChange={setSource} onSaved={refresh} />

@@ -49,6 +49,7 @@ import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import { MenuPopover, MenuItemRow, SelectMenu } from "./ui-menu";
 import BloubBot from "./BloubBot";
+import ThinkingDots from "./ThinkingDots";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
 
 const SYSTEM =
@@ -344,8 +345,9 @@ export default function Copilot() {
               className="shrink-0 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ink"
             >
               <BloubBot
-                size={22}
+                size={44}
                 animate={busy}
+                ambient
                 state={botStateFor(busy ? "thinking" : "idle")}
                 expression={botExpressionFor(busy ? "thinking" : "idle")}
               />
@@ -573,7 +575,7 @@ export default function Copilot() {
             )}
             {busy && view === "chat" && (
               <div className="mr-auto w-fit rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
-                Thinking…
+                <ThinkingDots />
               </div>
             )}
             {err && view === "chat" && (
@@ -646,12 +648,12 @@ export default function Copilot() {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Filey AI assistant"
-        className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors"
+        className="flex h-16 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors"
       >
         {/* The launcher is the assistant's presence on every page, so it stays
             alive: one loop for the whole app, and it stops on its own for
             anyone who asked for reduced motion. */}
-        <BloubBot size={32} state="idle" />
+        <BloubBot size={64} state="idle" ambient />
         <span className="text-sm font-medium text-ink">Ask AI</span>
       </button>
     </div>

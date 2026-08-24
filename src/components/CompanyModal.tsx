@@ -6,31 +6,63 @@ import { errMsg } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
 import { loadCustomTemplates } from "./TemplateDesigner";
+import { templatesForDocType, type DocType } from "./DocTemplates";
+import {
+  loadDocPresets,
+  saveDocPreset,
+  presetTemplate,
+  DOC_TYPE_LABELS,
+} from "../lib/docPresets";
 import { SelectMenu } from "./ui-menu";
 
 /** The company-details dialog behind every document section's "Company"
  *  button. Invoicing, Quoting and Purchase Orders each carried their own copy
  *  of this form, which is how they drifted apart — different fields, different
  *  labels, and no company button at all on receipts and challans. One copy now,
- *  so every section opens the same dialog. */
+ *  so every section opens the same dialog.
+ *
+ *  Pass `docType` and the dialog also carries that section's default-template
+ *  preset — the Company button is then the whole preset surface, and the old
+ *  elongated preset bar above each list is gone. */
 export default function CompanyModal({
   open,
   company,
   onClose,
   onSaved,
+  docType,
 }: {
   open: boolean;
   company: CompanyProfile;
   onClose: () => void;
   onSaved: (c: CompanyProfile) => void;
+  docType?: DocType;
 }) {
   const { toast } = useUI();
   const [c, setC] = useState<CompanyProfile>(company);
+  const [preset, setPreset] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) setC(company);
   }, [open, company]);
+
+  useEffect(() => {
+    if (open && docType) {
+      loadDocPresets()
+        .then((p) =>
+          setPreset(
+            presetTemplate(
+              p,
+              docType,
+              company.default_template,
+              templatesForDocType(docType)[0]?.id ?? "minimal"
+            )
+          )
+        )
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, docType]);
 
   const onLogo = (file?: File) => {
     if (!file) return;
@@ -41,6 +73,7 @@ export default function CompanyModal({
 
   const save = async () => {
     try {
+      if (docType && preset) await saveDocPreset(docType, preset);
       await billing.saveCompany(c);
       // Re-fetch so the page applies exactly what the server persisted (server
       // defaults, RLS-trimmed columns) and not just the locally-edited copy.
@@ -117,6 +150,20 @@ export default function CompanyModal({
             />
           </Field>
         </div>
+        {docType && (
+          <Field
+            label={`Default template for new ${DOC_TYPE_LABELS[docType].toLowerCase()}`}
+          >
+            <SelectMenu
+              value={preset}
+              onChange={setPreset}
+              options={[
+                ...templatesForDocType(docType),
+                ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
+              ].map((t) => ({ value: t.id, label: t.name }))}
+            />
+          </Field>
+        )}
         <Field label="Logo">
           <div className="flex items-center gap-3">
             {c.logo && (

@@ -11,7 +11,6 @@ import {
   Upload,
   X,
   Copy,
-  Check,
   Send,
   Monitor,
   Smartphone,
@@ -76,7 +75,7 @@ import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { r2, applyRoundOff, type CalcMode } from "../lib/money";
-import DocPresetBar, { startingTemplate } from "../components/DocPresetBar";
+import { startingTemplate } from "../components/DocPresetBar";
 import {
   docLineAmount,
   storedLineAmount,
@@ -566,6 +565,7 @@ export default function Quoting() {
   );
   const sentCount = docs.filter((d) => d.status === "sent").length;
   const acceptedCount = docs.filter((d) => d.status === "accepted").length;
+  const draftCount = docs.filter((d) => (d.status || "draft") === "draft").length;
 
   // ---- List-row actions (DEMO parity) ----
   const openQuickView = (d: QuotationSummary) => {
@@ -957,6 +957,7 @@ export default function Quoting() {
         {company && (
           <CompanyModal
             open={companyOpen}
+            docType="quote"
             company={company}
             onClose={() => setCompanyOpen(false)}
             onSaved={(c) => {
@@ -2332,31 +2333,32 @@ export default function Quoting() {
         }
       />
 
-      <DocPresetBar docType="quote" company={company} onCompanySaved={setCompany} />
-
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
           label="Quotes"
           value={num(docs.length)}
-          icon={<FileText size={20} />}
+          change={
+            draftCount > 0 ? `${num(draftCount)} in draft` : "None waiting"
+          }
+          changeTone={draftCount > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Total Value"
           value={aed(totalValue)}
-          icon={<Check size={20} />}
-          iconClass="bg-primary-100 text-ink"
+          change="Quoted across all customers"
+          changeTone="up"
         />
         <MetricCard
           label="Sent"
           value={num(sentCount)}
-          icon={<Send size={20} />}
-          iconClass="bg-info/15 text-info"
+          change={sentCount > 0 ? "With customers" : "None"}
+          changeTone="up"
         />
         <MetricCard
           label="Accepted"
           value={num(acceptedCount)}
-          icon={<Check size={20} />}
-          iconClass="bg-success/15 text-success"
+          change={acceptedCount > 0 ? "Converted to invoices" : "None yet"}
+          changeTone={acceptedCount > 0 ? "up" : "warn"}
         />
       </div>
 
@@ -2558,6 +2560,7 @@ export default function Quoting() {
       {company && (
         <CompanyModal
           open={companyOpen}
+            docType="quote"
           company={company}
           onClose={() => setCompanyOpen(false)}
           onSaved={(c) => {

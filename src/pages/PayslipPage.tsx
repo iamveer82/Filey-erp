@@ -57,10 +57,59 @@ export default function PayslipPage() {
     year: "numeric",
   });
 
-  const download = () => {
-    const el = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
-    if (el) downloadElementAsPdf(el, `Payslip-${employee.name}-${month}`);
-    else window.print(); // never leave the button doing nothing at all
+  const download = async () => {
+    const src = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
+    if (!src) {
+      window.print(); // never leave the button doing nothing at all
+      return;
+    }
+    // Capture from a full A4-width off-screen sheet, not the narrow preview
+    // card. The exporter measures the node it is given and strips its
+    // padding, so a card-sized node produced a card-sized page whose text
+    // ran clipped into the right edge. Same content, real document geometry:
+    // A4 width, the card's padding kept on an inner node the exporter never
+    // touches.
+    const holder = document.createElement("div");
+    holder.setAttribute("aria-hidden", "true");
+    holder.style.cssText =
+      "position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;";
+    const sheet = document.createElement("div");
+    sheet.setAttribute("data-pdf-single", "true");
+    sheet.style.cssText =
+      "width:794px;min-height:1123px;background:#ffffff;box-sizing:border-box;";
+    const card = src.cloneNode(true) as HTMLElement;
+    card.style.width = "100%";
+    card.style.borderRadius = "0";
+    card.style.border = "none";
+    sheet.appendChild(card);
+    holder.appendChild(sheet);
+    document.body.appendChild(holder);
+    try {
+      const saved = await downloadElementAsPdf(
+        sheet,
+        `Payslip-${employee.name}-${month}`
+      );
+      // Generating a payslip IS recording it: the PDF only existed as a file
+      // while the payroll history stayed empty and monthly payroll read zero.
+      // Guarded by the same `recorded` lookup as the button, so a period can
+      // never be posted twice.
+      if (saved && !recorded && !saving) {
+        setSaving(true);
+        try {
+          await hr.runPayroll(employee.id, month, basic, allowances, deductions);
+          loadPayroll();
+          toast.success(`Payslip recorded for ${periodLabel}.`);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "PDF saved, but recording it failed."
+          );
+        } finally {
+          setSaving(false);
+        }
+      }
+    } finally {
+      holder.remove();
+    }
   };
 
   /** The payslip this page is showing, if it has already been recorded. */
@@ -103,7 +152,7 @@ export default function PayslipPage() {
             <button className="btn-ghost" onClick={() => nav("/people")}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-ghost" onClick={download}>
+            <button className="btn-ghost" onClick={() => void download()}>
               <Download size={15} /> Download PDF
             </button>
             <button
@@ -174,7 +223,10 @@ export default function PayslipPage() {
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-[13px] text-muted-foreground mb-3">Preview</div>
           <div ref={ref}>
-            <div className="invoice-print bg-white text-black rounded-xl border border-brand-200 p-6">
+            <div
+              className="invoice-print bg-white text-black rounded-xl border border-brand-200 p-6"
+              data-pdf-single="true"
+            >
               <div className="flex items-start justify-between mb-4">
                 <div>
                   {company?.logo && (

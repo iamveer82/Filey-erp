@@ -51,8 +51,9 @@ import {
   FilterChip,
   EmptyState,
   Modal,
+  MetricCard,
 } from "../components/ui";
-import { cn } from "../lib/format";
+import { cn, num } from "../lib/format";
 
 const fmtSize = (n: number) =>
   n < 1024
@@ -489,6 +490,28 @@ export default function MyFiles() {
             </div>
           }
         />
+
+        {/* KPI cards — same quiet strip as the other sections */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
+          <MetricCard
+            label="Files"
+            value={num(files.length)}
+            change="Across all folders"
+            changeTone="up"
+          />
+          <MetricCard
+            label="Storage used"
+            value={fmtSize(files.reduce((s, f) => s + (Number(f.size) || 0), 0))}
+            change="Documents, PDFs & images"
+            changeTone="up"
+          />
+          <MetricCard
+            label="Folders"
+            value={num(folders.length)}
+            change={folders.length > 0 ? "Organised" : "None yet"}
+            changeTone="up"
+          />
+        </div>
 
         {/* Breadcrumbs (also drop targets to move items up the tree) */}
         <Breadcrumbs trail={trail} onNavigate={setCwd} />

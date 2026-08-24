@@ -97,7 +97,13 @@ const PRESETS: Preset[] = [
     label: "OpenCode Zen",
     provider: "openai",
     baseUrl: "https://opencode.ai/zen/v1",
-    model: "grok-code",
+    model: "kimi-k2.7-code",
+  },
+  {
+    label: "OpenCode Zen · Claude",
+    provider: "anthropic",
+    baseUrl: "https://opencode.ai/zen/v1",
+    model: "claude-sonnet-5",
   },
   {
     label: "Cerebras",
@@ -144,6 +150,74 @@ const PROVIDER_DEFAULT_URL: Record<AiProvider, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
 };
+
+/** OpenCode Zen's catalogue (GET /zen/v1/models), grouped by the wire protocol
+ *  each family actually speaks. Filey posts to /chat/completions (openai) or
+ *  /messages (anthropic) straight on the gateway; the Responses and Gemini
+ *  families need protocols this app doesn't speak, so they're offered only as
+ *  labelled dead ends instead of silently failing. */
+const ZEN_BASE = "https://opencode.ai/zen/v1";
+const ZEN_MODEL_GROUPS: { label: string; models: string[] }[] = [
+  {
+    label: "Works with the OpenCode Zen preset (OpenAI protocol)",
+    models: [
+      "kimi-k2.7-code",
+      "kimi-k3",
+      "kimi-k2.6",
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5",
+      "minimax-m3",
+      "minimax-m2.7",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-free",
+      "big-pickle",
+      "x-preview-f-free",
+      "mimo-v2.5-free",
+      "hy3-free",
+      "nemotron-3-ultra-free",
+      "nemotron-3.5-lightning-free",
+      "laguna-s-2.1-free",
+    ],
+  },
+  {
+    label: "Set Provider API to Anthropic, same base URL",
+    models: [
+      "claude-fable-5",
+      "claude-opus-5",
+      "claude-opus-4-8",
+      "claude-opus-4-7",
+      "claude-opus-4-6",
+      "claude-opus-4-5",
+      "claude-sonnet-5",
+      "claude-sonnet-4-6",
+      "claude-sonnet-4-5",
+      "claude-haiku-4-5",
+      "qwen3.6-plus",
+      "qwen3.5-plus",
+    ],
+  },
+  {
+    label: "Speaks OpenAI Responses / Gemini — not callable from Filey",
+    models: [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4-mini",
+      "grok-4.6",
+      "grok-4.5",
+      "grok-build-0.1",
+      "muse-spark-1.2",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-pro",
+      "gemini-3-flash",
+    ],
+  },
+];
 
 export default function AiSettings() {
   const { toast } = useUI();
@@ -279,7 +353,23 @@ export default function AiSettings() {
             value={cfg.model}
             onChange={(e) => update({ model: e.target.value })}
             placeholder="claude-opus-5"
+            list={
+              cfg.baseUrl.replace(/\/+$/, "") === ZEN_BASE
+                ? "zen-model-list"
+                : undefined
+            }
           />
+          {cfg.baseUrl.replace(/\/+$/, "") === ZEN_BASE && (
+            <datalist id="zen-model-list">
+              {ZEN_MODEL_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.models.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </optgroup>
+              ))}
+            </datalist>
+          )}
         </div>
       </div>
 

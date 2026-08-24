@@ -2,10 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
-  ClipboardList,
-  CheckCircle2,
-  Clock,
-  Wallet,
   ShoppingCart,
   Search,
   X,
@@ -239,32 +235,24 @@ export default function Orders() {
         <MetricCard
           label="Total Orders"
           value={num(orders.length)}
-          icon={<ClipboardList size={20} />}
-          iconClass="bg-primary-100 text-ink"
           change={`${stats.returns} cancelled`}
           changeTone={stats.returns > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Completed"
           value={num(stats.completed)}
-          icon={<CheckCircle2 size={20} />}
-          iconClass="bg-success/15 text-success"
           change={stats.completed > 0 ? "Fulfilled" : "None yet"}
           changeTone="up"
         />
         <MetricCard
           label="In Progress"
           value={num(stats.progress)}
-          icon={<Clock size={20} />}
-          iconClass="bg-info/15 text-info"
           change={stats.progress > 0 ? "Active" : "All done"}
           changeTone={stats.progress > 0 ? "warn" : "up"}
         />
         <MetricCard
           label="Order Value"
           value={aed(stats.value)}
-          icon={<Wallet size={20} />}
-          iconClass="bg-primary-100 text-ink"
           change="Total booked"
           changeTone="up"
         />

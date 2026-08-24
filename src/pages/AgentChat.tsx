@@ -23,6 +23,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
+import ThinkingDots from "../components/ThinkingDots";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
 import { getReachConfig, setReachConfig } from "../lib/reach";
@@ -504,8 +505,8 @@ export default function AgentChat() {
               {/* The empty chat is where the bot has room to be itself, so this
                   one animates: it breathes, blinks and looks around while it
                   waits for a first question. */}
-              <div className="mx-auto mb-3 grid h-14 w-14 place-items-center">
-                <BloubBot size={56} state="idle" label="Filey AI" />
+              <div className="mx-auto mb-3 grid h-28 w-28 place-items-center">
+                <BloubBot size={112} state="idle" label="Filey AI" ambient />
               </div>
               <p className="text-[20px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
               <p className="mt-1.5 text-[13px] text-muted-foreground">
@@ -536,7 +537,7 @@ export default function AgentChat() {
           {busy && (
             <>
               <Bubble
-                turn={{ role: "assistant", text: streaming || "Thinking…" }}
+                turn={{ role: "assistant", text: streaming || "" }}
                 pending
               />
               {activity.length > 0 && (
@@ -1164,10 +1165,11 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
       {/* The bot is the assistant's face. Only the turn in flight animates:
           every earlier reply keeps its avatar as a still frame, so a long chat
           doesn't run one animation loop per message. */}
-      <div className="grid h-8 w-8 shrink-0 place-items-center">
+      <div className="grid h-[52px] w-[52px] shrink-0 place-items-center">
         <BloubBot
-          size={26}
+          size={52}
           animate={!!pending}
+          ambient
           state={botStateFor(pending ? "thinking" : "idle")}
           expression={botExpressionFor(pending ? "thinking" : "idle")}
         />
@@ -1184,8 +1186,16 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
         >
           {/* Markdown, not raw text: the model writes **bold**, bullets and
               fenced code, and every one of those used to show as punctuation. */}
-          <Markdown text={turn.text} />
-          {pending && <span className="ml-1 inline-block animate-pulse">▍</span>}
+          {turn.text ? (
+            <Markdown text={turn.text} />
+          ) : (
+            // Nothing streamed yet: the three dots stand in for words, matching
+            // the thought trail the bot's face is wearing at that same moment.
+            <ThinkingDots className="text-muted-foreground" />
+          )}
+          {pending && turn.text && (
+            <span className="ml-1 inline-block animate-pulse">▍</span>
+          )}
         </div>
         {!pending && turn.text.trim() && (
           <div className="mt-0.5 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100">

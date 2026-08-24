@@ -173,8 +173,8 @@ function AssistantColor() {
       </div>
       <div className="p-6 flex flex-col sm:flex-row sm:items-center gap-6">
         {/* A live one, not a swatch: this is exactly what the chat will show. */}
-        <div className="grid h-20 w-20 shrink-0 place-items-center rounded-xl bg-hover">
-          <BloubBot size={64} state="idle" label="Assistant preview" />
+        <div className="grid h-[128px] w-[128px] shrink-0 place-items-center rounded-xl bg-hover">
+          <BloubBot size={128} state="idle" label="Assistant preview" ambient />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-2">
