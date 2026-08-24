@@ -47,7 +47,8 @@ import { fileToImage } from "../lib/docScan";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import { MenuPopover, MenuItemRow, SelectMenu } from "./ui-menu";
-import ColorOrb from "./ColorOrb";
+import BloubBot from "./BloubBot";
+import { botExpressionFor, botStateFor } from "../lib/botMood";
 
 const SYSTEM =
   "You are Filey, a powerful ERP agent with FULL control of the user's business app. You can READ, CREATE, and MODIFY data via tools — not just chat. Available actions: get stats (customers, products, invoices, orders, quotes, overdue); search customers and products; list invoices by status; list employees; create customers, products, quotes, purchase orders, and draft invoices; adjust stock; log expenses; mark invoices sent/paid/recurring; mark employee attendance (present/absent/half_day/leave); email invoices to customers; run PDF/image operations on attached files (compress, convert, rotate, OCR, merge); navigate to any app page. When the user asks you to DO something, execute the tool and confirm what you did in one short line. For destructive or ambiguous requests, ask first. Never invent data — look it up. Be concise and practical.";
@@ -70,32 +71,6 @@ const SUGGESTIONS = [
   "What's low on stock?",
 ];
 
-function shade(hex: string, amt: number): string {
-  const c = hex.replace("#", "");
-  const full =
-    c.length === 3
-      ? c
-          .split("")
-          .map((x) => x + x)
-          .join("")
-      : c;
-  const num = parseInt(full, 16);
-  if (Number.isNaN(num)) return hex;
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-  const f = (v: number) =>
-    Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
-  return "#" + (((f(r) << 16) | (f(g) << 8) | f(b)) >>> 0).toString(16).padStart(6, "0");
-}
-function orbTones(color: string) {
-  return {
-    base: "#1b1d22",
-    accent1: color,
-    accent2: shade(color, 0.28),
-    accent3: shade(color, -0.28),
-  };
-}
 
 type View = "chat" | "history";
 
@@ -128,7 +103,6 @@ export default function Copilot() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const save = (patch: Partial<AiPersona>) => setPersonaState(setPersona(patch));
-  const tones = orbTones(persona.orbColor);
   // Mirror for async reads: send() needs the latest list after an await, and
   // building the next state from the mirror keeps the setChats call pure (the
   // localStorage write used to run inside the updater — a side effect React
@@ -378,7 +352,13 @@ export default function Copilot() {
               title="Click to rename & recolour"
               className="shrink-0 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ink"
             >
-              <ColorOrb dimension="22px" tones={tones} />
+              <BloubBot
+                size={22}
+                ink={persona.orbColor}
+                animate={busy}
+                state={botStateFor(busy ? "thinking" : "idle")}
+                expression={botExpressionFor(busy ? "thinking" : "idle")}
+              />
             </button>
             <span className="truncate text-sm font-medium text-ink">
               {view === "history" ? "Chats" : persona.assistantName || "Filey"}
@@ -678,7 +658,10 @@ export default function Copilot() {
         aria-label="Filey AI assistant"
         className="flex h-12 cursor-pointer items-center gap-2 rounded-full border border-brand-200 bg-white pl-2 pr-4 hover:bg-brand-50 dark:hover:bg-white/5 transition-colors"
       >
-        <ColorOrb dimension="32px" tones={tones} />
+        {/* The launcher is the assistant's presence on every page, so it stays
+            alive: one loop for the whole app, and it stops on its own for
+            anyone who asked for reduced motion. */}
+        <BloubBot size={32} ink={persona.orbColor} state="idle" />
         <span className="text-sm font-medium text-ink">Ask AI</span>
       </button>
     </div>

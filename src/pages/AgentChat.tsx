@@ -22,7 +22,8 @@ import {
   Hammer,
   Sparkles,
 } from "lucide-react";
-import { ThinkingOrb } from "thinking-orbs";
+import BloubBot from "../components/BloubBot";
+import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
 import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
@@ -78,7 +79,6 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { cn } from "../lib/format";
-import { getAccent, type AccentKey } from "../lib/accent";
 import {
   hasDesktop as waHasDesktop,
   bridgeState,
@@ -115,18 +115,8 @@ const CHIP =
  *  on one measure so long replies don't stretch wider than where you type. */
 const COLUMN = "mx-auto w-full max-w-[760px]";
 
-/** The orb library draws in grayscale only, so the accent from Settings ->
- *  Appearance is applied optically: sepia re-colorises, saturate intensifies,
- *  hue-rotate lands on the chosen accent. Slate stays neutral. */
-const ORB_ACCENT_FILTER: Record<AccentKey, string> = {
-  amber: "sepia(1) saturate(4) hue-rotate(-8deg)",
-  blue: "sepia(1) saturate(5) hue-rotate(175deg)",
-  sky: "sepia(1) saturate(4) hue-rotate(160deg)",
-  emerald: "sepia(1) saturate(4) hue-rotate(95deg)",
-  violet: "sepia(1) saturate(5) hue-rotate(215deg)",
-  rose: "sepia(1) saturate(5) hue-rotate(280deg)",
-  slate: "none",
-};
+/* The bot draws in the accent colour directly — see BloubBot — so nothing here
+   re-tints it. The old orb was grayscale and needed a filter stack to fake one. */
 
 export default function AgentChat() {
   // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
@@ -511,14 +501,11 @@ export default function AgentChat() {
         <div className={cn(COLUMN, "flex-1 space-y-6 pb-6 pt-2")}>
           {empty && !busy ? (
             <div className="mx-auto mt-8 max-w-xl text-center">
-              {/* The orb ships two tuned presets (64 / 20) rather than arbitrary
-                  sizes, so the 56px presence comes from a static scale on the
-                  box, not from an untuned canvas redraw. Static transform = no
-                  motion-budget cost. */}
+              {/* The empty chat is where the bot has room to be itself, so this
+                  one animates: it breathes, blinks and looks around while it
+                  waits for a first question. */}
               <div className="mx-auto mb-3 grid h-14 w-14 place-items-center">
-                <div className="scale-[0.875]">
-                  <ThinkingOrb size={64} state="listening" style={{ filter: ORB_ACCENT_FILTER[getAccent()] }} />
-                </div>
+                <BloubBot size={56} state="idle" label="Filey AI" />
               </div>
               <p className="text-[20px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
               <p className="mt-1.5 text-[13px] text-muted-foreground">
@@ -1174,11 +1161,16 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   }
   return (
     <div className="group/msg flex gap-3">
-      {/* The orb is the assistant's face, so it stays alive whatever the agent
-          is doing - working while a turn is in flight, listening once it has
-          answered. */}
+      {/* The bot is the assistant's face. Only the turn in flight animates:
+          every earlier reply keeps its avatar as a still frame, so a long chat
+          doesn't run one animation loop per message. */}
       <div className="grid h-8 w-8 shrink-0 place-items-center">
-        <ThinkingOrb size={20} state={pending ? "working" : "listening"} style={{ filter: ORB_ACCENT_FILTER[getAccent()] }} />
+        <BloubBot
+          size={26}
+          animate={!!pending}
+          state={botStateFor(pending ? "thinking" : "idle")}
+          expression={botExpressionFor(pending ? "thinking" : "idle")}
+        />
       </div>
       {/* Plain text on the background, full measure: boxing every answer as a
           card frames two-line confirmations like documents. 14px separates the
