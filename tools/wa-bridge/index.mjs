@@ -25,6 +25,7 @@
  */
 import path from "node:path";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import readline from "node:readline";
 import makeWASocket, {
   DisconnectReason,
@@ -61,8 +62,11 @@ const REPLY_TIMEOUT_MS = 240_000;
 /** Silence reads as "it's broken", so say something while the agent works. */
 const ACK_AFTER_MS = 20_000;
 /** The app's replies open with this line (waFormat in src/lib/waAgent.ts); the
- *  bridge's own messages wear it too so everything from Filey looks the same. */
-const HEADER = "*⚡ Filey Agent*";
+ *  bridge's own messages wear it too so everything from Filey looks the same.
+ *  Bold + underlined: WhatsApp has no underline markup, so each letter carries
+ *  the combining low line (U+0332) — how underlined text is typed on WhatsApp. */
+const underline = (s) => [...s].map((c) => (c === " " ? c : c + "\u0332")).join("");
+const HEADER = `*${underline("Filey Agent")}*`;
 
 /** The live socket (set in start()); the stdin `send` handler uses it for
  *  proactive owner notifications. */
@@ -120,6 +124,30 @@ function startStdinLoop() {
       // Proactive message to a specific JID (owner notifications). The desktop
       // app drives these after pairing; before that activeSock is null.
       void sendTo(v.to, v.text);
+    }
+    if (v.type === "send_file") {
+      // A PDF, photo or document the agent produced, delivered into the chat.
+      // The app passes an absolute path; the file is read here so multi-MB
+      // payloads never cross the stdin pipe.
+      void (async () => {
+        try {
+          const jid = v.to.includes("@") ? v.to : `${v.to}@s.whatsapp.net`;
+          const buf = fs.readFileSync(v.path);
+          const mime = v.mimetype || "application/octet-stream";
+          const opts = mime.startsWith("image/")
+            ? { image: buf, caption: v.caption || undefined }
+            : {
+                document: buf,
+                mimetype: mime,
+                fileName: v.filename || path.basename(v.path),
+                caption: v.caption || undefined,
+              };
+          console.log(`→ file ${v.filename || path.basename(v.path)} (${buf.length}B) to ${jid}`);
+          remember((await activeSock?.sendMessage(jid, opts))?.key?.id);
+        } catch (e) {
+          console.error("send_file failed:", e?.message);
+        }
+      })();
     }
   });
 }

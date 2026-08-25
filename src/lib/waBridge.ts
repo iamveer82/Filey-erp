@@ -109,6 +109,24 @@ export async function sendWa(to: string, text: string): Promise<void> {
   await invoke("wa_bridge_send", { to, text });
 }
 
+/** Send a file (PDF, photo, document) to a JID. The desktop sidecar reads it
+ *  off disk and uploads it — images go as photos, everything else as
+ *  documents. Throws when the bridge is down or the file is missing. */
+export async function sendWaFile(
+  to: string,
+  file: { path: string; filename: string; mimetype?: string; caption?: string }
+): Promise<void> {
+  if (!hasDesktop)
+    throw new Error("Sending files over WhatsApp runs in the desktop app only.");
+  await invoke("wa_bridge_send_file", {
+    to,
+    path: file.path,
+    filename: file.filename,
+    mimetype: file.mimetype ?? "",
+    caption: file.caption ?? "",
+  });
+}
+
 /** Called once at boot: if the owner asked for it, bring WhatsApp up in the
  *  background so the app simply has a live channel after launch. Silent by
  *  design — a failure here must never block startup. */

@@ -15,14 +15,15 @@ import {
   CartesianGrid,
 } from "recharts";
 import { aed, num, cn } from "../../lib/format";
-import { useChartColors } from "../../lib/accent";
+import { useChartStyle } from "../../components/charts";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 
 const CLOSED = ["paid", "draft", "cancelled"];
 
 export default function SalesTab({ data }: { data: ReportsData }) {
-  const c = useChartColors();
+  const cs = useChartStyle();
+  const c = cs.c;
   const trend = useTrend(data.invoices, data.receiptList);
   const pie = useStatusPie(data.invoices, c.accent, c.primary, c.tertiary);
 
@@ -74,13 +75,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
     return Array.from(byMonth.values());
   }, [data.invoices]);
 
-  const tooltipStyle = {
-    borderRadius: 8,
-    fontSize: 12,
-    background: c.tooltipBg,
-    border: `1px solid ${c.tooltipBorder}`,
-    color: c.tooltipFg,
-  };
+  const tooltipStyle = cs.tooltipStyle;
 
   const kpis = [
     { label: "Total Invoiced", value: aed(totalInvoiced) },
@@ -131,16 +126,10 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis
                   dataKey="d"
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                 />
                 <YAxis
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                   tickFormatter={(v) => `AED ${num(v)}`}
                 />
                 <Tooltip
@@ -199,16 +188,10 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis
                   dataKey="m"
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                 />
                 <YAxis
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                   tickFormatter={(v) => `AED ${num(v)}`}
                 />
                 <Tooltip
@@ -220,7 +203,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                   name="Invoiced"
                   fill="url(#salesG)"
                   radius={[6, 6, 0, 0]}
-                />
+                 maxBarSize={32} />
               </BarChart>
             </ResponsiveContainer>
             )}

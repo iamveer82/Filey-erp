@@ -60,7 +60,7 @@ import {
   type Memory,
 } from "../lib/aiMemory";
 import {
-  setTurnFile,
+  setTurnFiles,
   setToolConfirm,
   endTurn,
   redactArgs,
@@ -127,7 +127,9 @@ export default function AgentChat() {
   const [auto, setAuto] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  /** Object URL per attached image ("" for non-images), revoked on replace. */
+  const [previews, setPreviews] = useState<string[]>([]);
   const [pendingConfirm, setPendingConfirm] = useState<{
     name: string;
     args: Record<string, unknown>;
@@ -163,7 +165,6 @@ export default function AgentChat() {
     return () => window.removeEventListener("keydown", keys);
   }, []);
 
-  const [filePreview, setFilePreview] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   // Read fresh every render: frozen-at-mount values kept showing a stale model
   // chip (and a stale "connect first" gate) after the key changed in Settings.
@@ -183,16 +184,21 @@ export default function AgentChat() {
    *  would get the value from the render that started the run, not the latest. */
   const streamedRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Attach a file + build an image preview (revoking the previous one).
-  const attach = (f: File | null) => {
-    setFilePreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null;
+  /** Attach one or more files. Several at once is the point: "merge these"
+   *  means the user drops all the PDFs on the composer and the agent runs
+   *  the merge right here. */
+  const attach = (list: File[] | null) => {
+    const next = (list ?? []).filter(Boolean);
+    setPreviews((prev) => {
+      prev.filter(Boolean).forEach((u) => URL.revokeObjectURL(u));
+      return next.map((f) => (f.type.startsWith("image/") ? URL.createObjectURL(f) : ""));
     });
-    setFile(f);
+    setFiles(next);
   };
 
   // Auto-grow the textarea up to a cap — tall enough for a real brief, short
@@ -253,8 +259,24 @@ export default function AgentChat() {
     setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
   }, [chat]);
 
+  // Opening a chat must not animate. A smooth scroll on mount — with the
+  // sentinel aligned to the *top* of the viewport, which is scrollIntoView's
+  // default — parks the page mid-scroll, so the chat reads as already scrolled
+  // up. On mount: jump straight to the foot of an existing conversation, and
+  // put a fresh one at the top (the scroll position carries over from whatever
+  // page you came from otherwise). After that, follow new turns smoothly, and
+  // anchor to `end` so the newest message sits at the bottom, not the top.
+  const mounted = useRef(false);
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!mounted.current) {
+      mounted.current = true;
+      const atFoot = chat.turns.length > 0;
+      (atFoot ? endRef.current : topRef.current)?.scrollIntoView({
+        block: atFoot ? "end" : "start",
+      });
+      return;
+    }
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [chat.turns, streaming, busy]);
 
   /** Stop the run. The catch in send() turns the abort into a kept partial
@@ -271,20 +293,25 @@ export default function AgentChat() {
 
   const send = async (raw: string) => {
     const q = raw.trim();
-    const attached = file;
-    if ((!q && !attached) || busy) return;
+    const attached = files;
+    if ((!q && !attached.length) || busy) return;
     if (!ready) {
       setErr("Connect an AI model first - Settings → AI Assistant (bring your own key).");
       return;
     }
     setErr(null);
     setInput("");
-    attach(null); // clears the file AND revokes the preview object URL
+    attach(null); // clears the files AND revokes the preview object URL
 
-    const shownText = attached ? `${q}${q ? "\n\n" : ""}📎 ${attached.name}` : q;
-    // Explicit hint so the agent knows it can edit the attached file via tools.
-    const goalText = attached
-      ? `${q || "Process the attached file."}\n\n[A file named "${attached.name}" is attached - use the run_file_tool to edit/convert it, or read it to act on its contents.]`
+    const names = attached.map((f) => `📎 ${f.name}`).join("\n");
+    const shownText = attached.length ? `${q}${q ? "\n\n" : ""}${names}` : q;
+    // Explicit hint so the agent knows it can work on the attached files via
+    // tools — several at once, in attachment order.
+    const fileList = attached.map((f) => `"${f.name}"`).join(", ");
+    const goalText = attached.length
+      ? `${q || "Process the attached file."}\n\n[${
+          attached.length === 1 ? "A file" : `${attached.length} files`
+        } ${attached.length === 1 ? "is" : "are"} attached: ${fileList}. Use run_file_tool to edit/convert/merge them (multiple attachments arrive in order), or read_attached_document to act on their contents. Deliver the result here — do not send the user to the Tools page.]`
       : q;
     // This turn's slot in the file toolbox: the attachment in, produced files
     // out. Scoped per turn so a popover run mid-flight can't swap this one's
@@ -300,12 +327,13 @@ export default function AgentChat() {
     const ctl = new AbortController();
     abortRef.current = ctl;
 
-    // Make the file available to run_file_tool; convert images for vision.
-    setTurnFile(turnId, attached);
+    // Make the files available to run_file_tool; convert images for vision.
+    setTurnFiles(turnId, attached);
+    const firstImage = attached.find((f) => f.type.startsWith("image/"));
     let images: AiImage[] | undefined;
-    if (attached && attached.type.startsWith("image/")) {
+    if (firstImage) {
       try {
-        images = [await fileToImage(attached)];
+        images = [await fileToImage(firstImage)];
       } catch {
         /* non-fatal — the agent can still run file tools on it */
       }
@@ -473,13 +501,16 @@ export default function AgentChat() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f && !busy) attach(f);
+        const dropped = Array.from(e.dataTransfer.files ?? []);
+        if (dropped.length && !busy) attach(dropped);
       }}
     >
       {/* Conversation column: header, messages and the composer all share the
           same 760px measure so the eye never jumps between widths. */}
-      <div className="relative flex min-h-[calc(100vh-7rem)] min-w-0 flex-1 flex-col">
+      <div
+        ref={topRef}
+        className="relative flex min-h-[calc(100vh-7rem)] min-w-0 flex-1 flex-col"
+      >
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2 text-foreground">
@@ -597,38 +628,51 @@ export default function AgentChat() {
                 busy && "opacity-60"
               )}
             >
-              {/* Attachment chip — thumbnail-first, remove always visible
-                  (hover-only removal hides the affordance on touch). */}
-              {file && (
-                <div className="mb-2 flex">
-                  <div className="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted">
-                    {filePreview ? (
-                      <img
-                        src={filePreview}
-                        alt={file.name}
-                        className="h-full w-full object-cover"
-                        title={file.name}
-                      />
-                    ) : (
+              {/* Attachment chips — one tile per file, remove always visible
+                  (hover-only removal hides the affordance on touch). Several
+                  files at once is the merge flow: the order shown is the order
+                  the tools receive. */}
+              {files.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {files.map((f, i) => {
+                    const preview = previews[i] || null;
+                    return (
                       <div
-                        className="flex h-full flex-col items-center justify-center gap-1 p-1"
-                        title={`${file.name} · ${Math.max(1, Math.ceil(file.size / 1024))} KB`}
+                        key={`${f.name}-${i}`}
+                        className="group relative h-16 w-16 overflow-hidden rounded-xl border border-border bg-muted"
                       >
-                        <FileText size={16} className="text-muted-foreground" />
-                        <span className="w-full truncate text-center text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {file.name.split(".").pop()}
+                        {preview ? (
+                          <img
+                            src={preview}
+                            alt={f.name}
+                            className="h-full w-full object-cover"
+                            title={f.name}
+                          />
+                        ) : (
+                          <div
+                            className="flex h-full flex-col items-center justify-center gap-1 p-1"
+                            title={`${f.name} · ${Math.max(1, Math.ceil(f.size / 1024))} KB`}
+                          >
+                            <FileText size={16} className="text-muted-foreground" />
+                            <span className="w-full truncate text-center text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {f.name.split(".").pop()}
+                            </span>
+                          </div>
+                        )}
+                        <span className="absolute left-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/60 text-[9px] font-bold text-white">
+                          {i + 1}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => attach(files.filter((_, j) => j !== i))}
+                          aria-label={`Remove ${f.name}`}
+                          className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                        >
+                          <X size={11} />
+                        </button>
                       </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => attach(null)}
-                      aria-label={`Remove ${file.name}`}
-                      className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
-                    >
-                      <X size={11} />
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -655,7 +699,7 @@ export default function AgentChat() {
                   );
                   if (img) {
                     e.preventDefault();
-                    attach(img);
+                    attach([img]);
                   }
                 }}
                 /*
@@ -780,10 +824,11 @@ export default function AgentChat() {
                 <input
                   ref={fileRef}
                   type="file"
+                  multiple
                   accept="application/pdf,image/*"
                   className="hidden"
                   onChange={(e) => {
-                    attach(e.target.files?.[0] ?? null);
+                    attach(Array.from(e.target.files ?? []));
                     e.target.value = ""; // allow re-selecting the same file
                   }}
                 />
@@ -840,12 +885,12 @@ export default function AgentChat() {
                   <button
                     type="button"
                     onClick={() => void send(input)}
-                    disabled={!input.trim() && !file}
+                    disabled={!input.trim() && !files.length}
                     aria-label="Send message"
                     title="Send (Enter)"
                     className={cn(
                       "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
-                      input.trim() || file
+                      input.trim() || files.length
                         ? "bg-primary-400 text-zinc-900 hover:bg-primary-500"
                         : "bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
                     )}
@@ -1249,18 +1294,9 @@ function WhatsAppPairingCard() {
     return onBridgeState(setSt);
   }, []);
 
-  if (!st.qr && st.state !== "connected") return null;
-
-  if (st.state === "connected") {
-    return (
-      <div className="flex gap-3">
-        <div className="h-8 w-8 shrink-0" />
-        <div className="rounded-lg border border-success/30 bg-success/10 px-3.5 py-2.5 text-[13px] text-foreground">
-          ✅ WhatsApp is connected. Message that number and I'll answer there.
-        </div>
-      </div>
-    );
-  }
+  // Connected is the steady state — showing a bubble for it forever would just
+  // be noise in the conversation. The card exists for the QR moment only.
+  if (!st.qr) return null;
 
   return (
     <div className="flex gap-3">
@@ -1270,7 +1306,7 @@ function WhatsAppPairingCard() {
           Scan to connect WhatsApp
         </p>
         <img
-          src={st.qr!}
+          src={st.qr}
           alt="WhatsApp pairing QR code"
           className="h-44 w-44 rounded bg-white p-1"
         />

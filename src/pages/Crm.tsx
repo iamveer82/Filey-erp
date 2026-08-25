@@ -19,7 +19,7 @@ import { crm, Opportunity, CrmCustomer, Activity, Lead } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
-import { useChartColors } from "../lib/accent";
+import { useChartStyle } from "../components/charts";
 import ImportCsvModal from "../components/ImportCsvModal";
 import { SelectMenu } from "../components/ui-menu";
 import DealDrawer from "../components/DealDrawer";
@@ -44,7 +44,8 @@ import { Tabs, TabsList, TabsTrigger } from "../components/Tabs";
 export default function Crm() {
   const nav = useNavigate();
   const { toast } = useUI();
-  const c = useChartColors();
+  const cs = useChartStyle();
+  const c = cs.c;
   const [view, setView] = useState<"dashboard" | "pipeline" | "forecast">("pipeline");
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);

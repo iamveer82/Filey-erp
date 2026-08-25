@@ -27,6 +27,7 @@ import { gateFor } from "./agentMode";
 import { log } from "./log";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
 import { invoiceLineAmount, r2 } from "./money";
+import { pickDocNumber, loadDocFormats } from "./numberFormat";
 import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
 import {
   githubRepo,
@@ -109,24 +110,32 @@ export interface FileOutput {
   path?: string;
 }
 interface TurnSlot {
-  file: File | null;
+  /** Every file attached to this turn, in attachment order — merge combines
+   *  them in exactly this order. */
+  files: File[];
   outputs: FileOutput[];
 }
 const turnSlots = new Map<string, TurnSlot>();
 const slotFor = (id: string): TurnSlot => {
   let s = turnSlots.get(id);
   if (!s) {
-    s = { file: null, outputs: [] };
+    s = { files: [], outputs: [] };
     turnSlots.set(id, s);
   }
   return s;
 };
 
-/** Hand the user's attachment to this turn's file tools. */
+/** Hand the user's attachment to this turn's file tools (single-file form). */
 export function setTurnFile(turnId: string, f: File | null): void {
+  setTurnFiles(turnId, f ? [f] : []);
+}
+
+/** Hand every user attachment to this turn's file tools. Order is preserved:
+ *  "merge these three" combines them first-to-last. */
+export function setTurnFiles(turnId: string, files: File[]): void {
   const slot = slotFor(turnId);
-  slot.file = f;
-  if (!f && !slot.outputs.length) turnSlots.delete(turnId);
+  slot.files = files;
+  if (!slot.files.length && !slot.outputs.length) turnSlots.delete(turnId);
 }
 
 /** Files this turn produced, as chat chips. Ends the turn. Call this exactly
@@ -141,9 +150,19 @@ export function endTurn(turnId: string): FileOutput[] {
 /** Set by runTool around each tool.run; captured at tool entry before any
  *  await, which is what makes concurrent runs safe. */
 let activeTurnId = "";
-const turnFile = (tid: string): File | null => turnSlots.get(tid)?.file ?? null;
+const turnFiles = (tid: string): File[] => turnSlots.get(tid)?.files ?? [];
+const turnFile = (tid: string): File | null => turnFiles(tid)[0] ?? null;
 const pushTurnOutput = (tid: string, o: FileOutput): void => {
   slotFor(tid).outputs.push(o);
+};
+/** A file THIS turn produced, matched loosely by name ("the merged pdf" finds
+ *  "Rennox-merged.pdf") — the handle send_whatsapp_file sends onward. */
+const turnOutputNamed = (tid: string, name: string): FileOutput | undefined => {
+  const n = name.toLowerCase().trim();
+  if (!n) return undefined;
+  return slotFor(tid).outputs.find(
+    (o) => o.name.toLowerCase().includes(n) || n.includes(o.name.toLowerCase())
+  );
 };
 
 /** Warn when a document is being raised for a party nobody has heard of.
@@ -751,6 +770,12 @@ export const TOOLS: ToolDef[] = [
     name: "create_invoice_draft",
     description:
       "Create a DRAFT invoice for a customer with line items (always a draft the user reviews). Pass `template` to choose the design (e.g. corporate, elegant, fta) — call list_templates if unsure; omitted, the company default is used.\n\n" +
+      "DECODING THE USER'S WORDS — map a dictated invoice onto the fields like this:\n" +
+      "  · 'invoice Al Noor for 2 laptops at 2500' → customer_name 'Al Noor', items [{description:'laptops', qty:2, unit_price:2500}].\n" +
+      "  · The party after 'for'/'to' is customer_name; on a PURCHASE order or bill the same slot is the supplier.\n" +
+      "  · The product words are description, verbatim — codes stay intact.\n" +
+      "  · 'qty'/'quantity' → qty (decimals fine). 'rate'/'price'/'@' → unit_price, the per-one-unit figure, never multiplied by qty.\n" +
+      "Ask for whatever piece is missing (one question, in the order: customer, item, qty, rate) instead of guessing.\n\n" +
       "PRICING THAT IS NOT qty × unit_price: by default a line is `qty × unit_price`. When the rate is quoted per something else — per litre, per kg, per metre, per hour — do NOT multiply it out by hand into a fake unit price, and do NOT price by the pack count. Add the real measure as a custom column and price on it:\n" +
       "  · `custom_columns` names the extra columns, e.g. [{key:\"total_liters\", label:\"T.Liters\"}].\n" +
       "  · each item carries its value in `custom`, e.g. {\"total_liters\": \"400\"}.\n" +
@@ -759,11 +784,46 @@ export const TOOLS: ToolDef[] = [
     parameters: {
       type: "object",
       properties: {
-        customer_name: { type: "string" },
+        customer_name: {
+          type: "string",
+          description:
+            "Who is being billed — the name after 'for'/'to' in 'invoice X for…'. Use the user's wording; a near-miss against saved customers is warned about, not fatal.",
+        },
         currency: { type: "string" },
         template: {
           type: "string",
           description: "Design id or name, e.g. corporate. Omit for the company default.",
+        },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              description: {
+                type: "string",
+                description: "The item exactly as the user said it — codes stay intact.",
+              },
+              qty: {
+                type: "number",
+                description: "The quantity — decimals fine: 39.22.",
+              },
+              unit_price: {
+                type: "number",
+                description:
+                  "The per-unit price — the user's 'rate' or 'price'. Never multiply it by qty yourself.",
+              },
+              unit: {
+                type: "string",
+                description: "What one qty is — Pail, Drum, kg, hr. Shown on the line.",
+              },
+              custom: {
+                type: "object",
+                description:
+                  "Values for the custom columns, keyed by column key, e.g. {\"total_liters\":\"400\"}.",
+              },
+            },
+            required: ["description", "qty", "unit_price"],
+          },
         },
         custom_columns: {
           type: "array",
@@ -780,27 +840,6 @@ export const TOOLS: ToolDef[] = [
           description:
             "Custom column key the line amount multiplies by instead of qty (amount = custom[price_by] × unit_price). Omit for ordinary qty × unit_price pricing.",
         },
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
-              unit_price: { type: "number" },
-              unit: {
-                type: "string",
-                description: "What one qty is — Pail, Drum, kg, hr. Shown on the line.",
-              },
-              custom: {
-                type: "object",
-                description:
-                  "Values for the custom columns, keyed by column key, e.g. {\"total_liters\":\"400\"}.",
-              },
-            },
-            required: ["description", "qty", "unit_price"],
-          },
-        },
       },
       required: ["customer_name", "items"],
     },
@@ -809,7 +848,6 @@ export const TOOLS: ToolDef[] = [
       // and a UAE tax invoice issued without one is a compliance problem. Fail
       // loudly rather than quietly draft an invalid invoice.
       const co = await billing.getCompany();
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
         : [];
@@ -823,8 +861,15 @@ export const TOOLS: ToolDef[] = [
       const wanted = str(args.price_by);
       const priceBy =
         wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
+      // The user's invoice sequence (Settings → Document Numbering), not a
+      // timestamp — an agent-made draft sits in the same series as the rest.
+      const number = pickDocNumber(
+        "invoice",
+        ((await billing.listDocs("sales")) as { number: string }[]).map((d) => d.number),
+        await loadDocFormats()
+      );
       const input: InvoiceDocInput = {
-        number: `DRAFT-${stamp}`,
+        number,
         status: "draft",
         template:
           (str(args.template) ? resolveTemplate(str(args.template)) : undefined) ||
@@ -1053,11 +1098,15 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_order",
-    description: "Create a sales order for a customer.",
+    description:
+      "Create a sales order for a customer. DECODING: 'order for Al Noor, 4500' → customer_name 'Al Noor', total 4500 — the party after 'for' is the customer. Omit order_number unless the user names one; the saved numbering format supplies it.",
     parameters: {
       type: "object",
       properties: {
-        customer_name: { type: "string" },
+        customer_name: {
+          type: "string",
+          description: "The buyer — the name after 'for' in 'order for X'.",
+        },
         total: { type: "number" },
         order_number: { type: "string" },
       },
@@ -1066,7 +1115,11 @@ export const TOOLS: ToolDef[] = [
     run: async (a) => {
       const number =
         str(a.order_number) ||
-        `ORD-${today().replace(/-/g, "")}-${Math.floor(Math.random() * 900 + 100)}`;
+        pickDocNumber(
+          "sales_order",
+          ((await erp.orders()) as { order_number: string }[]).map((o) => o.order_number),
+          await loadDocFormats()
+        );
       await erp.createOrder(number, str(a.customer_name), numOf(a.total));
       return {
         ok: true,
@@ -1127,8 +1180,10 @@ export const TOOLS: ToolDef[] = [
           accepts: t.accept,
           // An interactive tool has no headless path — its run() deliberately
           // throws and tells the user to open the workspace. Say so here so the
-          // agent offers the page instead of failing into it.
-          needs_the_user: !!t.interactive,
+          // agent offers the page instead of failing into it. Tools marked
+          // headlessOk (merge) carry a workspace for ordering, but their run()
+          // also works on plain attachments — the agent runs them itself.
+          needs_the_user: !!t.interactive && !t.headlessOk,
           options: t.fields.map((f) => ({
             key: f.key,
             type: f.type,
@@ -1142,7 +1197,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "run_file_tool",
     description:
-      "Run one of the document tools on the file the user attached to this chat. `tool_id` comes from list_file_tools (e.g. 'compress', 'pdf2txt', 'merge', 'ocr-pdf', 'word2pdf', 'encrypt'). Pass that tool's options as `options`, keyed exactly as list_file_tools reports them. The result is SAVED to the user's computer — the export folder from Settings, or their desktop — and the path comes back in the result; tell the user where it went.",
+      "Run one of the document tools on the file(s) the user attached to this chat — and deliver the result right here as downloadable chips. `tool_id` comes from list_file_tools (e.g. 'compress', 'pdf2txt', 'merge', 'ocr-pdf', 'word2pdf', 'encrypt'). ALL attachments this turn are passed to the tool in attachment order, so 'merge' combines them first-to-last — ask the user to attach in that order. Pass the tool's options as `options`, keyed exactly as list_file_tools reports them.",
     parameters: {
       type: "object",
       properties: {
@@ -1158,10 +1213,11 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a) => {
       const tid = activeTurnId;
-      const f = turnFile(tid);
-      if (!f)
+      const files = turnFiles(tid);
+      if (!files.length)
         return {
-          error: "No file attached — ask the user to attach a PDF or image first.",
+          error:
+            "No file attached — ask the user to attach the file(s) to this chat. Several can be attached in one message (merge combines them in attachment order); they can also say 'use <name> from My Files'.",
         };
       const asked = str(a.tool_id) || str(a.operation);
       const legacy = LEGACY_OPS[lc(asked)];
@@ -1193,7 +1249,7 @@ export const TOOLS: ToolDef[] = [
 
       let out: { name: string; bytes: Uint8Array }[];
       try {
-        out = await tool.run([f], params);
+        out = await tool.run(files, params);
       } catch (e) {
         // Interactive tools throw on purpose, and a real failure reads the same
         // way to the agent: report it, don't dress it up as success.
@@ -1224,18 +1280,22 @@ export const TOOLS: ToolDef[] = [
       }
       const where = await outputDir();
       const paths = saved.map((s) => s.path).filter(Boolean);
+      const multi = files.length > 1;
       return {
         ok: true,
         tool: tool.name,
         files: saved.map((s) => s.name),
+        inputs: multi ? files.map((f) => f.name) : undefined,
         saved_to: paths.length ? paths : undefined,
         folder: where
           ? `${where.dir} (${where.source === "settings" ? "your export folder from Settings" : "your desktop"})`
           : undefined,
         filed_in_my_files: a.save_to_app ? filedInApp : undefined,
-        message: paths.length
-          ? `Saved ${saved.length} file(s) to ${where?.dir ?? "disk"}.`
-          : `${saved.length} file(s) ready in the chat.`,
+        message: multi
+          ? `${tool.name} combined ${files.length} files (in attachment order) — ${saved.length} result(s) delivered in the chat.`
+          : paths.length
+            ? `Saved ${saved.length} file(s) to ${where?.dir ?? "disk"}.`
+            : `${saved.length} file(s) ready in the chat.`,
       };
     },
   },
@@ -1408,6 +1468,7 @@ export const TOOLS: ToolDef[] = [
     name: "create_quote",
     description:
       "Create a quotation for a customer with line items (draft — user reviews in Quoting).\n\n" +
+      "DECODING THE USER'S WORDS: 'quote Al Noor for 2 laptops at 2500' → customer_name 'Al Noor', items [{description:'laptops', qty:2, rate:2500}]. The party after 'for'/'to' is customer_name; product words are description verbatim; 'qty' → qty (decimals fine); 'rate'/'price' → rate, the per-one-unit figure, never multiplied by qty. Ask for whatever is missing (one question, in the order: customer, item, qty, rate).\n\n" +
       "PRICING THAT IS NOT qty × rate: by default a line is `qty × rate`. When the rate is quoted per something else — per litre, per kg, per metre, per hour — do NOT multiply it out by hand into a fake rate, and do NOT price by the pack count. Add the real measure as a custom column and price on it:\n" +
       "  · `custom_columns` names the extra columns, e.g. [{key:\"total_liters\", label:\"T.Liters\"}].\n" +
       "  · each item carries its value in `custom`, e.g. {\"total_liters\": \"400\"}.\n" +
@@ -1416,7 +1477,11 @@ export const TOOLS: ToolDef[] = [
     parameters: {
       type: "object",
       properties: {
-        customer_name: { type: "string" },
+        customer_name: {
+          type: "string",
+          description:
+            "Who the quote goes to — the name after 'for'/'to'. Use the user's wording; near-misses are warned about, not fatal.",
+        },
         currency: { type: "string" },
         custom_columns: {
           type: "array",
@@ -1438,9 +1503,19 @@ export const TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
-              rate: { type: "number" },
+              description: {
+                type: "string",
+                description: "The item exactly as the user said it — codes stay intact.",
+              },
+              qty: {
+                type: "number",
+                description: "The quantity — decimals fine: 39.22.",
+              },
+              rate: {
+                type: "number",
+                description:
+                  "The per-unit rate — the user's 'rate' or 'price'. Never multiply it by qty yourself.",
+              },
               unit: {
                 type: "string",
                 description: "What one qty is — Pail, Drum, kg, hr. Shown on the line.",
@@ -1472,7 +1547,12 @@ export const TOOLS: ToolDef[] = [
       const wanted = str(args.price_by);
       const priceBy =
         wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
-      const qtNo = `QT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900000) + 100000)}`;
+      // The user's quotation sequence (Settings → Document Numbering).
+      const qtNo = pickDocNumber(
+        "quote",
+        ((await quoteApi.listDocs()) as { number: string }[]).map((q) => q.number),
+        await loadDocFormats()
+      );
       const lineItems = items.map((it) => ({
         product: str(it.description),
         description: str(it.description),
@@ -1528,11 +1608,21 @@ export const TOOLS: ToolDef[] = [
     name: "create_purchase_order",
     description:
       "Create a purchase order with line items (draft). Name the supplier — a PO without one cannot be sent.\n\n" +
+      "DECODING THE USER'S WORDS — map a spoken order onto the fields like this:\n" +
+      "  · 'draft a PO for Rennox' → the name after 'for' is supplier_name (a PO buys FROM a supplier; on an invoice or quote the same slot is the customer).\n" +
+      "  · 'purchasing OIL SN 500' → description 'OIL SN 500', verbatim — never reword, translate or truncate a product code.\n" +
+      "  · 'qty is 39.22' → qty 39.22 (decimals are normal).\n" +
+      "  · 'rate is 3890' → unit_price 3890 — the per-one-unit rate is unit_price, NOT multiplied by qty.\n" +
+      "Worked example: 'PO for Rennox, purchasing OIL SN 500, qty 39.22, rate 3890' → supplier_name:'Rennox', items:[{description:'OIL SN 500', qty:39.22, unit_price:3890}]. Ask for whatever piece is missing (one question, in the order: item, qty, rate) instead of guessing.\n\n" +
       "PRICING THAT IS NOT qty × unit_price: when the supplier quotes a rate per litre, kg, metre or hour, do NOT multiply it out by hand and do NOT price by the pack count. Add the real measure as a custom column and price on it: `custom_columns` names the columns ([{key:\"total_liters\", label:\"T.Liters\"}]), each item carries its value in `custom` ({\"total_liters\":\"400\"}), and `price_by` is the column the amount multiplies. 20 pails of 20L at 4.1 per litre is 400 × 4.1 = 1640, not 20 × 4.1 = 82.",
     parameters: {
       type: "object",
       properties: {
-        supplier_name: { type: "string" },
+        supplier_name: {
+          type: "string",
+          description:
+            "Who the goods are bought FROM — the name after 'for' in 'PO for X'. Use the user's wording; a near-miss against saved suppliers is warned about, not fatal.",
+        },
         currency: { type: "string" },
         expected_date: { type: "string", description: "YYYY-MM-DD, when it is needed." },
         custom_columns: {
@@ -1555,9 +1645,21 @@ export const TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
-              unit_price: { type: "number" },
+              description: {
+                type: "string",
+                description:
+                  "The item exactly as the user said it — 'purchasing OIL SN 500' → 'OIL SN 500'.",
+              },
+              qty: {
+                type: "number",
+                description:
+                  "The quantity — the number after 'qty'/'quantity'. Decimals fine: 39.22.",
+              },
+              unit_price: {
+                type: "number",
+                description:
+                  "The per-unit price — the user's 'rate' or 'price'. Never multiply it by qty yourself.",
+              },
               unit: { type: "string", description: "What one qty is — Pail, Drum, kg, hr." },
               custom: {
                 type: "object",
@@ -1582,7 +1684,13 @@ export const TOOLS: ToolDef[] = [
       const wanted = str(args.price_by);
       const priceBy =
         wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
-      const poNumber = `PO-${today().replace(/-/g, "")}-${Math.floor(Math.random() * 9000 + 1000)}`;
+      // The user's own numbering scheme (Settings → Document Numbering), not a
+      // random number — an agent-made PO sits in the same sequence as the rest.
+      const poNumber = pickDocNumber(
+        "purchase_order",
+        (await pos.list()).map((r) => r.po_number),
+        await loadDocFormats()
+      );
       const lineItems = items.map((it) => ({
         description: str(it.description),
         quantity: numOf(it.qty) || 1,
@@ -2063,11 +2171,15 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_purchase_invoice_draft",
     description:
-      "Record a supplier bill as a DRAFT the user reviews. Use after reading an attached supplier invoice, or when the user dictates one. Finalising it (which receives stock and posts to Payables) stays a human decision.",
+      "Record a supplier bill as a DRAFT the user reviews. Use after reading an attached supplier invoice, or when the user dictates one. Finalising it (which receives stock and posts to Payables) stays a human decision.\n\n" +
+      "DECODING THE USER'S WORDS: the party on a bill is supplier_name — 'bill from Rennox' → supplier_name 'Rennox'. Product words are description verbatim; 'qty' → qty (decimals fine); 'rate'/'price' → unit_price per one unit, never multiplied by qty. Dates: 'issue date'/'bill date' → issue_date, 'due' → due_date (YYYY-MM-DD).",
     parameters: {
       type: "object",
       properties: {
-        supplier_name: { type: "string" },
+        supplier_name: {
+          type: "string",
+          description: "Who issued the bill — the name after 'from' in 'bill from X'.",
+        },
         currency: { type: "string" },
         issue_date: { type: "string" },
         due_date: { type: "string" },
@@ -2076,9 +2188,15 @@ export const TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
-              unit_price: { type: "number" },
+              description: {
+                type: "string",
+                description: "The item exactly as written on the bill — codes stay intact.",
+              },
+              qty: { type: "number", description: "Decimals fine: 39.22." },
+              unit_price: {
+                type: "number",
+                description: "Per-unit price — the bill's 'rate'. Never multiplied by qty.",
+              },
             },
             required: ["description", "qty", "unit_price"],
           },
@@ -2088,11 +2206,16 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a) => {
       const co = await billing.getCompany();
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
       if (!items.length) return { error: "A bill needs at least one line." };
+      // The user's purchase-invoice sequence (Settings → Document Numbering).
+      const number = pickDocNumber(
+        "purchase_invoice",
+        ((await billing.listDocs("purchase")) as { number: string }[]).map((d) => d.number),
+        await loadDocFormats()
+      );
       const input = {
-        number: `BILL-${stamp}`,
+        number,
         status: "draft",
         // doc_type is what separates a supplier bill from a sales invoice —
         // without it the bill lands in Invoicing as money owed TO the company.
@@ -2215,16 +2338,26 @@ export const TOOLS: ToolDef[] = [
     name: "create_payment_receipt",
     sensitive: true,
     description:
-      "Issue a payment receipt to a customer for money received. Amount and customer are required; method is e.g. cash, bank transfer, cheque, card.",
+      "Issue a payment receipt to a customer for money received. Amount and customer are required; method is e.g. cash, bank transfer, cheque, card.\n\n" +
+      "DECODING THE USER'S WORDS: 'receipt for 5000 from Al Noor via bank transfer, ref TT-88' → customer_name 'Al Noor', amount 5000, payment_method 'bank transfer', ref_number 'TT-88'. 'received from'/'from' names the payer; 'via'/'by' names the method; 'for' names what it was for (for_description).",
     parameters: {
       type: "object",
       properties: {
-        customer_name: { type: "string" },
+        customer_name: {
+          type: "string",
+          description: "The payer — the name after 'from' in 'receipt for X from Y'.",
+        },
         amount: { type: "number" },
-        payment_method: { type: "string" },
+        payment_method: {
+          type: "string",
+          description: "The user's 'via'/'by' — cash, bank transfer, cheque, card, UPI.",
+        },
         payment_date: { type: "string" },
-        for_description: { type: "string" },
-        ref_number: { type: "string" },
+        for_description: {
+          type: "string",
+          description: "What the payment was for — the words after 'for'.",
+        },
+        ref_number: { type: "string", description: "Cheque/transaction reference." },
       },
       required: ["customer_name", "amount"],
     },
@@ -2232,8 +2365,12 @@ export const TOOLS: ToolDef[] = [
       const amount = numOf(a.amount);
       if (amount <= 0) return { error: "A receipt needs an amount greater than zero." };
       const [co, { receipts }] = await Promise.all([billing.getCompany(), import("./api")]);
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-      const number = `RCPT-${stamp}`;
+      // The user's receipt sequence (Settings → Document Numbering).
+      const number = pickDocNumber(
+        "payment_receipt",
+        (await receipts.list()).map((r) => r.number),
+        await loadDocFormats()
+      );
       await receipts.save({
         number,
         status: "issued",
@@ -2295,19 +2432,27 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_delivery_challan",
     description:
-      "Create a delivery challan (or goods received note / return challan) for a party, with the items and quantities being moved. Challans carry quantities, not prices. The number is assigned from the saved numbering format. Open Delivery Challans in the app to print or send it.",
+      "Create a delivery challan (or goods received note / return challan) for a party, with the items and quantities being moved. Challans carry quantities, not prices. The number is assigned from the saved numbering format. Open Delivery Challans in the app to print or send it.\n\n" +
+      "DECODING THE USER'S WORDS: 'challan to Al Noor for 5 drums of oil' → party_name 'Al Noor', items [{description:'drums of oil', qty:5}]. The party after 'to'/'for' is party_name (a goods_received note names who SENT them); item words are description verbatim; 'qty' → qty.",
     parameters: {
       type: "object",
       properties: {
-        party_name: { type: "string", description: "Who the goods go to (or come from)." },
+        party_name: {
+          type: "string",
+          description:
+            "Who the goods go to (or come from) — the name after 'to'/'for'.",
+        },
         items: {
           type: "array",
           description: "Lines being moved.",
           items: {
             type: "object",
             properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
+              description: {
+                type: "string",
+                description: "The item exactly as the user said it.",
+              },
+              qty: { type: "number", description: "Decimals fine: 39.22." },
             },
             required: ["description"],
           },
@@ -3697,6 +3842,95 @@ export const TOOLS: ToolDef[] = [
       const { waLogAdd } = await import("./waLog");
       waLogAdd({ dir: "out", from: digits, text });
       return { ok: true, message: `Sent to ${digits}.` };
+    },
+  },
+  {
+    name: "send_whatsapp_file",
+    sensitive: true,
+    ownerOnly: true,
+    description:
+      "Send a FILE over WhatsApp — a PDF the user asked to be merged, a photo, a payslip, any document — as a document (or a photo for images) with an optional caption. `file` is the NAME of a file this chat just produced (\"the merged pdf\") or one saved in My Files. `to` omitted means the OWNER's chat; give digits to send elsewhere (approval still applies). Desktop app, bridge connected.",
+    parameters: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          description: "Name (or part of a name) of the file to send — a chat output or a My Files document.",
+        },
+        to: {
+          type: "string",
+          description: "Recipient digits, e.g. 971501234567. Omit to send to the owner.",
+        },
+        caption: { type: "string", description: "Short note under the file." },
+      },
+      required: ["file"],
+    },
+    run: async (a) => {
+      const { hasDesktop, bridgeState, sendWaFile } = await import("./waBridge");
+      if (!hasDesktop)
+        return { error: "Sending files over WhatsApp runs in the desktop app only." };
+      const want = str(a.file).toLowerCase().trim();
+      if (!want) return { error: "Which file? Give its name (or part of it)." };
+
+      // Resolve the file: first this chat's own outputs, then My Files. Either
+      // way it must exist ON DISK for the sidecar to upload.
+      let path = "";
+      let filename = "";
+      let mimetype = "";
+      const made = turnOutputNamed(activeTurnId, want);
+      if (made?.path) {
+        path = made.path;
+        filename = made.name;
+      } else {
+        const { listFiles, fileBytes } = await import("./files");
+        const hit = (await listFiles()).find((f) => f.name.toLowerCase().includes(want));
+        if (!hit)
+          return {
+            error: `No file matching "${str(a.file)}" — nothing this chat produced and nothing in My Files.`,
+            hint: "Run the tool that produces the file first, then send it.",
+          };
+        const bytes = await fileBytes(hit);
+        if (!bytes) return { error: `Could not read "${hit.name}" out of storage.` };
+        const { deliverFile } = await import("./agentFiles");
+        const d = await deliverFile({ name: hit.name, bytes });
+        if (!d.path) return { error: `Could not write "${hit.name}" to disk to send it.` };
+        path = d.path;
+        filename = hit.name;
+        mimetype = hit.mime || "";
+      }
+
+      const st = await bridgeState();
+      if (st.state !== "connected")
+        return { error: `WhatsApp isn't connected (state: ${st.state}). Pair it first.` };
+
+      // Recipient: the given number, else the owner (paired account or the
+      // owner number from Integrations — same rule as the proactive agent).
+      let jid: string;
+      const toDigits = str(a.to).replace(/\D/g, "");
+      if (toDigits) jid = `${toDigits}@s.whatsapp.net`;
+      else {
+        const me = st.me ?? "";
+        const own = str((await import("./waBridge")).getBridgeConfig().ownerNumber).replace(/\D/g, "");
+        jid = own ? `${own}@s.whatsapp.net` : me;
+      }
+      if (!jid) return { error: "No recipient: the bridge has no paired account yet." };
+
+      await sendWaFile(jid, {
+        path,
+        filename,
+        mimetype: mimetype || undefined,
+        caption: str(a.caption) || undefined,
+      });
+      const { waLogAdd } = await import("./waLog");
+      waLogAdd({
+        dir: "out",
+        from: jid.split("@")[0],
+        text: `[file] ${filename}${a.caption ? ` — ${str(a.caption)}` : ""}`,
+      });
+      return {
+        ok: true,
+        message: `${filename} sent over WhatsApp${toDigits ? ` to ${toDigits}` : " to your chat"}.`,
+      };
     },
   },
   {

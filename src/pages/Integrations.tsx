@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Calculator,
   Check,
+  ChevronDown,
   Cloud,
   CreditCard,
   ExternalLink,
@@ -64,6 +65,7 @@ import {
   type BridgeConfig,
   type BridgeState,
 } from "../lib/waBridge";
+import { waLogList } from "../lib/waLog";
 
 /* ── Integrations ──────────────────────────────────────────────────────────
  * The single home for everything Filey connects to. This used to be split in
@@ -391,7 +393,7 @@ export default function Integrations() {
         />
       </div>
 
-      <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2">
+      <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
         <ComposioProvider source={source} onSourceChange={setSource} onSaved={refresh} />
         <ZernioProvider />
         <WhatsAppBridgeProvider />
@@ -549,30 +551,6 @@ function AppLogo({ slug, logo }: { slug: string; logo?: string }) {
   );
 }
 
-/** Says who is paying, in the words a customer would use. */
-function SourceBadge({ source, own }: { source: KeySource; own: boolean }) {
-  if (own)
-    return (
-      <p className="rounded-xl bg-hover px-3 py-2 text-[12px] font-medium text-muted-foreground">
-        Running on <b>your own key</b>. Calls go straight to the provider and
-        aren't metered by Filey.
-      </p>
-    );
-  if (source === "platform")
-    return (
-      <p className="rounded-xl bg-success/10 px-3 py-2 text-[12px] font-medium text-success">
-        <Check size={11} className="inline" /> Included in your Filey plan.
-        nothing to configure. Daily limits apply on the free tier.
-      </p>
-    );
-  return (
-    <p className="rounded-xl bg-warning/10 px-3 py-2 text-[12px] font-medium text-warning">
-      Sign in to your Filey account to use the built-in integrations, or add your
-      own key below.
-    </p>
-  );
-}
-
 /* ── Composio: the key behind every app card above ──────────────────────── */
 function ComposioProvider({
   source,
@@ -636,33 +614,37 @@ function ComposioProvider({
   };
 
   return (
-    <div className="bg-card p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <Plug size={17} className="text-primary-500" />
-        <p className="text-[14px] font-semibold text-foreground">Connected apps</p>
+    <div className="bg-card p-5 flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
+          <Plug size={17} className="text-primary-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[14px] font-semibold text-foreground">Connected apps</p>
+            <KeyBadge source={source} own={hasKey} />
+          </div>
+          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
+            Powers every app below — connect once and the agent can work in it.
+          </p>
+        </div>
       </div>
-      <p className="mb-3 text-[12.5px] text-muted-foreground">
-        Powers every app below. Once an app is connected, the Filey AI agent can
-        work in it - read the form response, book the meeting, send the follow-up.
-      </p>
 
-      <SourceBadge source={source} own={hasKey} />
-
-      <details className="mt-3">
-        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground">
-          Use my own Composio key instead
+      <details className="mt-3 group">
+        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-1">
+          <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
+          {hasKey ? "Manage your key" : "Use my own Composio key"}
         </summary>
         {!hasDesktop && !cloudConfigured ? (
-          <p className="mt-2 rounded-xl bg-warning/10 px-3 py-2 text-[12px] font-medium text-warning">
-            Your own key needs either the desktop app (device's encrypted store)
-            or a signed-in cloud workspace to keep it in.
+          <p className="mt-2 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[12px] font-medium text-warning">
+            Your own key needs the desktop app or a signed-in cloud workspace.
           </p>
         ) : (
-          <>
-            <p className="mt-2 text-[12px] text-muted-foreground">
+          <div className="mt-2">
+            <p className="text-[11.5px] text-muted-foreground">
               {hasDesktop
-                ? "Kept in this device's encrypted store. Calls go straight to Composio on your key, so nothing is metered by Filey."
-                : "Kept in your workspace, where the browser can replace or remove it but never read it back. Calls still go through Filey's proxy - it just spends your key, so they aren't metered against your plan."}
+                ? "Kept in this device's encrypted store; calls go straight to Composio, unmetered by Filey."
+                : "Kept in your workspace — replaceable, never readable; calls spend your key, not your plan."}
             </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="field flex-1">
@@ -681,20 +663,27 @@ function ComposioProvider({
             </div>
             {hasKey && (
               <button
-                className="mt-2 h-8 px-3 text-[12px] font-medium text-danger hover:underline"
+                className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
                 onClick={removeKey}
                 disabled={busy}
               >
                 Remove key
               </button>
             )}
-          </>
+          </div>
         )}
       </details>
 
-      {msg && <p className="mt-3 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
     </div>
   );
+}
+
+/** Compact one-line key status — the full sentences live in the key panel. */
+function KeyBadge({ source, own }: { source: KeySource; own: boolean }) {
+  if (own) return <Badge tone="info">Own key</Badge>;
+  if (source === "platform") return <Badge tone="success">Included</Badge>;
+  return <Badge tone="neutral">Sign in</Badge>;
 }
 
 /* ── Zernio: social publishing ──────────────────────────────────────────── */
@@ -749,91 +738,97 @@ function ZernioProvider() {
   };
 
   return (
-    <div className="bg-card p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <Share2 size={17} className="text-primary-500" />
-        <p className="text-[14px] font-semibold text-foreground">Social publishing</p>
+    <div className="bg-card p-5 flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
+          <Share2 size={17} className="text-primary-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[14px] font-semibold text-foreground">Social publishing</p>
+            <KeyBadge source={source} own={own} />
+          </div>
+          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
+            Post and schedule to Instagram, LinkedIn, X and more — link accounts at zernio.com.
+          </p>
+        </div>
       </div>
-      <p className="mb-3 text-[12.5px] text-muted-foreground">
-        Post and schedule to Instagram, LinkedIn, X, TikTok and more - by hand or
-        by asking the agent. Link the accounts themselves at zernio.com.
-      </p>
 
-      <SourceBadge source={source} own={own} />
-
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <Link to="/integrations/social-publishing" className="btn-secondary">
           Open publisher
         </Link>
         <button className="btn-ghost" onClick={check} disabled={busy}>
           {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={13} />}
-          Check accounts
+          Check
         </button>
       </div>
 
-      <details className="mt-3">
-        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground">
-          Use my own Zernio key instead
+      <details className="mt-3 group">
+        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-1">
+          <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
+          {own ? "Manage your key" : "Use my own Zernio key"}
         </summary>
-        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="field flex-1">
-            <span className="label">Zernio API key</span>
-            <input
-              type="password"
-              className="input"
-              placeholder={own ? "•••••••• (saved - paste to replace)" : "sk_…"}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
+        <div className="mt-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="field flex-1">
+              <span className="label">Zernio API key</span>
+              <input
+                type="password"
+                className="input"
+                placeholder={own ? "•••••••• (saved - paste to replace)" : "sk_…"}
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+              />
+            </div>
+            <button className="btn-primary" onClick={saveOwn} disabled={busy || !key.trim()}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+            </button>
           </div>
-          <button className="btn-primary" onClick={saveOwn} disabled={busy || !key.trim()}>
-            {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
-          </button>
+          {own && (
+            <button
+              className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
+              onClick={removeOwn}
+              disabled={busy}
+            >
+              Remove key
+            </button>
+          )}
         </div>
-        {own && (
-          <button
-            className="mt-2 h-8 px-3 text-[12px] font-medium text-danger hover:underline"
-            onClick={removeOwn}
-            disabled={busy}
-          >
-            Remove key
-          </button>
-        )}
       </details>
 
-      {msg && <p className="mt-3 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
     </div>
   );
 }
 
 /* ── WhatsApp bridge: QR-paired session, no per-message cost ─────────────── */
 function WhatsAppBridgeProvider() {
+  const desktop = waHasDesktop;
   const [cfg, setCfg] = useState<BridgeConfig>(() =>
-    waHasDesktop ? getBridgeConfig() : { autoStart: false, ownerNumber: "" }
+    desktop ? getBridgeConfig() : { autoStart: false, ownerNumber: "" }
   );
   const [st, setSt] = useState<BridgeState>({ state: "stopped" });
   const [msg, setMsg] = useState("");
+  // What the bridge actually saw, newest first — "is it receiving my
+  // messages, is it answering" answered by evidence instead of guesswork.
+  const [activity, setActivity] = useState(() => waLogList({ limit: 4 }).reverse());
 
   useEffect(() => {
-    if (!waHasDesktop) return;
+    if (!desktop) return;
     void bridgeState().then(setSt);
     return onBridgeState(setSt); // QR + connection changes arrive from Rust
-  }, []);
+  }, [desktop]);
 
-  if (!waHasDesktop) {
-    return (
-      <div className="bg-card p-5">
-        <div className="mb-1 flex items-center gap-2">
-          <MessageCircle size={17} className="text-primary-500" />
-          <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
-        </div>
-        <p className="text-[12.5px] text-muted-foreground">
-          A QR-paired WhatsApp session has to stay connected, so it runs in the
-          desktop app rather than the browser.
-        </p>
-      </div>
-    );
-  }
+  // Refresh the activity trail whenever the bridge speaks or the card mounts.
+  useEffect(() => {
+    setActivity(waLogList({ limit: 4 }).reverse());
+  }, [st.state]);
+
+  // The browser build has no WhatsApp bridge to drive — the card still shows
+  // the full pairing surface, locked, so it's obvious what WhatsApp connect
+  // is and that it lives in the desktop app.
+  const locked = !desktop;
 
   const run = async (fn: () => Promise<unknown>) => {
     setMsg("");
@@ -845,72 +840,145 @@ function WhatsAppBridgeProvider() {
   };
 
   const connected = st.state === "connected";
-  const label: Record<string, string> = {
-    stopped: "Not running",
-    starting: "Starting…",
-    connecting: "Waiting for the QR to be scanned",
-    connected: "Connected",
-    reconnecting: "Reconnecting…",
-    logged_out: "Logged out on the phone - re-pair to continue",
-  };
+  const pairing = st.state === "starting" || st.state === "connecting";
+  const label: Record<string, string> = locked
+    ? { stopped: "Needs desktop app" }
+    : {
+        stopped: "Not running",
+        starting: "Starting…",
+        connecting: "Waiting for QR scan",
+        connected: "Connected",
+        reconnecting: "Reconnecting…",
+        logged_out: "Logged out — re-pair",
+      };
 
   return (
-    <div className="bg-card p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <MessageCircle size={17} className="text-primary-500" />
-        <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
-        <span
-          className={cn(
-            "ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium",
-            connected ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
-          )}
-        >
-          {label[st.state] ?? st.state}
-        </span>
+    <div className="bg-card p-5 flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
+          <MessageCircle size={17} className="text-primary-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                connected
+                  ? "bg-success/15 text-success"
+                  : pairing
+                    ? "bg-info/10 text-info"
+                    : "bg-muted text-muted-foreground"
+              )}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  connected
+                    ? "bg-success"
+                    : pairing
+                      ? "bg-info animate-pulse"
+                      : "bg-muted-foreground/50"
+                )}
+              />
+              {label[st.state] ?? st.state}
+            </span>
+          </div>
+          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
+            Pair your own number — chatting with your agent costs nothing per message.
+          </p>
+        </div>
       </div>
-      <p className="mb-3 text-[12.5px] text-muted-foreground">
-        Pairs to a WhatsApp account you own, so chatting with your agent costs
-        nothing per message. This drives a real account through an unofficial
-        connection - against WhatsApp's terms, and the number can be banned. Use
-        one you can afford to lose.
-      </p>
+
+      {locked && (
+        <p className="mt-3 rounded-lg bg-hover px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground">
+          QR pairing runs in the Filey desktop app — open Integrations there and
+          press Connect to generate the QR.
+        </p>
+      )}
+
+      {connected && st.me && (
+        <p className="mt-3 text-[11.5px] text-muted-foreground">
+          Paired as <b className="text-foreground">+{st.me.split("@")[0].split(":")[0]}</b>
+          {cfg.ownerNumber ? (
+            <>
+              {" "}· takes orders from{" "}
+              <b className="text-foreground">+{cfg.ownerNumber.replace(/\D/g, "")}</b>
+            </>
+          ) : (
+            " · self-chat only"
+          )}
+        </p>
+      )}
+
+      {/* Delivery trail — whether messages are arriving and whether the agent
+          answered, from the bridge's own log. An in with no out after it is
+          the owner-number gate, not a dead bridge. */}
+      {!locked && activity.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Recent activity
+          </p>
+          <div className="mt-1.5 space-y-1">
+            {activity.map((e, i) => (
+              <div key={i} className="flex items-start gap-2 text-[11.5px]">
+                <span
+                  className={cn(
+                    "mt-0.5 shrink-0 rounded px-1 py-px text-[10px] font-semibold",
+                    e.dir === "in"
+                      ? "bg-info/10 text-info"
+                      : "bg-success/10 text-success"
+                  )}
+                >
+                  {e.dir === "in" ? "IN" : "OUT"}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  {e.dir === "in" ? e.name || `+${e.from}` : "Filey Agent"} · {e.text}
+                </span>
+                <span className="shrink-0 text-muted-foreground/70">
+                  {new Date(e.at).toLocaleTimeString(undefined, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {st.qr && (
-        <div className="mb-3 flex items-start gap-3 rounded-xl border border-border p-3">
-          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-40 w-40" />
-          <p className="text-[12.5px] text-muted-foreground">
+        <div className="mt-3 flex items-start gap-3 rounded-xl border border-border p-3">
+          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-32 w-32" />
+          <p className="text-[12px] text-muted-foreground">
             On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a
-            device, then scan this.
+            device, then scan.
           </p>
         </div>
       )}
 
-      <label className="mt-3 block text-[12.5px] text-muted-foreground">
-        My WhatsApp number
-        <input
-          className="input mt-1"
-          placeholder="971501234567"
-          inputMode="tel"
-          defaultValue={cfg.ownerNumber}
-          onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
-        />
-        <span className="mt-1 block">
-          The agent answers you and nobody else. Leave this empty if you paired
-          your own phone - messaging yourself already works. Fill it in when the
-          paired account is a second number, so Filey knows which number is you.
-        </span>
-      </label>
-
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button className="btn-primary" onClick={() => run(startBridge)}>
+        <button
+          className="btn-secondary"
+          disabled={locked}
+          title={locked ? "Needs the desktop app" : undefined}
+          onClick={() => run(startBridge)}
+        >
           {st.state === "stopped" ? "Connect" : "Restart"}
         </button>
-        <button className="btn-ghost" onClick={() => run(stopBridge)}>
-          Stop
-        </button>
+        {st.state !== "stopped" && (
+          <button className="btn-ghost" disabled={locked} onClick={() => run(stopBridge)}>
+            Stop
+          </button>
+        )}
         <button
           className="btn-ghost"
-          title="Forget the pairing and show a fresh QR. Use this if your phone shows “Waiting for this message”."
+          disabled={locked}
+          title={
+            locked
+              ? "Needs the desktop app"
+              : "Forget the pairing and show a fresh QR. Use this if your phone shows “Waiting for this message”."
+          }
           onClick={() => {
             if (
               window.confirm(
@@ -922,15 +990,33 @@ function WhatsAppBridgeProvider() {
         >
           Re-pair
         </button>
-        <label className="ml-auto flex items-center gap-2 text-[12.5px] text-muted-foreground">
+        <label className="ml-auto flex items-center gap-2 text-[12px] text-muted-foreground">
           <input
             type="checkbox"
+            disabled={locked}
             checked={cfg.autoStart}
             onChange={(e) => setCfg(setBridgeConfig({ autoStart: e.target.checked }))}
           />
           Start with Filey
         </label>
       </div>
+
+      <label className="mt-3 block">
+        <span className="label">My WhatsApp number</span>
+        <input
+          className="input mt-1"
+          placeholder="971501234567"
+          inputMode="tel"
+          disabled={locked}
+          defaultValue={cfg.ownerNumber}
+          onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
+        />
+        <span className="mt-1 block text-[11.5px] text-muted-foreground">
+          The agent answers you and nobody else. Empty is right when you paired
+          your own phone. This drives a real account through an unofficial
+          connection — use a number you can afford to lose.
+        </span>
+      </label>
 
       {msg && <p className="mt-2 text-[12px] font-medium text-danger">{msg}</p>}
     </div>

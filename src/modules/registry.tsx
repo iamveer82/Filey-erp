@@ -224,7 +224,7 @@ export const MODULES: AppModule[] = [
     label: "Marketing",
     short: "Marketing",
     desc: "Rank leads from your trading history and fill in their details",
-    icon: "followups",
+    icon: "marketing",
     to: "/marketing",
     Component: Marketing,
   },

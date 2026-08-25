@@ -63,31 +63,48 @@ fn set_state(app: &AppHandle, mutate: impl FnOnce(&mut BridgeState)) {
 
 /// Sidecar path. Tauri places externalBin next to the app executable, with the
 /// target triple stripped at bundle time.
+///
+/// Dev builds get two extra fallbacks, because `tauri dev` copies nothing:
+/// the triple-suffixed name next to the dev executable, and the repo's
+/// `src-tauri/binaries/` output of build.ps1 (found via CARGO_MANIFEST_DIR,
+/// which only exists to dev builds). Without these, WhatsApp was packaged-
+/// build-only: dev started no bridge, and every message sat unanswered.
 fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let name = if cfg!(windows) {
+    let plain = if cfg!(windows) {
         "filey-wa-bridge.exe"
     } else {
         "filey-wa-bridge"
     };
+    let tripled = if cfg!(windows) {
+        "filey-wa-bridge-x86_64-pc-windows-msvc.exe"
+    } else if cfg!(target_arch = "aarch64") {
+        "filey-wa-bridge-aarch64-apple-darwin"
+    } else {
+        "filey-wa-bridge-x86_64-apple-darwin"
+    };
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     // Packaged builds: next to the executable. Dev builds: the binaries dir.
     if let Ok(dir) = std::env::current_exe() {
         if let Some(dir) = dir.parent() {
-            let p = dir.join(name);
-            if p.exists() {
-                return Ok(p);
-            }
+            candidates.push(dir.join(plain));
+            candidates.push(dir.join(tripled)); // tauri dev layout
         }
     }
-    let p = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("binaries")
-        .join(name);
-    if p.exists() {
-        return Ok(p);
+    if let Ok(dir) = app.path().resource_dir() {
+        candidates.push(dir.join("binaries").join(plain));
     }
-    Err("WhatsApp bridge binary is not installed with this build".into())
+    // Repo checkout: build.ps1 compiles the sidecar into src-tauri/binaries.
+    candidates.push(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join(tripled),
+    );
+
+    candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| "WhatsApp bridge binary is not installed with this build".to_string())
 }
 
 /// Kill any sidecar left over from a previous run of the app.
@@ -217,39 +234,83 @@ pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
 }
 
 /// Send the local agent's reply back to the sidecar (and thus to WhatsApp).
+///
+/// A missing bridge is an ERROR, not a silent Ok: the agent believes it
+/// answered, the log records an outgoing message, and the owner waits on a
+/// reply that was written nowhere. Failing loudly is what lets the UI say
+/// "the bridge dropped" instead of "the agent is broken".
 #[tauri::command]
 pub fn wa_bridge_reply(id: String, text: String) -> Result<(), String> {
     let mut guard = BRIDGE.lock().unwrap();
-    if let Some(sup) = guard.as_mut() {
-        if let Some(stdin) = sup.stdin.as_mut() {
-            let line = format!(
-                "FILEY {}\n",
-                serde_json::json!({ "type": "reply", "id": id, "text": text })
-            );
-            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-            stdin.flush().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
+    let stdin = guard
+        .as_mut()
+        .and_then(|sup| sup.stdin.as_mut())
+        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
+    let line = format!(
+        "FILEY {}\n",
+        serde_json::json!({ "type": "reply", "id": id, "text": text })
+    );
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
 }
 
 /// Send a proactive WhatsApp message to a specific JID (owner notifications —
-/// daily summary, low-stock and overdue alerts). Returns Ok even if the bridge
-/// isn't connected yet; the sidecar simply has no socket to write to.
+/// daily summary, low-stock and overdue alerts).
 #[tauri::command]
 pub fn wa_bridge_send(to: String, text: String) -> Result<(), String> {
     let mut guard = BRIDGE.lock().unwrap();
-    if let Some(sup) = guard.as_mut() {
-        if let Some(stdin) = sup.stdin.as_mut() {
-            let line = format!(
-                "FILEY {}\n",
-                serde_json::json!({ "type": "send", "to": to, "text": text })
-            );
-            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-            stdin.flush().map_err(|e| e.to_string())?;
-        }
+    let stdin = guard
+        .as_mut()
+        .and_then(|sup| sup.stdin.as_mut())
+        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
+    let line = format!(
+        "FILEY {}\n",
+        serde_json::json!({ "type": "send", "to": to, "text": text })
+    );
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
+}
+
+/// Send a FILE (PDF, photo, document) to a JID. The sidecar reads the file off
+/// the same disk and uploads it — a document for most types, a photo for
+/// images — so a merged PDF or a payslip lands straight in the owner's chat.
+#[tauri::command]
+pub fn wa_bridge_send_file(
+    to: String,
+    path: String,
+    filename: String,
+    mimetype: String,
+    caption: String,
+) -> Result<(), String> {
+    // The path is the contract: it must exist NOW, before the sidecar races to
+    // read it. A missing file is an error here rather than a silent no-send.
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("file not found: {path}"));
     }
-    Ok(())
+    let mut guard = BRIDGE.lock().unwrap();
+    let stdin = guard
+        .as_mut()
+        .and_then(|sup| sup.stdin.as_mut())
+        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
+    let line = format!(
+        "FILEY {}\n",
+        serde_json::json!({
+            "type": "send_file",
+            "to": to,
+            "path": path,
+            "filename": filename,
+            "mimetype": mimetype,
+            "caption": caption,
+        })
+    );
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
 }
 
 #[tauri::command]

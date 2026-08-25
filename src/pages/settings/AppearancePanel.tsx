@@ -39,7 +39,7 @@ export default function AppearancePanel() {
       <div className="rounded-xl border border-border bg-card">
         <div className="px-6 pt-5 pb-4 border-b border-border">
           <div className="text-[17px] font-semibold text-foreground">
-            Theme mode
+            Modes
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">
             Light for daytime, dark for focus.
@@ -92,10 +92,10 @@ export default function AppearancePanel() {
       <div className="rounded-xl border border-border bg-card">
         <div className="px-6 pt-5 pb-4 border-b border-border">
           <div className="text-[17px] font-semibold text-foreground">
-            Accent color
+            Theme colour
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">
-            Used for charts, active states and highlights across the app.
+            Drives buttons, toggles, highlights and charts across the whole app.
           </div>
         </div>
         <div className="p-6">
@@ -110,7 +110,7 @@ export default function AppearancePanel() {
                 key={key}
                 onClick={() => {
                   setAccent(key);
-                  toast.success(`Accent set to ${val.name}`);
+                  toast.success(`Theme colour set to ${val.name}`);
                 }}
                 className={cn(
                   "p-3 rounded-lg border text-left transition-all cursor-pointer",
@@ -165,10 +165,11 @@ function AssistantColor() {
     <div className="rounded-xl border border-border bg-card">
       <div className="px-6 pt-5 pb-4 border-b border-border">
         <div className="text-[17px] font-semibold text-foreground">
-          Assistant colour
+          Filey AI
         </div>
         <div className="text-[13px] text-muted-foreground mt-1">
-          The colour Filey AI is drawn in, wherever it appears.
+          The colour the bot is drawn in, wherever it appears. Independent of
+          the theme colour.
         </div>
       </div>
       <div className="p-6 flex flex-col sm:flex-row sm:items-center gap-6">

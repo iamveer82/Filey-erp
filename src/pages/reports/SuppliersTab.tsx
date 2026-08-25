@@ -9,7 +9,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { aed, num, cn } from "../../lib/format";
-import { useChartColors } from "../../lib/accent";
+import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
@@ -19,17 +19,12 @@ import {
 } from "./useReportsData";
 
 export default function SuppliersTab({ data }: { data: ReportsData }) {
-  const c = useChartColors();
+  const cs = useChartStyle();
+  const c = cs.c;
   const topSuppliers = useTopSuppliers(data.poList, data.supplierList);
   const aging = usePayablesAging(data.poList, data.poPayments);
 
-  const tooltipStyle = {
-    borderRadius: 8,
-    fontSize: 12,
-    background: c.tooltipBg,
-    border: `1px solid ${c.tooltipBorder}`,
-    color: c.tooltipFg,
-  };
+  const tooltipStyle = cs.tooltipStyle;
 
   /* Payables aging bar chart data */
   const agingData = [
@@ -137,19 +132,13 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
                   <XAxis
                     type="number"
-                    stroke={c.axis}
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
+                    {...cs.axisProps}
                     tickFormatter={(v) => `AED ${num(v)}`}
                   />
                   <YAxis
                     type="category"
                     dataKey="name"
-                    stroke={c.axis}
-                    tick={{ fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
+                    {...cs.axisProps}
                     width={60}
                   />
                   <Tooltip
@@ -161,7 +150,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                     name="PO Value"
                     fill="url(#supG)"
                     radius={[0, 4, 4, 0]}
-                  />
+                   maxBarSize={32} />
                 </BarChart>
               </ResponsiveContainer>
               )}
@@ -195,16 +184,10 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis
                   dataKey="name"
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                 />
                 <YAxis
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
@@ -215,7 +198,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                   name="Payable"
                   fill="url(#payG)"
                   radius={[6, 6, 0, 0]}
-                />
+                 maxBarSize={32} />
               </BarChart>
             </ResponsiveContainer>
             )}

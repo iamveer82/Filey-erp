@@ -21,7 +21,9 @@ import {
   BookOpen,
   Languages,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import AppIcon from "./AppIcon";
+import BloubBot from "./BloubBot";
 import ErrorBoundary from "./ErrorBoundary";
 import { PageContextProvider } from "../lib/pageContext";
 import { cn, todayYmd, CURRENCIES } from "../lib/format";
@@ -85,11 +87,11 @@ function Wordmark() {
     <span className="flex items-center gap-2">
       <img
         src="/icons/filey-logo.png"
-        width={22}
-        height={22}
+        width={33}
+        height={33}
         alt=""
         draggable={false}
-        className="h-[22px] w-[22px] shrink-0 select-none rounded-md object-cover"
+        className="h-[33px] w-[33px] shrink-0 select-none rounded-md object-cover"
       />
       <span className="text-[15px] font-semibold text-foreground tracking-tight">Filey</span>
     </span>
@@ -382,7 +384,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       {t(group.title)}
                     </div>
                     <nav className="flex flex-col gap-0.5">
-                      {items.map(({ to, label, icon: iconName }) => (
+                      {items.map(({ id, to, label, icon: iconName }) => (
                         <NavLink
                           key={to}
                           to={to}
@@ -397,13 +399,36 @@ export default function Layout({ children }: { children: ReactNode }) {
                         >
                           {({ isActive }) => (
                             <>
-                              <AppIcon
-                                name={iconName}
-                                className={cn(
-                                  "h-[15px] w-[15px] shrink-0",
-                                  isActive ? "text-foreground" : "text-muted-foreground"
-                                )}
-                              />
+                              {/* Filey AI carries the assistant's own animated
+                                  face instead of a glyph — the one living icon
+                                  in the rail, so the assistant reads as a
+                                  presence rather than a page. It idles with
+                                  ambient tricks, watches the pointer, and
+                                  springs on hover/press. */}
+                              {id === "agent" ? (
+                                <motion.span
+                                  className="shrink-0 leading-none"
+                                  whileHover={{ scale: 1.12, rotate: -4 }}
+                                  whileTap={{ scale: 0.92 }}
+                                  transition={{ type: "spring", stiffness: 480, damping: 22 }}
+                                >
+                                  <BloubBot
+                                    size={48}
+                                    state="idle"
+                                    animate
+                                    ambient
+                                    trackCursor
+                                  />
+                                </motion.span>
+                              ) : (
+                                <AppIcon
+                                  name={iconName}
+                                  className={cn(
+                                    "h-[15px] w-[15px] shrink-0",
+                                    isActive ? "text-foreground" : "text-muted-foreground"
+                                  )}
+                                />
+                              )}
                               <span className="truncate">{t(label)}</span>
                             </>
                           )}
@@ -495,7 +520,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 {searchOpen && (
                   <div
                     style={{ "--materialize-origin": "top" } as CSSProperties}
-                    className="materialize-surface absolute left-0 right-0 top-11 z-30 overflow-hidden rounded-lg bg-card border border-border shadow-lg"
+                    className="materialize-surface absolute left-0 right-0 top-11 z-30 max-h-[52vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
                   >
                     <div className="max-h-[52vh] overflow-y-auto p-1.5">
                       {/* Quick actions (command palette) */}
@@ -591,7 +616,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 {notifOpen && (
                   <div
                     style={{ "--materialize-origin": "top right" } as CSSProperties}
-                    className="materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto rounded-lg bg-card border border-border shadow-lg"
+                    className="materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                       <p className="text-[13px] font-semibold text-foreground">
@@ -730,7 +755,7 @@ function CurrencySwitcher() {
         aria-label="Display currency"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        title="Currency used for totals and dashboards"
+        title="Currency for totals, new documents and their tax rules (AED→VAT, INR→GST)"
         className="hidden h-8 cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 text-[12.5px] font-medium text-foreground transition-colors hover:bg-hover hover:border-border sm:inline-flex"
       >
         {currency}

@@ -24,15 +24,23 @@ import { waLogAdd } from "./waLog";
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval: if a tool needs approval and is refused, tell the user exactly what you need approved and ask them to reply YES to proceed. Never invent data — look it up. Be concise and practical.";
 
+/** WhatsApp has no underline markup — the combining low line (U+0332) after
+ *  each character is how underlined text is typed on WhatsApp, and every
+ *  client renders it. */
+const underline = (s: string) =>
+  [...s].map((ch) => (ch === " " ? ch : ch + "\u0332")).join("");
+
 /** Every message Filey sends on WhatsApp opens with this line, so an answer is
- *  recognisable as the agent's at a glance in a thread of your own messages. */
-export const WA_HEADER = "*⚡ Filey Agent*";
+ *  recognisable as the agent's at a glance in a thread of your own messages —
+ *  bold + underlined, the way reference agents sign their replies. */
+export const WA_HEADER = `*${underline("Filey Agent")}*`;
 
 /** WhatsApp is not markdown: `#`, `**` and tables render as literal characters,
  *  so the house style is spelled out rather than left to the model's defaults. */
 const FORMAT = [
   "REPLY FORMAT — every WhatsApp message you send follows it:",
-  `1. First line is exactly: ${WA_HEADER}`,
+  "1. First line is exactly the words: Filey Agent",
+  "   (the app styles that line itself — never add emoji, bold marks or underlines to it)",
   "2. Blank line, then the answer — lead with the outcome in one sentence, key values in *bold*.",
   "3. Detail, when there is any, goes in sections: a heading line in *BOLD CAPS*, then items as `· Label — value`.",
   "4. WhatsApp formatting ONLY: *bold*, _italic_, ```monospace```. Never markdown (#, **, ---, | tables, code fences) — it shows up as raw characters.",
@@ -40,11 +48,18 @@ const FORMAT = [
 ].join("\n");
 
 /** Put the header on a reply (once) — the model is asked for it, and this makes
- *  sure it is there even when the model forgets. */
+ *  sure it is there, in the exact house style, even when the model forgets or
+ *  styles it wrong. The first line counts as the header when its bare text
+ *  (styling marks stripped) reads "filey agent". */
 export function waFormat(text: string): string {
   const t = (text ?? "").trim();
   if (!t) return "";
-  const body = t.startsWith(WA_HEADER) ? t.slice(WA_HEADER.length).trim() : t;
+  const [first, ...rest] = t.split("\n");
+  const bare = first
+    .replace(/[\u0332*_\u26a1]/g, "")
+    .trim()
+    .toLowerCase();
+  const body = bare === "filey agent" ? rest.join("\n").trim() : t;
   return body ? `${WA_HEADER}\n\n${body}` : WA_HEADER;
 }
 
@@ -173,7 +188,19 @@ async function handle(m: WaMessage): Promise<void> {
     // is what releases the sidecar's pending promise.
     const out = waFormat(text);
     if (out) waLogAdd({ dir: "out", from: m.from, name: m.fromName, text: out });
-    await replyWa(m.id, out);
+    try {
+      await replyWa(m.id, out);
+    } catch (e) {
+      // The bridge died between receiving the question and the answer. The
+      // sidecar's pending entry will time out with its own line to the owner;
+      // here it matters only that the failure is visible in the app log
+      // instead of the reply vanishing into a resolved promise.
+      log.error(
+        "whatsapp",
+        `reply to ${m.from} could not be delivered — bridge not running?`,
+        e instanceof Error ? e.message : String(e)
+      );
+    }
   };
 
   // The agent answers the OWNER only. Anyone else who happens to have the

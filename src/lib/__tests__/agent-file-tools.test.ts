@@ -34,11 +34,16 @@ describe("the agent's view of the document toolbox", () => {
     expect(res.tools.some((t) => t.id === "compress")).toBe(true);
   });
 
-  it("flags the tools that can't run headless", async () => {
-    const res = (await tool("list_file_tools").run({ query: "merge" })) as {
+  it("runs merge headless but flags the tools that genuinely need their workspace", async () => {
+    const res = (await tool("list_file_tools").run({})) as {
       tools: { id: string; needs_the_user: boolean }[];
     };
-    expect(res.tools.find((t) => t.id === "merge")?.needs_the_user).toBe(true);
+    // Merge carries a drag-order workspace, but attachments arrive in order —
+    // the agent combines them in the chat instead of sending anyone anywhere.
+    expect(res.tools.find((t) => t.id === "merge")?.needs_the_user).toBe(false);
+    // Page-level editors (live preview, drag on canvas) have no headless path.
+    expect(res.tools.find((t) => t.id === "split")?.needs_the_user).toBe(true);
+    expect(res.tools.find((t) => t.id === "esign")?.needs_the_user).toBe(true);
   });
 
   it("keeps every legacy operation name pointing at a tool that exists", () => {

@@ -25,7 +25,7 @@ import {
 } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { SelectMenu } from "../components/ui-menu";
-import { fmtDate, money, CURRENCIES, errMsg, todayYmd, num } from "../lib/format";
+import { fmtDate, money, CURRENCIES, errMsg, todayYmd, num, getDisplayCurrency } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import ColorPicker from "../components/ColorPicker";
 import {
@@ -92,7 +92,8 @@ function blankForm(
     // company's invoice default was, which rendered them as invoices.
     template: "voucher",
     accent: c.default_accent || "#3E7C3A",
-    currency: c.currency || "AED",
+    // Receipts follow the active display currency like every other document.
+    currency: getDisplayCurrency() || c.currency || "AED",
     logo: c.logo,
     seller_name: c.name,
     seller_address: c.address,

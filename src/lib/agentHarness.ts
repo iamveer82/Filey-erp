@@ -43,6 +43,42 @@ export const MAX_TOOL_ROUNDS = 16;
 const LIST_TOOLSETS = "list_toolsets";
 const USE_TOOLSET = "use_toolset";
 
+/** The multi-level primitive: the running agent can hand a self-contained
+ *  piece of work to a fresh sub-agent with its own context and round budget,
+ *  and get a summary back. What this buys over doing everything inline:
+ *  the orchestrator's context stays clean (a sub-task's twenty tool outputs
+ *  never reach it — only the conclusion does), independent chunks can be
+ *  specified precisely instead of remembered vaguely, and a sub-task failing
+ *  is one report rather than a derailed main run. Sub-agents cannot spawn
+ *  further sub-agents — one level of delegation, no recursion. */
+const SPAWN_SUBTASK = "spawn_subtask";
+const SUBTASK_ROUNDS = 8;
+
+const SUBTASK_SYSTEM =
+  "You are a focused sub-agent executing ONE piece of a larger plan. The orchestrator handed you a self-contained goal: complete exactly it, no scope creep and no questions back. " +
+  "Use the app's tools to look up and act; never invent data. If the goal is truly blocked on a detail only the user has, stop and report exactly what is missing. " +
+  "Finish with a compact report: what was done, the key numbers and ids, and anything the orchestrator must know.";
+
+const SPAWN_TOOL: AgentToolDef = {
+  name: SPAWN_SUBTASK,
+  description:
+    "Delegate one self-contained chunk of work to a focused sub-agent with its own fresh context and tool budget; a compact report comes back. Use it when a piece of the job is independent and precisely describable — 'research X and summarise', 'draft document Y from the saved data', 'reconcile Z across the books'. Write the goal as a complete instruction: what to do, against which records, and what the report must contain. Do NOT use it for quick lookups in the current step, and never split one tightly-coupled edit across sub-agents.",
+  parameters: {
+    type: "object",
+    properties: {
+      goal: {
+        type: "string",
+        description: "The complete, self-contained instruction for the sub-agent.",
+      },
+      label: {
+        type: "string",
+        description: "Two to four words naming this chunk, shown to the user as progress.",
+      },
+    },
+    required: ["goal"],
+  },
+};
+
 /** Answered here like the two above: it reaches into this run's compression
  *  store, not the app. Only offered once something was actually compressed,
  *  so the model never sees a tool that has nothing to retrieve. */
@@ -121,7 +157,9 @@ function openToolset(
  */
 export function offeredTools(
   opts: HarnessOpts,
-  opened: ReadonlySet<string>
+  opened: ReadonlySet<string>,
+  /** Delegation depth — sub-agents run at 1 and are not offered the spawner. */
+  subdepth = 0
 ): AgentToolDef[] {
   const visible = TOOLS.filter((t) => {
     if (t.ownerOnly && !opts.isOwner) return false;
@@ -143,6 +181,9 @@ export function offeredTools(
     })),
     // No point advertising more domains once they are all open.
     ...(opened.size < Object.keys(TOOLSETS).length ? toolsetTools : []),
+    // The delegation tool exists only at the top level: a sub-agent spawning
+    // sub-agents is unbounded recursion waiting for an ambitious goal.
+    ...(subdepth === 0 ? [SPAWN_TOOL] : []),
     ...(opts.extraTools ?? []),
   ];
 }
@@ -186,6 +227,9 @@ export interface HarnessOpts {
   /** The chat turn this run belongs to — scopes per-turn file state (the
    *  attachment, produced files) to this run alone. */
   turnId?: string;
+  /** Delegation depth: 0 = top-level orchestrator (may spawn sub-agents),
+   *  1 = sub-agent (may not). Sub-runs also get a tighter round budget. */
+  subdepth?: number;
 }
 
 export interface HarnessDeps {
@@ -479,7 +523,7 @@ export async function* runAgentStream(
 
   for (let round = 0; round < maxRounds; round++) {
     trimWire(wire, round > 0);
-    const offered = offeredTools(opts, opened);
+    const offered = offeredTools(opts, opened, opts.subdepth ?? 0);
     const tools = compressedThisRun ? [...offered, headroomTool] : offered;
     const { url, init } = adapter.buildRequest(wire, tools, opts, deps.cfg);
 
@@ -550,6 +594,47 @@ export async function* runAgentStream(
       }
       if (call.name === HEADROOM_RETRIEVE) {
         const result = headroomRetrieve(String(call.args.id ?? ""));
+        yield { type: "tool_result", id: call.id, name: call.name, result };
+        outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
+        continue;
+      }
+      if (call.name === SPAWN_SUBTASK) {
+        const goal = String(call.args.goal ?? "").trim();
+        const label = String(call.args.label ?? "Sub-task").trim() || "Sub-task";
+        if (!goal) {
+          const result = { error: "spawn_subtask needs a goal — a complete instruction." };
+          yield { type: "tool_result", id: call.id, name: call.name, result };
+          outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
+          continue;
+        }
+        // Narrate the delegation so the user sees the shape of the work, then
+        // drain the sub-run. Its own tool calls stay inside the sub-run: the
+        // orchestrator receives only the report, which is the point.
+        yield { type: "text", text: `↳ ${label} — delegating to a sub-agent…` };
+        let report: string;
+        try {
+          report = yield* runAgentStream(
+            [
+              { role: "system", text: SUBTASK_SYSTEM },
+              { role: "user", text: goal },
+            ],
+            {
+              ...opts,
+              maxRounds: SUBTASK_ROUNDS,
+              subdepth: (opts.subdepth ?? 0) + 1,
+              // The sub-agent's narration is not surfaced; its report lands as
+              // this call's result on the orchestrator's wire.
+              extraTools: undefined,
+            },
+            deps
+          );
+        } catch (e) {
+          report = `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        const result = {
+          report,
+          note: "This is the sub-agent's summary of its own work. Verify anything critical before acting on it, and fold it into your own report to the user.",
+        };
         yield { type: "tool_result", id: call.id, name: call.name, result };
         outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
         continue;

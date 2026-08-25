@@ -140,6 +140,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: [
       "send_gmail",
       "send_whatsapp",
+      "send_whatsapp_file",
       "list_whatsapp_messages",
       "connect_whatsapp",
       "composio_run",

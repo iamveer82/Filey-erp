@@ -62,8 +62,10 @@ import {
   todayYmd,
   localYmd,
   plural,
+  getDisplayCurrency,
 } from "../lib/format";
-import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
+import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates"
+import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
@@ -326,13 +328,18 @@ function blankForm(
   mode: DocMode = "sales",
   formats?: DocFormats
 ): Form {
+  // New documents are raised in the currency the app is being worked in —
+  // the active display currency — under that currency's tax regime
+  // (AED → UAE VAT 5%, INR → India GST 18%, …). Switching the currency
+  // switcher to INR therefore produces GST invoices, not VAT ones.
+  const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     number: pickInvoiceNumber(mode, existing, formats),
     status: "draft",
     doc_title: mode === "purchase" ? "Purchase Invoice" : "Tax Invoice",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
-    currency: c.currency || "AED",
+    currency,
     seller_name: c.name,
     seller_address: c.address,
     seller_trn: c.trn,
@@ -353,7 +360,7 @@ function blankForm(
     round_off: false,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days.",
-    tax_rate: c.default_tax_rate ?? 5,
+    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
     discount: 0,
     // UAE e-invoice (Peppol PINT-AE) — sensible defaults; user overrides as needed.
     invoice_type_code: DEFAULT_INVOICE_TYPE_CODE,
@@ -2228,7 +2235,7 @@ function Editor({
              }
              ${
                (form.tax_rate || 0) > 0
-                 ? `<tr><td>VAT (${form.tax_rate}%)</td><td style="text-align:right">${m(
+                 ? `<tr><td>${taxRegimeFor(form.currency).taxLabel} (${form.tax_rate}%)</td><td style="text-align:right">${m(
                      t.tax
                    )}</td></tr>`
                  : ""
@@ -2311,7 +2318,9 @@ function Editor({
           >
             <Download size={15} /> PDF
           </button>
-          {partyLabel !== "Supplier" && (
+          {/* Peppol PINT-AE is the UAE e-invoice — only meaningful for
+              documents under the UAE VAT regime. */}
+          {partyLabel !== "Supplier" && isUaeRegime(form.currency) && (
             <button
               className="btn-ghost"
               onClick={exportXml}
@@ -2598,7 +2607,7 @@ function Editor({
                     />
                     <input
                       className="input"
-                      placeholder="TRN"
+                      placeholder={taxRegimeFor(form.currency).trnLabel}
                       value={form.customer_trn ?? ""}
                       onChange={(e) => set("customer_trn", e.target.value)}
                     />
@@ -2956,7 +2965,7 @@ function Editor({
                       Disc %
                     </th>
                     {(form.tax_rate || 0) > 0 && (
-                      <th className="py-2 px-2 w-24 text-right">VAT</th>
+                      <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency).taxLabel}</th>
                     )}
                     <th className="py-2 px-2 w-28 text-right">Amount</th>
                     <th className="w-8" />
@@ -3452,7 +3461,7 @@ function Editor({
                     <input
                       type="number"
                       className="input"
-                      placeholder="VAT rate %"
+                      placeholder={`${taxRegimeFor(form.currency).taxLabel} rate %`}
                       value={form.tax_rate}
                       onChange={(e) => set("tax_rate", numInput(e.target.value))}
                     />
@@ -3984,7 +3993,7 @@ function CustomerModal({
               onChange={(e) => setF({ ...f, email: e.target.value })}
             />
           </Field>
-          <Field label="TRN (15 digits)">
+          <Field label={`${taxRegimeFor(getDisplayCurrency()).trnLabel} (15 digits)`}>
             <input
               className="input"
               placeholder="100000000000003"
@@ -3994,7 +4003,7 @@ function CustomerModal({
           </Field>
         </div>
         {!trnValid && (
-          <p className="text-xs text-danger">TRN must be exactly 15 digits.</p>
+          <p className="text-xs text-danger">{taxRegimeFor(getDisplayCurrency()).trnLabel} must be exactly 15 digits.</p>
         )}
       </div>
       <div className="flex justify-end gap-2 mt-5">

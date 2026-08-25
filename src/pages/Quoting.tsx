@@ -55,8 +55,10 @@ import {
   errMsg,
   todayYmd,
   localYmd,
+  getDisplayCurrency,
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates";
+import { defaultTaxRate, taxRegimeFor } from "../lib/taxRegimes";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -172,13 +174,16 @@ function blankForm(
   existing: string[] = [],
   formats?: DocFormats
 ): Form {
+  // Same rule as invoicing: new quotes adopt the active display currency and
+  // its tax regime (INR → GST, AED → VAT).
+  const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     number: pickQuoteNumber(existing, formats),
     status: "draft",
     doc_title: "Quotation",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
-    currency: c.currency || "AED",
+    currency,
     seller_name: c.name,
     seller_address: c.address,
     seller_trn: c.trn,
@@ -196,7 +201,7 @@ function blankForm(
     terms:
       "1. This quotation is valid until the date mentioned above.\n2. Prices are subject to applicable taxes.\n3. Payment terms as agreed.",
     discount: 0,
-    tax_rate: 0,
+    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
     round_off: false,
     items: [
       {
@@ -1212,7 +1217,7 @@ export default function Quoting() {
                           />
                           <input
                             className="input"
-                            placeholder="TRN"
+                            placeholder={taxRegimeFor(form.currency).trnLabel}
                             value={form.customer_trn ?? ""}
                             onChange={(e) => set("customer_trn", e.target.value)}
                           />
@@ -1705,7 +1710,7 @@ export default function Quoting() {
                       <input
                         type="number"
                         className="input mt-2"
-                        placeholder="VAT rate %"
+                        placeholder={`${taxRegimeFor(form.currency).taxLabel} rate %`}
                         value={form.tax_rate}
                         onChange={(e) =>
                           setForm({ ...form, tax_rate: numInput(e.target.value) })
@@ -2732,7 +2737,7 @@ function CustomerModal({
               onChange={(e) => setF({ ...f, email: e.target.value })}
             />
           </Field>
-          <Field label="TRN">
+          <Field label={taxRegimeFor(getDisplayCurrency()).trnLabel}>
             <input
               className="input"
               value={f.trn}

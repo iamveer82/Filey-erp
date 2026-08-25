@@ -40,7 +40,11 @@ import {
   Skeleton,
   keyActivate,
 } from "../components/ui";
-import { useChartColors } from "../lib/accent";
+import {
+  useChartStyle,
+  ChartPanel,
+  ChartGradient,
+} from "../components/charts";
 import { useAuth } from "../lib/auth";
 
 /* ── Overview (Emergent reference layout) ──────────────────────────────────
@@ -86,7 +90,8 @@ const relTime = (iso: string): string => {
 
 export default function ModernOverview() {
   const nav = useNavigate();
-  const c = useChartColors();
+  const cs = useChartStyle();
+  const c = cs.c;
   const { profile } = useAuth();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -343,14 +348,6 @@ export default function ModernOverview() {
     },
   ];
 
-  const tooltipStyle = {
-    borderRadius: 8,
-    fontSize: 12,
-    background: c.tooltipBg,
-    border: `1px solid ${c.tooltipBorder}`,
-    color: c.tooltipFg,
-  };
-
   // Export the KPI snapshot currently on screen (reference Export button).
   const onExport = () => {
     downloadCsv(
@@ -438,68 +435,86 @@ export default function ModernOverview() {
 
       {/* ── Charts row: sales bar + segments pie ── */}
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card">
-        <div className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border p-5">
-          <div className="flex items-center gap-2">
-            <div className="text-[14px] font-semibold text-foreground">
-              Sales vs Payments received
-            </div>
-            <span className="px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-success/10 text-success ring-1 ring-success/30 inline-flex items-center gap-1">
-              <TrendingUp className="h-3 w-3" /> Live
-            </span>
-          </div>
-          <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Last 8 days, from your invoices &amp; receipts
-          </div>
-          <div className="h-[280px] mt-4">
-            {!hasBarData ? (
-              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
-            ) : (
+        <ChartPanel
+          title="Sales vs Payments received"
+          subtitle="Last 8 days, from your invoices & receipts"
+          live
+          className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border"
+          bodyClassName="h-[280px] mt-4"
+        >
+          {!hasBarData ? (
+            <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+          ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barTrend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="barSold" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
-                  </linearGradient>
-                </defs>
+                <ChartGradient id="barSold" color={c.accent} from={0.9} to={0.3} />
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis dataKey="d" stroke={c.axis} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis stroke={c.axis} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="d" {...cs.axisProps} />
+                <YAxis {...cs.axisProps} />
                 <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "currentColor", fillOpacity: 0.04 }}
+                  contentStyle={cs.tooltipStyle}
+                  cursor={cs.cursor}
                   formatter={(v) => aed(Number(v) || 0)}
                 />
-                <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
-                <Bar dataKey="invoiced" name="Invoiced" fill="url(#barSold)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="received" name="Received" fill={c.primary} radius={[4, 4, 0, 0]} />
+                <Legend wrapperStyle={cs.legendStyle} />
+                <Bar
+                  dataKey="invoiced"
+                  name="Invoiced"
+                  fill="url(#barSold)"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="received"
+                  name="Received"
+                  fill={c.primary}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
               </BarChart>
             </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-        <div className="p-5">
-          <div className="text-[14px] font-semibold text-foreground">Customer segments</div>
-          <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            By segment tag
-          </div>
+          )}
+        </ChartPanel>
+        <ChartPanel
+          title="Customer segments"
+          subtitle="By segment tag"
+          bodyClassName="mt-2"
+        >
           {segmentPie.length === 0 ? (
             <div className="h-[220px] grid place-items-center text-[12.5px] text-muted-foreground">
               No customers yet
             </div>
           ) : (
             <>
-              <div className="h-[220px] mt-2">
+              <div className="relative h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={segmentPie} innerRadius={50} outerRadius={80} paddingAngle={2} dataKey="value">
+                    <Pie
+                      data={segmentPie}
+                      innerRadius={58}
+                      outerRadius={84}
+                      paddingAngle={2}
+                      dataKey="value"
+                      cornerRadius={3}
+                    >
                       {segmentPie.map((_, i) => (
                         <Cell key={i} fill={pieColors[i % pieColors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={tooltipStyle} />
+                    <Tooltip contentStyle={cs.tooltipStyle} />
                   </PieChart>
                 </ResponsiveContainer>
+                {/* Donut centre: the whole point of the chart, stated once */}
+                <div className="absolute inset-0 grid place-items-center pointer-events-none">
+                  <div className="text-center">
+                    <div className="text-[20px] font-semibold text-foreground tabular-nums leading-none">
+                      {num(customers.length)}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-1">
+                      {customers.length === 1 ? "customer" : "customers"}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="space-y-1.5">
                 {segmentPie.map((s, i) => (
@@ -511,13 +526,13 @@ export default function ModernOverview() {
                       />
                       <span className="text-foreground">{s.name}</span>
                     </div>
-                    <span className="text-muted-foreground">{s.value}</span>
+                    <span className="text-muted-foreground tabular-nums">{s.value}</span>
                   </div>
                 ))}
               </div>
             </>
           )}
-        </div>
+        </ChartPanel>
       </div>
 
       {/* ── Recent invoices + activity ── */}
@@ -615,57 +630,69 @@ export default function ModernOverview() {
 
       {/* ── Cash movement area ── */}
       <div className="mt-5 rounded-xl border border-border bg-card">
-        <div className="px-5 pt-4 pb-3 flex items-center justify-between">
-          <div>
-            <div className="text-[14px] font-semibold text-foreground">Cash movement</div>
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              Money in vs money out
-            </div>
-          </div>
-          <div className="flex items-center gap-1 border border-border rounded-md p-0.5 text-[12px]">
-            {(["7d", "30d", "90d"] as Range[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={cn(
-                  "px-2.5 py-1 rounded",
-                  range === r
-                    ? "bg-foreground text-background font-medium"
-                    : "text-muted-foreground hover:bg-hover"
-                )}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="px-4 pb-4 h-[260px]">
-          {!hasTrendData ? (
-            <ChartEmpty hint="Money in and money out appear here once invoices are sent and paid." />
-          ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
-              <defs>
-                <linearGradient id="cashIn" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={c.accent} stopOpacity={0.4} />
-                  <stop offset="100%" stopColor={c.accent} stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="cashOut" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={c.primary} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={c.primary} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-              <XAxis dataKey="d" stroke={c.axis} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis stroke={c.axis} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v) => aed(Number(v) || 0)} />
-              <Legend wrapperStyle={{ fontSize: 11, color: c.axis }} />
-              <Area type="monotone" dataKey="received" name="Cash in" stroke={c.accent} fill="url(#cashIn)" strokeWidth={2} />
-              <Area type="monotone" dataKey="invoiced" name="Sales" stroke={c.primary} fill="url(#cashOut)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-          )}
-        </div>
+        <ChartPanel
+          title="Cash movement"
+          subtitle="Money in vs money out"
+          action={
+              <div className="flex items-center gap-1 border border-border rounded-md p-0.5 text-[12px]">
+                {(["7d", "30d", "90d"] as Range[]).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setRange(r)}
+                    className={cn(
+                      "px-2.5 py-1 rounded",
+                      range === r
+                        ? "bg-foreground text-background font-medium"
+                        : "text-muted-foreground hover:bg-hover"
+                    )}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            }
+            bodyClassName="h-[260px] mt-2"
+          >
+            {!hasTrendData ? (
+              <ChartEmpty hint="Money in and money out appear here once invoices are sent and paid." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                  <ChartGradient id="cashIn" color={c.accent} from={0.35} />
+                  <ChartGradient id="cashOut" color={c.primary} from={0.25} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+                  <XAxis dataKey="d" {...cs.axisProps} />
+                  <YAxis {...cs.axisProps} />
+                  <Tooltip
+                    contentStyle={cs.tooltipStyle}
+                    cursor={cs.cursor}
+                    formatter={(v) => aed(Number(v) || 0)}
+                  />
+                  <Legend wrapperStyle={cs.legendStyle} />
+                  <Area
+                    type="monotone"
+                    dataKey="received"
+                    name="Cash in"
+                    stroke={c.accent}
+                    fill="url(#cashIn)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 3, strokeWidth: 0 }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="invoiced"
+                    name="Sales"
+                    stroke={c.primary}
+                    fill="url(#cashOut)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 3, strokeWidth: 0 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </ChartPanel>
       </div>
 
       {/* ── Empty state ── */}

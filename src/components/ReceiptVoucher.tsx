@@ -1,4 +1,5 @@
 import { fmtDate, money } from "../lib/format";
+import { taxRegimeFor } from "../lib/taxRegimes";
 
 /* A classic business receipt voucher: company header, centred spaced title,
  * underlined field rows, a solid amount block, "received from" party block
@@ -80,7 +81,7 @@ export default function ReceiptVoucher({
         )}
         {sellerTrn && (
           <p className="text-[11px] mt-0.5" style={{ color: accent }}>
-            TRN: {sellerTrn}
+            {taxRegimeFor(currency).trnLabel}: {sellerTrn}
           </p>
         )}
       </div>

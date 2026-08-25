@@ -41,7 +41,8 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { SelectMenu } from "../components/ui-menu";
-import { aed, fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd } from "../lib/format";
+import { aed, fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd, getDisplayCurrency } from "../lib/format";
+import { defaultTaxRate, taxRegimeFor } from "../lib/taxRegimes";
 import {
   docLineAmount,
   docTotals,
@@ -146,6 +147,9 @@ function blankForm(
   existing: string[] = [],
   formats?: DocFormats
 ): Form {
+  // Same rule as invoicing: new POs adopt the active display currency and its
+  // tax regime (INR → GST, AED → VAT).
+  const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     po_number: pickDocNumber("purchase_order", existing, formats),
     status: "draft",
@@ -153,7 +157,7 @@ function blankForm(
     doc_title: "Purchase Order",
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
-    currency: c.currency || "AED",
+    currency,
     seller_name: c.name,
     seller_address: c.address,
     seller_trn: c.trn,
@@ -170,7 +174,7 @@ function blankForm(
     expected_date: undefined,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days of invoice.",
-    tax_rate: 0,
+    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
     discount: 0,
     items: [
       {
@@ -1496,7 +1500,7 @@ function Editor({
                       />
                       <input
                         className="input"
-                        placeholder="TRN"
+                        placeholder={taxRegimeFor(form.currency).trnLabel}
                         value={form.supplier_trn ?? ""}
                         onChange={(e) => set("supplier_trn", e.target.value)}
                       />
@@ -1648,7 +1652,7 @@ function Editor({
                       ))}
                       <th className="py-2 px-2 w-32 text-right">Unit Cost</th>
                       {(form.tax_rate || 0) > 0 && (
-                        <th className="py-2 px-2 w-24 text-right">VAT</th>
+                        <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency).taxLabel}</th>
                       )}
                       <th className="py-2 px-2 w-28 text-right">Amount</th>
                       <th className="w-8" />
@@ -1976,7 +1980,7 @@ function Editor({
                     Tip: set this once in Settings → Company Details to auto-fill every PO.
                   </p>
                   <div className="space-y-2 pt-2">
-                    <Field label="VAT rate %">
+                    <Field label={`${taxRegimeFor(form.currency).taxLabel} rate %`}>
                       <input
                         type="number"
                         className="input"
@@ -2497,7 +2501,7 @@ function SupplierQuickAdd({
             <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
-        <Field label="TRN">
+        <Field label={taxRegimeFor(getDisplayCurrency()).trnLabel}>
           <input
             className="input"
             value={trn}

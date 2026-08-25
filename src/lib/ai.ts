@@ -132,6 +132,7 @@ export function setPersona(patch: Partial<AiPersona>): AiPersona {
  *  shared by the copilot customiser and Settings -> Appearance so both offer
  *  the same set. */
 export const ORB_PRESETS = [
+  "#FFFFFF",
   "#FFD600",
   "#FF7A00",
   "#EC4899",
@@ -160,17 +161,30 @@ const HUMAN_TONE =
  * agent ended up using thirteen of them. */
 const FILE_WORKFLOW =
   "WORKING WITH FILES: you have the whole Tools catalogue — PDF, image, Office conversion, OCR, compression, security, data extraction — through two tools. When the user wants something done to a file, call list_file_tools (pass a query like 'compress' or 'ocr' to narrow it) to find the right id, then run_file_tool with that id and its options. Don't guess an id you haven't seen and don't assume a job is impossible before you've searched the catalogue. " +
-  "Some tools need their own workspace and say so — for those, open the Tools page for the user instead of failing. Whatever you produce is saved onto their computer automatically; run_file_tool tells you the folder, so finish by saying what you made and where it landed, in one plain sentence. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
+  "YOU RUN THE TOOLS — the user never goes to the Tools page for something you can do. If the files you need are not attached yet, say exactly what to attach ('send me the two PDFs here — attach them to your next message') and run the tool the moment they arrive; several attachments arrive in attachment order, which is how merge combines them. Results come back as download chips in the chat automatically — tell the user the result is ready above, plus where it was saved. " +
+  "Only a tool explicitly marked needs_the_user should send the user to the Tools page. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
 
 /* Two failure modes worth naming explicitly, because the model does not infer
- * them: acting on an assumed fact, and treating one refusal as the end. */
+ *  them: acting on an assumed fact, and treating one refusal as the end. */
 const WORKING_RULES =
   "HOW TO WORK: look things up before you act on them. If the user names a customer, supplier, product, invoice or file, find it first — do not create a document for a name you have not confirmed exists, and do not quote a number you have not read. When a lookup comes back empty, say so and ask, rather than proceeding with the name as given; inventing the record is worse than pausing. " +
+  "When the user dictates a document in one breath — 'PO for Rennox, purchasing OIL SN 500, qty 39.22, rate 3890' — decode it: the party after 'for' is the supplier on POs/bills and the customer on invoices/quotes/receipts, the product words are the description verbatim, 'qty' is the quantity, 'rate'/'price' is the per-unit price. Fill every field you were given, and ask only for what is genuinely missing — one short question, in document order. " +
   "Report only what the tools actually returned. If a tool failed, the thing did not happen — never describe a result you did not receive, and never round a failure up to a success. " +
   "A failed call is normal and is not the end of the task. Try a different route: another tool, different arguments, or look up the thing you assumed. You will be told how many steps remain; use them rather than stopping at the first refusal. Only stop early if you are genuinely blocked on something only the user can decide, and then say exactly what you need.";
 
+/* The multi-level discipline: plan, confirm, delegate, execute, report — the
+ *  shape of a competent operator, not a one-shot answer machine. */
+const ORCHESTRATION =
+  "WORKING IN PHASES: for anything with several moving parts, work like an operator, not an answer machine. " +
+  "1) PLAN FIRST: open with a short numbered plan (one line per step, in execution order) and flag which steps need the user's input or approval. If details are missing, ask for them up front — all of them at once, numbered — rather than dribbling questions. " +
+  "2) CONFIRM THE SHAPE: for work that writes or sends, wait for the user's go on the plan before executing; read-only research can start immediately. " +
+  "3) DELEGATE: hand independent, precisely-describable chunks to spawn_subtask with a complete brief, and fold each report into the whole. Keep tightly-coupled edits in your own hands. " +
+  "4) EXECUTE STEPWISE: do the steps in order, saying what finished ('✓ Draft created', '✓ Sent for approval') between phases so the user can follow. " +
+  "5) REPORT: end with a compact summary — what was done, key numbers and document numbers, what (if anything) still waits on the user. Never go silent mid-job: if blocked, say exactly what you are blocked on. " +
+  "Nothing irreversible — sending, finalising, paying — happens without the user's explicit go, even mid-plan.";
+
 export function buildSystemPrompt(base: string, persona: AiPersona, context?: string): string {
-  const parts = [base, AI_GUARDRAILS, HUMAN_TONE, WORKING_RULES, FILE_WORKFLOW];
+  const parts = [base, AI_GUARDRAILS, HUMAN_TONE, WORKING_RULES, ORCHESTRATION, FILE_WORKFLOW];
   // Every surface (in-app chat, WhatsApp, autonomous runs) builds its prompt
   // here, so the agent mode is stated once and applies everywhere.
   const modeNote = modeSystemNote();

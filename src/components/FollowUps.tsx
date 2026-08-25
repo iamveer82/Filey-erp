@@ -281,7 +281,7 @@ export default function FollowUps({
             viewBox="0 0 100 80"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
-            className="opacity-80"
+            className="opacity-80 text-primary-500"
           >
             <rect
               x="24"
@@ -289,9 +289,9 @@ export default function FollowUps({
               width="52"
               height="44"
               rx="5"
-              fill="#f59e0b"
+              fill="currentColor"
               fill-opacity="0.12"
-              stroke="#f59e0b"
+              stroke="currentColor"
               strokeWidth="1.5"
             />
             <line
@@ -299,7 +299,7 @@ export default function FollowUps({
               y1="20"
               x2="66"
               y2="20"
-              stroke="#f59e0b"
+              stroke="currentColor"
               strokeWidth="1.5"
               strokeLinecap="round"
             />
@@ -334,14 +334,14 @@ export default function FollowUps({
               cx="50"
               cy="68"
               r="7"
-              fill="#f59e0b"
+              fill="currentColor"
               fill-opacity="0.12"
-              stroke="#f59e0b"
+              stroke="currentColor"
               strokeWidth="1.5"
             />
             <path
               d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="#f59e0b"
+              stroke="currentColor"
               strokeWidth="1.2"
               strokeLinecap="round"
               strokeLinejoin="round"

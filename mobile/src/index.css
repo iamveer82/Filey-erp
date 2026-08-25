@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+/* Class-based dark mode, same contract as the desktop app (.dark on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Design tokens — verbatim from the desktop app (src/index.css) so the
+   two surfaces are the same product. Accent ramp resolves through --p-h/--p-s
+   exactly like the desktop, so applyAccent() from the shared lib restyles
+   mobile too. ─────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --page: 240 5% 97%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 4% 42%;
+    --success: 163 94% 24%;
+    --warning: 26 90% 37%;
+    --danger: 0 74% 42%;
+    --info: 201 96% 32%;
+    --border: 240 5.9% 90%;
+    --hover: 240 4.8% 95.9%;
+
+    --p-h: 38;
+    --p-s: 92%;
+    --p-l400: 56%;
+    --primary-50: var(--p-h) var(--p-s) 96%;
+    --primary-100: var(--p-h) var(--p-s) 89%;
+    --primary-300: var(--p-h) var(--p-s) 65%;
+    --primary-400: var(--p-h) var(--p-s) var(--p-l400);
+    --primary-500: var(--p-h) var(--p-s) 50%;
+    --primary-600: var(--p-h) var(--p-s) 45%;
+    --primary-700: var(--p-h) var(--p-s) 37%;
+  }
+
+  [data-accent="blue"] { --p-h: 217; --p-s: 91%; --p-l400: 60%; }
+  [data-accent="emerald"] { --p-h: 160; --p-s: 84%; }
+  [data-accent="rose"] { --p-h: 347; --p-s: 89%; --p-l400: 61%; }
+  [data-accent="violet"] { --p-h: 258; --p-s: 90%; --p-l400: 66%; }
+  [data-accent="sky"] { --p-h: 199; --p-s: 89%; }
+  [data-accent="slate"] { --p-h: 215; --p-s: 16%; --p-l400: 62%; }
+
+  .dark {
+    --background: 0 0% 4%;
+    --page: 0 0% 4%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 6%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 62%;
+    --success: 156 49% 49%;
+    --warning: 38 92% 50%;
+    --danger: 358 75% 59%;
+    --info: 199 89% 48%;
+    --border: 0 0% 15%;
+    --hover: 0 0% 10%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    background: hsl(var(--page));
+    color: hsl(var(--foreground));
+    font-family: "Inter Variable", Inter, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    /* The bottom tab bar is inside the layout; the body never scrolls. */
+    overscroll-behavior: none;
+  }
+  /* Tap highlights off — the app gives its own pressed feedback. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px; /* stops iOS zoom-on-focus */
+  }
+}
+
+/* ── Token → utility mapping (Tailwind 4 CSS-first) ─────────────────── */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-page: hsl(var(--page));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-hover: hsl(var(--hover));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-danger: hsl(var(--danger));
+  --color-info: hsl(var(--info));
+  --color-primary-50: hsl(var(--primary-50));
+  --color-primary-100: hsl(var(--primary-100));
+  --color-primary-300: hsl(var(--primary-300));
+  --color-primary-400: hsl(var(--primary-400));
+  --color-primary-500: hsl(var(--primary-500));
+  --color-primary-600: hsl(var(--primary-600));
+  --color-primary-700: hsl(var(--primary-700));
+}
+
+@layer components {
+  /* Card — the one surface. Hairline border, 16px radius, no shadows:
+     elevation is communicated by the page tint behind it. */
+  .card {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 1rem;
+  }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.75rem;
+    padding: 0 1.1rem;
+    border-radius: 0.75rem;
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+  }
+  .btn-primary:active {
+    transform: scale(0.97);
+  }
+  .btn-primary:disabled {
+    opacity: 0.45;
+  }
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 2.75rem;
+    padding: 0 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: transform 0.12s ease, background 0.12s ease;
+  }
+  .btn-ghost:active {
+    transform: scale(0.97);
+    background: hsl(var(--hover));
+  }
+  .input {
+    width: 100%;
+    height: 2.75rem;
+    padding: 0 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    font-size: 0.95rem;
+    outline: none;
+  }
+  .input:focus {
+    border-color: hsl(var(--muted-foreground) / 0.6);
+  }
+  .textarea {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    font-size: 0.95rem;
+    outline: none;
+    resize: none;
+  }
+  .label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+    margin-bottom: 0.3rem;
+  }
+}
+
+@utility tab-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility top-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Enter transitions — quiet, transform+opacity only. */
+@keyframes m-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.screen-in {
+  animation: m-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-in {
+    animation: none;
+  }
+}

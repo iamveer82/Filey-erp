@@ -1,7 +1,7 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { aed, num, cn } from "../../lib/format";
-import { useChartColors } from "../../lib/accent";
+import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
@@ -19,7 +19,8 @@ type Kpi = {
 };
 
 export default function DashboardTab({ data }: { data: ReportsData }) {
-  const c = useChartColors();
+  const cs = useChartStyle();
+  const c = cs.c;
   const revenueTotal = useRevenueTotal(data.invoices);
   const cashReceived = useCashReceived(data.receiptList);
   const deltas = useDeltas(data.invoices, data.receiptList, data.customers, data.orders);
@@ -53,14 +54,6 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
   ];
 
   const recent = data.txns.slice(0, 8);
-
-  const tooltipStyle = {
-    borderRadius: 8,
-    fontSize: 12,
-    background: c.tooltipBg,
-    border: `1px solid ${c.tooltipBorder}`,
-    color: c.tooltipFg,
-  };
 
   return (
     <div className="space-y-5">
@@ -121,35 +114,27 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
               <BarChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dashInvoiced" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
+                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.9} />
+                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.3} />
                   </linearGradient>
                   <linearGradient id="dashReceived" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.primary} stopOpacity={0.95} />
-                    <stop offset="100%" stopColor={c.primary} stopOpacity={0.35} />
+                    <stop offset="0%" stopColor={c.primary} stopOpacity={0.9} />
+                    <stop offset="100%" stopColor={c.primary} stopOpacity={0.3} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis
-                  dataKey="d"
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
+                <XAxis dataKey="d" {...cs.axisProps} />
                 <YAxis
-                  stroke={c.axis}
-                  tick={{ fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
+                  {...cs.axisProps}
                   tickFormatter={(v) => `AED ${num(v)}`}
                 />
                 <Tooltip
-                  contentStyle={tooltipStyle}
+                  contentStyle={cs.tooltipStyle}
+                  cursor={cs.cursor}
                   formatter={(v) => aed(Number(v) || 0)}
                 />
                 <Legend
-                  wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+                  wrapperStyle={cs.legendStyle}
                   iconType="circle"
                   iconSize={8}
                 />
@@ -158,12 +143,14 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
                   name="Invoiced"
                   fill="url(#dashInvoiced)"
                   radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
                 />
                 <Bar
                   dataKey="received"
                   name="Received"
                   fill="url(#dashReceived)"
                   radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
                 />
               </BarChart>
             </ResponsiveContainer>

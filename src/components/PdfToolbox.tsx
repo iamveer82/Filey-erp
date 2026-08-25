@@ -138,6 +138,10 @@ export interface Tool {
    * `toolFlow()`. Used to render the "FROM → TO" chip on each tool card so
    * users can see at a glance what a tool converts. */
   flow?: { from: string; to: string };
+  /** The workspace exists for nicer control (drag-order), but run() also
+   * works headless on plain attachments — the AI agent may run it directly
+   * instead of sending the user to the Tools page. */
+  headlessOk?: boolean;
 }
 
 /** Human label for a tool's input format, inferred from its `accept` string. */
@@ -211,6 +215,9 @@ export const PDF_TOOLS: Tool[] = [
     multi: true,
     accept: "application/pdf",
     interactive: "merge",
+    // The workspace is for drag-ordering; attachments arrive in order and the
+    // agent merges them headlessly right in the chat.
+    headlessOk: true,
     fields: [],
     run: async (f) => [await pdf.mergePdfs(f)],
   },

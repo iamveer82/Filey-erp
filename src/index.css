@@ -56,15 +56,47 @@
     --tooltip-fg: 240 10% 3.9%;
 
     /* Legacy chart vars (ModernOverview et al until Phase 3 rebuild). */
-    --chart-stroke: #f59e0b;
-    --chart-fill-start: #f59e0b;
-    --chart-fill-end: #fde68a;
+    --chart-stroke: hsl(var(--primary-500));
+    --chart-fill-start: hsl(var(--primary-500));
+    --chart-fill-end: hsl(var(--primary-200));
     --chart-fill-opacity-start: 0.35;
     --chart-fill-opacity-end: 0.05;
     --chart-tick: #9ca3af;
     --chart-tooltip-bg: #ffffff;
     --chart-tooltip-border: #e5e7eb;
+
+    /* ── Accent ramp ───────────────────────────────────────────────────
+       `primary-*` in tailwind.config.js resolves through these, so the
+       accent picked in Settings → Appearance reaches every button, toggle,
+       ring and highlight in the app — not just the charts. One hue/sat
+       pair swings the whole scale; only the lightness curve is fixed.
+       ponytail: hue+sat swap, not a per-accent hand-tuned ramp. `--p-l400`
+       is the one escape hatch, for hues that read too dark under the
+       always-dark ink on primary surfaces (see .text-ink rules below). */
+    --p-h: 38;
+    --p-s: 92%;
+    --p-l400: 56%;
+    --primary-50: var(--p-h) var(--p-s) 96%;
+    --primary-100: var(--p-h) var(--p-s) 89%;
+    --primary-200: var(--p-h) var(--p-s) 77%;
+    --primary-300: var(--p-h) var(--p-s) 65%;
+    --primary-400: var(--p-h) var(--p-s) var(--p-l400);
+    --primary-500: var(--p-h) var(--p-s) 50%;
+    --primary-600: var(--p-h) var(--p-s) 45%;
+    --primary-700: var(--p-h) var(--p-s) 37%;
+    --primary-800: var(--p-h) var(--p-s) 32%;
+    --primary-900: var(--p-h) var(--p-s) 26%;
   }
+
+  /* Accents from accentPalette (src/lib/accent.ts); applyAccent() stamps
+     data-accent on <html>, which is the same element as :root — so these
+     re-resolve the whole ramp above. Keep the two lists in step. */
+  [data-accent="blue"] { --p-h: 217; --p-s: 91%; --p-l400: 60%; }
+  [data-accent="emerald"] { --p-h: 160; --p-s: 84%; }
+  [data-accent="rose"] { --p-h: 347; --p-s: 89%; --p-l400: 61%; }
+  [data-accent="violet"] { --p-h: 258; --p-s: 90%; --p-l400: 66%; }
+  [data-accent="sky"] { --p-h: 199; --p-s: 89%; }
+  [data-accent="slate"] { --p-h: 215; --p-s: 16%; --p-l400: 62%; }
 
   .dark {
     /* Dark theme — near-black */
@@ -102,9 +134,9 @@
     --tooltip-border: 0 0% 15%;
     --tooltip-fg: 0 0% 93%;
 
-    --chart-stroke: #fbbf24;
-    --chart-fill-start: #fbbf24;
-    --chart-fill-end: #78350f;
+    --chart-stroke: hsl(var(--primary-400));
+    --chart-fill-start: hsl(var(--primary-400));
+    --chart-fill-end: hsl(var(--primary-900));
     --chart-tick: #666666;
     --chart-tooltip-bg: #0e0e0e;
     --chart-tooltip-border: #262626;
@@ -211,6 +243,17 @@
      so keyboard focus reads as an interactive affordance app-wide. */
   :focus-visible {
     @apply outline-none ring-2 ring-primary-400 ring-offset-2;
+  }
+  /* Charts are click surfaces, not focus targets. WebView2 matches
+     :focus-visible on plain mouse clicks over the plot svg, which wrapped
+     every clicked chart in a box. Nothing on a chart is operable by
+     keyboard, so it gets no ring at all. */
+  .recharts-wrapper:focus,
+  .recharts-wrapper:focus-visible,
+  .recharts-surface:focus,
+  .recharts-surface:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
   }
   /* design.md §7: Lucide icons at 1.75px stroke everywhere.
      CSS beats the inline stroke-width="2" presentation attribute. */

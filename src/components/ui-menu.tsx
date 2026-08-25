@@ -112,7 +112,11 @@ export function MenuPopover({
     // Height isn't known until after paint (fonts, option count) — re-measure
     // once so the flip decision uses the real panel size.
     const raf = requestAnimationFrame(place);
-    const onScroll = () => {
+    const onScroll = (e: Event) => {
+      // Capture phase sees EVERY scroll, including the panel scrolling itself.
+      // Closing on the panel's own scroll made long menus snap shut the
+      // moment their scrollbar moved — only the page behind may close it.
+      if (panelRef.current?.contains(e.target as Node)) return;
       if (closeOnScroll) closeRef.current();
       else place();
     };
@@ -132,7 +136,11 @@ export function MenuPopover({
       role="menu"
       style={{ ...pos, ...style }}
       className={cn(
-        "z-50 rounded-xl border border-border bg-card p-1 shadow-lg",
+        // Every menu scrolls within the viewport and keeps its wheel events to
+        // itself: the cap turns a 160-currency list into a scrollable panel,
+        // overscroll-contain stops the scroll chaining to the page behind
+        // (which used to close closeOnScroll menus at the end of the list).
+        "z-50 max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg",
         className
       )}
     >
@@ -255,9 +263,6 @@ export function SelectMenu({
           anchorRef={btnRef}
           closeOnScroll
           style={{ minWidth: minW }}
-          className={cn(
-            options.length > 10 && "max-h-72 overflow-y-auto"
-          )}
         >
           {options.map((o) => (
             <MenuItemRow

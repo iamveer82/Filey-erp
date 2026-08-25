@@ -67,6 +67,7 @@ pub fn run() {
             modules::wa_bridge::wa_bridge_reset,
             modules::wa_bridge::wa_bridge_reply,
             modules::wa_bridge::wa_bridge_send,
+            modules::wa_bridge::wa_bridge_send_file,
             // Owner-only shell execution (terminal / repo run)
             modules::shell::shell_exec,
         ])
