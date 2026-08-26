@@ -162,7 +162,7 @@ export default function BankAccounts() {
   const currencies = new Set(accounts.map((a) => a.currency)).size;
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Bank Accounts"
         subtitle="Manage your company bank accounts & balances"

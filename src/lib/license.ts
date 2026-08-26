@@ -183,6 +183,7 @@ export async function redeemVoucher(code: string): Promise<LicenseState> {
       not_signed_in: "Sign in first, then redeem your voucher.",
       invalid_code: "That voucher code isn't valid.",
       exhausted: "This voucher is fully claimed — all free seats are taken.",
+      expired: "This coupon has expired — contact us for a fresh one.",
     };
     throw new Error(msg[res.reason ?? ""] ?? "Couldn't redeem this voucher.");
   }
@@ -277,6 +278,9 @@ export type Tier = "free" | "lite" | "pro";
  *  outright, not about where the data lives. Mirror any change in
  *  supabase/2026-07-29-free-invoice-cap-5.sql or the server cap disagrees. */
 export const FREE_LIMITS = { invoicesPerMonth: 5 };
+
+/** Desktop (Lite) license device slots. */
+export const LITE_DEVICE_LIMIT = 2;
 
 /** Pure tier resolution — pro needs a live plan (past_due = grace period),
  *  lite needs a valid offline license, everything else is free. */

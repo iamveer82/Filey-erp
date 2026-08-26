@@ -69,7 +69,7 @@ export default function AppsManager() {
     <div className="rounded-xl border border-border bg-card">
       <div className="px-6 pt-5 pb-4 border-b border-border flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <div className="text-[17px] font-semibold text-foreground">
+          <div className="text-[15px] font-semibold text-ink">
             Apps &amp; Modules
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">

@@ -15,7 +15,9 @@ import {
   getBridgeConfig,
   hasDesktop,
   onWaMessage,
+  onWaVoice,
   replyWa,
+  sendWaFile,
   type WaMessage,
 } from "./waBridge";
 import { billing } from "./api";
@@ -174,10 +176,76 @@ export function startWaAgent(): void {
   onWaMessage((m) => {
     queue = queue.then(() => handle(m)).catch(() => {});
   });
+
+  // Voice notes: transcribe with the configured provider's Whisper endpoint,
+  // then run the exact same handler the words would have taken as text.
+  onWaVoice((v) => {
+    queue = queue
+      .then(() => handleVoice(v))
+      .catch(() => {});
+  });
 }
 
-/** Answer one incoming message. Runs one at a time, off the queue. */
-async function handle(m: WaMessage): Promise<void> {
+/** Transcribe one voice note and answer it. Falls back to a clear, honest
+ *  line when no speech provider is configured — never silence. */
+async function handleVoice(v: {
+  id: string;
+  from: string;
+  fromName?: string;
+  b64: string;
+  mimetype?: string;
+}): Promise<void> {
+  waLogAdd({
+    dir: "in",
+    from: v.from,
+    name: v.fromName,
+    text: "[voice note]",
+  });
+  let transcript = "";
+  try {
+    const { transcribeAudio, sttAvailable } = await import("./voice");
+    if (!sttAvailable()) {
+      await replyWa(
+        v.id,
+        waFormat(
+          "I can't listen yet — voice needs an OpenAI or Groq key in Settings → AI Assistant. Type it out and I'm on it."
+        )
+      );
+      return;
+    }
+    const bytes = Uint8Array.from(atob(v.b64), (c) => c.charCodeAt(0));
+    transcript = await transcribeAudio(bytes, {
+      mimetype: v.mimetype,
+      filename: "note.ogg",
+    });
+  } catch (e) {
+    log.warn("whatsapp", "voice transcription failed", e);
+    await replyWa(
+      v.id,
+      waFormat(
+        "That voice note didn't come through clearly on my side. Send it as text and I'm on it."
+      )
+    );
+    return;
+  }
+  if (!transcript) {
+    await replyWa(v.id, waFormat("That one came through silent — say it again?"));
+    return;
+  }
+  waLogAdd({ dir: "in", from: v.from, name: v.fromName, text: transcript });
+  log.info("whatsapp", `voice from ${v.from} →`, transcript.slice(0, 120));
+  // The spoken words are treated exactly like typed ones; `voice` flags the
+  // reply path to also send a spoken version back.
+  await handle(
+    { id: v.id, from: v.from, text: transcript, fromName: v.fromName },
+    { voice: true }
+  );
+}
+
+/** Answer one incoming message. Runs one at a time, off the queue. When
+ *  `voice` is set (a voice note came in), the reply also goes back as a
+ *  spoken voice note where TTS is available — talk in, talk out. */
+async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<void> {
   // Everything the bridge sees goes in the log, owner or customer: it is the
   // only record of the WhatsApp thread the in-app agent can read back (see
   // list_whatsapp_messages). WhatsApp itself offers no history to fetch.
@@ -297,6 +365,41 @@ async function handle(m: WaMessage): Promise<void> {
     else pendingApproval.delete(key); // nothing outstanding — a stale "yes" must not land
 
     await answer(text);
+
+    // Spoken reply for spoken input: TTS → mp3 on disk → audio message.
+    // Best-effort — the text answer above already stands on its own.
+    if (opts.voice) {
+      try {
+        const { ttsAvailable, textToSpeech } = await import("./voice");
+        if (ttsAvailable()) {
+          const mp3 = await textToSpeech(text);
+          const { outputDir } = await import("./agentFiles");
+          const target = await outputDir();
+          if (target) {
+            const { writeDocFile } = await import("./localPaths");
+            const path = await writeDocFile(
+              target.dir,
+              `filey-voice-${Date.now()}.mp3`,
+              mp3
+            );
+            await sendWaFile(`${m.from}@s.whatsapp.net`, {
+              path,
+              filename: "filey-reply.mp3",
+              mimetype: "audio/mpeg",
+              caption: undefined,
+            });
+            waLogAdd({
+              dir: "out",
+              from: m.from,
+              name: m.fromName,
+              text: "[voice reply]",
+            });
+          }
+        }
+      } catch (e) {
+        log.warn("whatsapp", "voice reply skipped", e);
+      }
+    }
   } catch (e) {
     // The reason matters over WhatsApp — there is no console to check.
     const why = e instanceof Error ? e.message : String(e);

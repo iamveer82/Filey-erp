@@ -273,7 +273,7 @@ export default function ModernOverview() {
     }
     return Object.entries(seg).map(([name, value]) => ({ name, value }));
   }, [customers]);
-  const pieColors = [c.accent, c.primary, c.accentSoft, c.tertiary, "#6366f1"];
+  const pieColors = [c.accent, c.primary, c.accentSoft, c.tertiary, c.grid];
 
   const recent = useMemo(() => invoices.slice(0, 5), [invoices]);
 
@@ -399,16 +399,16 @@ export default function ModernOverview() {
               key={k.label}
               onClick={() => nav(k.to)}
               className={cn(
-                "p-5 text-left border-b lg:border-b-0 border-border hover:bg-hover/50 transition-colors",
+                "p-5 text-left border-b lg:border-b-0 border-border hover:bg-hover transition-colors",
                 i < 3 && "lg:border-r",
                 i % 2 === 0 && "sm:border-r lg:border-r"
               )}
             >
-              <div className="text-[13px] text-muted-foreground">{k.label}</div>
+              <div className="text-[12px] text-muted-foreground">{k.label}</div>
               {loading ? (
                 <Skeleton className="mt-3 h-8 w-28" />
               ) : (
-                <div className="mt-3 text-[26px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
+                <div className="mt-3 text-[22px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
                   {k.value}
                 </div>
               )}
@@ -421,7 +421,7 @@ export default function ModernOverview() {
                       up ? "text-success" : "text-danger"
                     )}
                   >
-                    <Icon className="h-3 w-3" />
+                    <Icon className="h-3.5 w-3.5" />
                     {k.delta >= 0 ? "+" : ""}
                     {k.delta.toFixed(1)}%
                   </span>
@@ -442,7 +442,7 @@ export default function ModernOverview() {
           className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border"
           bodyClassName="h-[280px] mt-4"
         >
-          {!hasBarData ? (
+          {!loading && !hasBarData ? (
             <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -507,7 +507,7 @@ export default function ModernOverview() {
                 {/* Donut centre: the whole point of the chart, stated once */}
                 <div className="absolute inset-0 grid place-items-center pointer-events-none">
                   <div className="text-center">
-                    <div className="text-[20px] font-semibold text-foreground tabular-nums leading-none">
+                    <div className="text-[22px] font-semibold text-foreground tabular-nums leading-none">
                       {num(customers.length)}
                     </div>
                     <div className="text-[11px] text-muted-foreground mt-1">
@@ -549,7 +549,7 @@ export default function ModernOverview() {
               to="/invoicing"
               className="text-[12.5px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
             >
-              View all <ArrowUpRight className="h-3 w-3" />
+              View all <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
           </div>
           <div className="overflow-x-auto">
@@ -558,7 +558,7 @@ export default function ModernOverview() {
                 <tr className="text-left text-muted-foreground border-b border-border">
                   <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Invoice</th>
                   <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Customer</th>
-                  <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Amount</th>
+                  <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide text-right">Amount</th>
                   <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Status</th>
                   <th className="px-5 py-2.5 font-medium text-[12px] tracking-wide">Date</th>
                 </tr>
@@ -581,7 +581,7 @@ export default function ModernOverview() {
                   >
                     <td className="px-5 py-3 text-foreground font-medium">{r.number}</td>
                     <td className="px-5 py-3 text-foreground">{r.customer_name || "—"}</td>
-                    <td className="px-5 py-3 text-foreground tabular-nums">{aed(r.total || 0)}</td>
+                    <td className="px-5 py-3 text-right text-foreground tabular-nums">{aed(r.total || 0)}</td>
                     <td className="px-5 py-3">
                       <Badge tone={statusTone(r.status || "draft")}>{r.status}</Badge>
                     </td>
@@ -639,6 +639,7 @@ export default function ModernOverview() {
                   <button
                     key={r}
                     onClick={() => setRange(r)}
+                    aria-pressed={range === r}
                     className={cn(
                       "px-2.5 py-1 rounded",
                       range === r
@@ -653,7 +654,7 @@ export default function ModernOverview() {
             }
             bodyClassName="h-[260px] mt-2"
           >
-            {!hasTrendData ? (
+            {!loading && !hasTrendData ? (
               <ChartEmpty hint="Money in and money out appear here once invoices are sent and paid." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -699,7 +700,7 @@ export default function ModernOverview() {
       {isEmpty && !loading && (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="grid h-14 w-14 place-items-center rounded-xl bg-muted text-muted-foreground mb-4">
-            <Sparkles size={26} />
+            <Sparkles size={24} />
           </div>
           <p className="text-[14px] font-semibold text-foreground">Fresh start</p>
           <p className="text-[12.5px] text-muted-foreground mt-1 max-w-[36ch]">

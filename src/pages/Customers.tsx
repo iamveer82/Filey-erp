@@ -17,6 +17,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import { num, cn } from "../lib/format";
+import { Skeleton } from "../components/ui";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { inputTypeFor, validateCustomValue, type CustomFieldDef } from "../lib/customFields";
 import { SelectMenu } from "../components/ui-menu";
@@ -158,7 +159,7 @@ export default function Customers() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="Customers"
         subtitle="Your customer directory: names, TRN and addresses pulled onto invoices & quotations"
@@ -255,7 +256,7 @@ export default function Customers() {
 
       {/* ── Table card: toolbar lives inside the card (DEMO reference) ── */}
       <div className="card p-0">
-        <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-2">
+        <div className="px-5 pt-4 pb-3 flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
             <input
@@ -278,7 +279,7 @@ export default function Customers() {
             <button
               aria-label="Clear filters"
               onClick={() => setVw({ email: false, trn: false })}
-              className="text-xs font-medium text-brand-500 hover:text-ink"
+              className="text-xs font-medium text-brand-500 hover:text-ink transition-colors cursor-pointer"
             >
               Clear filters
             </button>
@@ -303,7 +304,7 @@ export default function Customers() {
                 [0, 1, 2].map((i) => (
                   <tr key={i}>
                     <td colSpan={4} className="td">
-                      <div className="h-4 w-2/3 rounded bg-hover animate-pulse" />
+                      <Skeleton className="h-4 w-2/3" />
                     </td>
                   </tr>
                 ))}
@@ -436,9 +437,9 @@ export default function Customers() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-4 w-full">
             {[
-              { id: "overview", label: "Overview", icon: <Info size={12} /> },
-              { id: "activity", label: "Activity", icon: <Activity size={12} /> },
-              { id: "invoices", label: "Invoices", icon: <FileText size={12} /> },
+              { id: "overview", label: "Overview", icon: <Info size={14} /> },
+              { id: "activity", label: "Activity", icon: <Activity size={14} /> },
+              { id: "invoices", label: "Invoices", icon: <FileText size={14} /> },
             ].map((t) => (
               <TabsTrigger key={t.id} value={t.id}>
                 {t.icon}
@@ -509,7 +510,7 @@ export default function Customers() {
           </TabsContent>
         </Tabs>
 
-        <div className="flex justify-end gap-2 pt-4 border-t border-brand-200">
+        <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button
             onClick={() => detail && nav(`/customers/${detail.id}?statement=1`)}
             className="btn-ghost"
@@ -606,7 +607,7 @@ function TH({
           active && "text-foreground"
         )}
       >
-        {label} <ArrowUpDown className="h-3 w-3" />
+        {label} <ArrowUpDown className={cn("h-3 w-3 transition-transform", active && "text-foreground")} />
       </button>
     </th>
   );
@@ -998,7 +999,7 @@ function CustomerModal({
           </div>
         </div>
       )}
-      <div className="mt-5 flex justify-end gap-2">
+      <div className="flex justify-end gap-2 pt-3 border-t border-border">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>

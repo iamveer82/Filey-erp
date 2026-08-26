@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Download, Info, Upload } from "lucide-react";
-import { billing, erp, crm, fin, quotes } from "../../lib/api";
+import { billing, erp, crm, fin, hr, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
 import { cn, errMsg, todayYmd } from "../../lib/format";
 import { hasTauri, saveBytes } from "../../lib/localPaths";
@@ -34,6 +34,9 @@ export default function BackupPanel() {
         ["quotations", () => quotes.listDocs()],
         ["customers", () => crm.customers()],
         ["expenses", () => fin.expenses()],
+        ["accounts", () => fin.accounts()],
+        ["transactions", () => fin.transactions()],
+        ["employees", () => hr.employees()],
       ] as const;
       const settled = await Promise.allSettled(sources.map(([, load]) => load()));
       const failed = sources
@@ -43,12 +46,19 @@ export default function BackupPanel() {
         throw new Error(
           `Could not read ${failed.join(", ")}. Nothing was downloaded - a backup missing data is worse than none.`
         );
-      const [company, products, orders, invoices, quotations, customers, expenses] =
-        settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
+      const values = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
+      const [company, products, orders, invoices, quotations, customers, expenses, accounts, transactions, employees] = values;
       const json = JSON.stringify(
         {
+          version: 2,
           exported_at: new Date().toISOString(),
           app: "filey-erp",
+          counts: Object.fromEntries(
+            sources.map(([name], i) => {
+              const v = values[i];
+              return [name, Array.isArray(v) ? v.length : v ? 1 : 0];
+            })
+          ),
           company,
           products,
           orders,
@@ -56,6 +66,9 @@ export default function BackupPanel() {
           quotations,
           customers,
           expenses,
+          accounts,
+          transactions,
+          employees,
         },
         null,
         2
@@ -89,7 +102,7 @@ export default function BackupPanel() {
   return (
     <div className="rounded-xl border border-border bg-card">
       <div className="px-6 pt-5 pb-4 border-b border-border">
-        <div className="text-[17px] font-semibold text-foreground">
+        <div className="text-[15px] font-semibold text-ink">
           Backup &amp; Restore
         </div>
         <div className="text-[13px] text-muted-foreground mt-1">
@@ -107,8 +120,9 @@ export default function BackupPanel() {
                 Download backup
               </div>
               <div className="text-[12.5px] text-muted-foreground">
-                Company, products, orders, invoices, quotations, customers and
-                expenses.
+                Company, products, orders, invoices, quotations, customers,
+                expenses, accounts, transactions and employees — the full
+                ledger and books.
               </div>
               <button
                 onClick={exportData}

@@ -25,6 +25,9 @@ export function getAccent(): AccentKey {
 
 export function applyAccent(a: AccentKey = getAccent()): void {
   document.documentElement.dataset.accent = a;
+  // Notify theme-aware hooks (useChartColors etc.) — without this, a caller
+  // applying the accent after React mounted leaves subscribers stale.
+  window.dispatchEvent(new Event("filey-ui"));
 }
 
 export function setAccent(a: AccentKey): void {

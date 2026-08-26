@@ -366,7 +366,7 @@ export default function Integrations() {
   const soonCount = integrations.filter((i) => i.soon).length;
 
   return (
-    <div className="animate-fade-up pb-10">
+    <div className="pb-10">
       <PageHeader
         title="Integrations"
         subtitle="Connect Filey with the tools you already use, and let the AI agent work in them"

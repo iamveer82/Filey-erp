@@ -374,12 +374,12 @@ export default function Inventory() {
                   <p className="text-sm font-semibold text-ink truncate tracking-tight">
                     {p.name}
                   </p>
-                  <p className="text-[11px] text-brand-500 font-medium tracking-tight">
+                  <p className="text-[11px] text-muted-foreground font-medium">
                     {p.sku}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-bold text-ink tabular-nums tracking-tight">
+                  <span className="text-sm font-semibold text-ink tabular-nums tracking-tight">
                     {p.quantity}
                   </span>
                   {p.quantity === 0 ? (
@@ -392,7 +392,7 @@ export default function Inventory() {
             ))}
           </div>
           {lowStock.length > 6 && (
-            <p className="text-xs text-brand-500 mt-3 font-medium tracking-tight">
+            <p className="text-xs text-muted-foreground mt-3 font-medium">
               +{lowStock.length - 6} more items need attention
             </p>
           )}
@@ -422,14 +422,14 @@ export default function Inventory() {
                   Low stock
                 </FilterChip>
                 <button
-                  className="btn-ghost !h-8 text-xs"
+                  className="btn-ghost text-xs"
                   disabled={draftingPo}
                   onClick={draftPoFromLowStock}
                 >
                   {draftingPo ? (
-                    <Loader2 size={13} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                   ) : (
-                    <ShoppingCart size={13} />
+                    <ShoppingCart size={14} />
                   )}
                   Draft PO from low stock
                 </button>
@@ -485,7 +485,7 @@ export default function Inventory() {
           bulkActions={[
             {
               label: "Share",
-              icon: <Users size={13} />,
+              icon: <Users size={14} />,
               run: async (sel) => {
                 try {
                   for (const p of sel) await shareRecord("products", p.id, true);
@@ -498,7 +498,7 @@ export default function Inventory() {
             },
             {
               label: "Make private",
-              icon: <Lock size={13} />,
+              icon: <Lock size={14} />,
               run: async (sel) => {
                 try {
                   for (const p of sel) await shareRecord("products", p.id, false);
@@ -511,7 +511,7 @@ export default function Inventory() {
             },
             {
               label: "Delete",
-              icon: <Trash2 size={13} />,
+              icon: <Trash2 size={14} />,
               danger: true,
               run: async (sel) => {
                 const ok = await confirm({

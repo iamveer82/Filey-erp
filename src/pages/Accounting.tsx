@@ -226,7 +226,7 @@ export default function Accounting() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="Accounting"
         subtitle="Chart of accounts, journal entries & financial position"

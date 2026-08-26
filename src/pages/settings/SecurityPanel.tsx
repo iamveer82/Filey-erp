@@ -1,8 +1,8 @@
 import { supabase } from "../../lib/supabase";
 import { rememberLocalCredential } from "../../lib/localAuth";
 import { Modal, Field } from "../../components/ui";
-import { useEffect, useState, type ReactNode } from "react";
-import { Lock, KeyRound, Monitor, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Lock, KeyRound, Monitor, ShieldAlert } from "lucide-react";
 
 function ManageRow({
   icon,
@@ -22,7 +22,7 @@ function ManageRow({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 rounded-xl border border-brand-200 px-3 py-3 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+      className="w-full flex items-center gap-3 rounded-xl border border-border px-3 py-3 text-left hover:bg-hover transition-colors cursor-pointer"
     >
       <span
         className={`rounded-md p-2 ${
@@ -37,11 +37,19 @@ function ManageRow({
         >
           {title}
         </span>
-        <span className="block text-[11px] text-brand-400">{desc}</span>
+        <span className="block text-[11px] text-muted-foreground">{desc}</span>
       </span>
       {right}
-      <ChevronRight size={15} className="text-brand-300 shrink-0" />
+      {!danger && <ChevronRightIcon />}
     </button>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="text-muted-foreground shrink-0">
+      <path d="m9 18 6-6-6-6" />
+    </svg>
   );
 }
 
@@ -53,23 +61,23 @@ export default function SecurityPanel({
   return (
     <div className="card">
       <p className="font-medium text-ink">Security</p>
-      <p className="text-sm text-brand-500 mt-0.5 mb-4">Protect your account</p>
+      <p className="text-sm text-muted-foreground mt-0.5 mb-4">Protect your account</p>
       <div className="space-y-2">
         <ManageRow
           icon={<Lock size={16} />}
           title="Change Password"
-          desc="Update your account password"
+          desc="Requires your current password to confirm"
           onClick={onChangePassword}
         />
         <ManageRow
           icon={<KeyRound size={16} />}
           title="Two-Factor Authentication"
-          desc="Enable TOTP from your Supabase account settings"
+          desc="Not available yet — planned for a future release"
         />
         <ManageRow
           icon={<Monitor size={16} />}
           title="Active Sessions"
-          desc="Sessions are managed by Supabase Auth"
+          desc="Not available yet — planned for a future release"
         />
       </div>
     </div>
@@ -83,32 +91,57 @@ export function ChangePasswordModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const [currentPw, setCurrentPw] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (open) {
+      setCurrentPw("");
       setPw("");
       setPw2("");
       setErr("");
       setOk(false);
     }
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, [open]);
 
+  const close = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    onClose();
+  };
+
   const submit = async () => {
-    if (pw.length < 8) return setErr("Password must be at least 8 characters.");
+    if (currentPw.length < 1) return setErr("Enter your current password first.");
+    if (pw.length < 8) return setErr("New password must be at least 8 characters.");
     if (pw !== pw2) return setErr("Passwords do not match.");
     if (!supabase) return setErr("Auth not configured.");
     setBusy(true);
     setErr("");
+
+    // Re-authenticate with the current password before rotating. Without this
+    // challenge, anyone at an unlocked keyboard silently takes over the account.
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email: (await supabase.auth.getUser()).data.user?.email ?? "",
+      password: currentPw,
+    });
+    if (reauthError) {
+      setBusy(false);
+      return setErr(
+        reauthError.message.includes("Invalid login credentials")
+          ? "Current password is incorrect."
+          : `Could not verify your identity: ${reauthError.message}`
+      );
+    }
+
     const { error } = await supabase.auth.updateUser({ password: pw });
     if (!error) {
-      // Keep the device's offline password in step with the account's. A stale
-      // hash means this machine still wants the previous password the next time
-      // it is used without a connection.
       const { data } = await supabase.auth.getUser();
       if (data.user?.email)
         await rememberLocalCredential(data.user.email, data.user.id, pw);
@@ -117,29 +150,46 @@ export function ChangePasswordModal({
     if (error) setErr(error.message);
     else {
       setOk(true);
-      setTimeout(onClose, 1200);
+      timeoutRef.current = setTimeout(close, 1200);
     }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Change Password">
+    <Modal open={open} onClose={close} title="Change Password">
       <div className="space-y-3">
+        <Field label="Current Password">
+          <input
+            type="password"
+            className="input"
+            value={currentPw}
+            onChange={(e) => setCurrentPw(e.target.value)}
+            autoComplete="current-password"
+          />
+        </Field>
         <Field label="New Password">
           <input
             type="password"
             className="input"
             value={pw}
             onChange={(e) => setPw(e.target.value)}
+            autoComplete="new-password"
           />
         </Field>
-        <Field label="Confirm Password">
+        <Field label="Confirm New Password">
           <input
             type="password"
             className="input"
             value={pw2}
             onChange={(e) => setPw2(e.target.value)}
+            autoComplete="new-password"
           />
         </Field>
+        <div className="flex items-start gap-1.5 rounded-lg bg-info/5 px-2.5 py-1.5">
+          <ShieldAlert size={13} className="text-info shrink-0 mt-px" />
+          <p className="text-[11px] text-muted-foreground">
+            Your current password is required to confirm this change.
+          </p>
+        </div>
         {err && (
           <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2">
             {err}
@@ -152,7 +202,7 @@ export function ChangePasswordModal({
         )}
       </div>
       <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
+        <button className="btn-ghost" onClick={close}>
           Cancel
         </button>
         <button className="btn-primary" disabled={busy} onClick={submit}>

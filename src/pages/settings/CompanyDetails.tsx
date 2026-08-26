@@ -149,28 +149,49 @@ export default function CompanyDetails() {
       setFieldError("email", "Enter a valid email");
       hasErr = true;
     }
+    if (c.trn && !/^\d{15}$/.test(c.trn.trim())) {
+      setFieldError("trn", "TRN must be exactly 15 digits");
+      hasErr = true;
+    }
     if (hasErr) return;
 
     setSaving(true);
     try {
       await billing.saveCompany(c);
-      await saveBankInfo(bank);
-      await saveLetterhead(lh);
-      await saveCompanyStampSig(stampSig);
-      // One write per type, and only for types the user actually touched.
-      for (const spec of DOC_NUMBER_KINDS) {
-        const v = docFmts[spec.kind];
-        if (v !== undefined) await saveDocFormat(spec.kind, v);
+      // Bank, letterhead, stamp and doc formats are independent targets —
+      // run them in parallel and report which ones failed, rather than
+      // aborting on the first error and leaving the user guessing.
+      const [bankR, lhR, stampR] = await Promise.allSettled([
+        saveBankInfo(bank),
+        saveLetterhead(lh),
+        saveCompanyStampSig(stampSig),
+      ]);
+      const fmtResults = await Promise.allSettled(
+        DOC_NUMBER_KINDS.filter((spec) => docFmts[spec.kind] !== undefined).map(
+          (spec) => saveDocFormat(spec.kind, docFmts[spec.kind]!)
+        )
+      );
+      const failures = [
+        ...(bankR.status === "rejected" ? ["bank details"] : []),
+        ...(lhR.status === "rejected" ? ["letterhead"] : []),
+        ...(stampR.status === "rejected" ? ["stamp/signature"] : []),
+        ...fmtResults
+          .map((r, i) =>
+            r.status === "rejected" ? DOC_NUMBER_KINDS[i].label.toLowerCase() : null
+          )
+          .filter(Boolean),
+      ];
+      if (failures.length) {
+        toast.error(`Saved company details, but these failed: ${failures.join(", ")}. Try saving again.`);
       }
       try {
         const fresh = await billing.getCompany();
         setC(fresh);
       } catch (e) {
         console.warn("Failed to load company details after save", e);
-        // getCompany falls back to cache — our saved data is there.
       }
       setSaved(true);
-      toast.success("Company details saved.");
+      if (!failures.length) toast.success("Company details saved.");
     } catch (e) {
       const msg =
         e instanceof Error

@@ -91,9 +91,11 @@ export function onLog(cb: (e: LogEntry) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-/** The whole buffer as text, for pasting into a bug report. */
-export function logAsText(): string {
-  return entries
+/** Log entries as text, for pasting into a bug report. Pass a filtered array
+ *  to serialise only the visible subset; omit for the whole buffer. */
+export function logAsText(filter?: LogEntry[]): string {
+  const rows = filter ?? entries;
+  return rows
     .map(
       (e) =>
         `${new Date(e.at).toISOString()} ${e.level.toUpperCase().padEnd(5)} [${e.scope}] ${

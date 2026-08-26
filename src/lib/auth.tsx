@@ -99,18 +99,25 @@ export function adoptLocalProfile(p: Partial<Profile>): void {
  *  so the same person sees the same name and company in both modes and is never
  *  asked to set up a profile they already have. Best-effort by design. */
 async function pullCloudProfile(uid: string, email: string): Promise<void> {
-  if (!uid || !supabase) return;
-  try {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", uid)
-      .maybeSingle();
-    if (data) adoptLocalProfile({ ...(data as Partial<Profile>), email });
-  } catch {
-    /* a name is not worth failing a sign-in over */
+    if (!uid || !supabase) return;
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", uid)
+        .maybeSingle();
+      if (data) {
+        // The signup trigger creates a stub profile (name: "User", company: "").
+        // Adopting every non-empty field from that stub would rename a user who
+        // set up offline ("Ahmed", "Gulf Trading") back to "User" — the same
+        // guard DataModePanel uses when switching modes. Skip stub fields.
+        const isStub = data.name === "User" && !data.company;
+        if (!isStub) adoptLocalProfile({ ...(data as Partial<Profile>), email });
+      }
+    } catch {
+      /* a name is not worth failing a sign-in over */
+    }
   }
-}
 
 export type Channel = "email" | "phone";
 
@@ -496,14 +503,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     if (local) {
-      // End the on-device session and return to the login screens, same as
-      // cloud. The remembered credential SURVIVES so they can sign back in
-      // without a connection, and the on-device profile and data are untouched
-      // — signing out is not a request to erase the company's books.
+      // End the on-device session AND the underlying cloud session. Without
+      // this, a shared computer's next user inherits the previous account's
+      // live Supabase session — background sync keeps shipping writes to an
+      // account the person at the keyboard didn't sign into. The remembered
+      // credential SURVIVES so they can sign back in without a connection.
       setLocalSignedIn(false);
       setUser(null);
       setSession(null);
       setCacheOrg(null);
+      // Kill the cloud session that cloudSignIn/OTP created — sync, licensing
+      // and RLS all key off it. Without this, "signed out" was cosmetic.
+      if (supabase) await supabase.auth.signOut().catch(() => {});
       return;
     }
     if (!supabase) return;

@@ -195,7 +195,7 @@ export default function Suppliers() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Suppliers"
         subtitle="Vendors you buy from: track balances and purchase history"

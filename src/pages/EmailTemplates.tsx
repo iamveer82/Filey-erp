@@ -137,7 +137,7 @@ export default function EmailTemplates() {
   const categories = new Set(templates.map((t) => t.category)).size;
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Email Templates"
         subtitle="Reusable email templates with placeholders"

@@ -192,7 +192,7 @@ export default function ChequeRegister() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Cheque Register"
         subtitle="Track issued & received cheques"

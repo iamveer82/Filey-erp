@@ -177,6 +177,19 @@ async function pushFileBlobs(
 
 let running = false;
 
+/** True while a migration (import/push) is running. syncCycle checks this and
+ *  skips rather than racing a full-collection replace against the same tables.
+ *  Set/cleared by the migration callers via setMigrating(). */
+let migrating = false;
+
+export function setMigrating(v: boolean): void {
+  migrating = v;
+}
+
+export function isMigrating(): boolean {
+  return migrating;
+}
+
 /** Push everything the journal marked dirty. Returns true when the push ran to
  *  completion (including "nothing to do"). `client` is injectable for tests. */
 export async function syncNow(
@@ -200,6 +213,8 @@ export async function syncNow(
   if (!supa) return stop("Cloud is not configured in this build.");
   if (!manual && !autoSyncEnabled()) return false;
   if (running) return stop("A sync is already running — wait for it to finish.");
+  if (migrating && !manual)
+    return stop("A data migration is running — sync will resume after it finishes.");
   if (typeof navigator !== "undefined" && !navigator.onLine)
     return stop("No internet connection.");
 

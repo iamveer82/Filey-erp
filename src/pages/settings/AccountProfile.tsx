@@ -1,4 +1,5 @@
 import { supabase, cloudConfigured } from "../../lib/supabase";
+import { isLocalMode } from "../../lib/dataMode";
 import { cloudSessionEmail } from "../../lib/sync";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
@@ -59,7 +60,6 @@ export default function AccountProfile() {
   const [p, setP] = useState({
     name: profile?.name ?? "",
     phone: profile?.phone ?? "",
-    role: profile?.role ?? "Administrator",
     username: profile?.username ?? "",
     avatar: profile?.avatar ?? "",
     language: profile?.language ?? "English (US)",
@@ -83,10 +83,22 @@ export default function AccountProfile() {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-  const verified = !!(user as any)?.email_confirmed_at;
+  // The AuthProvider `user` in local mode is a synthetic on-device identity
+  // with no email_confirmed_at — reading verification from it always shows
+  // "Unverified" even for a fully confirmed account. Read from the real
+  // Supabase session instead.
+  const verified = !!(supabase && !isLocalMode() && (user as any)?.email_confirmed_at);
 
   const onAvatar = (file?: File) => {
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Avatar must be under 2 MB — pick a smaller image.");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast.error("Pick an image file (PNG, JPG, etc.).");
+      return;
+    }
     const r = new FileReader();
     r.onload = () => set("avatar", String(r.result));
     r.readAsDataURL(file);
@@ -98,6 +110,7 @@ export default function AccountProfile() {
   const [cpw, setCpw] = useState("");
   const [show, setShow] = useState({ c: false, n: false, k: false });
   const [pwBusy, setPwBusy] = useState(false);
+  const [usernameBusy, setUsernameBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const pwValid = PW_RULES.every((r) => r.test(npw));
   // cloudConfigured is true in every build (Supabase is baked in), so it says
@@ -128,6 +141,35 @@ export default function AccountProfile() {
   // An email change in flight: the new address plus the code sent to it.
   const [pending, setPending] = useState<{ next: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
+
+  // ---- email verification -------------------------------------------------
+  // Supabase leaves email_confirmed_at NULL when an account signed up while
+  // "Confirm email" was optional (or the link was never clicked) — the user
+  // is fully signed in, yet the badge reads Unverified. The fix is the
+  // confirmation email itself: resend it, user clicks, Supabase stamps the
+  // row, and onAuthStateChange (USER_UPDATED) refreshes the session here.
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  const sendVerification = async () => {
+    if (!accountEmail || !supabase) return;
+    setVerifyBusy(true);
+    setVerifyMsg(null);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: accountEmail.trim().toLowerCase(),
+      });
+      if (error) throw error;
+      setVerifyMsg({
+        ok: true,
+        t: "Confirmation link sent — open it from your inbox, then reopen Settings.",
+      });
+    } catch (e) {
+      setVerifyMsg({ ok: false, t: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
 
   const changeEmail = async () => {
     const next = await prompt({
@@ -235,7 +277,6 @@ export default function AccountProfile() {
                   await updateProfile({
                     name: p.name,
                     phone: p.phone,
-                    role: p.role,
                     avatar: p.avatar,
                     username: p.username,
                   });
@@ -304,15 +345,6 @@ export default function AccountProfile() {
                   onChange={(e) => set("phone", e.target.value)}
                 />
               </FormField>
-              <FormField label="Role">
-                <SelectMenu
-                  value={p.role}
-                  onChange={(v) => set("role", v)}
-                  options={["Administrator", "Manager", "Accountant", "Staff"].map(
-                    (r) => ({ value: r, label: r })
-                  )}
-                />
-              </FormField>
             </div>
           </div>
         </div>
@@ -348,6 +380,28 @@ export default function AccountProfile() {
                   Change Email
                 </button>
               </div>
+              {!verified && (
+                <div className="mb-3">
+                  <button
+                    className="btn-ghost"
+                    onClick={() => void sendVerification()}
+                    disabled={verifyBusy}
+                  >
+                    {verifyBusy ? "Sending…" : "Send verification link"}
+                  </button>
+                  {verifyMsg && (
+                    <p
+                      className={
+                        verifyMsg.ok
+                          ? "mt-1.5 text-[12px] font-medium text-success"
+                          : "mt-1.5 text-[12px] font-medium text-danger"
+                      }
+                    >
+                      {verifyMsg.t}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {pending && (
                 <div className="mb-4 rounded-lg border border-brand-200 dark:border-white/10 p-3">
@@ -405,9 +459,17 @@ export default function AccountProfile() {
             />
             <button
               className="btn-ghost shrink-0"
+              disabled={usernameBusy}
               onClick={async () => {
-                await updateProfile({ username: p.username });
-                toast.success("Username saved.");
+                setUsernameBusy(true);
+                try {
+                  await updateProfile({ username: p.username });
+                  toast.success("Username saved.");
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setUsernameBusy(false);
+                }
               }}
             >
               Change Username

@@ -133,7 +133,7 @@ export default function ToolsPage() {
   }
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Tools"
         subtitle="Convert, merge, split & edit your files, all on-device"
@@ -341,7 +341,7 @@ function PdfToolWorkspace({
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       {/* One header, not two. The tool name used to appear in a sticky bar and
           again in a card 90px below it, with the category floating unanchored in
           the top-right corner. Everything identifying the tool now sits on one

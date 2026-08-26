@@ -53,7 +53,7 @@ export default function FollowUpsPage() {
   const supplierOpts = vendors.map((s) => ({ id: s.id, name: s.name }));
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Follow-ups"
         subtitle="Reminders and to-dos. We surface them in-app when they're due"

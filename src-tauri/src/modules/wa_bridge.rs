@@ -217,6 +217,11 @@ pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
                         // Route to the local agent in the frontend.
                         let _ = app2.emit("wa-message", v.clone());
                     }
+                    Some("voice_note") => {
+                        // A voice note the owner sent — the app transcribes it
+                        // (Whisper via the configured provider) and answers.
+                        let _ = app2.emit("wa-voice", v.clone());
+                    }
                     _ => {}
                 }
             }

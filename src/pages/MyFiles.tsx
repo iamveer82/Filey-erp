@@ -406,7 +406,7 @@ export default function MyFiles() {
   /* ---------------- gates ---------------- */
   if (!isConfigured || !user) {
     return (
-      <div className="animate-fade-up">
+      <div className="">
         <PageHeader
           title="My Files"
           subtitle="Organise documents into folders: drag, drop, and arrange your way"
@@ -420,7 +420,7 @@ export default function MyFiles() {
 
   if (loading) {
     return (
-      <div className="animate-fade-up">
+      <div className="">
         <PageHeader
           title="My Files"
           subtitle="Organise documents into folders: drag, drop, and arrange your way"
@@ -456,7 +456,7 @@ export default function MyFiles() {
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <div className="animate-fade-up">
+      <div className="">
         <PageHeader
           title="My Files"
           subtitle="Organise documents into folders: drag, drop, and arrange your way"
@@ -985,7 +985,7 @@ function FilePreviewPage({
   const isImage = file.mime.startsWith("image/");
 
   return (
-    <div className="animate-fade-up flex h-[calc(100vh-7rem)] flex-col">
+    <div className="flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
           className="rounded-md p-2 text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer"

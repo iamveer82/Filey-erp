@@ -133,7 +133,7 @@ export default function People() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="People"
         subtitle="Employees and contacts on your team"

@@ -1,7 +1,6 @@
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@shared/auth";
 import { initDisplayCurrency } from "@shared/displayCurrency";
-import { billing } from "@shared/api";
 import { Gate } from "@mobile/components/Gate";
 import { TabShell } from "@mobile/components/TabShell";
 import Dashboard from "@mobile/screens/Dashboard";

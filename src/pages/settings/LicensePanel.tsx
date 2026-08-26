@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Cloud, KeyRound, Laptop, ShieldCheck, ShoppingCart, Unplug } from "lucide-react";
-import { cloudConfigured } from "../../lib/supabase";
+import { Cloud, KeyRound, Laptop, ShieldCheck, ShoppingCart, Unplug, Copy, Check } from "lucide-react";
+import { cloudConfigured, supabase } from "../../lib/supabase";
 import {
   verifyStoredLicense,
+  LITE_DEVICE_LIMIT,
   activateThisDevice,
   redeemVoucher,
   deactivateDevice,
@@ -33,11 +34,32 @@ export default function LicensePanel() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [voucher, setVoucher] = useState("");
+  /** Website leads with their minted coupon codes — the owner reads the code
+   *  here (and in email) and sends it once payment lands. */
+  const [leads, setLeads] = useState<
+    { id: string; name: string; phone: string; email: string | null; code: string; status: string; created_at: string }[]
+  >([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const loadLeads = async () => {
+    if (!cloudConfigured || !supabase) return;
+    try {
+      const { data } = await supabase
+        .from("lead_coupons")
+        .select("id, name, phone, email, code, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(25);
+      setLeads((data ?? []) as never);
+    } catch {
+      /* offline — the list is owner-only convenience */
+    }
+  };
 
   const refresh = () => {
     verifyStoredLicense().then(setLocal).catch(() => {});
     deviceId().then(setThisDevice).catch(() => {});
     entitlement(true).then(setTier).catch(() => {});
+    loadLeads();
     if (cloudConfigured) {
       licenseOverview().then(setOverview).catch(() => {});
       listOrgDevices().then(setOrgDevices).catch(() => {});
@@ -71,7 +93,7 @@ export default function LicensePanel() {
   return (
     <div className="card space-y-5">
       <div>
-        <h2 className="text-lg font-medium text-ink flex items-center gap-2">
+        <h2 className="text-[15px] font-semibold text-ink flex items-center gap-2">
           <KeyRound size={18} /> Desktop License
         </h2>
         <p className="text-sm text-brand-500 mt-1">
@@ -100,7 +122,7 @@ export default function LicensePanel() {
       )}
 
       {/* This device */}
-      <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
+      <div className="rounded-xl border border-border p-4">
         <p className="font-medium text-ink flex items-center gap-2">
           <Laptop size={15} /> This device
         </p>
@@ -153,13 +175,13 @@ export default function LicensePanel() {
 
       {/* Account license + slots */}
       {cloudConfigured && (
-        <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
+        <div className="rounded-xl border border-border p-4">
           <p className="font-medium text-ink">Your license</p>
           {overview ? (
             <>
               <p className="text-sm text-brand-500 mt-1">
                 Purchased {fmtDate(overview.license.created_at)} · {overview.license.status} ·{" "}
-                {overview.devices.filter((d) => !d.deactivated_at).length}/2 device slots used
+                {overview.devices.filter((d) => !d.deactivated_at).length}/{LITE_DEVICE_LIMIT} device slots used
               </p>
               <ul className="mt-2 space-y-1.5">
                 {overview.devices.map((d) => (
@@ -181,16 +203,22 @@ export default function LicensePanel() {
                       </span>
                       {!d.deactivated_at && (
                         <button
-                          className="text-xs text-danger hover:underline cursor-pointer"
+                          className="text-xs text-danger hover:underline cursor-pointer disabled:opacity-50 transition-opacity"
                           disabled={busy}
-                          onClick={() =>
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Deactivate "${d.device_name || "this device"}"? The device will lose its offline license and needs re-activation.`
+                              )
+                            )
+                              return;
                             run(
                               () => deactivateDevice(d.fingerprint),
                               "Device deactivated - slot freed. Activate your new device now."
-                            )
-                          }
+                            );
+                          }}
                         >
-                          <Unplug size={12} className="inline" /> Deactivate
+                          <Unplug size={14} className="inline" /> Deactivate
                         </button>
                       )}
                     </span>
@@ -218,7 +246,7 @@ export default function LicensePanel() {
                 <ShoppingCart size={15} /> Buy desktop license
               </button>
 
-              <div className="mt-4 border-t border-brand-100 dark:border-white/8 pt-4">
+              <div className="mt-4 border-t border-border pt-4">
                 <label htmlFor="voucher" className="text-sm font-medium text-ink flex items-center gap-1.5">
                   <KeyRound size={14} /> Have a voucher?
                 </label>
@@ -253,7 +281,7 @@ export default function LicensePanel() {
 
       {/* Cloud (Pro) devices - 5 per organization, shared with the team */}
       {cloudConfigured && (
-        <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
+        <div className="rounded-xl border border-border p-4">
           <p className="font-medium text-ink flex items-center gap-2">
             <Cloud size={15} /> Cloud devices
           </p>
@@ -277,7 +305,7 @@ export default function LicensePanel() {
                     last seen {fmtDate(d.last_seen)}
                   </span>
                   <button
-                    className="text-xs text-danger hover:underline cursor-pointer"
+                    className="text-xs text-danger hover:underline cursor-pointer disabled:opacity-50 transition-opacity"
                     disabled={busy}
                     onClick={() =>
                       run(
@@ -286,7 +314,7 @@ export default function LicensePanel() {
                       )
                     }
                   >
-                    <Unplug size={12} className="inline" /> Release
+                    <Unplug size={14} className="inline" /> Release
                   </button>
                 </span>
               </li>
@@ -301,7 +329,77 @@ export default function LicensePanel() {
         </div>
       )}
 
-      {msg && <p className="text-sm text-success">{msg}</p>}
+      {/* Website leads + their coupon codes — send the code after payment. */}
+      {leads.length > 0 && (
+        <div className="rounded-xl border border-border p-4">
+          <p className="font-medium text-ink flex items-center gap-2">
+            <KeyRound size={15} /> Freedom leads &amp; coupons
+          </p>
+          <p className="text-sm text-brand-500 mt-1">
+            Visitors who asked for the plan. Each code unlocks the offline
+            license ONCE and expires unused after 30 days. Copy → send after
+            payment.
+          </p>
+          <ul className="mt-2 divide-y divide-border">
+            {leads.map((l) => (
+              <li key={l.id} className="py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink truncate">
+                    {l.name} · {l.phone}
+                    {l.email ? ` · ${l.email}` : ""}
+                  </p>
+                  <p className="text-xs text-brand-400">
+                    {fmtDate(l.created_at)} ·{" "}
+                    {l.status === "redeemed"
+                      ? "redeemed ✓"
+                      : l.status === "sent"
+                        ? "code sent"
+                        : "code not sent yet"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <code className="text-[12px] font-semibold tracking-wide text-ink">
+                    {l.code}
+                  </code>
+                  <button
+                    aria-label="Copy code"
+                    title="Copy code"
+                    className="grid h-7 w-7 place-items-center rounded-md text-brand-400 hover:text-ink hover:bg-hover cursor-pointer"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(l.code);
+                        setCopiedId(l.id);
+                        setTimeout(() => setCopiedId(null), 1500);
+                      } catch {
+                        /* clipboard denied — the code is visible on screen */
+                      }
+                    }}
+                  >
+                    {copiedId === l.id ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                  {l.status === "new" && (
+                    <button
+                      className="text-xs text-brand-500 hover:text-ink hover:underline cursor-pointer"
+                      disabled={busy}
+                      onClick={async () => {
+                        await supabase!
+                          .from("lead_coupons")
+                          .update({ status: "sent" })
+                          .eq("id", l.id);
+                        loadLeads();
+                      }}
+                    >
+                      Mark sent
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {msg && (<p className="text-sm text-success bg-success/10 rounded-lg px-3 py-2">{msg}</p>)}
       {err && (
         <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
       )}

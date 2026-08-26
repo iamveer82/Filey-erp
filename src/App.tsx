@@ -188,8 +188,15 @@ function Gate() {
   if (!getDataMode() && (hasTauri || !cloudConfigured)) return <SetupNotice />;
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
+  // Signed out. The desktop app is for people who already have an account —
+  // the marketing landing page is web-only noise there; show the login card
+  // straight away. The hosted web build keeps its landing page.
   if (!user)
-    return showLogin ? <Login /> : <Landing onGetStarted={() => setShowLogin(true)} />;
+    return showLogin || hasTauri ? (
+      <Login />
+    ) : (
+      <Landing onGetStarted={() => setShowLogin(true)} />
+    );
   // Signed in but still fetching the profile — show the splash, not the
   // profile-setup form (which would otherwise flash for existing users).
   if (profileLoading) return <Splash />;

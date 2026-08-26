@@ -449,7 +449,7 @@
     @apply text-[12.5px] text-muted-foreground;
   }
   .stat-value {
-    @apply text-[26px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
+    @apply text-[22px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
   }
 
   /* ── Buttons — reference scale: 32px height, 6px radius, 13px text.
@@ -483,10 +483,10 @@
   }
   .btn-danger {
     @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
-           bg-danger px-3 text-[13px] font-medium text-white select-none
+           bg-danger px-3 text-[13px] font-semibold text-white select-none
            transition-colors duration-200 hover:opacity-90 active:scale-[0.97]
            outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none cursor-pointer;
   }
 
   /* Tactile press: buttons scale down 3% on press (Apple — respond on
@@ -531,7 +531,7 @@
   }
   .select {
     @apply appearance-none bg-no-repeat pr-9 cursor-pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     background-position: right 0.75rem center;
   }
   .field {
@@ -595,10 +595,9 @@
     @apply bg-hover;
   }
 
-  /* Joined KPI grid: put on a `grid grid-cols-*` wrapper of MetricCards so the
-     stats read as one continuous bordered box. No gap and a card-coloured
-     ground: a 1px gap over bg-border is what drew the grey hairlines between
-     cards, which we do not want. */
+  /* Joined KPI strips — cards sit close (gap-3) so a row reads as one
+     instrument panel. The original spec wanted zero gap with hairlines;
+     the separated cards won visually and are what ships on every module. */
   .joined-kpis {
     @apply gap-3;
   }

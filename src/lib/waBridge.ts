@@ -92,8 +92,25 @@ export interface WaMessage {
 }
 
 export function onWaMessage(cb: (m: WaMessage) => void): () => void {
-  if (!hasDesktop) return () => {};
+  if (!hasDesktop) return () => void 0;
   const un = listen<WaMessage>("wa-message", (e) => cb(e.payload));
+  return () => void un.then((f) => f()).catch(() => {});
+}
+
+/** A voice note the owner sent — audio arrives base64; the app transcribes it
+ *  and feeds the words to the agent exactly like a typed message. */
+export interface WaVoice {
+  id: string;
+  from: string;
+  text: string; // unused for voice (kept for shape parity)
+  fromName?: string;
+  b64: string;
+  mimetype?: string;
+}
+
+export function onWaVoice(cb: (v: WaVoice) => void): () => void {
+  if (!hasDesktop) return () => void 0;
+  const un = listen<WaVoice>("wa-voice", (e) => cb(e.payload));
   return () => void un.then((f) => f()).catch(() => {});
 }
 

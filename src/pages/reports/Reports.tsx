@@ -50,7 +50,7 @@ export default function Reports() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Reports"
         subtitle="Live analytics driven by your invoices, receipts, orders and inventory."

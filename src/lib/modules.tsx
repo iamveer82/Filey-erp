@@ -79,20 +79,27 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
-  const persist = (next: string[]) => {
+  const persist = (prev: string[], next: string[]) => {
     setDisabled(next);
     tools
       .setSetting(KEY, JSON.stringify(next))
-      .catch((e) => console.error("Failed to persist module settings:", e));
+      .catch((e) => {
+        // Rollback on failure so the toggle doesn't lie about what was saved.
+        console.error("Failed to persist module settings:", e);
+        setDisabled(prev);
+      });
   };
 
   const toggle = (id: string) => {
     const m = MODULES.find((x) => x.id === id);
     if (m?.core) return;
-    persist(disabled.includes(id) ? disabled.filter((x) => x !== id) : [...disabled, id]);
+    const next = disabled.includes(id)
+      ? disabled.filter((x) => x !== id)
+      : [...disabled, id];
+    persist(disabled, next);
   };
 
-  const enableAll = () => persist([]);
+  const enableAll = () => persist(disabled, []);
 
   const value: ModulesValue = {
     loading,

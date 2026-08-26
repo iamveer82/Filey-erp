@@ -30,6 +30,7 @@ import readline from "node:readline";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import QR from "qrcode";
@@ -136,12 +137,14 @@ function startStdinLoop() {
           const mime = v.mimetype || "application/octet-stream";
           const opts = mime.startsWith("image/")
             ? { image: buf, caption: v.caption || undefined }
-            : {
-                document: buf,
-                mimetype: mime,
-                fileName: v.filename || path.basename(v.path),
-                caption: v.caption || undefined,
-              };
+            : mime.startsWith("audio/")
+              ? { audio: buf, mimetype: mime, ptt: mime.includes("ogg") }
+              : {
+                  document: buf,
+                  mimetype: mime,
+                  fileName: v.filename || path.basename(v.path),
+                  caption: v.caption || undefined,
+                };
           console.log(`→ file ${v.filename || path.basename(v.path)} (${buf.length}B) to ${jid}`);
           remember((await activeSock?.sendMessage(jid, opts))?.key?.id);
         } catch (e) {
@@ -283,7 +286,56 @@ async function start() {
       if (m.key.fromMe && !selfChat) continue;
 
       const text = textOf(m);
-      if (!text) continue;
+      if (!text) {
+        // Voice notes are speech, not silence: hand the audio to the app for
+        // transcription. The note registers a pending entry exactly like a
+        // typed message — the app's reply arrives as `reply` against the same
+        // id, and without that entry the reply was written to nobody and the
+        // owner sat staring at a read bubble that never answered. Capped: a
+        // 40-minute voice memo is not a prompt.
+        const audio =
+          m.message?.audioMessage || m.message?.pttMessage || null;
+        if (audio) {
+          try {
+            const buf = await downloadMediaMessage(m, {
+              reuploadRequest: sock.updateMediaMessage,
+            });
+            if (buf && buf.length <= 8 * 1024 * 1024) {
+              console.log(`← ${name}: [voice note ${buf.length}B]`);
+              const id = crypto.randomUUID();
+              void new Promise((resolve) => {
+                const entry = { resolve, jid, timedOut: false };
+                entry.ackTimer = setTimeout(() => {
+                  if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
+                }, ACK_AFTER_MS);
+                entry.timer = setTimeout(() => {
+                  entry.timedOut = true;
+                  setTimeout(() => pending.delete(id), 120_000).unref?.();
+                  resolve(
+                    `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected.`
+                  );
+                }, REPLY_TIMEOUT_MS);
+                pending.set(id, entry);
+                emit({
+                  type: "voice_note",
+                  id,
+                  from: phone,
+                  fromName: name,
+                  b64: buf.toString("base64"),
+                  mimetype: audio.mimetype || "audio/ogg; codecs=opus",
+                });
+              }).then((reply) => {
+                if (reply) void sendTo(jid, reply);
+              });
+            } else {
+              console.error("voice note too large, skipped");
+            }
+          } catch (e) {
+            console.error("voice download failed:", e?.message);
+          }
+        }
+        continue;
+      }
 
       const phone = (jid ?? "").split("@")[0];
       const name = m.pushName ?? phone;

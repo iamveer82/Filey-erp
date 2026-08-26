@@ -724,7 +724,7 @@ export default function CustomerDetail() {
 
   if (!loading && !customer) {
     return (
-      <div className="animate-fade-up">
+      <div className="">
         <Link to="/customers" className="btn-ghost h-9 inline-flex mb-6">
           <ArrowLeft size={15} /> Back to Customers
         </Link>
@@ -739,7 +739,7 @@ export default function CustomerDetail() {
   }
 
   return (
-    <div className="animate-fade-up pb-10">
+    <div className="pb-10">
       {/* DEMO parity header: square back button, 22px title + status pill,
           13px subtitle, right-aligned actions */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">

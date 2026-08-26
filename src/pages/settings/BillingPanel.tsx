@@ -22,33 +22,43 @@ export default function BillingPanel() {
   const { toast } = useUI();
   const [params] = useSearchParams();
   const [stats, setStats] = useState<Record<string, number>>({});
+  const [statsError, setStatsError] = useState(false);
   const [sub, setSub] = useState<Subscription>({ plan: "free" });
+  const [subLoading, setSubLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [leadOpen, setLeadOpen] = useState(false);
 
   useEffect(() => {
+    let failed = false;
+    const guard = <T,>(p: Promise<T[]>): Promise<T[]> =>
+      p.catch(() => {
+        failed = true;
+        return [];
+      });
     Promise.all([
-      erp.products().catch(() => []),
-      erp.orders().catch(() => []),
-      quotes.listDocs().catch(() => []),
-      billing.listDocs().catch(() => []),
-      crm.customers().catch(() => []),
-    ]).then(([p, o, q, i, c]) =>
+      guard(erp.products()),
+      guard(erp.orders()),
+      guard(quotes.listDocs()),
+      guard(billing.listDocs()),
+      guard(crm.customers()),
+    ]).then(([p, o, q, i, c]) => {
+      setStatsError(failed);
       setStats({
         Products: p.length,
         Orders: o.length,
         Quotations: q.length,
         Invoices: i.length,
         Customers: c.length,
-      })
-    );
+      });
+    });
     getSubscription()
       .then(setSub)
       .catch((e) =>
         toast.error(
           "Failed to load subscription: " + (e instanceof Error ? e.message : e)
         )
-      );
+      )
+      .finally(() => setSubLoading(false));
   }, []);
 
   // Once on mount only. With [params, toast] deps the success toast re-renders
@@ -56,8 +66,16 @@ export default function BillingPanel() {
   // endless "Subscription updated" toasts after returning from Stripe.
   useEffect(() => {
     const c = params.get("checkout");
-    if (c === "success") toast.success("Subscription updated - welcome aboard!");
-    else if (c === "cancel") toast.info("Checkout canceled.");
+    if (c === "success") {
+      toast.success("Subscription updated - welcome aboard!");
+      // Strip the param so leaving Settings and coming back doesn't re-toast.
+      params.delete("checkout");
+      window.history.replaceState(null, "", `?${params.toString()}`);
+    } else if (c === "cancel") {
+      toast.info("Checkout canceled.");
+      params.delete("checkout");
+      window.history.replaceState(null, "", `?${params.toString()}`);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -105,10 +123,14 @@ export default function BillingPanel() {
       <div className="card-accent flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-ink/70">Current plan</p>
+          {subLoading ? (
+            <p className="mt-1 text-2xl font-medium text-muted-foreground">…</p>
+          ) : (
           <p className="mt-1 text-2xl font-medium text-ink">
             {current.name}
             {sub.plan !== "free" && sub.plan_status ? ` · ${sub.plan_status}` : ""}
           </p>
+          )}
           {sub.plan !== "free" && sub.current_period_end && (
             <p className="mt-1 text-sm text-ink/70">
               Renews {fmtDate(sub.current_period_end)}
@@ -137,7 +159,7 @@ export default function BillingPanel() {
               style={{
                 width: `${pctUsed}%`,
                 // design.md: no gradients — flat amber accent, red at ≥90%.
-                background: pctUsed >= 90 ? "#ef4444" : "#f59e0b",
+                background: pctUsed >= 90 ? "hsl(var(--danger))" : "hsl(var(--primary-400))",
               }}
             />
           </div>
@@ -224,6 +246,11 @@ export default function BillingPanel() {
 
       <div className="card">
         <p className="mb-3 font-medium text-ink">Usage</p>
+        {statsError ? (
+          <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">
+            Couldn't load your usage counts — check your connection and refresh.
+          </p>
+        ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {Object.entries(stats).map(([k, v]) => (
             <div key={k} className="rounded-xl border border-brand-200 p-3 text-center">
@@ -232,6 +259,7 @@ export default function BillingPanel() {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       <FreedomContactModal open={leadOpen} onClose={() => setLeadOpen(false)} />

@@ -1,4 +1,3 @@
-import { useLiveSync } from "../../lib/realtime";
 import { fmtDate } from "../../lib/format";
 import { DataTable, Badge } from "../../components/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -96,13 +95,15 @@ export default function ActivityLog() {
 
   const load = () => {
     tools
-      .auditLog()
+      .auditLog(200)
       .then(setAudit)
       .catch(console.error)
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
-  useLiveSync(load);
+  // LiveSync removed: audit_log grows forever and a full refetch on every
+  // realtime blip is the heaviest query in the app. The user refreshes by
+  // navigating to the panel.
 
   const entities = useMemo(
     () => Array.from(new Set(audit.map((a) => a.entity))).sort(),

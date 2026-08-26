@@ -131,7 +131,11 @@ export default function PreferencesPanel() {
               className="input"
               placeholder="25"
               defaultValue={get("pref.page_size", "25")}
-              onBlur={(e) => set("pref.page_size", e.target.value || "25")}
+              onBlur={(e) => {
+              const n = parseInt(e.target.value, 10);
+              const clamped = Number.isFinite(n) ? Math.max(5, Math.min(200, n)) : 25;
+              set("pref.page_size", String(clamped));
+            }}
             />
           </Field>
           <Field label="Brand colour">
@@ -139,7 +143,7 @@ export default function PreferencesPanel() {
               <input
                 type="color"
                 value={brandColor}
-                onChange={(e) => setBrandColor(e.target.value)}
+                onBlur={(e) => setBrandColor(e.target.value)}
                 className="h-10 w-14 rounded-xl border-0 p-0 cursor-pointer"
               />
               <span className="text-sm text-brand-500">{brandColor}</span>

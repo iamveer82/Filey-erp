@@ -18,6 +18,7 @@ import {
   Link2,
   X,
   Printer,
+  Users,
 } from "lucide-react";
 import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { cn } from "../lib/format";
@@ -41,12 +42,17 @@ export function RowActions({
   onCopy,
   onDelete,
   onSend,
+  onShare,
+  shareLabel = "Share",
   align = "right",
 }: {
   onView?: () => void;
   onEdit?: () => void;
   onCopy?: () => void;
   onDelete?: () => void;
+  /** Team-share this record — renders the members icon button. */
+  onShare?: () => void;
+  shareLabel?: string;
   onSend?: {
     whatsapp?: () => void;
     email?: () => void;
@@ -107,6 +113,19 @@ export function RowActions({
           className={btn}
         >
           <Copy className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {onShare && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onShare();
+          }}
+          title={shareLabel}
+          aria-label={shareLabel}
+          className={btn}
+        >
+          <Users className="h-3.5 w-3.5" />
         </button>
       )}
       {onSend && (

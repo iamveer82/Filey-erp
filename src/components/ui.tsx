@@ -267,35 +267,6 @@ export function InfoCard({
   );
 }
 
-/** Back-compat: old StatCard maps onto MetricCard styling. */
-export function StatCard({
-  label,
-  value,
-  hint,
-  icon,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  icon?: ReactNode;
-  accent?: "brand" | "emerald";
-}) {
-  return (
-    <div className="card">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="stat-label">{label}</p>
-          <p className="stat-value">{value}</p>
-          {hint && <p className="text-xs text-brand-400 mt-1">{hint}</p>}
-        </div>
-        {icon && (
-          <div className="rounded-xl p-2.5 bg-primary-100 text-ink">{icon}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function Badge({
   children,
   tone = "neutral",
@@ -482,7 +453,7 @@ export function DataTable<T>({
                 disabled={running}
                 onClick={() => runBulk(a)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium cursor-pointer transition-colors",
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none",
                   a.danger
                     ? "text-danger hover:bg-danger/10"
                     : "text-foreground hover:bg-hover"
@@ -578,9 +549,14 @@ export function DataTable<T>({
                       <p className="text-sm font-medium text-foreground">
                         {empty ?? "Nothing here yet"}
                       </p>
-                      <p className="text-[12.5px] text-muted-foreground mt-1 max-w-xs">
-                        When you have records, they'll show up right here.
-                      </p>
+                      {/* A custom message means the list was filtered, not
+                          empty — the fixed "they'll show up here" copy would
+                          contradict it. */}
+                      {!empty && (
+                        <p className="text-[12.5px] text-muted-foreground mt-1 max-w-xs">
+                          When you have records, they'll show up right here.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </td>
@@ -851,69 +827,8 @@ export function FormField({
           {error}
         </p>
       ) : hint ? (
-        <p className="text-xs text-brand-400 mt-1.5">{hint}</p>
+        <p className="text-xs text-muted-foreground mt-1">{hint}</p>
       ) : null}
-    </div>
-  );
-}
-
-/* ---------- Dashboard breakdown cards (minimal theme) ---------- */
-
-/** Quiet KPI breakdown card: stacked value/label rows on a white surface. */
-export function OrdersStatCard({
-  title,
-  items,
-}: {
-  title: string;
-  items: [string, number][];
-}) {
-  return (
-    <div className="card">
-      <p className="font-bold text-ink mb-4">{title}</p>
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-        {items.map(([k, v]) => (
-          <div key={k}>
-            <p className="text-2xl font-bold leading-none text-ink tabular-nums">{v}</p>
-            <p className="text-xs font-semibold text-brand-400 mt-1">{k}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** Quiet breakdown card: dot legend + total tile on a white surface. */
-export function StockBreakdownCard({
-  title,
-  total,
-  items,
-}: {
-  title: string;
-  total: number;
-  items: [string, number, string][];
-}) {
-  return (
-    <div className="card">
-      <p className="font-bold text-ink mb-4">{title}</p>
-      <div className="flex items-center gap-5">
-        <ul className="flex-1 space-y-2.5">
-          {items.map(([k, v, dot]) => (
-            <li
-              key={k}
-              className="flex items-center justify-between text-sm text-brand-700"
-            >
-              <span className="flex items-center gap-2 font-medium">
-                <span className={`w-2.5 h-2.5 rounded-full ${dot}`} />
-                {k}
-              </span>
-              <span className="font-bold tabular-nums">{v}</span>
-            </li>
-          ))}
-        </ul>
-        <div className="grid place-items-center rounded-xl bg-muted text-foreground w-16 h-16 shrink-0">
-          <span className="text-2xl font-bold tabular-nums">{total}</span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1059,8 +974,7 @@ export function FilterChip({
   const tones: Record<string, string> = {
     neutral: active
       ? "bg-foreground text-background border-foreground"
-      : "bg-card text-muted-foreground border-border hover:bg-hover",
-    success: active
+      : "bg-card text-muted-foreground border-border hover:bg-hover",    success: active
       ? "bg-success text-white border-success"
       : "bg-success/10 text-success border-success/20 hover:bg-success/20",
     warn: active
@@ -1076,6 +990,7 @@ export function FilterChip({
   return (
     <button
       type="button"
+      aria-pressed={!!active}
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
@@ -1086,7 +1001,7 @@ export function FilterChip({
       {count !== undefined && (
         <span
           className={cn(
-            "inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold",
+            "inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-semibold",
             active ? "bg-background/20 text-background" : "bg-muted text-muted-foreground"
           )}
         >

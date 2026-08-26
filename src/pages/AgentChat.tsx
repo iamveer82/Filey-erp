@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Mic,
   Plus,
   Zap,
   Paperclip,
@@ -80,6 +81,7 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { cn } from "../lib/format";
+import { startDictation, speechRecognitionSupported } from "../lib/voice";
 import {
   hasDesktop as waHasDesktop,
   bridgeState,
@@ -166,6 +168,41 @@ export default function AgentChat() {
   }, []);
 
   const [dragging, setDragging] = useState(false);
+  // ── Voice dictation (Web Speech API — Chromium, free, no key) ──────────
+  const [listening, setListening] = useState(false);
+  const dictationRef = useRef<ReturnType<typeof startDictation> | null>(null);
+    const micSupported = useMemo(() => speechRecognitionSupported(), []);
+
+  const toggleMic = () => {
+    if (listening) {
+      dictationRef.current?.stop();
+      dictationRef.current = null;
+      setListening(false);
+      return;
+    }
+    const base = input;
+    dictationRef.current = startDictation({
+      onFinal: (chunk) =>
+        setInput((cur) => (cur === base ? "" : cur) + (cur && cur !== base ? " " : "") + chunk),
+      onInterim: (draft) => {
+        // Live draft shows in the placeholder so the words appear as spoken
+        // without churning the real value on every partial result.
+        if (textareaRef.current) textareaRef.current.placeholder = draft || "Listening…";
+      },
+      onEnd: () => {
+        setListening(false);
+        dictationRef.current = null;
+        if (textareaRef.current) textareaRef.current.placeholder = textareaRef.current.dataset.ph || "Message Filey AI…";
+      },
+      onError: (e) => {
+        setListening(false);
+        dictationRef.current = null;
+        if (e !== "no-speech" && e !== "aborted")
+          setErr(`Dictation failed: ${e}`);
+      },
+    });
+    setListening(!!dictationRef.current);
+  };
   // Read fresh every render: frozen-at-mount values kept showing a stale model
   // chip (and a stale "connect first" gate) after the key changed in Settings.
   // These are cheap localStorage reads.
@@ -514,7 +551,7 @@ export default function AgentChat() {
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-2 text-foreground">
-              <Paperclip size={28} />
+              <Paperclip size={24} />
               <p className="text-sm font-semibold text-foreground">Drop a PDF or image to attach</p>
             </div>
           </div>
@@ -524,12 +561,7 @@ export default function AgentChat() {
             a long conversation, which is exactly where they used to be scrolled
             off the top. On lg+ those controls live in the rail, so only the
             title stays. The blur keeps message text from showing through. */}
-        <div className="sticky top-0 z-30 bg-background/85 backdrop-blur">
-          <div className={COLUMN}>
-          </div>
-        </div>
-
-        {/* Messages */}
+                {/* Messages */}
         <div className={cn(COLUMN, "flex-1 space-y-6 pb-6 pt-2")}>
           {empty && !busy ? (
             <div className="mx-auto mt-8 max-w-xl text-center">
@@ -539,7 +571,7 @@ export default function AgentChat() {
               <div className="mx-auto mb-3 grid h-28 w-28 place-items-center">
                 <BloubBot size={112} state="idle" label="Filey AI" ambient />
               </div>
-              <p className="text-[20px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
+              <p className="text-[22px] font-semibold text-foreground tracking-tight">How can I help with your business?</p>
               <p className="mt-1.5 text-[13px] text-muted-foreground">
                 Ask anything, or flip on <b>Autonomous</b> to delegate a whole task. I can read and
                 act across invoices, customers, inventory, accounting and more.
@@ -659,7 +691,7 @@ export default function AgentChat() {
                             </span>
                           </div>
                         )}
-                        <span className="absolute left-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/60 text-[9px] font-bold text-white">
+                        <span className="absolute left-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-black/60 text-[10px] font-semibold text-white">
                           {i + 1}
                         </span>
                         <button
@@ -889,13 +921,34 @@ export default function AgentChat() {
                     aria-label="Send message"
                     title="Send (Enter)"
                     className={cn(
-                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors disabled:hover:bg-transparent",
                       input.trim() || files.length
                         ? "bg-primary-400 text-zinc-900 hover:bg-primary-500"
-                        : "bg-transparent text-muted-foreground hover:bg-hover hover:text-foreground"
+                        : "bg-transparent text-muted-foreground"
                     )}
                   >
-                    <ArrowUp size={16} strokeWidth={2.25} />
+                    <ArrowUp size={16} />
+                  </button>
+                )}
+                {/* Mic — dictation straight into the composer. Browser engine
+                    (Chromium WebView2), free, no key. Hidden where the browser
+                    doesn't ship SpeechRecognition. */}
+                {micSupported && !busy && (
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    disabled={busy}
+                    aria-label={listening ? "Stop dictation" : "Start dictation"}
+                    aria-pressed={listening}
+                    title={listening ? "Stop dictation" : "Dictate (speech-to-text)"}
+                    className={cn(
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
+                      listening
+                        ? "bg-danger/15 text-danger animate-pulse"
+                        : "text-muted-foreground hover:bg-hover hover:text-foreground"
+                    )}
+                  >
+                    <Mic size={15} />
                   </button>
                 )}
               </div>
@@ -988,7 +1041,7 @@ export default function AgentChat() {
                 <button
                   onClick={() => setMemOpen(false)}
                   aria-label="Close"
-                  className="text-muted-foreground hover:text-foreground"
+                  className="grid h-8 w-8 place-items-center rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground transition-colors"
                 >
                   <X size={16} />
                 </button>
@@ -1057,7 +1110,7 @@ export default function AgentChat() {
                 <button
                   onClick={() => setHistOpen(false)}
                   aria-label="Close"
-                  className="text-muted-foreground hover:text-foreground"
+                  className="grid h-8 w-8 place-items-center rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground transition-colors"
                 >
                   <X size={16} />
                 </button>
@@ -1097,7 +1150,7 @@ export default function AgentChat() {
                           deleteChat(c.id);
                         }}
                         aria-label="Delete chat"
-                        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 group-focus-within:opacity-100"
                       >
                         <Trash2 size={13} />
                       </button>

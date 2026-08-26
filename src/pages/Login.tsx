@@ -330,7 +330,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center mb-6">
           <Logo size={44} />
-          <h1 className="mt-4 text-xl font-semibold tracking-tight text-foreground">
+          <h1 className="mt-4 text-[22px] font-semibold tracking-tight text-foreground">
             {heading}
           </h1>
           <p className="mt-1.5 text-sm text-brand-500">{subheading}</p>
@@ -471,7 +471,7 @@ export default function Login() {
                 <button
                   type="button"
                   disabled={busy || offline}
-                  className="self-end text-xs font-medium text-brand-500 hover:text-ink cursor-pointer disabled:opacity-50"
+                  className="block ml-auto text-xs font-medium text-brand-500 hover:text-ink cursor-pointer transition-colors duration-200 disabled:opacity-50"
                   onClick={() => {
                     setMethod("otp");
                     setErr(null);
@@ -568,7 +568,7 @@ export default function Login() {
                   setErr(null);
                   setMsg(null);
                 }}
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-ink cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-ink cursor-pointer transition-colors duration-200"
               >
                 <ArrowLeft size={14} /> Back
               </button>

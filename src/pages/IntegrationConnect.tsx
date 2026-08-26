@@ -60,7 +60,7 @@ export default function IntegrationConnect() {
 
   if (!meta)
     return (
-      <div className="animate-fade-up">
+      <div className="">
         <PageHeader title="Unknown integration" subtitle={`No app called "${app}"`} />
         <Link to="/integrations" className="btn-secondary">
           <ArrowLeft size={15} /> Back to integrations
@@ -72,7 +72,7 @@ export default function IntegrationConnect() {
   // the page chrome and nothing else from here.
   if (app === "social-publishing")
     return (
-      <div className="animate-fade-up">
+      <div className="">
         <PageHeader
           title={meta.title}
           subtitle={meta.subtitle}
@@ -110,7 +110,7 @@ export default function IntegrationConnect() {
   const capability = CAPABILITIES.find((c) => c.id === "web");
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title={meta.title}
         subtitle={meta.subtitle}

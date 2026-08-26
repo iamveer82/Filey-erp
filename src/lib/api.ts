@@ -353,6 +353,8 @@ export interface InvoiceItem {
 }
 export interface InvoiceDocSummary {
   id: number;
+  /** Authoring user — distinguishes my invoices from team-shared ones. */
+  user_id?: string;
   number: string;
   customer_name: string;
   status: string;
@@ -364,6 +366,8 @@ export interface InvoiceDocSummary {
   issue_date?: string;
   due_date?: string;
   shared?: boolean;
+  /** Member user-ids this invoice is explicitly shared with. */
+  shared_with?: string[] | null;
   updated_at: string;
   unit_price_formula?: { a: string; b?: string } | null;
   /** VAT rate (%) applied to this document — used by statement engine. */
@@ -2087,13 +2091,16 @@ export const tools = {
       if (row?.id) await sUpdate("app_settings", row.id, { value });
       else await sInsert("app_settings", { key, value });
     }),
-  auditLog: () =>
-    readCached<AuditEntry[]>(
-      "tools_audit",
-      () =>
-        sList<AuditEntry>("audit_log", [{ col: "id", asc: false }]),
-      []
-    ),
+  auditLog: (limit = 200) =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("audit_log")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return (data ?? []) as AuditEntry[];
+    }),
   logAction: (
     actor: string,
     action: string,
@@ -3293,8 +3300,8 @@ export const billing = {
         // (The local shim ignores the column list and returns whole rows, which
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
-          "id,number,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
-          "shared,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
+          "id,user_id,number,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
+          "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
           // doc_type is null on legacy rows and those count as sales, which
@@ -3542,6 +3549,28 @@ export const billing = {
         shared
       )
     ),
+  /** Team-share an invoice: with the whole org (all=true) or specific
+   *  members (merged into shared_with). Server validates author/admin. */
+  shareWithMembers: (docId: number, all: boolean, userIds: string[]) =>
+    online(async () => {
+      const { error } = await sb().rpc("share_invoice", {
+        p_id: docId,
+        p_all: all,
+        p_user_ids: JSON.parse(JSON.stringify(userIds ?? [])),
+      });
+      if (error) throw error;
+    }),
+  /** The invoice's current team-visibility state (author/admin reads directly). */
+  sharingState: (docId: number) =>
+    online(async () => {
+      const { data, error } = await sb()
+        .from("invoice_docs")
+        .select("shared, shared_with, user_id")
+        .eq("id", docId)
+        .single();
+      if (error) throw error;
+      return data as { shared: boolean; shared_with: string[] | null; user_id: string };
+    }),
   /** Ensure the invoice is shared and return its public portal token. */
   publicLink: (docId: number) =>
     online(async () => {

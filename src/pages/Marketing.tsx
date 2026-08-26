@@ -81,7 +81,7 @@ export default function Marketing() {
   }, [leads, search, filter]);
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Marketing"
         subtitle="Who to contact next, ranked from your own trading history"

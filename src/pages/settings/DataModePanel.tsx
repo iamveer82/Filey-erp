@@ -28,6 +28,7 @@ import {
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
+import { setMigrating } from "../../lib/sync";
 import { canUseLocalMode, hasLocalData, ENFORCE_LICENSING } from "../../lib/license";
 import {
   hasTauri,
@@ -48,12 +49,10 @@ import { todayYmd } from "../../lib/format";
 function SyncSwitch({
   on,
   busy,
-  progress,
   onChange,
 }: {
   on: boolean;
   busy: boolean;
-  progress: string;
   onChange: (want: boolean) => void;
 }) {
   return (
@@ -89,9 +88,15 @@ function SyncSwitch({
         </button>
       </div>
       {busy && (
-        <p className="text-xs text-brand-500 mt-3">
-          {progress || "Working…"}
-        </p>
+        <div className="mt-3" role="status" aria-label="Syncing">
+          <div
+            className="h-5 w-5 rounded-full animate-spin"
+            style={{
+              border: "2px solid hsl(var(--brand-200))",
+              borderTopColor: "hsl(var(--ink))",
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -329,8 +334,7 @@ function CloudSyncCard() {
 export default function DataModePanel() {
   const mode: DataMode = getDataMode() ?? (cloudConfigured ? "cloud" : "local");
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [result, setResult] = useState<MigrateResult[] | null>(null);
+    const [result, setResult] = useState<MigrateResult[] | null>(null);
   const [err, setErr] = useState("");
   const [dataDir, setDataDirState] = useState("");
   const [exportDir, setExportDirState] = useState(getExportDir());
@@ -492,7 +496,7 @@ export default function DataModePanel() {
         setErr("");
         setResult(null);
         try {
-          setResult(await migrateCloudToLocal(setProgress));
+          setResult(await migrateCloudToLocal());
         } catch (e) {
           // Switching anyway would drop them into the empty workspace this was
           // meant to prevent, so stay put and explain.
@@ -503,9 +507,8 @@ export default function DataModePanel() {
           );
           return;
         } finally {
-          setBusy(false);
-          setProgress("");
-        }
+      setBusy(false);
+    }
       }
     }
     if (m === "local") await keepSignedInLocally();
@@ -524,14 +527,15 @@ export default function DataModePanel() {
     setBusy(true);
     setErr("");
     setResult(null);
+    setMigrating(true);
     try {
-      const res = await migrateCloudToLocal(setProgress);
+      const res = await migrateCloudToLocal();
       setResult(res);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
       setBusy(false);
-      setProgress("");
+      setMigrating(false);
     }
   };
 
@@ -545,14 +549,15 @@ export default function DataModePanel() {
     setBusy(true);
     setErr("");
     setResult(null);
+    setMigrating(true);
     try {
-      const res = await migrateLocalToCloud(setProgress);
+      const res = await migrateLocalToCloud();
       setResult(res);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
       setBusy(false);
-      setProgress("");
+      setMigrating(false);
     }
   };
 
@@ -605,13 +610,23 @@ export default function DataModePanel() {
     )
       return;
 
+    // Same licensing gate the Advanced → Local path uses. Without this, any
+    // free-tier user gets the paid offline mode by toggling one switch.
+    const localAllowed = await canUseLocalMode();
+    if (!localAllowed) {
+      setErr(
+        "Offline mode needs a Freedom license (one-time purchase) or an existing offline workspace. Upgrade in Settings → Billing, or use the Advanced → Local path below."
+      );
+      return;
+    }
+
     setBusy(true);
     try {
       // Copy down BEFORE switching, and abort the switch if it fails —
       // otherwise the user lands in an empty workspace, which is the exact
       // failure this flow exists to prevent.
       if (getDataMode() !== "local") {
-        setResult(await migrateCloudToLocal(setProgress));
+        setResult(await migrateCloudToLocal());
       }
       await keepSignedInLocally();
       setAutoSyncEnabled(false);
@@ -625,7 +640,6 @@ export default function DataModePanel() {
       );
     } finally {
       setBusy(false);
-      setProgress("");
     }
   };
 
@@ -687,7 +701,7 @@ export default function DataModePanel() {
       <SyncSwitch
         on={mode === "cloud" || autoSyncEnabled()}
         busy={busy}
-        progress={progress}
+       
         onChange={(want) => void setSync(want)}
       />
       <details className="rounded-xl border border-brand-200 p-3">
@@ -834,60 +848,64 @@ export default function DataModePanel() {
 
       {cloudConfigured && (
         <div className="border-t border-brand-100 pt-4 space-y-3">
-          <div>
-            <p className="font-medium text-ink flex items-center gap-2">
-              <Download size={16} /> Import cloud data to this device
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5">
-              Copies everything from your cloud account (invoices, customers,
-              products, files…) into local storage. Sign in to Cloud mode first.
-              Replaces existing local data.
-            </p>
-          </div>
-          <button
-            onClick={runImport}
-            disabled={busy}
-            className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-          >
-            {busy ? progress || "Working…" : "Import cloud data"}
-          </button>
-
-          <div className="pt-2">
-            <p className="font-medium text-ink flex items-center gap-2">
-              <Upload size={16} /> Push local data to the cloud
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5">
-              Uploads everything on this device (invoices, customers, products,
-              files…) to your cloud account, so the web version shows the same
-              data. Cloud records sharing an id are overwritten by this
-              device's copy.
-            </p>
-          </div>
-          <button
-            onClick={runPush}
-            disabled={busy}
-            className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-          >
-            {busy ? progress || "Working…" : "Push local data to cloud"}
-          </button>
-          {result && (
-            <div className="text-sm">
-              <p className="text-success font-medium mb-1">
-                Done. Per-table summary below.
-              </p>
-              <ul className="text-brand-500 grid grid-cols-2 gap-x-6 gap-y-0.5">
-                {result
-                  .filter((r) => r.rows > 0 || r.error)
-                  .map((r) => (
-                    <li key={r.table} className="flex justify-between" title={r.error}>
-                      <span>{r.table}</span>
-                      <span className={r.error ? "text-danger" : "tabular-nums"}>
-                        {r.error ? `${r.rows} · ${r.error}` : r.rows}
-                      </span>
-                    </li>
-                  ))}
-              </ul>
+          {/* While a transfer runs, the card becomes ONE spinning circle —
+              no per-table narration, no counts. People don't act on which of
+              fourteen tables is uploading; they just need to know it's working
+              and that it finished. */}
+          {busy ? (
+            <div className="grid place-items-center py-10" role="status" aria-label="Syncing">
+              <div
+                className="h-10 w-10 rounded-full animate-spin"
+                style={{
+                  border: "3px solid hsl(var(--brand-200))",
+                  borderTopColor: "hsl(var(--ink))",
+                }}
+              />
             </div>
+          ) : (
+            <>
+              <div>
+                <p className="font-medium text-ink flex items-center gap-2">
+                  <Download size={16} /> Import cloud data to this device
+                </p>
+                <p className="text-sm text-brand-500 mt-0.5">
+                  Copies everything from your cloud account (invoices, customers,
+                  products, files…) into local storage. Sign in to Cloud mode
+                  first. Replaces existing local data.
+                </p>
+              </div>
+              <button
+                onClick={runImport}
+                disabled={busy}
+                className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                Import cloud data
+              </button>
+
+              <div className="pt-2">
+                <p className="font-medium text-ink flex items-center gap-2">
+                  <Upload size={16} /> Push local data to the cloud
+                </p>
+                <p className="text-sm text-brand-500 mt-0.5">
+                  Uploads everything on this device (invoices, customers,
+                  products, files…) to your cloud account, so the web version
+                  shows the same data. Cloud records sharing an id are
+                  overwritten by this device's copy.
+                </p>
+              </div>
+              <button
+                onClick={runPush}
+                disabled={busy}
+                className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                Push local data to cloud
+              </button>
+              {result && (
+                <p className="text-sm text-success font-medium">
+                  Done — everything is in sync.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}

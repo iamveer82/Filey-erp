@@ -194,12 +194,17 @@ export default function PaymentReceipt() {
   const [zoom] = useState(100);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>({});
   const previewRef = useRef<HTMLDivElement>(null);
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([billing.getCompany(), receipts.list()]).then(([c, d]) => {
-      setCompany(c);
-      setDocs(d);
-    });
+    Promise.all([billing.getCompany(), receipts.list()])
+      .then(([c, d]) => {
+        setCompany(c);
+        setDocs(d);
+      })
+      .catch((e) => setLoadErr(errMsg(e)))
+      .finally(() => setDocsLoading(false));
     crm.customers().then(setCustomers).catch(() => {});
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
     syncCustomTemplates().then(setCustomTemplates).catch(() => {});
@@ -602,14 +607,14 @@ export default function PaymentReceipt() {
   );
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title="Payment Receipts"
         subtitle="Payments received against invoices"
         action={
           <div className="flex gap-2 flex-wrap">
             <button className="btn-ghost" aria-label="Export" onClick={exportCsv}>
-              <Download size={14} /> Export
+              <Download size={15} /> Export
             </button>
             <button className="btn-primary" onClick={newReceipt}>
               <Plus size={16} /> Record payment
@@ -620,6 +625,11 @@ export default function PaymentReceipt() {
 
       {view === "list" ? (
         <>
+          {loadErr && (
+            <div className="mb-4 rounded-lg bg-danger/10 px-3 py-2 text-[13px] font-medium text-danger">
+              {loadErr}
+            </div>
+          )}
           <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
             <MetricCard
               label="Total received"
@@ -674,6 +684,7 @@ export default function PaymentReceipt() {
           {/* DataTable draws its own card - the extra wrapper here was the
               reason receipts looked boxed-in next to the other sections. */}
           <DataTable
+              loading={docsLoading}
               pageSize={10}
               columns={[
                 { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
@@ -786,12 +797,15 @@ export default function PaymentReceipt() {
       ) : (
         <>
           {!form ? (
-            <div className="mt-4 text-sm text-brand-500">Loading editor…</div>
+            <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
+              Loading editor…
+            </div>
           ) : (
             <>
               {/* Header bar — same layout as the invoice editor: back arrow,
                   title, then status + actions right-aligned. */}
-              <div className="no-print mt-4 flex items-start justify-between mb-6 gap-4 flex-wrap">
+              <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
                 <div className="flex items-start gap-3">
                   <button
                     className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
@@ -808,7 +822,7 @@ export default function PaymentReceipt() {
                       {form.id ? "Edit Receipt" : "Record Payment"}
                     </h1>
                     <p className="text-sm text-brand-500 mt-0.5">
-                      Money received - a receipt the payer can file
+                      Money received — a receipt the payer can file
                     </p>
                   </div>
                 </div>
@@ -1092,7 +1106,7 @@ export default function PaymentReceipt() {
               {viewOpen &&
                 createPortal(
                   <div
-                    className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
+                    className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4"
                     onClick={() => setViewOpen(false)}
                   >
                     <div

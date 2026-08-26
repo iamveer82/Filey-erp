@@ -115,7 +115,7 @@ export default function Purchase() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Purchase"
         subtitle="Log and track company expenses"

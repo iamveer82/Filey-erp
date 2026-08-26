@@ -143,7 +143,7 @@ export default function PayslipPage() {
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title={`Payslip - ${employee.name}`}
         subtitle={periodLabel}

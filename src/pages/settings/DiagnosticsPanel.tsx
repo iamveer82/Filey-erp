@@ -46,6 +46,8 @@ function RunJournal() {
         <button
           className="btn-ghost ml-auto"
           onClick={() => {
+            if (!window.confirm("Clear the run journal? The agent will forget its recent failures and may repeat them."))
+              return;
             clearJournal();
             setRuns([]);
           }}
@@ -103,7 +105,7 @@ export default function DiagnosticsPanel() {
   const shown = useMemo(
     () =>
       entries
-        .filter((e) => (!scope || e.scope === scope) && (!level || e.level === level))
+        .filter((e) => (!scope || e.scope === scope) && (!level || (level === "warn" ? e.level !== "info" : e.level === level)))
         .slice()
         .reverse(), // newest first: the thing that just broke is at the top
     [entries, scope, level]
@@ -149,7 +151,7 @@ export default function DiagnosticsPanel() {
           <button
             className="btn-ghost"
             onClick={() => {
-              void navigator.clipboard?.writeText(logAsText()).then(
+              void navigator.clipboard?.writeText(logAsText(shown)).then(
                 () => {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
@@ -166,6 +168,8 @@ export default function DiagnosticsPanel() {
           <button
             className="btn-ghost"
             onClick={() => {
+              if (!window.confirm("Clear the diagnostic log? This removes the evidence of any issue you're investigating."))
+                return;
               clearLog();
               setEntries([]);
             }}

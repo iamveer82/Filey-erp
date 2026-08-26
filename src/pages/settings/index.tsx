@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Building2,
@@ -86,9 +86,10 @@ export default function Settings() {
     NAV.some((n) => n.id === requested) ? requested : "company"
   );
   const [pwOpen, setPwOpen] = useState(false);
+  const visitedRef = useRef<Set<Section>>(new Set([section]));
 
   return (
-    <div className="animate-fade-up pb-10">
+    <div className="pb-10">
       <PageHeader
         title="Settings"
         subtitle="Manage your workspace, company profile and preferences"
@@ -103,10 +104,12 @@ export default function Settings() {
               <button
                 key={id}
                 onClick={() => setSection(id)}
+                role="tab"
+                aria-selected={isActive}
                 className={cn(
-                  "inline-flex items-center gap-1.5 px-3 py-2.5 text-[13px] whitespace-nowrap border-b-2 transition-colors cursor-pointer",
+                  "inline-flex items-center gap-1.5 px-3 py-2.5 text-[13px] font-medium whitespace-nowrap border-b-2 transition-colors cursor-pointer",
                   isActive
-                    ? "border-primary-500 text-foreground font-medium"
+                    ? "border-primary-500 text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
                 )}
               >
@@ -125,24 +128,40 @@ export default function Settings() {
       </div>
 
       <div>
-        {section === "company" && <CompanyDetails />}
-        {section === "account" && <AccountProfile />}
-        {section === "ai" && <AiSettings />}
-        {section === "users" && <UsersRoles />}
-        {section === "apps" && <AppsManager />}
-        {section === "appearance" && <AppearancePanel />}
-        {section === "activity" && <ActivityLog />}
-        {section === "diagnostics" && <DiagnosticsPanel />}
-        {section === "security" && (
-          <SecurityPanel onChangePassword={() => setPwOpen(true)} />
-        )}
-        {section === "preferences" && <PreferencesPanel />}
-        {section === "billing" && <BillingPanel />}
-        {section === "license" && <LicensePanel />}
-        {section === "notifications" && <NotificationsPanel />}
-        {/* {section === "sms" && <SmsPanel />} */}
-        {section === "backup" && <BackupPanel />}
-        {section === "datamode" && <DataModePanel />}
+        {(() => {
+          // Keep visited panels mounted but hidden — a user who filled 15
+          // fields in Company Details and clicks "Appearance" loses everything
+          // if the panel unmounts. Once a panel is opened it stays alive (just
+          // display:none) so form state, scroll position and in-flight saves
+          // all survive tab switches. First visit still lazy-mounts.
+          const PANELS: { id: Section; el: React.ReactNode }[] = [
+            { id: "company", el: <CompanyDetails /> },
+            { id: "account", el: <AccountProfile /> },
+            { id: "ai", el: <AiSettings /> },
+            { id: "users", el: <UsersRoles /> },
+            { id: "apps", el: <AppsManager /> },
+            { id: "appearance", el: <AppearancePanel /> },
+            { id: "activity", el: <ActivityLog /> },
+            { id: "diagnostics", el: <DiagnosticsPanel /> },
+            { id: "security", el: <SecurityPanel onChangePassword={() => setPwOpen(true)} /> },
+            { id: "preferences", el: <PreferencesPanel /> },
+            { id: "billing", el: <BillingPanel /> },
+            { id: "license", el: <LicensePanel /> },
+            { id: "notifications", el: <NotificationsPanel /> },
+            { id: "backup", el: <BackupPanel /> },
+            { id: "datamode", el: <DataModePanel /> },
+          ];
+          return PANELS.map(({ id, el }) => {
+            const visited = visitedRef.current.has(id);
+            if (section === id) visitedRef.current.add(id);
+            if (!visited && section !== id) return null;
+            return (
+              <div key={id} style={{ display: section === id ? "block" : "none" }}>
+                {el}
+              </div>
+            );
+          });
+        })()}
       </div>
       <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
     </div>

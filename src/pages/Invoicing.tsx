@@ -162,6 +162,8 @@ import {
   type QuickViewData,
   type ShareKind,
 } from "../components/RowActions";
+import TeamShareModal from "../components/TeamShareModal";
+import { useAuth } from "../lib/auth";
 
 type CustomColumn = { key: string; label: string };
 type Item = {
@@ -395,6 +397,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const isPurchase = mode === "purchase";
   const partyLabel = isPurchase ? "Supplier" : "Customer";
   const { toast, confirm } = useUI();
+  const { user } = useAuth();
+  const myId = user?.id ?? "";
+  // Team sharing: the invoice whose Share modal is open.
+  const [shareTarget, setShareTarget] = useState<InvoiceDocSummary | null>(null);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   // Rates are only a fallback: a document saved since the FX freeze carries its
   // own. Cached for four hours, so this costs nothing on most loads.
@@ -417,6 +423,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [statusFilter, setStatusFilter] = useState<
     "all" | "draft" | "sent" | "paid" | "overdue"
   >("all");
+  // Team: show only invoices shared with me by other members.
+  const [sharedWithMe, setSharedWithMe] = useState(false);
   // DEMO parity: quick-view modal payload (+ doc id for its Edit action).
   const [quickView, setQuickView] = useState<{
     id: number;
@@ -426,11 +434,13 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   // Free-tier invoice cap hit (client check or server trigger) → upgrade modal.
   const [capOpen, setCapOpen] = useState(false);
   const isCapError = (e: unknown) => errMsg(e).includes("Free plan limit reached");
+  const [docsLoading, setDocsLoading] = useState(true);
   const loadDocs = () =>
     billing
       .listDocs(mode)
       .then(setDocs)
-      .catch(() => toast.error("Failed to load documents"));
+      .catch(() => toast.error("Failed to load documents"))
+      .finally(() => setDocsLoading(false));
   const loadRecurs = () =>
     recurrences
       .list()
@@ -929,6 +939,12 @@ const editInvoice = async (id: number) => {
     .filter((d) => d.status !== "draft" && !isOverdueDoc(d))
     .reduce((s, d) => s + inStatCcy(d.balance ?? 0, d), 0);
   const filteredDocs = docs.filter((d) => {
+    // "Shared with me": team invoices others opened to this user — not the
+    // user's own, and explicitly visible via whole-org or targeted share.
+    if (sharedWithMe) {
+      if (!myId || d.user_id === myId) return false;
+      if (!(d.shared || (d.shared_with ?? []).includes(myId))) return false;
+    }
     if (statusFilter === "overdue") {
       if (!isOverdueDoc(d)) return false;
     } else if (statusFilter !== "all" && d.status !== statusFilter) {
@@ -1248,12 +1264,12 @@ const editInvoice = async (id: number) => {
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
-          <p className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink tracking-tight">
+          <div className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink tracking-tight">
             <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-100">
               <Repeat size={14} className="text-primary-700" />
             </div>
             Recurring invoices
-          </p>
+          </div>
           <ul className="space-y-1.5">
             {recurs
               .filter((r) => r.active)
@@ -1292,9 +1308,20 @@ const editInvoice = async (id: number) => {
         </div>
       )}
 
+      <TeamShareModal
+        open={!!shareTarget}
+        onClose={() => setShareTarget(null)}
+        record="invoice_docs"
+        recordId={shareTarget?.id ?? 0}
+        label={shareTarget?.number || "invoice"}
+        shareFn={(id, all, userIds) => billing.shareWithMembers(id, all, userIds)}
+        stateFn={(id) => billing.sharingState(id)}
+        onShared={() => loadDocs()}
+      />
+
       <CustomerAdvancesPanel />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <SearchInput
           value={search}
           onChange={setSearch}
@@ -1302,6 +1329,14 @@ const editInvoice = async (id: number) => {
           className="max-w-xs flex-1 min-w-[220px]"
         />
         <div className="flex flex-wrap items-center gap-1.5">
+          {!isPurchase && myId && (
+            <FilterChip
+              active={sharedWithMe}
+              onClick={() => setSharedWithMe((v) => !v)}
+            >
+              Shared with me
+            </FilterChip>
+          )}
           <FilterChip
             active={statusFilter === "all"}
             onClick={() => setStatusFilter("all")}
@@ -1372,6 +1407,7 @@ const editInvoice = async (id: number) => {
       <DataTable<InvoiceDocSummary>
         pageSize={10}
         rows={filteredDocs}
+        loading={docsLoading}
         empty={
           search || statusFilter !== "all"
             ? "No invoices match your filter"
@@ -1460,7 +1496,9 @@ const editInvoice = async (id: number) => {
             label: "Total",
             sortValue: (d) => d.total,
             render: (d) => (
-              <span className="font-medium">{money(d.total, d.currency || "AED")}</span>
+              <span className="font-medium block text-right">
+                {money(d.total, d.currency || "AED")}
+              </span>
             ),
           },
           {
@@ -1528,6 +1566,11 @@ const editInvoice = async (id: number) => {
                 <RowActions
                   onView={() => openQuickView(d)}
                   onEdit={() => editInvoice(d.id)}
+                  onShare={
+                    !isPurchase && d.user_id === myId
+                      ? () => setShareTarget(d)
+                      : undefined
+                  }
                   onCopy={() => duplicateInvoice(d.id)}
                   onSend={{
                     whatsapp: () => sendDoc("whatsapp", d),
@@ -2298,7 +2341,7 @@ function Editor({
           </button>
           <div>
             <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Invoice</h1>
-            <p className="text-sm text-brand-500 mt-0.5">
+            <p className="text-[13px] text-muted-foreground mt-0.5">
               Create and send professional invoices to your customers
             </p>
           </div>

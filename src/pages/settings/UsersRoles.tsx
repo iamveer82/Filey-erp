@@ -20,6 +20,15 @@ export default function UsersRoles() {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [invites, setInvites] = useState<Invitation[]>([]);
   const [myInvites, setMyInvites] = useState<Invitation[]>([]);
+  const [editName, setEditName] = useState(profile?.name ?? "");
+  const [editCompany, setEditCompany] = useState(profile?.company ?? "");
+  // Sync the inline editors when the profile loads after mount (cloud mode
+  // fetches it async — without this the fields sit empty and the Save
+  // button compares against a stale baseline).
+  useEffect(() => {
+    setEditName(profile?.name ?? "");
+    setEditCompany(profile?.company ?? "");
+  }, [profile?.name, profile?.company]);
   const [name, setName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
@@ -71,11 +80,17 @@ export default function UsersRoles() {
     org
       .invites()
       .then(setInvites)
-      .catch(() => setInvites([]));
+      .catch((e) => {
+        setInvites([]);
+        console.error("Failed to load invites:", e);
+      });
     org
       .myInvites()
       .then(setMyInvites)
-      .catch(() => setMyInvites([]));
+      .catch((e) => {
+        setMyInvites([]);
+        console.error("Failed to load my invites:", e);
+      });
   };
   useEffect(() => {
     if (!local || cloudUser) load();
@@ -85,8 +100,13 @@ export default function UsersRoles() {
   const uid = local ? cloudUser?.id : user?.id;
   const currentOrg = (local ? cloudOrgId : profile?.org_id) || "default";
   const personal = currentOrg === "default" || !o;
+  // Scope to THIS org: the user may have org_members rows in other workspaces
+  // (RLS lets their own rows through via user_id = auth.uid()), and a stale
+  // row from an old org could shadow their real role here.
+  const orgMembers = members.filter((m) => m.org_id === currentOrg);
   const myRole =
-    members.find((m) => m.user_id === uid)?.role ?? (personal ? "owner" : "staff");
+    orgMembers.find((m) => m.user_id === uid)?.role ??
+    (personal ? "owner" : "staff");
   const isAdmin = personal || ["owner", "admin"].includes(myRole);
 
   const switchOrg = async (id: string) => {
@@ -121,12 +141,21 @@ export default function UsersRoles() {
   };
 
   const sendInvite = async () => {
-    if (!inviteEmail.trim()) return;
+    const trimmed = inviteEmail.trim().toLowerCase();
+    if (!trimmed) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      toast.error("Enter a valid email address.");
+      return;
+    }
+    if (invites.some((inv) => inv.email?.toLowerCase() === trimmed)) {
+      toast.error("An invitation for that email is already pending.");
+      return;
+    }
     setBusy(true);
     try {
-      await org.invite(inviteEmail.trim(), inviteRole, null);
+      await org.invite(trimmed, inviteRole, null);
       setInviteEmail("");
-      toast.success(`Invitation sent to ${inviteEmail.trim()}.`);
+      toast.success(`Invitation sent to ${trimmed}.`);
       load();
     } catch (e) {
       toast.error(`Could not invite: ${e instanceof Error ? e.message : e}`);
@@ -189,6 +218,55 @@ export default function UsersRoles() {
                   : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Your name + company name — edit inline */}
+      <div className="card p-4 space-y-3">
+        <p className="font-medium text-ink">Your details</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Your name">
+            <input
+              className="input"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder={profile?.name || "Your name"}
+            />
+          </Field>
+          <Field label="Company name">
+            <input
+              className="input"
+              value={editCompany}
+              onChange={(e) => setEditCompany(e.target.value)}
+              placeholder={profile?.company || "Company name"}
+            />
+          </Field>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-primary"
+            disabled={
+              busy ||
+              (editName === (profile?.name ?? "") &&
+                editCompany === (profile?.company ?? ""))
+            }
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await updateProfile({
+                  name: editName.trim(),
+                  company: editCompany.trim(),
+                });
+                toast.success("Profile updated.");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : String(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
 
@@ -282,19 +360,23 @@ export default function UsersRoles() {
         <div className="mb-4">
           <p className="text-lg font-medium text-ink">Members &amp; Roles</p>
           <p className="text-sm text-brand-500 mt-0.5">
-            {members.length} member{members.length === 1 ? "" : "s"}
+            {orgMembers.length} member{orgMembers.length === 1 ? "" : "s"}
             {!isAdmin && " · only owners/admins can change roles"}
           </p>
         </div>
 
-        {members.length === 0 ? (
+        {orgMembers.length === 0 ? (
           <p className="py-6 text-center text-sm text-brand-400">
-            {personal ? "Just you for now." : "No members loaded."}
+            {personal ? "Just you for now — create an organization to invite a team." : "No members loaded."}
           </p>
         ) : (
           <div>
-            {members.map((m) => {
-              const editable = isAdmin && m.user_id !== user?.id;
+            {orgMembers.map((m) => {
+              const isYou = m.user_id === uid;
+              const isLastOwner =
+                m.role === "owner" &&
+                orgMembers.filter((o) => o.role === "owner").length === 1;
+              const editable = isAdmin && !isYou && !isLastOwner;
               return (
                 <div
                   key={m.id}
@@ -325,10 +407,21 @@ export default function UsersRoles() {
                         className="w-[118px]"
                         value={m.role}
                         onChange={async (v) => {
-                          await org.setRole(m.id, v);
-                          load();
+                          try {
+                            await org.setRole(m.id, v);
+                            load();
+                            toast.success("Role updated.");
+                          } catch (e) {
+                            toast.error(
+                              "Could not change role: " +
+                                (e instanceof Error ? e.message : String(e))
+                            );
+                          }
                         }}
-                        options={ROLES.map((r) => ({ value: r, label: r }))}
+                        // "owner" is excluded from the dropdown — ownership
+                        // transfer needs an explicit dedicated flow, not a
+                        // dropdown accident.
+                        options={ROLES.filter((r) => r !== "owner").map((r) => ({ value: r, label: r }))}
                       />
                     ) : (
                       <Badge tone="info">{m.role}</Badge>
@@ -352,8 +445,16 @@ export default function UsersRoles() {
                               danger: true,
                             });
                             if (!ok) return;
-                            await org.remove(m.id);
-                            load();
+                            try {
+                              await org.remove(m.id);
+                              load();
+                              toast.success("Member removed.");
+                            } catch (e) {
+                              toast.error(
+                                "Could not remove member: " +
+                                  (e instanceof Error ? e.message : String(e))
+                              );
+                            }
                           }}
                         >
                           <Trash2 size={15} />

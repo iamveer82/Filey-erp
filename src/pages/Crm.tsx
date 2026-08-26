@@ -161,7 +161,7 @@ export default function Crm() {
   const tasks = acts.filter((a) => !a.done).slice(0, 6);
 
   return (
-    <div className="animate-fade-up">
+    <div>
       <PageHeader
         title="CRM"
         subtitle={`Deals in play: ${aed(pipelineValue)} across ${openDeals} deals`}

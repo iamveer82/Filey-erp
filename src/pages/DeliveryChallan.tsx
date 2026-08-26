@@ -291,7 +291,7 @@ export default function DeliveryChallan() {
   );
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Delivery"
         subtitle="Track shipments and driver assignments"

@@ -309,7 +309,7 @@ export default function DeclarationLetter() {
   const uniqueRecipients = new Set(docs.map((d) => d.recipient_name).filter(Boolean)).size;
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title="Declaration Letters"
         subtitle="VAT supply declaration letters in the standard UAE format"
@@ -654,7 +654,7 @@ function DeclarationEditor({
   const paragraphs = resolveBody(form).split(/\n{2,}/);
 
   return (
-    <div className="animate-fade-up">
+    <div className="">
       <PageHeader
         title={isNew ? "New Declaration Letter" : "Edit Declaration Letter"}
         subtitle="VAT supply declaration in the standard UAE format. Print or email to your supplier"

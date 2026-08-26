@@ -6,7 +6,6 @@ import { Toggle } from "./PreferencesPanel";
 import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
 import { ORB_PRESETS, setPersona } from "../../lib/ai";
 import BloubBot, { useBotSkin } from "../../components/BloubBot";
-import { useUI } from "../../lib/ui";
 import { cn } from "../../lib/format";
 
 /* ---------------- Appearance — theme mode + accent color ----------------
@@ -28,7 +27,6 @@ function useTheme(): { theme: Theme; setTheme: (t: Theme) => void } {
 }
 
 export default function AppearancePanel() {
-  const { toast } = useUI();
   const { theme, setTheme } = useTheme();
   const { accent, setAccent } = useAccent();
   const smooth = useSyncExternalStore(subscribe, getSmoothScroll);
@@ -38,7 +36,7 @@ export default function AppearancePanel() {
       {/* Theme mode */}
       <div className="rounded-xl border border-border bg-card">
         <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[17px] font-semibold text-foreground">
+          <div className="text-[15px] font-semibold text-ink">
             Modes
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">
@@ -68,7 +66,7 @@ export default function AppearancePanel() {
       {/* Scrolling */}
       <div className="rounded-xl border border-border bg-card">
         <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[17px] font-semibold text-foreground">
+          <div className="text-[15px] font-semibold text-ink">
             Scrolling
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">
@@ -91,7 +89,7 @@ export default function AppearancePanel() {
       {/* Accent color */}
       <div className="rounded-xl border border-border bg-card">
         <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[17px] font-semibold text-foreground">
+          <div className="text-[15px] font-semibold text-ink">
             Theme colour
           </div>
           <div className="text-[13px] text-muted-foreground mt-1">
@@ -110,7 +108,7 @@ export default function AppearancePanel() {
                 key={key}
                 onClick={() => {
                   setAccent(key);
-                  toast.success(`Theme colour set to ${val.name}`);
+                  // Selection is instantly visible (ring + check) — no toast needed.
                 }}
                 className={cn(
                   "p-3 rounded-lg border text-left transition-all cursor-pointer",
@@ -153,18 +151,17 @@ export default function AppearancePanel() {
    place shows up in the other. */
 
 function AssistantColor() {
-  const { toast } = useUI();
   const { color } = useBotSkin();
 
   const pick = (hex: string) => {
     setPersona({ orbColor: hex });
-    toast.success("Assistant colour updated");
+    // Same — the swatch ring is the feedback.
   };
 
   return (
     <div className="rounded-xl border border-border bg-card">
       <div className="px-6 pt-5 pb-4 border-b border-border">
-        <div className="text-[17px] font-semibold text-foreground">
+        <div className="text-[15px] font-semibold text-ink">
           Filey AI
         </div>
         <div className="text-[13px] text-muted-foreground mt-1">

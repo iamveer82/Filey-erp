@@ -5,6 +5,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
+    "types": ["vite/client"],
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
@@ -12,13 +13,11 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@shared/*": ["../src/lib/*"],
       "@mobile/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite.config.ts", "../src/lib"]
+  "include": ["src"]
 }

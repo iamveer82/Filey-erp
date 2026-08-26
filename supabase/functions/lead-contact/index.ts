@@ -39,6 +39,21 @@ const esc = (v: unknown) =>
 /** Trim, cap, and reject the empty string. */
 const field = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 
+/** Mint a single-use coupon code for the offline license. Unguessable by
+ *  construction: 20 characters from a 30-symbol alphabet (look-alikes 0/O/1/I
+ *  excluded) is ~98 bits of randomness — nothing like the old FILEY25. */
+const ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+function generateCouponCode(): string {
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  let raw = "";
+  for (const b of bytes) raw += ALPHABET[b % ALPHABET.length];
+  return `FL-${raw.slice(0, 5)}-${raw.slice(5, 10)}-${raw.slice(10, 15)}-${raw.slice(15)}`;
+}
+
+/** How long an unredeemed coupon stays alive. */
+const COUPON_TTL_DAYS = 30;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -87,6 +102,47 @@ Deno.serve(async (req) => {
       .single();
     if (ie) return json({ error: ie.message }, 500);
 
+    // ── Mint the lead's single-use coupon ──────────────────────────────────
+    // One code per lead, one redemption per code, dead in 30 days if unused.
+    // The code goes to the OWNER (email + in-app notification) — the visitor
+    // gets it after payment, which for now is a conversation, not a gateway.
+    const code = generateCouponCode();
+    const expiresAt = new Date(
+      Date.now() + COUPON_TTL_DAYS * 24 * 3_600_000
+    ).toISOString();
+    const ve = await supa
+      .from("vouchers")
+      .insert({ code, max_uses: 1, expires_at: expiresAt });
+    if (ve.error) return json({ error: ve.error.message }, 500);
+    const ce = await supa.from("lead_coupons").insert({
+      lead_id: row.id,
+      name,
+      phone,
+      email: email || null,
+      message: message || null,
+      source,
+      code,
+    });
+    if (ce.error) return json({ error: ce.error.message }, 500);
+
+    // In-app notification for the owner (first profile = the founding account).
+    const { data: owner } = await supa
+      .from("profiles")
+      .select("id, org_id")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (owner) {
+      await supa.from("notifications").insert({
+        org_id: owner.org_id,
+        user_id: owner.id,
+        actor: "Website",
+        kind: "lead",
+        body: `${name} requested Filey Freedom. Coupon ${code} (expires ${expiresAt.slice(0, 10)}).`,
+        link: "/settings?section=billing",
+      });
+    }
+
     const key = Deno.env.get("RESEND_API_KEY");
     const from = Deno.env.get("EMAIL_FROM") ?? "Filey <noreply@gofiley.com>";
     const to = Deno.env.get("LEAD_INBOX") ?? DEFAULT_INBOX;
@@ -109,6 +165,10 @@ Deno.serve(async (req) => {
         html:
           `<div style="font-family:Arial,sans-serif;color:#222">` +
           `<h2 style="margin:0 0 12px">New Freedom plan request</h2>` +
+          `<div style="margin:0 0 14px;padding:12px 16px;background:#FFF8E1;border:1px solid #F0D060;border-radius:8px">` +
+          `<p style="margin:0 0 4px;font-size:12px;color:#666">SINGLE-USE COUPON (expires ${expiresAt.slice(0, 10)}) — send after payment:</p>` +
+          `<p style="margin:0;font-size:20px;font-weight:bold;letter-spacing:1px">${esc(code)}</p>` +
+          `</div>` +
           `<p style="margin:0 0 6px"><b>Name:</b> ${esc(name)}</p>` +
           `<p style="margin:0 0 6px"><b>Phone:</b> ${esc(phone)}</p>` +
           (email ? `<p style="margin:0 0 6px"><b>Email:</b> ${esc(email)}</p>` : "") +
