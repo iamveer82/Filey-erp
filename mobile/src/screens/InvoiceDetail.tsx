@@ -40,6 +40,15 @@ export default function InvoiceDetail() {
   const tax = ((doc.tax_rate || 0) / 100) * subtotal;
   const total = Math.round((subtotal + tax) * 100) / 100;
 
+  const setStatus = async (status: string) => {
+    try {
+      await billing.setStatus(doc.id, status);
+      setDoc((d) => (d ? { ...d, status } : d));
+    } catch {
+      /* silent — the list will show the real state on refresh */
+    }
+  };
+
   const share = async () => {
     const text = `Invoice ${doc.number} — ${money(total, ccy)}${
       doc.customer_name ? ` · ${doc.customer_name}` : ""
@@ -92,7 +101,25 @@ export default function InvoiceDetail() {
               </p>
             )}
           </div>
-          <Pill status={doc.status} />
+          <div className="flex items-center gap-2">
+            <Pill status={doc.status} />
+            {doc.status === "draft" && (
+              <button
+                onClick={() => void setStatus("sent")}
+                className="rounded-full border border-border px-2.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors active:bg-hover"
+              >
+                Mark sent
+              </button>
+            )}
+            {doc.status === "sent" && (
+              <button
+                onClick={() => void setStatus("paid")}
+                className="rounded-full border border-success/30 px-2.5 py-0.5 text-[10.5px] font-medium text-success transition-colors active:bg-success/10"
+              >
+                Mark paid
+              </button>
+            )}
+          </div>
         </Card>
 
         <Card>

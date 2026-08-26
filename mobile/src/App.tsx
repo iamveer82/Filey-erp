@@ -10,6 +10,7 @@ import InvoiceCreate from "@mobile/screens/InvoiceCreate";
 import Inventory from "@mobile/screens/Inventory";
 import Customers from "@mobile/screens/Customers";
 import CustomerDetail from "@mobile/screens/CustomerDetail";
+import Receipts from "@mobile/screens/Receipts";
 import Quoting from "@mobile/screens/Quoting";
 import Settings from "@mobile/screens/Settings";
 import Agent from "@mobile/screens/Agent";
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="/customers/:id" element={<CustomerDetail />} />
               <Route path="/agent" element={<Agent />} />
               <Route path="/more" element={<More />} />
+              <Route path="/receipts" element={<Receipts />} />
               <Route path="/quoting" element={<Quoting />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
