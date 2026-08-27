@@ -26,12 +26,21 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          # macOS dropped: needs an Apple Developer signing cert we don't have,
-          # and Filey ships as a Windows desktop app. Re-add with the APPLE_*
-          # secrets if a notarized .dmg is ever needed.
           - os: ubuntu-22.04
             args: ""
           - os: windows-latest
+            args: ""
+          # macOS is UNSIGNED — no APPLE_* secrets are set, so Gatekeeper marks
+          # the .dmg as from an unidentified developer and users must right-click
+          # → Open once. Set APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
+          # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID (needs a $99/yr Apple
+          # Developer account) and it notarizes with no workflow change.
+          #
+          # arm64 only, not universal: the wa-bridge sidecar below is compiled
+          # for the RUNNER's host triple, and a universal build makes tauri look
+          # for an x86_64-apple-darwin sidecar too, which nothing produces.
+          # For Intel Macs, cross-compile the sidecar with bun's --target first.
+          - os: macos-latest
             args: ""
     runs-on: ${{ matrix.os }}
     steps:
@@ -50,9 +59,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Host triple only. macos-latest is already aarch64, and we don't build
+      # universal (see the matrix note about the sidecar).
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -107,6 +116,13 @@ jobs:
           releaseDraft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AppImage bundling shells out to linuxdeploy, which is itself an
+          # AppImage and needs FUSE to mount — GitHub runners have no FUSE, so
+          # it died with "failed to run linuxdeploy" on every release since
+          # v2.6.0. The .deb and .rpm bundled fine first, but the AppImage
+          # failure failed the job, so Linux never uploaded anything at all.
+          # Extract-and-run skips the mount entirely.
+          APPIMAGE_EXTRACT_AND_RUN: 1
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
