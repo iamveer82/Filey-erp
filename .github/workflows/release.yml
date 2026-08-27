@@ -26,8 +26,19 @@ jobs:
       max-parallel: 1
       matrix:
         include:
+          # deb + rpm only. tauri.conf sets targets "all", which on Linux also
+          # builds an AppImage — and that step has failed on every single
+          # release this project has ever cut ("failed to run linuxdeploy",
+          # stderr swallowed by tauri). Because the bundler runs AppImage last
+          # and one failure fails the job, the .deb and .rpm that had already
+          # built successfully were never uploaded, so Linux shipped nothing at
+          # all. Naming the two working formats explicitly gets Linux users
+          # installers today. APPIMAGE_EXTRACT_AND_RUN=1 was tried and ruled
+          # FUSE out, so re-adding "appimage" needs the real linuxdeploy error
+          # first — likeliest suspect is the bun-compiled wa-bridge sidecar in
+          # externalBin, which linuxdeploy also tries to resolve deps for.
           - os: ubuntu-22.04
-            args: ""
+            args: "--bundles deb,rpm"
           - os: windows-latest
             args: ""
           # macOS is UNSIGNED — no APPLE_* secrets are set, so Gatekeeper marks
@@ -116,13 +127,6 @@ jobs:
           releaseDraft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # AppImage bundling shells out to linuxdeploy, which is itself an
-          # AppImage and needs FUSE to mount — GitHub runners have no FUSE, so
-          # it died with "failed to run linuxdeploy" on every release since
-          # v2.6.0. The .deb and .rpm bundled fine first, but the AppImage
-          # failure failed the job, so Linux never uploaded anything at all.
-          # Extract-and-run skips the mount entirely.
-          APPIMAGE_EXTRACT_AND_RUN: 1
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
