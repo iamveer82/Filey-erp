@@ -154,3 +154,53 @@ jobs:
             # into a working latest.json if the release upload ever needs redoing.
             src-tauri/target/**/release/bundle/**/*.sig
           if-no-files-found: ignore
+
+  # Every release from v2.6.0 through v2.9.0 reported "failure" and shipped
+  # anyway: Windows uploaded, Linux silently did not, and the red run became
+  # background noise. Linux was missing from every release this project ever
+  # cut and nobody noticed. A green matrix is not proof the release is whole —
+  # only the asset list is, so assert on that and fail loudly when a platform
+  # goes missing.
+  verify-release-assets:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every platform uploaded its installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "Assets on $TAG:"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets -q '.assets[].name' | tee assets.txt
+          echo
+
+          # One glob per installer we expect to ship. Keep this list in step
+          # with the build matrix — adding a platform means adding its pattern.
+          missing=0
+          while read -r label pattern; do
+            if grep -qE "$pattern" assets.txt; then
+              echo "  ok      $label"
+            else
+              echo "  MISSING $label  (no asset matching /$pattern/)"
+              missing=1
+            fi
+          done <<'PATTERNS'
+          windows-nsis  _x64-setup\.exe$
+          windows-msi   _x64_en-US\.msi$
+          linux-deb     _amd64\.deb$
+          linux-rpm     \.x86_64\.rpm$
+          macos-dmg     \.dmg$
+          updater       ^latest\.json$
+          PATTERNS
+
+          if [ "$missing" -ne 0 ]; then
+            echo
+            echo "Release $TAG is incomplete — a platform built green but shipped nothing."
+            echo "Do not publish this draft until the gap is understood."
+            exit 1
+          fi
+          echo
+          echo "All expected installers present."
