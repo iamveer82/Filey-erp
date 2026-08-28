@@ -3406,7 +3406,12 @@ export const billing = {
         return {
           ...(d as InvoiceDoc),
           items: items
-            .filter((i) => i.invoice_id === docId)
+            // The query above already filtered on invoice_id server-side, so
+            // this is belt-and-braces — but with === it was a liability: an id
+            // that came back as a string would match nothing, silently yield an
+            // empty item list, and saveDoc would then persist that emptiness.
+            // eslint-disable-next-line eqeqeq
+            .filter((i) => i.invoice_id == docId)
             .map((i) => ({
               id: i.id,
               description: i.description,
@@ -3438,13 +3443,21 @@ export const billing = {
         }
       }
       let docId: number;
+      // Ids of the lines this save replaces. They are NOT deleted here: this
+      // used to wipe every item first and re-insert after, with no transaction
+      // between, so anything that made the insert fail — a column the cloud DB
+      // hadn't migrated yet, a check constraint, a dropped connection — left
+      // the invoice permanently empty and showing a zero total. The delete is
+      // deferred until the replacements are safely written.
+      let staleItemIds: number[] = [];
       if (id && id > 0) {
         await sUpdate("invoice_docs", id, row);
-        const { error } = await sb()
+        const { data: existing, error } = await sb()
           .from("invoice_doc_items")
-          .delete()
+          .select("id")
           .eq("invoice_id", id);
         if (error) throw error;
+        staleItemIds = ((existing ?? []) as { id: number }[]).map((r) => r.id);
         docId = id;
       } else {
         await checkFreeInvoiceCap(invoicesThisMonth);
@@ -3466,6 +3479,17 @@ export const billing = {
               product_id: it.product_id ?? null,
             }))
           );
+        // Throwing here now costs the user nothing: the previous lines are
+        // still in the table, so the invoice survives a failed save intact.
+        if (error) throw error;
+      }
+      // Replacements are in. Retiring the old lines by id (rather than by
+      // invoice_id) is what keeps the ones just written.
+      if (staleItemIds.length) {
+        const { error } = await sb()
+          .from("invoice_doc_items")
+          .delete()
+          .in("id", staleItemIds);
         if (error) throw error;
       }
       // Keep Orders, Inventory and Accounting in sync with the invoice state.

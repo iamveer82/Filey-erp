@@ -143,6 +143,7 @@ type Op = "select" | "insert" | "update" | "upsert" | "delete";
 type Filter =
   | { kind: "eq"; col: string; val: any }
   | { kind: "lte"; col: string; val: any }
+  | { kind: "in"; col: string; val: any[] }
   | { kind: "contains"; col: string; val: any };
 
 class LocalBuilder implements PromiseLike<Result> {
@@ -191,6 +192,12 @@ class LocalBuilder implements PromiseLike<Result> {
     this.filters.push({ kind: "lte", col, val });
     return this;
   }
+  /** Match any of a set of values. Uses the same loose comparison as eq(), so
+   *  an id that came back from storage as a string still matches a number. */
+  in(col: string, vals: any[]): this {
+    this.filters.push({ kind: "in", col, val: vals });
+    return this;
+  }
   contains(col: string, val: any): this {
     this.filters.push({ kind: "contains", col, val });
     return this;
@@ -232,6 +239,8 @@ class LocalBuilder implements PromiseLike<Result> {
     for (const f of this.filters) {
       if (f.kind === "eq" && !this.looseEq(r[f.col], f.val)) return false;
       if (f.kind === "lte" && !(r[f.col] <= f.val)) return false;
+      if (f.kind === "in" && !f.val.some((v) => this.looseEq(r[f.col], v)))
+        return false;
       if (f.kind === "contains") {
         const cell = r[f.col];
         if (Array.isArray(f.val)) {
