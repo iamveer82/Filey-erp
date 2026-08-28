@@ -756,7 +756,9 @@ async function sList<T>(
 async function sChildren<T>(
   table: string,
   fk: string,
-  id: number,
+  // string too, not just a parent id — the same server-side narrowing applies
+  // to a date column (attendance for one day) as to a foreign key.
+  id: number | string,
   order?: { col: string; asc: boolean }[]
 ): Promise<T[]> {
   let q: any = sb().from(table).select("*").eq(fk, id);
@@ -1521,18 +1523,17 @@ export const hr = {
         const today = todayYmd();
         const [emps, att, pay] = await Promise.all([
           sList<Employee>("employees"),
-          sList<{ date: string; status: string }>("attendance"),
+          // Only today's rows. This used to read the whole attendance table —
+          // every employee for every day since the company started — and then
+          // throw all but today away in JS, purely to show two counters.
+          sChildren<{ date: string; status: string }>("attendance", "date", today),
           sList<{ net_pay: number; status: string }>("payroll"),
         ]);
         const active = emps.filter((e) => e.status === "active");
         return {
           headcount: active.length,
-          present_today: att.filter(
-            (a) => a.date === today && a.status === "present"
-          ).length,
-          on_leave: att.filter(
-            (a) => a.date === today && a.status === "leave"
-          ).length,
+          present_today: att.filter((a) => a.status === "present").length,
+          on_leave: att.filter((a) => a.status === "leave").length,
           monthly_payroll: pay
             .filter((p) => p.status !== "paid")
             .reduce((s, p) => s + p.net_pay, 0),
@@ -5017,25 +5018,19 @@ export const receipts = {
   },
 };
 
+/* tool_runs is an append-only log: one row every time a tool runs, forever.
+ * list()/rename()/remove() had no callers anywhere — PdfTools only writes, via
+ * log() and setPaths(). list() in particular read the entire table with no
+ * limit, so it would have grown into the slowest query in the app while never
+ * rendering anything. Deleted rather than paginated; add a bounded read back
+ * when something actually displays this history. */
 export const toolRuns = {
-  list: () =>
-    readCached<ToolRun[]>(
-      "tool_runs",
-      () => sList<ToolRun>("tool_runs", [{ col: "id", asc: false }]),
-      []
-    ),
   log: (tool: string, toolName: string, fileName: string) => {
     const row = { tool, tool_name: toolName, file_name: fileName };
     return write({ k: "insert", t: "tool_runs", row }, () =>
       sInsert("tool_runs", row), -1
     );
   },
-  rename: (id: number, fileName: string) =>
-    write(
-      { k: "update", t: "tool_runs", id, row: { file_name: fileName } },
-      () => sUpdate("tool_runs", id, { file_name: fileName }),
-      undefined
-    ),
   setPaths: (id: number, paths: string[], sizeBytes = 0) =>
     write(
       {
@@ -5050,10 +5045,6 @@ export const toolRuns = {
           size_bytes: sizeBytes,
         }),
       undefined
-    ),
-  remove: (id: number) =>
-    write({ k: "delete", t: "tool_runs", id }, () =>
-      sDelete("tool_runs", id), undefined
     ),
 };
 
