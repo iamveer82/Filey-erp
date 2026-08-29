@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument } from "pdf-lib";
 import type { Tool } from "./PdfToolbox";
@@ -29,7 +30,7 @@ async function firstPageFile(file: File): Promise<File> {
 
 /** Render the first page of PDF bytes to a PNG data URL. */
 async function renderFirstPage(bytes: Uint8Array): Promise<string> {
-  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const pdf = await safePdf.getDocument({ data: bytes }).promise;
   const p = await pdf.getPage(1);
   const pt = p.getViewport({ scale: 1 });
   const scale = RENDER_W / pt.width;

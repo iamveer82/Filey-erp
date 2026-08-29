@@ -22,6 +22,7 @@ import {
 import initVtracer, { to_svg as vtracerToSvg } from "vtracer-wasm";
 import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "./pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { parseRanges } from "./ranges";
 import { hasTauri, saveBytes } from "./localPaths";
@@ -187,7 +188,7 @@ export async function pdfToImages(
   scale = 2
 ): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out: OutFile[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -632,7 +633,7 @@ export async function compressImage(
 /** Extract the embedded text layer of a PDF to a .txt file. */
 export async function pdfToText(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   let text = "";
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -662,7 +663,7 @@ export async function flattenPdf(
   grayscale = false
 ): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out = await PDFDocument.create();
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1365,7 +1366,7 @@ export async function markdownToPdf(file: File): Promise<OutFile> {
 /** Extract every page's text + basic metadata as JSON. */
 export async function pdfToJsonText(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const doc = await loadDoc(file);
   const pages: { page: number; text: string }[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
@@ -1400,7 +1401,7 @@ export async function pdfToImageFormat(
   scale = 2
 ): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out: OutFile[] = [];
   const mime =
     format === "bmp" ? "image/bmp" :
@@ -1438,7 +1439,7 @@ async function rasterTransform(
   scale = 2
 ): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out = await PDFDocument.create();
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1488,7 +1489,7 @@ export const invertColors = (file: File) => rasterTransform(file, "invert");
 /** Remove pages with effectively no text and near-blank pixel content. */
 export async function removeBlankPages(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const keep: number[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1792,7 +1793,7 @@ export async function splitAtPages(
 
 async function extractText(file: File): Promise<string[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const pages: string[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1873,7 +1874,7 @@ export async function comparePdfsText(files: File[]): Promise<OutFile> {
 /** Extract embedded raster images from every page as PNG files. */
 export async function extractImages(file: File): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const { OPS } = pdfjs;
   const out: OutFile[] = [];
   const seen = new Set<string>();
@@ -2008,7 +2009,7 @@ export async function addAttachments(files: File[]): Promise<OutFile> {
 /** Pull every embedded file out of a PDF. */
 export async function extractAttachments(file: File): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const att = (await pdf.getAttachments()) as Record<
     string,
     { filename: string; content: Uint8Array }
@@ -2116,7 +2117,7 @@ async function pdfTables(
   file: File
 ): Promise<{ page: number; rows: string[][] }[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const result: { page: number; rows: string[][] }[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -2324,7 +2325,7 @@ export async function decryptPdf(
   const data = new Uint8Array(await readBuf(file));
   let pdf;
   try {
-    pdf = await pdfjs.getDocument({ data, password }).promise;
+    pdf = await safePdf.getDocument({ data, password }).promise;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
@@ -2391,7 +2392,7 @@ async function ocrPages(
 ): Promise<{ width: number; height: number; words: OcrWord[]; text: string }[]> {
   const { createWorker } = await import("tesseract.js");
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const worker = await createWorker("eng", 1, TESS_OPTS);
   const pages: { width: number; height: number; words: OcrWord[]; text: string }[] = [];
   try {
@@ -2438,7 +2439,7 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
   const scale = 2;
   const { createWorker } = await import("tesseract.js");
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out = await PDFDocument.create();
   const font = await out.embedFont(StandardFonts.Helvetica);
   const worker = await createWorker("eng", 1, TESS_OPTS);
@@ -2737,7 +2738,7 @@ export async function tiffToPdf(file: File): Promise<OutFile> {
 export async function pdfToTiff(file: File): Promise<OutFile[]> {
   const UTIF = (await import("utif")).default;
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out: OutFile[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -3283,7 +3284,7 @@ function detectSkewDeg(source: HTMLCanvasElement): number {
 /** Auto-straighten every page of a scanned PDF. */
 export async function deskewPdf(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const out = await PDFDocument.create();
   for (let i = 1; i <= pdf.numPages; i++) {
     const p = await pdf.getPage(i);

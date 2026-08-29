@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { redactBoxes, type RedactBox, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
@@ -43,7 +44,7 @@ export default function RedactStudio({
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        const pdf = await safePdf.getDocument({ data }).promise;
         if (dead) return;
         setPages(pdf.numPages);
         const idx = Math.min(Math.max(0, page), pdf.numPages - 1);

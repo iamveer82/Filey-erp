@@ -13,6 +13,7 @@ import {
   FolderPlus,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 import { Card, FilterChip, PageHeader, SearchInput } from "../components/ui";
@@ -607,7 +608,7 @@ function FilePreview({ file }: { file: File }) {
       try {
         if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
           const data = new Uint8Array(await file.arrayBuffer());
-          const pdf = await pdfjs.getDocument({ data }).promise;
+          const pdf = await safePdf.getDocument({ data }).promise;
           const p = await pdf.getPage(1);
           const vp = p.getViewport({ scale: 1.4 });
           const c = document.createElement("canvas");

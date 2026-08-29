@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Upload, Loader2, FileText } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { downloadBytes, fileNameOf } from "../lib/toolStorage";
 
@@ -93,7 +94,7 @@ export default function PreviewModal({
     } else if (k === "text") {
       setText(new TextDecoder().decode(bytes));
     } else if (k === "pdf") {
-      const doc = await pdfjs.getDocument({ data: bytes }).promise;
+      const doc = await safePdf.getDocument({ data: bytes }).promise;
       const wrap = canvasWrap.current;
       if (wrap) {
         wrap.replaceChildren();

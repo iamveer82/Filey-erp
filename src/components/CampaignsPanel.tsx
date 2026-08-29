@@ -387,12 +387,23 @@ function ComposeModal({
                 <p className="mt-1 text-sm font-medium text-ink">
                   {renderTemplate(subject || "(no subject)", sample)}
                 </p>
-                <div
-                  className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2 text-[12.5px] text-ink"
-                  // Preview only: the same HTML the campaign will send, rendered
-                  // for the author. Merge values are escaped by renderTemplate;
-                  // the surrounding markup is the author's own.
-                  dangerouslySetInnerHTML={{ __html: renderTemplate(body, sample) }}
+                {/* The campaign body is raw HTML. renderTemplate escapes the
+                    merge values, but the surrounding markup is whatever the
+                    author typed — and a campaign is org-shared, so with two
+                    people in a workspace one member's template would have run
+                    as script in the other's session. The session lives in
+                    localStorage, so that is account takeover, not a defaced
+                    preview.
+
+                    A sandboxed iframe is the fix rather than a sanitiser: an
+                    empty sandbox attribute blocks scripts, forms and navigation
+                    outright, so there is no filter to get wrong or keep up to
+                    date. srcDoc keeps it a preview of the exact bytes we send. */}
+                <iframe
+                  title="Campaign preview"
+                  sandbox=""
+                  srcDoc={renderTemplate(body, sample)}
+                  className="mt-2 h-40 w-full rounded-lg border-0 bg-muted"
                 />
               </>
             ) : (

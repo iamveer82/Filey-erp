@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, X, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { fileBytes, type SavedFile } from "../lib/files";
 
@@ -38,7 +39,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
           setLoading(false);
           return;
         }
-        const doc = await pdfjs.getDocument({ data: bytes }).promise;
+        const doc = await safePdf.getDocument({ data: bytes }).promise;
         if (dead) return;
         setPdf(doc);
       } catch (e) {

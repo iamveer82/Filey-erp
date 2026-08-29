@@ -1,4 +1,5 @@
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "./pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { AiImage } from "./ai";
 
@@ -45,7 +46,7 @@ function fileBase64(file: File): Promise<string> {
 
 async function pdfPagesImages(file: File): Promise<AiImage[]> {
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await safePdf.getDocument({ data }).promise;
   const pages = Math.min(pdf.numPages, MAX_PDF_PAGES);
   const out: AiImage[] = [];
   for (let p = 1; p <= pages; p++) {

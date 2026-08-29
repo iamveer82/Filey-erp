@@ -14,6 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import { useUI } from "../lib/ui";
@@ -154,7 +155,7 @@ export default function InlinePdfEditor({
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const task = pdfjs.getDocument({ data, password: pwdRef.current });
+        const task = safePdf.getDocument({ data, password: pwdRef.current });
         task.onPassword = (updatePassword: (pw: string) => void, reason: number) => {
           // reason 2 = previous password was wrong, 1 = none supplied yet.
           prompt({

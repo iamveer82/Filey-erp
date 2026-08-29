@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload, Loader2, GripVertical, X, Combine } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { mergePdfs, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
@@ -24,7 +25,7 @@ const fileKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
 async function toItem(file: File): Promise<Item> {
   try {
     const data = new Uint8Array(await file.arrayBuffer());
-    const pdf = await pdfjs.getDocument({ data }).promise;
+    const pdf = await safePdf.getDocument({ data }).promise;
     const p = await pdf.getPage(1);
     const vp = p.getViewport({ scale: 0.4 });
     const c = document.createElement("canvas");

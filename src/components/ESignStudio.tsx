@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useUI } from "../lib/ui";
 import type { OutFile } from "../lib/pdfTools";
@@ -151,7 +152,7 @@ export default function ESignStudio({
       const pages: DocPage[] = [];
       if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        const pdf = await safePdf.getDocument({ data }).promise;
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const vp = page.getViewport({ scale: 1.5 });

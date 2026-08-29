@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, RotateCcw, RotateCw, Check } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { rotatePdf, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
@@ -33,7 +34,7 @@ export default function RotateStudio({
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        const pdf = await safePdf.getDocument({ data }).promise;
         const p = await pdf.getPage(1);
         const pt = p.getViewport({ scale: 1 });
         if (dead) return;

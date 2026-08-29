@@ -12,6 +12,7 @@ import {
   Grid3X3,
 } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
+import * as safePdf from "../lib/pdfjsSafe";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { organizePages, splitAtPoints, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
@@ -65,7 +66,7 @@ export default function OrganizeStudio({
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        const pdf = await safePdf.getDocument({ data }).promise;
         const out: Thumb[] = [];
         const fulls: Record<number, string> = {};
         for (let n = 1; n <= pdf.numPages; n++) {
