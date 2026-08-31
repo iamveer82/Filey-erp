@@ -38,6 +38,8 @@ export const PUSH_TABLES = [
   "crm_notes",
   "crm_tasks",
   "follow_ups",
+  // Edges reference rows in other tables, so they sync after them.
+  "entity_links",
   "tool_runs",
   "user_folders",
   "user_files",

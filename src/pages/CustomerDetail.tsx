@@ -54,6 +54,7 @@ import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
 import StickyNotes from "../components/StickyNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
+import LinkedRecords from "../components/LinkedRecords";
 import CrmRecordPanel from "../components/CrmRecordPanel";
 import ContactsPanel from "../components/ContactsPanel";
 import PartyBankDetails from "../components/PartyBankDetails";
@@ -1306,6 +1307,14 @@ export default function CustomerDetail() {
       {id && (
         <div className="mb-5">
           <FollowUps customerId={Number(id)} customerName={display} />
+        </div>
+      )}
+
+      {/* What this customer is connected to — the quotes, invoices and
+          follow-ups that reference them, read in both directions. */}
+      {customer && (
+        <div className="mb-5">
+          <LinkedRecords type="customer" id={customer.id} title={display} />
         </div>
       )}
 

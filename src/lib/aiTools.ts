@@ -12,8 +12,10 @@ import {
   computeTrialBalance,
   computeBalanceSheet,
   computeCashSummary,
+  links,
   type InvoiceDocInput,
 } from "./api";
+import { ENTITY_TYPES, isEntityType } from "./links";
 import { sendEmail, emailShell, esc } from "./email";
 import { getDisplayCurrency, todayYmd } from "./format";
 import { getExchangeRates, docAmountInAed } from "./exchange-rates";
@@ -601,6 +603,70 @@ export const TOOLS: ToolDef[] = [
           email: c.email,
           phone: c.phone,
         }));
+    },
+  },
+  {
+    name: "find_links",
+    description:
+      "Show what a record is connected to — the quote an invoice came from, the follow-ups a customer generated. Reads both directions. type is one of: " +
+      ENTITY_TYPES.join(", ") + ".",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", description: "Record type, e.g. customer" },
+        id: { type: "number", description: "Record id" },
+      },
+      required: ["type", "id"],
+    },
+    run: async ({ type, id }) => {
+      const t = String(type ?? "");
+      if (!isEntityType(t))
+        return {
+          error: `Unknown type "${t}". Use one of: ${ENTITY_TYPES.join(", ")}.`,
+        };
+      const rows = await links.for(t, Number(id));
+      if (!rows.length) return { linked: [], message: "Nothing linked to this record yet." };
+      return {
+        linked: rows.map((l) => ({
+          type: l.type,
+          id: l.id,
+          label: l.label,
+          // Which way the edge points is the difference between "this invoice
+          // came from that quote" and "that quote produced this invoice".
+          direction: l.direction,
+          kind: l.kind,
+        })),
+      };
+    },
+  },
+  {
+    name: "link_records",
+    description:
+      "Connect two records so each shows the other — e.g. link an invoice to the quotation it came from.",
+    parameters: {
+      type: "object",
+      properties: {
+        from_type: { type: "string" },
+        from_id: { type: "number" },
+        to_type: { type: "string" },
+        to_id: { type: "number" },
+        kind: { type: "string", description: "Optional label, e.g. produced" },
+      },
+      required: ["from_type", "from_id", "to_type", "to_id"],
+    },
+    run: async ({ from_type, from_id, to_type, to_id, kind }) => {
+      const f = String(from_type ?? ""),
+        t = String(to_type ?? "");
+      if (!isEntityType(f) || !isEntityType(t))
+        return { error: `Types must be one of: ${ENTITY_TYPES.join(", ")}.` };
+      if (f === t && Number(from_id) === Number(to_id))
+        return { error: "A record cannot be linked to itself." };
+      await links.add(
+        { type: f, id: Number(from_id) },
+        { type: t, id: Number(to_id) },
+        { kind: kind ? String(kind) : undefined }
+      );
+      return { ok: true, message: `Linked ${f} #${from_id} to ${t} #${to_id}.` };
     },
   },
   {

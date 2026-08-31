@@ -43,6 +43,7 @@ import { storedLineAmount } from "../lib/docItems";
 import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
+import LinkedRecords from "../components/LinkedRecords";
 import PartyBankDetails from "../components/PartyBankDetails";
 import AdvanceCard from "../components/AdvanceCard";
 import StatementModal, {
@@ -1065,6 +1066,14 @@ export default function SupplierDetail() {
             partyName={supplier.name}
             outstanding={Math.max(0, totalValue - receivedValue)}
           />
+        </div>
+      )}
+
+      {/* What this supplier is connected to — the POs, invoices and follow-ups
+          that reference them, in both directions. */}
+      {supplier && (
+        <div className="mb-5">
+          <LinkedRecords type="supplier" id={supplier.id} title={supplier.name} />
         </div>
       )}
 

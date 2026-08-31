@@ -74,6 +74,11 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "create_supplier",
     ],
   },
+  links: {
+    about:
+      "How records connect — which quote became an invoice, what a customer generated. Read links or join two records up",
+    tools: ["find_links", "link_records"],
+  },
   inventory: {
     about: "Stock levels and adjustments",
     tools: ["adjust_stock"],

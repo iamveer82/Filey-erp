@@ -13,6 +13,14 @@ import { getExchangeRates, docAmountInAed, unratedCurrency } from "./exchange-ra
 import { nextDocNumber } from "./docNumber";
 import { checkFreeInvoiceCap } from "./license";
 import { localYmd, todayYmd } from "./format";
+import {
+  ENTITY_LABEL,
+  ENTITY_LABEL_COL,
+  ENTITY_TABLE,
+  isEntityType,
+  type EntityType,
+  type LinkedRecord,
+} from "./links";
 import { notifyDataChanged } from "./realtime";
 
 // ===== Types =====
@@ -5277,4 +5285,143 @@ export const org = {
       const { error } = await cdb().rpc("accept_invitation", { invite: id });
       if (error) throw error;
     }),
+};
+
+/* ===== Links =====
+ *
+ * The bidirectional graph. Everything else in this file models one module's
+ * records; this models the edges between them, so a purchase order can point
+ * at the invoice it produced and that invoice shows the PO without a second
+ * row being stored.
+ *
+ * Reads resolve each edge to a real label by querying the target table, which
+ * is why renaming a customer keeps its links intact — the edge holds an id,
+ * not a name like crm_activities.related_to does.
+ */
+export const links = {
+  /** Every link touching this record, in both directions, newest first. */
+  for: (type: EntityType, id: number) =>
+    readCached<LinkedRecord[]>(
+      `entity_links:${type}:${id}`,
+      async () => {
+        const [out, inc] = await Promise.all([
+          sb()
+            .from("entity_links")
+            .select("*")
+            .eq("from_type", type)
+            .eq("from_id", id),
+          sb()
+            .from("entity_links")
+            .select("*")
+            .eq("to_type", type)
+            .eq("to_id", id),
+        ]);
+        const rows = [
+          ...((out.data ?? []) as any[]).map((r) => ({ r, direction: "outgoing" as const })),
+          ...((inc.data ?? []) as any[]).map((r) => ({ r, direction: "incoming" as const })),
+        ];
+        if (!rows.length) return [];
+
+        // Resolve labels one table at a time rather than one row at a time —
+        // a record with twenty links should cost a handful of queries, not
+        // twenty. Unknown types are dropped instead of rendering a blank chip.
+        const wanted = new Map<EntityType, Set<number>>();
+        for (const { r, direction } of rows) {
+          const t = (direction === "outgoing" ? r.to_type : r.from_type) as string;
+          if (!isEntityType(t)) continue;
+          const rid = Number(direction === "outgoing" ? r.to_id : r.from_id);
+          (wanted.get(t) ?? wanted.set(t, new Set()).get(t)!).add(rid);
+        }
+        const labels = new Map<string, string>();
+        await Promise.all(
+          [...wanted].map(async ([t, ids]) => {
+            const col = ENTITY_LABEL_COL[t];
+            const { data } = await sb()
+              .from(ENTITY_TABLE[t])
+              .select(`id, ${col}`)
+              .in("id", [...ids]);
+            for (const row of (data ?? []) as any[])
+              labels.set(`${t}:${row.id}`, String(row[col] ?? "").trim());
+          })
+        );
+
+        return rows
+          .map(({ r, direction }) => {
+            const t = (direction === "outgoing" ? r.to_type : r.from_type) as string;
+            if (!isEntityType(t)) return null;
+            const rid = Number(direction === "outgoing" ? r.to_id : r.from_id);
+            return {
+              linkId: r.id,
+              type: t,
+              id: rid,
+              // A deleted target still has an edge; say so rather than render
+              // an empty chip the user cannot act on.
+              label: labels.get(`${t}:${rid}`) || `${ENTITY_LABEL[t]} #${rid}`,
+              kind: r.kind ?? "related",
+              note: r.note ?? undefined,
+              direction,
+              created_at: r.created_at,
+            } as LinkedRecord;
+          })
+          .filter((x): x is LinkedRecord => x !== null)
+          .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+      },
+      []
+    ),
+
+  add: (
+    from: { type: EntityType; id: number },
+    to: { type: EntityType; id: number },
+    opts: { kind?: string; note?: string } = {}
+  ) => {
+    const row = {
+      from_type: from.type,
+      from_id: from.id,
+      to_type: to.type,
+      to_id: to.id,
+      kind: opts.kind ?? "related",
+      note: opts.note ?? null,
+    };
+    return write({ k: "insert", t: "entity_links", row }, async () => {
+      // Re-linking the same pair must be a no-op, not a second edge or a
+      // constraint error. Postgres has a unique index for this, but the
+      // offline shim has neither that nor upsert's onConflict — so the check
+      // is done here, where both modes get it.
+      const { data: dupe } = await sb()
+        .from("entity_links")
+        .select("id")
+        .eq("from_type", row.from_type)
+        .eq("from_id", row.from_id)
+        .eq("to_type", row.to_type)
+        .eq("to_id", row.to_id)
+        .eq("kind", row.kind);
+      const existing = ((dupe ?? []) as { id: number }[])[0];
+      if (existing) return existing.id;
+
+      const { data, error } = await sb()
+        .from("entity_links")
+        .insert(row)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      return (data as { id: number } | null)?.id ?? -1;
+    }, -1);
+  },
+
+  remove: (linkId: number) =>
+    write({ k: "delete", t: "entity_links", id: linkId }, () =>
+      sDelete("entity_links", linkId), undefined
+    ),
+
+  /** Records of one type matching a search term — what the picker offers. */
+  search: async (type: EntityType, term: string, limit = 8) => {
+    const col = ENTITY_LABEL_COL[type];
+    let q = sb().from(ENTITY_TABLE[type]).select(`id, ${col}`).limit(limit);
+    if (term.trim()) q = q.ilike(col, `%${term.trim()}%`);
+    const { data } = await q;
+    return ((data ?? []) as any[]).map((r) => ({
+      id: Number(r.id),
+      label: String(r[col] ?? "").trim() || `#${r.id}`,
+    }));
+  },
 };

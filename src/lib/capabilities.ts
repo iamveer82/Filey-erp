@@ -30,6 +30,16 @@ export const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    id: "links",
+    name: "Record links",
+    description:
+      "Read how records connect, and join two of them up — which quote became an invoice, what a customer generated",
+    // find_links only reads, but it belongs to the same capability as the
+    // write so a mode that grants one grants the pair; link_records must be
+    // here or it would mutate the graph even in Plan mode.
+    tools: ["find_links", "link_records"],
+  },
+  {
     id: "purchasing",
     name: "Purchasing",
     description: "Create purchase orders, supplier bills and supplier records",
