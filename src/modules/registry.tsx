@@ -31,6 +31,8 @@ const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
 const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
 const BankAccounts = lazy(() => import("../pages/BankAccounts"));
 const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
+const Team = lazy(() => import("../pages/Team"));
+const Comms = lazy(() => import("../pages/Comms"));
 
 export interface AppModule {
   id: string;
@@ -100,6 +102,24 @@ export const MODULES: AppModule[] = [
     icon: "quotations",
     to: "/quoting",
     Component: Quoting,
+  },
+  {
+    id: "team",
+    label: "Team",
+    short: "Team",
+    desc: "Channels, mentions and threads",
+    icon: "people",
+    to: "/team",
+    Component: Team,
+  },
+  {
+    id: "comms",
+    label: "Comms log",
+    short: "Comms",
+    desc: "Email sent and calls logged",
+    icon: "email",
+    to: "/comms",
+    Component: Comms,
   },
   {
     id: "crm",

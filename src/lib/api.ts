@@ -5113,32 +5113,41 @@ export interface OrgMessage {
   body: string;
   author: string;
   parent_id?: number | null;
+  /** Which channel it was posted in. Rows predating channels read "general". */
+  channel: string;
   created_at: string;
 }
 
 export const messages = {
-  list: () =>
+  /** Messages in one channel, or every channel when omitted. */
+  list: (channel?: string) =>
     readCached<OrgMessage[]>(
-      "org_messages",
+      channel ? `org_messages:${channel}` : "org_messages",
       async () => {
         const [rows, profs] = await Promise.all([
           sList<any>("org_messages", [{ col: "id", asc: false }]),
           sList<any>("profiles"),
         ]);
         const byId = new Map(profs.map((p) => [p.id, p]));
-        return rows.slice(0, 200).map((r) => ({
+        // Filter before the 200 cap, not after — otherwise a busy channel
+        // pushes a quiet one off the end and it looks empty.
+        const mine = channel
+          ? rows.filter((r) => (r.channel ?? "general") === channel)
+          : rows;
+        return mine.slice(0, 200).map((r) => ({
           id: r.id,
           user_id: r.user_id,
           body: r.body,
           author: byId.get(r.user_id)?.name ?? "Team member",
           parent_id: r.parent_id ?? null,
+          channel: r.channel ?? "general",
           created_at: r.created_at,
         })) as OrgMessage[];
       },
       []
     ),
-  post: (body: string, parentId?: number | null) => {
-    const row: Record<string, unknown> = { body };
+  post: (body: string, parentId?: number | null, channel = "general") => {
+    const row: Record<string, unknown> = { body, channel };
     if (parentId) row.parent_id = parentId;
     return write({ k: "insert", t: "org_messages", row }, () =>
       sInsert("org_messages", row).then(() => undefined), undefined
@@ -5424,4 +5433,182 @@ export const links = {
       label: String(r[col] ?? "").trim() || `#${r.id}`,
     }));
   },
+};
+
+/* ===== Team comms =====
+ *
+ * Chat channels, a record of email actually sent, and call logs. The email and
+ * call tables carry the same (entity_type, entity_id) pair the link graph uses,
+ * so a customer's page can show its own correspondence without a join table
+ * per module.
+ */
+
+export interface OrgChannel {
+  id: number;
+  name: string;
+  purpose?: string | null;
+  created_at: string;
+}
+
+export const channels = {
+  list: () =>
+    readCached<OrgChannel[]>(
+      "org_channels",
+      () => sList<OrgChannel>("org_channels", [{ col: "name", asc: true }]),
+      []
+    ),
+  /** Create a channel. Names are lowercased and stripped so #Sales and
+   *  #sales are the same room rather than two half-empty ones. */
+  create: async (name: string, purpose?: string) => {
+    const clean = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
+    // Rejects rather than throwing synchronously: this reads as async, and a
+    // caller's .catch() would never see a sync throw.
+    if (!clean) throw new Error("Give the channel a name.");
+    const row = { name: clean, purpose: purpose?.trim() || null, shared: true };
+    return write({ k: "insert", t: "org_channels", row }, async () => {
+      const existing = await sList<OrgChannel>("org_channels");
+      const dupe = existing.find((c) => c.name === clean);
+      if (dupe) return dupe.id;
+      return sInsert("org_channels", row);
+    }, -1);
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "org_channels", id }, () =>
+      sDelete("org_channels", id), undefined
+    ),
+};
+
+export interface EmailMessage {
+  id: number;
+  to_email: string;
+  to_name?: string | null;
+  subject: string;
+  body?: string | null;
+  entity_type?: string | null;
+  entity_id?: number | null;
+  status: string;
+  error?: string | null;
+  sent_at: string;
+}
+
+export const emailLog = {
+  /** Everything sent, newest first. */
+  list: (limit = 100) =>
+    readCached<EmailMessage[]>(
+      "email_messages",
+      async () =>
+        (await sList<EmailMessage>("email_messages", [{ col: "sent_at", asc: false }])).slice(
+          0,
+          limit
+        ),
+      []
+    ),
+  /** Correspondence about one record — what a customer page shows. */
+  forEntity: (entityType: string, entityId: number) =>
+    readCached<EmailMessage[]>(
+      `email_messages:${entityType}:${entityId}`,
+      async () => {
+        const { data } = await sb()
+          .from("email_messages")
+          .select("*")
+          .eq("entity_type", entityType)
+          .eq("entity_id", entityId)
+          .order("sent_at", { ascending: false });
+        return (data ?? []) as EmailMessage[];
+      },
+      []
+    ),
+  /** Record a send. Called by the email path itself, so history accrues
+   *  without every caller remembering to log. */
+  record: (input: {
+    to_email: string;
+    to_name?: string;
+    subject: string;
+    body?: string;
+    entity_type?: string;
+    entity_id?: number;
+    status?: "sent" | "failed";
+    error?: string;
+  }) => {
+    const row = {
+      to_email: input.to_email,
+      to_name: input.to_name ?? null,
+      subject: input.subject ?? "",
+      body: input.body ?? null,
+      entity_type: input.entity_type ?? null,
+      entity_id: input.entity_id ?? null,
+      status: input.status ?? "sent",
+      error: input.error ?? null,
+    };
+    return write({ k: "insert", t: "email_messages", row }, () =>
+      sInsert("email_messages", row), -1
+    );
+  },
+};
+
+export interface CallLog {
+  id: number;
+  direction: "outgoing" | "incoming" | "missed";
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  entity_type?: string | null;
+  entity_id?: number | null;
+  started_at: string;
+  duration_secs: number;
+  outcome?: string | null;
+  notes?: string | null;
+}
+
+export const callLog = {
+  list: (limit = 100) =>
+    readCached<CallLog[]>(
+      "call_logs",
+      async () =>
+        (await sList<CallLog>("call_logs", [{ col: "started_at", asc: false }])).slice(0, limit),
+      []
+    ),
+  forEntity: (entityType: string, entityId: number) =>
+    readCached<CallLog[]>(
+      `call_logs:${entityType}:${entityId}`,
+      async () => {
+        const { data } = await sb()
+          .from("call_logs")
+          .select("*")
+          .eq("entity_type", entityType)
+          .eq("entity_id", entityId)
+          .order("started_at", { ascending: false });
+        return (data ?? []) as CallLog[];
+      },
+      []
+    ),
+  add: (input: {
+    direction?: "outgoing" | "incoming" | "missed";
+    contact_name?: string;
+    contact_phone?: string;
+    entity_type?: string;
+    entity_id?: number;
+    started_at?: string;
+    duration_secs?: number;
+    outcome?: string;
+    notes?: string;
+  }) => {
+    const row = {
+      direction: input.direction ?? "outgoing",
+      contact_name: input.contact_name ?? null,
+      contact_phone: input.contact_phone ?? null,
+      entity_type: input.entity_type ?? null,
+      entity_id: input.entity_id ?? null,
+      started_at: input.started_at ?? new Date().toISOString(),
+      duration_secs: Math.max(0, Math.round(input.duration_secs ?? 0)),
+      outcome: input.outcome ?? null,
+      notes: input.notes ?? null,
+    };
+    return write({ k: "insert", t: "call_logs", row }, () =>
+      sInsert("call_logs", row), -1
+    );
+  },
+  remove: (id: number) =>
+    write({ k: "delete", t: "call_logs", id }, () =>
+      sDelete("call_logs", id), undefined
+    ),
 };

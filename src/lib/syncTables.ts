@@ -40,6 +40,11 @@ export const PUSH_TABLES = [
   "follow_ups",
   // Edges reference rows in other tables, so they sync after them.
   "entity_links",
+  // Channels before the messages that name them.
+  "org_channels",
+  "org_messages",
+  "email_messages",
+  "call_logs",
   "tool_runs",
   "user_folders",
   "user_files",

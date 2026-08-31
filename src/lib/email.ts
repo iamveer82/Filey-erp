@@ -13,6 +13,10 @@ export interface EmailMessage {
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  /** What this email is about, so a customer's page can show its own
+   *  correspondence. Same vocabulary as the link graph (see lib/links). */
+  entityType?: string;
+  entityId?: number;
 }
 
 /** Base64-encode raw bytes for use as an EmailAttachment `content`. Chunked so
@@ -70,12 +74,43 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
     },
   })) as { data: { error?: string } | null; error: unknown };
 
-  if (error) throw new Error(await edgeErrorMessage(error));
-  // A non-2xx arrives as `error`, but the function can also answer 200 with an
-  // error body; treat that as a failure rather than reporting a phantom send.
-  if (data?.error) throw new Error(data.error);
+  const failure = error
+    ? await edgeErrorMessage(error)
+    : // A non-2xx arrives as `error`, but the function can also answer 200
+      // with an error body; treat that as a failure rather than reporting a
+      // phantom send.
+      (data?.error ?? null);
+
+  // Record the attempt either way. Filey could always send email but kept no
+  // record, so "did we ever send them that invoice" had no answer. Logging the
+  // failures too is the point — a silent bounce is exactly what you go looking
+  // for. Best-effort: a logging problem must never fail a real send.
+  void logEmail({
+    to_email: msg.to,
+    subject: msg.subject,
+    entity_type: msg.entityType,
+    entity_id: msg.entityId,
+    status: failure ? "failed" : "sent",
+    error: failure ?? undefined,
+  }).catch(() => {});
+
+  if (failure) throw new Error(failure);
 
   await bumpEmailCount();
+}
+
+/** Written as a separate import so email.ts does not pull the whole api module
+ *  at load time — it is imported by the agent tools and the campaign sender. */
+async function logEmail(row: {
+  to_email: string;
+  subject: string;
+  entity_type?: string;
+  entity_id?: number;
+  status: "sent" | "failed";
+  error?: string;
+}): Promise<void> {
+  const { emailLog } = await import("./api");
+  await emailLog.record(row);
 }
 
 /** Send a document-summary email through Resend for the list-row "Email"

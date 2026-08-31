@@ -352,6 +352,8 @@ async function writeSettingList(key: string, list: unknown[]): Promise<void> {
  *  added to the registry without being exposed here. */
 const NAV_PAGES = [
   "overview",
+  "team",
+  "comms",
   "inventory",
   "orders",
   "invoicing",

@@ -104,7 +104,13 @@ function MessageRow({
 
 /** Company message board — org-wide team feed with threaded replies and
  * @mention highlighting. */
-export default function CompanyMessages() {
+export default function CompanyMessages({
+  /** Which channel to show and post into. Defaults to the room every message
+   *  predating channels already belongs to. */
+  channel = "general",
+}: {
+  channel?: string;
+} = {}) {
   const { user } = useAuth();
   const { toast, confirm } = useUI();
   const [all, setAll] = useState<OrgMessage[]>([]);
@@ -117,12 +123,13 @@ export default function CompanyMessages() {
 
   const load = () => {
     messages
-      .list()
+      .list(channel)
       .then(setAll)
       .catch(() => toast.error("Failed to load messages"))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, [channel]);
   useLiveSync(load);
   useEffect(() => {
     org
@@ -152,7 +159,7 @@ export default function CompanyMessages() {
     if (!trimmed) return;
     setBusy(true);
     try {
-      await messages.post(trimmed, parentId);
+      await messages.post(trimmed, parentId, channel);
       if (parentId) {
         setReplyText("");
         setReplyTo(null);
