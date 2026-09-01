@@ -296,6 +296,17 @@ export default function AgentChat() {
     setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
   }, [chat]);
 
+  // Warm the business brief while the user is still typing. Building it reads
+  // five whole tables (customers, every invoice with its items and payments,
+  // products, quotes, orders), and send() awaits it before the agent can start
+  // — so on a cold memo the first message just sat there. Doing it on mount
+  // moves that wait into the time someone spends composing. Fire-and-forget:
+  // it only populates the shared 60s memo, and send() still awaits properly if
+  // this hasn't finished.
+  useEffect(() => {
+    buildAiContext().catch(() => {});
+  }, []);
+
   // Opening a chat must not animate. A smooth scroll on mount — with the
   // sentinel aligned to the *top* of the viewport, which is scrollIntoView's
   // default — parks the page mid-scroll, so the chat reads as already scrolled
@@ -314,7 +325,27 @@ export default function AgentChat() {
       return;
     }
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [chat.turns, streaming, busy]);
+    // Only real turns animate. `streaming` used to be in here too, which
+    // restarted a *smooth* scroll on every streamed step — a fresh easing
+    // animation several times a second, which WebView2 renders as the whole
+    // app locking up while the agent is answering.
+  }, [chat.turns, busy]);
+
+  // Following the stream is a separate, much cheaper job: jump (no easing) and
+  // only while the reader is already at the bottom, so scrolling up to re-read
+  // something isn't yanked back on the next step.
+  useEffect(() => {
+    if (!streaming || !mounted.current) return;
+    const nearFoot =
+      window.innerHeight + window.scrollY >=
+      document.documentElement.scrollHeight - 120;
+    if (!nearFoot) return;
+    // rAF coalesces bursts into one scroll per frame instead of one per step.
+    const id = requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [streaming]);
 
   /** Stop the run. The catch in send() turns the abort into a kept partial
    *  reply rather than an error banner. */

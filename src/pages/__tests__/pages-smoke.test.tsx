@@ -101,11 +101,19 @@ import EmployeeDetail from "../EmployeeDetail";
 import PayslipPage from "../PayslipPage";
 import SupplierDetail from "../SupplierDetail";
 import PortalView from "../PortalView";
+import Team from "../Team";
+import Comms from "../Comms";
+import LinkedRecords from "../../components/LinkedRecords";
 import Login from "../Login";
 import NotFound from "../NotFound";
 
 const pages: [string, () => ReactElement][] = [
   ["Customers", () => <Customers />],
+  ["Team", () => <Team />],
+  ["Comms", () => <Comms />],
+  // Not a page, but the panel now on customer and supplier detail — it does its
+  // own async load and would crash those pages if it threw on mount.
+  ["LinkedRecords", () => <LinkedRecords type="customer" id={1} />],
   ["Suppliers", () => <Suppliers />],
   ["Inventory", () => <Inventory />],
   ["Orders", () => <Orders />],

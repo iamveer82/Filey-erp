@@ -22,13 +22,26 @@ function fakeCloud(opts?: {
   org?: string;
   failTables?: string[];
   pull?: Record<string, any[]>;
+  /** Seconds from now the access token dies. Default: comfortably alive. */
+  expiresInSecs?: number;
 }) {
   const uid = opts?.uid ?? UID;
+  const refreshes: number[] = [];
   const calls: { table: string; op: string; payload?: any; ids?: any[] }[] = [];
   const client = {
     auth: {
       async getSession() {
-        return { data: { session: { user: { id: uid } } } };
+        const expires_at =
+          Math.floor(Date.now() / 1000) + (opts?.expiresInSecs ?? 3600);
+        return { data: { session: { user: { id: uid }, expires_at } } };
+      },
+      async refreshSession() {
+        refreshes.push(Date.now());
+        const expires_at = Math.floor(Date.now() / 1000) + 3600;
+        return {
+          data: { session: { user: { id: uid }, expires_at } },
+          error: null,
+        };
       },
     },
     async rpc(name: string) {
@@ -81,7 +94,7 @@ function fakeCloud(opts?: {
       };
     },
   };
-  return { client: client as any, calls };
+  return { client: client as any, calls, refreshes };
 }
 
 describe("local write journal", () => {
@@ -267,5 +280,25 @@ describe("cleanRowForPush", () => {
       UID
     );
     expect(out).toEqual({ id: 1, owner: UID, storage_path: `${UID}/docs/a.pdf` });
+  });
+});
+
+describe('expired session', () => {
+  // supabase-js refreshes on a timer, and a timer does not run while a laptop
+  // sleeps. A desktop waking after the token's hour is up pushed with a dead
+  // JWT and the first table in PUSH_TABLES failed — which is why the report
+  // always named company_profile rather than the real cause.
+  it('refreshes before pushing when the token is about to expire', async () => {
+    await localClient.from('products').insert({ name: 'Widget' });
+    const { client, refreshes } = fakeCloud({ expiresInSecs: 10 });
+    await syncNow(client, { manual: true });
+    expect(refreshes.length).toBe(1);
+  });
+
+  it('does not refresh a token with plenty of life left', async () => {
+    await localClient.from('products').insert({ name: 'Widget' });
+    const { client, refreshes } = fakeCloud({ expiresInSecs: 3600 });
+    await syncNow(client, { manual: true });
+    expect(refreshes.length).toBe(0);
   });
 });

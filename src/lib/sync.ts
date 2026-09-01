@@ -175,6 +175,33 @@ async function pushFileBlobs(
   }
 }
 
+/** The session, refreshed first if its token is dead or nearly dead.
+ *
+ *  supabase-js refreshes on a timer, and a timer does not run while a laptop is
+ *  asleep. A desktop app that wakes after the token's hour is up therefore
+ *  pushes with an expired JWT and the first table out of PUSH_TABLES fails —
+ *  which is why the report always names company_profile, the first entry, and
+ *  not the actual cause.
+ *
+ *  Refreshing 60s early also covers the case where the token is alive when the
+ *  push starts and dead by the time a long push reaches its last table. */
+async function freshSession(supa: SupabaseClient) {
+  const { data } = await supa.auth.getSession();
+  const s = data.session;
+  if (!s) return null;
+  const expiresAt = (s.expires_at ?? 0) * 1000;
+  if (expiresAt && expiresAt - Date.now() > 60_000) return s;
+  try {
+    const { data: r, error } = await supa.auth.refreshSession();
+    // A failed refresh is not fatal here: the caller still gets the old
+    // session and the push surfaces a real error rather than a silent no-op.
+    if (error) return s;
+    return r.session ?? s;
+  } catch {
+    return s;
+  }
+}
+
 let running = false;
 
 /** True while a migration (import/push) is running. syncCycle checks this and
@@ -218,8 +245,8 @@ export async function syncNow(
   if (typeof navigator !== "undefined" && !navigator.onLine)
     return stop("No internet connection.");
 
-  const { data: sess } = await supa.auth.getSession();
-  const uid = sess.session?.user?.id;
+  const sess = await freshSession(supa);
+  const uid = sess?.user?.id;
   if (!uid) {
     setStatus({
       state: manual
@@ -334,8 +361,8 @@ export async function pullNow(client?: SupabaseClient | null): Promise<boolean> 
   const supa = client ?? supabase;
   if (!isLocalMode() || !supa || !autoSyncEnabled() || running) return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
-  const { data: sess } = await supa.auth.getSession();
-  const uid = sess.session?.user?.id;
+  const sess = await freshSession(supa);
+  const uid = sess?.user?.id;
   if (!uid) return false;
 
   running = true;
