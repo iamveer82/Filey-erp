@@ -11,7 +11,7 @@ pub struct OutboxEntry {
 }
 
 #[tauri::command]
-pub fn cache_get(db: State<Db>, key: String) -> AppResult<Option<String>> {
+pub async fn cache_get(db: State<'_, Db>, key: String) -> AppResult<Option<String>> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     let val = conn
         .query_row(
@@ -24,7 +24,7 @@ pub fn cache_get(db: State<Db>, key: String) -> AppResult<Option<String>> {
 }
 
 #[tauri::command]
-pub fn cache_set(db: State<Db>, key: String, value: String) -> AppResult<()> {
+pub async fn cache_set(db: State<'_, Db>, key: String, value: String) -> AppResult<()> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     conn.execute(
         "INSERT INTO kv_cache (key, value, updated_at)
@@ -36,14 +36,14 @@ pub fn cache_set(db: State<Db>, key: String, value: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn outbox_add(db: State<Db>, op: String) -> AppResult<i64> {
+pub async fn outbox_add(db: State<'_, Db>, op: String) -> AppResult<i64> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     conn.execute("INSERT INTO outbox (op) VALUES (?1)", [op])?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-pub fn outbox_list(db: State<Db>) -> AppResult<Vec<OutboxEntry>> {
+pub async fn outbox_list(db: State<'_, Db>) -> AppResult<Vec<OutboxEntry>> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     let mut stmt =
         conn.prepare("SELECT id, op, created_at FROM outbox ORDER BY id ASC")?;
@@ -60,14 +60,14 @@ pub fn outbox_list(db: State<Db>) -> AppResult<Vec<OutboxEntry>> {
 }
 
 #[tauri::command]
-pub fn outbox_remove(db: State<Db>, entry_id: i64) -> AppResult<()> {
+pub async fn outbox_remove(db: State<'_, Db>, entry_id: i64) -> AppResult<()> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     conn.execute("DELETE FROM outbox WHERE id = ?1", [entry_id])?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn outbox_clear(db: State<Db>) -> AppResult<()> {
+pub async fn outbox_clear(db: State<'_, Db>) -> AppResult<()> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     conn.execute("DELETE FROM outbox", [])?;
     Ok(())
