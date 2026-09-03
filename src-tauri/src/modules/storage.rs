@@ -249,8 +249,22 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
 /// Full backup into `dest` folder: a clean DB copy (filey-erp.db) plus the My
 /// Files blob tree (files/). One self-contained folder the user can move to a
 /// USB drive or synced location.
+/// spawn_blocking, not a plain async command: this copies the whole files/ tree
+/// and can run for minutes on a library of scanned PDFs. Tauri's runtime is
+/// multi-threaded, so a plain async command would only occupy one worker rather
+/// than stall everything — but cache_get and cache_set ride that same pool on
+/// every collection read, and the UI waits on those. Long work belongs on the
+/// blocking pool. `Db` is fetched inside the closure because `State` borrows
+/// from the app and cannot cross the thread boundary.
 #[tauri::command]
-pub async fn backup_all(app: AppHandle, db: State<'_, Db>, dest: String) -> AppResult<String> {
+pub async fn backup_all(app: AppHandle, dest: String) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || backup_all_blocking(app, dest))
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))?
+}
+
+fn backup_all_blocking(app: AppHandle, dest: String) -> AppResult<String> {
+    let db = app.state::<Db>();
     let dir = PathBuf::from(&dest);
     fs::create_dir_all(&dir).map_err(|e| AppError::Io(e.to_string()))?;
     let db_dest = dir.join("filey-erp.db");
@@ -273,8 +287,16 @@ pub async fn backup_all(app: AppHandle, db: State<'_, Db>, dest: String) -> AppR
 /// Restore a full backup folder. Files (not locked) are copied back immediately;
 /// the DB is queued and applied at the next startup (it's open right now). Caller
 /// restarts after this returns.
+/// Off the runtime for the same reason as backup_all: it deletes and re-copies
+/// the entire files/ tree.
 #[tauri::command]
 pub async fn restore_all(app: AppHandle, src: String) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || restore_all_blocking(app, src))
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))?
+}
+
+fn restore_all_blocking(app: AppHandle, src: String) -> AppResult<()> {
     let dir = PathBuf::from(&src);
     let db_src = dir.join("filey-erp.db");
     if !db_src.exists() {

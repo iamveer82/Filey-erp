@@ -842,11 +842,20 @@ async function sInsertMany(
       .from(table)
       .insert(part)
       .select("id");
-    if (error) throw error;
+    // Earlier chunks are already committed, so the count rides on the error: a
+    // caller that retries row by row must start after them or it writes the
+    // successful rows a second time.
+    if (error) throw Object.assign(new Error(error.message), { inserted: ids.length });
     for (const r of (data ?? []) as { id: number }[]) ids.push(r.id);
   }
   return ids;
 }
+
+/** How many rows a failed bulk insert had already written. */
+export const insertedBefore = (e: unknown): number =>
+  typeof (e as { inserted?: unknown })?.inserted === "number"
+    ? (e as { inserted: number }).inserted
+    : 0;
 async function sUpdate(
   table: string,
   id: number,

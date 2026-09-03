@@ -4,8 +4,8 @@
 // one write, and the gap widens with the collection because the old shape is
 // quadratic. These pin the bulk path: every row lands, and the journal records
 // them all so sync still uploads the import.
-import { describe, it, expect, beforeEach } from "vitest";
-import { erp, crm } from "./api";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { erp, crm, insertedBefore } from "./api";
 import type { Product, CrmCustomer } from "./api";
 import { localClient, journalSnapshot } from "./localdb";
 
@@ -49,6 +49,32 @@ describe("bulk import", () => {
     expect(names.has("Product 0")).toBe(true);
     expect(names.has("Product 1199")).toBe(true);
     expect(names.size).toBe(1200);
+  });
+
+  // The import is chunked, so a failure partway leaves earlier chunks written.
+  // A caller retrying row by row has to know how many landed, or it imports
+  // those rows a second time — the CSV import does exactly that retry.
+  it("reports how many rows landed before a chunk failed", async () => {
+    const realSet = Storage.prototype.setItem;
+    let writes = 0;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, k: string, v: string) {
+        // Let the first chunk's collection write through, fail the second.
+        if (k === "localdb:products" && ++writes > 1) throw new Error("disk full");
+        return realSet.call(this, k, v);
+      });
+
+    let caught: unknown;
+    try {
+      await erp.createProducts(products(700)); // 500 + 200
+    } catch (e) {
+      caught = e;
+    }
+    spy.mockRestore();
+
+    expect(caught).toBeTruthy();
+    expect(insertedBefore(caught)).toBe(500);
   });
 
   it("journals the whole import so sync still uploads it", async () => {

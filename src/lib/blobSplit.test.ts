@@ -142,6 +142,36 @@ describe("blob split", () => {
     expect(after?.[0].status).toBe("paid");
   });
 
+  // A blob whose write failed must not stay cached as if it had succeeded:
+  // this process would serve it from memory, the next one would find a marker
+  // pointing at nothing, and no later save would retry — the cache would keep
+  // insisting the payload was already stored.
+  it("retries a blob whose write failed instead of trusting the cache", async () => {
+    const real = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, k: string, v: string) {
+        if (k.startsWith("localdb:blob:")) throw new Error("disk full");
+        return real.call(this, k, v);
+      });
+
+    await expect(
+      localClient.from("invoice_docs").insert({ number: "INV-1", logo: LOGO })
+    ).resolves.toMatchObject({ error: expect.anything() });
+    expect(blobKeys()).toHaveLength(0);
+
+    spy.mockRestore();
+
+    // The retry has to actually write the payload — not skip it because the
+    // cache still held the entry from the failed attempt.
+    await localClient.from("invoice_docs").insert({ number: "INV-1", logo: LOGO });
+    expect(blobKeys()).toHaveLength(1);
+
+    clearLocalCache();
+    const { data } = await localClient.from("invoice_docs").select("*");
+    expect(data?.[0].logo).toBe(LOGO);
+  });
+
   it("survives an update that changes the logo", async () => {
     await localClient.from("invoice_docs").insert({ number: "INV-1", logo: LOGO });
     await localClient.from("invoice_docs").update({ logo: OTHER }).eq("number", "INV-1");

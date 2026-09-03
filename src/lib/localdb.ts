@@ -134,28 +134,49 @@ async function getBlob(h: string): Promise<string | null | undefined> {
  *  payloads written out first. Returns the JSON actually stored. */
 async function dehydrate(rows: Row[]): Promise<string> {
   const pending: Promise<void>[] = [];
+  const added: string[] = [];
   const out = rows.map((r) => {
     let copy: Row | null = null;
     for (const k of Object.keys(r)) {
       const v = r[k];
       if (typeof v !== "string" || v.length < BLOB_MIN) continue;
-      let h = hashOf.get(v);
-      if (h === undefined) {
-        h = hashString(v);
-        hashOf.set(v, h);
-      }
-      if (!blobs.has(h)) {
+
+      // A hit here means this exact value produced this hash before — Map keys
+      // compare by value — so no verification is needed on the common path.
+      const known = hashOf.get(v);
+      const h = known ?? hashString(v);
+      const held = blobs.get(h);
+
+      if (held === undefined) {
         blobs.set(h, v);
+        added.push(h);
         pending.push(putBlob(BLOB_KEY(h), v));
+      } else if (known === undefined && held !== v) {
+        // Two different payloads, one hash. Vanishingly unlikely, but pointing
+        // an invoice at another image is not a thing to leave to chance, and
+        // this branch only runs when we were hashing anyway. Leave it inline.
+        continue;
       }
+      if (known === undefined) hashOf.set(v, h);
+
       copy ??= { ...r };
       copy[k] = { __blob: h } as BlobRef;
     }
     return copy ?? r;
   });
+
   // Payloads land before the rows that point at them, so a crash in between
   // leaves an unreferenced blob rather than a row referencing nothing.
-  if (pending.length) await Promise.all(pending);
+  try {
+    if (pending.length) await Promise.all(pending);
+  } catch (e) {
+    // A blob that never reached storage must not stay cached claiming it did.
+    // This process would keep serving it from memory, the next one would find
+    // the marker pointing at nothing, and no save would ever retry the write
+    // because the cache said the payload was already there.
+    for (const h of added) blobs.delete(h);
+    throw e;
+  }
   return JSON.stringify(out);
 }
 

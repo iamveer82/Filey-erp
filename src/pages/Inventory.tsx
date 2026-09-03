@@ -25,7 +25,15 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
+import {
+  erp,
+  pos,
+  shareRecord,
+  billing,
+  insertedBefore,
+  Product,
+  type StockMovement,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { MenuPopover, MenuItemRow } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
@@ -794,10 +802,13 @@ export default function Inventory() {
             // import look like a hang.
             await erp.createProducts(usable.map(toProduct));
             ok = usable.length;
-          } catch {
-            // A bulk insert is all-or-nothing, so it cannot say WHICH row was
-            // bad. Only a failed import pays for finding out.
-            for (const r of usable) {
+          } catch (e) {
+            // A bulk insert cannot say WHICH row was bad, so a failed import
+            // pays to find out row by row. It resumes after the rows that were
+            // already written — the write is chunked, so an earlier chunk may
+            // have committed, and starting from zero would import those twice.
+            ok = insertedBefore(e);
+            for (const r of usable.slice(ok)) {
               try {
                 await erp.createProduct(toProduct(r));
                 ok++;
