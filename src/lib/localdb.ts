@@ -19,36 +19,237 @@ type Result = { data: any; error: any };
 
 // ---- storage backend: collection name -> Row[] ----------------------------
 
+/** Parsed collections, kept between reads.
+ *
+ *  Reading a collection used to mean an IPC hop, a SQLite read and a JSON.parse
+ *  of the WHOLE array — every time. One screen does that a dozen times over the
+ *  same table and an agent turn does it far more, all on the main thread, which
+ *  is a large part of why the app stopped repainting under load. This process is
+ *  the only writer, so between writes the parsed array IS the stored state and
+ *  the round trip buys nothing.
+ *
+ *  The raw JSON rides along so replaceColl can compare against what's stored
+ *  without re-serialising it.
+ *
+ *  Rows handed out are shared and read-only by contract. That takes nothing
+ *  away: mutating a returned row never reached storage before either — only
+ *  saveColl writes — so any code doing it was already a no-op bug.
+ *
+ *  DESKTOP ONLY. Under Tauri this process owns the SQLite store, so a parsed
+ *  collection stays true until we write it. In a browser a second tab writes
+ *  the same localStorage key behind our back and a stale memo would serve rows
+ *  another tab deleted. Browser mode re-reads; localStorage is synchronous and
+ *  it is not where the cost was. */
+const memo = new Map<string, { rows: Row[]; json: string }>();
+
+/** Forget everything cached. Exported for tests and for a restore, which
+ *  replaces the database underneath us. */
+export function clearLocalCache(): void {
+  memo.clear();
+  blobs.clear();
+  hashOf.clear();
+  journalMemo = null;
+}
+
+/* ---- big-field blob split ------------------------------------------------
+ *
+ *  Every invoice_docs row snapshots the company logo as a base64 data URL, on
+ *  purpose: an issued tax document has to keep the logo it was issued with.
+ *  But a collection is stored as ONE JSON array, so writing a single invoice
+ *  re-serialised every logo of every invoice ever. Measured: 2000 docs with a
+ *  150KB logo each is a 308MB string built on the main thread per save, then
+ *  shipped over IPC to SQLite. With the logos hoisted out it is 0.6MB.
+ *
+ *  So oversized string fields are stored once, under their own key, and the row
+ *  keeps a {__blob} marker. Keys are content hashes, so the same logo on 2000
+ *  invoices is one stored blob and re-saving writes nothing new.
+ *
+ *  Rows with an inline string (everything written before this existed) still
+ *  load unchanged — hydrate only touches markers. */
+const BLOB_MIN = 8192;
+const BLOB_KEY = (h: string) => `localdb:blob:${h}`;
+type BlobRef = { __blob: string };
+
+/** Blob payloads by hash. Content-addressed, so an entry is never stale. */
+const blobs = new Map<string, string>();
+
+/** The same lookup backwards, so a save doesn't re-hash a payload it has
+ *  already seen. Without it, writing one row of a 2000-invoice collection
+ *  hashed the logo 2000 times — trading the big serialisation for a big scan.
+ *  hydrate hands every row the same string instance, and V8 caches a string's
+ *  hash on the instance, so these lookups stay cheap. */
+const hashOf = new Map<string, string>();
+
+const isBlobRef = (v: any): v is BlobRef =>
+  !!v && typeof v === "object" && typeof (v as BlobRef).__blob === "string";
+
+/** Two mixed 32-bit passes plus the length. Not cryptographic — it only has to
+ *  make a collision between two of a company's own logos implausible, and a
+ *  content hash keeps every writer (another tab included) agreeing on the key
+ *  without coordination. */
+function hashString(s: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x1000193;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = (Math.imul(b + c, 0x85ebca6b) ^ (b >>> 13)) >>> 0;
+  }
+  return `${a.toString(36)}${b.toString(36)}${s.length.toString(36)}`;
+}
+
+async function putBlob(key: string, value: string): Promise<void> {
+  if (hasTauri) await invoke("cache_set", { key, value });
+  else localStorage.setItem(key, value);
+}
+
+/** Never throws, and tells the two failure cases apart.
+ *
+ *  `null`      — the store answered, and there is no such blob. Gone for good.
+ *  `undefined` — the read itself failed. The blob may well still be there.
+ *
+ *  Both matter. loadColl's catch turns any throw into an EMPTY collection, so a
+ *  failed logo read would blank every invoice on screen; and substituting ""
+ *  for a blob that is merely unreadable right now would let the next save
+ *  write that "" back and destroy the logo for real. */
+async function getBlob(h: string): Promise<string | null | undefined> {
+  const hit = blobs.get(h);
+  if (hit != null) return hit;
+  try {
+    const key = BLOB_KEY(h);
+    const v = hasTauri
+      ? await invoke<string | null>("cache_get", { key })
+      : localStorage.getItem(key);
+    if (v != null) {
+      blobs.set(h, v);
+      hashOf.set(v, h); // so re-saving these rows doesn't re-hash the payload
+    }
+    return v;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rows as they go to storage: oversized strings replaced by markers, with the
+ *  payloads written out first. Returns the JSON actually stored. */
+async function dehydrate(rows: Row[]): Promise<string> {
+  const pending: Promise<void>[] = [];
+  const out = rows.map((r) => {
+    let copy: Row | null = null;
+    for (const k of Object.keys(r)) {
+      const v = r[k];
+      if (typeof v !== "string" || v.length < BLOB_MIN) continue;
+      let h = hashOf.get(v);
+      if (h === undefined) {
+        h = hashString(v);
+        hashOf.set(v, h);
+      }
+      if (!blobs.has(h)) {
+        blobs.set(h, v);
+        pending.push(putBlob(BLOB_KEY(h), v));
+      }
+      copy ??= { ...r };
+      copy[k] = { __blob: h } as BlobRef;
+    }
+    return copy ?? r;
+  });
+  // Payloads land before the rows that point at them, so a crash in between
+  // leaves an unreferenced blob rather than a row referencing nothing.
+  if (pending.length) await Promise.all(pending);
+  return JSON.stringify(out);
+}
+
+/** The inverse: markers swapped back for their payloads.
+ *
+ *  A blob the store says is gone resolves to "" rather than leaking
+ *  `[object Object]` into an <img src>. One that merely failed to read keeps
+ *  its marker: dehydrate passes a non-string straight through, so the reference
+ *  survives the round trip instead of being saved away as "". */
+async function hydrate(rows: Row[]): Promise<Row[]> {
+  let touched = false;
+  const out: Row[] = [];
+  for (const r of rows) {
+    let copy: Row | null = null;
+    for (const k of Object.keys(r)) {
+      const v = r[k];
+      if (!isBlobRef(v)) continue;
+      const payload = await getBlob(v.__blob);
+      if (payload === undefined) continue; // unreadable now — keep the marker
+      copy ??= { ...r };
+      copy[k] = payload ?? "";
+      touched = true;
+    }
+    out.push(copy ?? r);
+  }
+  return touched ? out : rows;
+}
+
+// ponytail: blobs are never garbage-collected — deleting the last invoice that
+// used a logo leaves the logo behind. A company has a handful of these ever, so
+// the leak is bounded and small. Sweep unreferenced keys on restore if that
+// ever stops being true.
+
 export async function loadColl(coll: string): Promise<Row[]> {
+  const hit = hasTauri ? memo.get(coll) : undefined;
+  if (hit) return hit.rows;
   const key = "localdb:" + coll;
   try {
-    if (hasTauri) {
-      const v = await invoke<string | null>("cache_get", { key });
-      return v ? (JSON.parse(v) as Row[]) : [];
-    }
-    const v = localStorage.getItem(key);
-    return v ? (JSON.parse(v) as Row[]) : [];
+    const v = hasTauri
+      ? await invoke<string | null>("cache_get", { key })
+      : localStorage.getItem(key);
+    const rows = await hydrate(v ? (JSON.parse(v) as Row[]) : []);
+    // json stays the STORED form (markers, not payloads) so replaceColl keeps
+    // comparing like with like.
+    if (hasTauri) memo.set(coll, { rows, json: v ?? "[]" });
+    return rows;
   } catch {
+    // Don't memo a failed read — the next call should try again.
     return [];
   }
 }
 
 async function saveColl(coll: string, rows: Row[]): Promise<void> {
   const key = "localdb:" + coll;
-  const json = JSON.stringify(rows);
-  if (hasTauri) await invoke("cache_set", { key, value: json });
-  else localStorage.setItem(key, json);
+  const json = await dehydrate(rows);
+  if (!hasTauri) {
+    localStorage.setItem(key, json);
+    return;
+  }
+  try {
+    // Cache only what actually reached storage. A write that fails (disk full,
+    // DB locked) must not leave the UI reading rows nobody saved.
+    await invoke("cache_set", { key, value: json });
+    memo.set(coll, { rows, json });
+  } catch (e) {
+    memo.delete(coll);
+    throw e;
+  }
 }
 
 /** Overwrite a collection from the cloud (pull-sync) WITHOUT journalling —
  *  journalling it would echo the pulled rows straight back up on the next
  *  push. Returns true when the stored data actually changed. */
 export async function replaceColl(coll: string, rows: Row[]): Promise<boolean> {
-  const next = JSON.stringify(rows);
-  if (JSON.stringify(await loadColl(coll)) === next) return false;
+  const next = await dehydrate(rows);
+  // Compare against the stored JSON rather than re-serialising what's already
+  // there: a pull that changes nothing used to parse AND stringify every table.
+  await loadColl(coll); // fills memo.json; free once warm
+  const current = hasTauri
+    ? memo.get(coll)?.json
+    : (localStorage.getItem("localdb:" + coll) ?? "[]");
+  if (current === next) return false;
   const key = "localdb:" + coll;
-  if (hasTauri) await invoke("cache_set", { key, value: next });
-  else localStorage.setItem(key, next);
+  if (!hasTauri) {
+    localStorage.setItem(key, next);
+    return true;
+  }
+  try {
+    await invoke("cache_set", { key, value: next });
+    memo.set(coll, { rows, json: next });
+  } catch (e) {
+    memo.delete(coll);
+    throw e;
+  }
   return true;
 }
 
@@ -71,7 +272,13 @@ export type SyncJournal = {
 
 const JOURNAL_KEY = "syncjournal";
 
+// Same deal as the collection memo above: journalMark reads and rewrites the
+// whole journal on every single row write, so saving an invoice with 20 lines
+// was 40 IPC round trips on the main thread.
+let journalMemo: SyncJournal | null = null;
+
 async function journalLoad(): Promise<SyncJournal> {
+  if (hasTauri && journalMemo) return journalMemo;
   try {
     const raw = hasTauri
       ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
@@ -87,18 +294,32 @@ async function journalLoad(): Promise<SyncJournal> {
         }
         if (!Array.isArray(e.deleted)) e.deleted = [];
       }
-      return j as SyncJournal;
+      journalMemo = j as SyncJournal;
+      return journalMemo;
     }
   } catch {
     /* corrupt journal → start fresh; worst case a full re-push (idempotent) */
   }
-  return { v: 0, tables: {} };
+  journalMemo = { v: 0, tables: {} };
+  return journalMemo;
 }
 
 async function journalSave(j: SyncJournal): Promise<void> {
   const json = JSON.stringify(j);
-  if (hasTauri) await invoke("cache_set", { key: JOURNAL_KEY, value: json });
-  else localStorage.setItem(JOURNAL_KEY, json);
+  if (!hasTauri) {
+    localStorage.setItem(JOURNAL_KEY, json);
+    return;
+  }
+  journalMemo = j;
+  try {
+    await invoke("cache_set", { key: JOURNAL_KEY, value: json });
+  } catch (e) {
+    // journalCommit clears pushed tables before saving. Keeping an unpersisted
+    // clear in memory would drop rows that never reached the cloud, so fall
+    // back to storage — the worst it costs is re-pushing, which is idempotent.
+    journalMemo = null;
+    throw e;
+  }
 }
 
 /** Mark rows dirty and notify the auto-sync scheduler. Bare call (no opts) or
@@ -114,10 +335,20 @@ export async function journalMark(
   j.v++;
   const entry = (j.tables[coll] ??= { changed: [], deleted: [] });
   if (opts?.all || (!opts?.changed && !opts?.deleted)) entry.all = true;
-  for (const id of opts?.changed ?? [])
-    if (id != null && !entry.changed.includes(id)) entry.changed.push(id);
-  for (const id of opts?.deleted ?? [])
-    if (id != null && !entry.deleted.includes(id)) entry.deleted.push(id);
+  // Set membership, not Array.includes: a bulk import marks thousands of ids
+  // against a list that is already thousands long, and the quadratic scan was
+  // the import's own bottleneck.
+  const push = (list: any[], ids: any[]): void => {
+    if (!ids.length) return;
+    const seen = new Set(list);
+    for (const id of ids) {
+      if (id == null || seen.has(id)) continue;
+      seen.add(id);
+      list.push(id);
+    }
+  };
+  push(entry.changed, opts?.changed ?? []);
+  push(entry.deleted, opts?.deleted ?? []);
   await journalSave(j);
   if (!opts?.silent && typeof window !== "undefined")
     window.dispatchEvent(new Event("filey:local-write"));
@@ -261,7 +492,11 @@ class LocalBuilder implements PromiseLike<Result> {
 
   private async exec(): Promise<Result> {
     try {
+      // loadColl hands back the cached array itself, so a write works on a copy:
+      // insert/upsert splice in place, and mutating the cache before the store
+      // has accepted the write would show rows that a failed save never kept.
       let rows = await loadColl(this.coll);
+      if (this.op !== "select") rows = [...rows];
       let result: any = null;
 
       if (this.op === "select") {
