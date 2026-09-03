@@ -28,20 +28,23 @@ function fakeCloud(opts?: {
   const uid = opts?.uid ?? UID;
   const refreshes: number[] = [];
   const calls: { table: string; op: string; payload?: any; ids?: any[] }[] = [];
+  // supabase-js stores the session and a refresh REPLACES it, so the next
+  // getSession sees the new expiry. Modelling that matters: the push checks the
+  // token per table, and a fake that kept handing back the dying token would
+  // make one refresh look like one per table.
+  let session = {
+    user: { id: uid },
+    expires_at: Math.floor(Date.now() / 1000) + (opts?.expiresInSecs ?? 3600),
+  };
   const client = {
     auth: {
       async getSession() {
-        const expires_at =
-          Math.floor(Date.now() / 1000) + (opts?.expiresInSecs ?? 3600);
-        return { data: { session: { user: { id: uid }, expires_at } } };
+        return { data: { session } };
       },
       async refreshSession() {
         refreshes.push(Date.now());
-        const expires_at = Math.floor(Date.now() / 1000) + 3600;
-        return {
-          data: { session: { user: { id: uid }, expires_at } },
-          error: null,
-        };
+        session = { user: { id: uid }, expires_at: Math.floor(Date.now() / 1000) + 3600 };
+        return { data: { session }, error: null };
       },
     },
     async rpc(name: string) {
@@ -300,5 +303,24 @@ describe('expired session', () => {
     const { client, refreshes } = fakeCloud({ expiresInSecs: 3600 });
     await syncNow(client, { manual: true });
     expect(refreshes.length).toBe(0);
+  });
+
+  // A first seed is every table at once and takes far longer than the 60s of
+  // headroom the opening check buys. The token used to be read once, so when it
+  // died partway the rest of the run failed as "JWT expired" — a message that
+  // names the first table in PUSH_TABLES and nothing about signing in.
+  it('stops with a sign-in message when the session dies mid-push', async () => {
+    await localClient.from('products').insert({ name: 'Widget' });
+    await localClient.from('customers').insert({ name: 'Acme' });
+    const { client } = fakeCloud();
+    // Alive for the opening check, gone by the time the first table is done.
+    let calls = 0;
+    client.auth.getSession = async () =>
+      ({ data: { session: calls++ < 1 ? { user: { id: UID }, expires_at: Math.floor(Date.now() / 1000) + 3600 } : null } }) as any;
+
+    expect(await syncNow(client, { manual: true })).toBe(false);
+    const s = getSyncStatus();
+    expect(s.state).toBe('error');
+    expect(s.error ?? '').toMatch(/sign in/i);
   });
 });

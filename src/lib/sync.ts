@@ -193,12 +193,22 @@ async function freshSession(supa: SupabaseClient) {
   if (expiresAt && expiresAt - Date.now() > 60_000) return s;
   try {
     const { data: r, error } = await supa.auth.refreshSession();
-    // A failed refresh is not fatal here: the caller still gets the old
-    // session and the push surfaces a real error rather than a silent no-op.
-    if (error) return s;
+    // Refresh failed, so the token in hand is dead. Handing it back only means
+    // every table in the push fails with "JWT expired" — reported against
+    // company_profile, the first one, which names neither the cause nor the
+    // cure. Report no session instead: the caller says "sign in", and the next
+    // cycle retries if the failure was transient.
+    if (error) {
+      // The one place the actual reason exists. Without it every report is the
+      // same "JWT expired" and a revoked refresh token looks like a flat
+      // network blip.
+      log.warn("sync", "session refresh failed", error.message);
+      return null;
+    }
     return r.session ?? s;
-  } catch {
-    return s;
+  } catch (e) {
+    log.warn("sync", "session refresh threw", e instanceof Error ? e.message : String(e));
+    return null;
   }
 }
 
@@ -292,6 +302,13 @@ export async function syncNow(
     let pushedAny = false;
     const failedByTable: Record<string, (string | number)[]> = {};
     for (const t of dirty) {
+      // Re-check the token per table, not once for the whole push. A first
+      // seed is thousands of rows across every table and takes far longer than
+      // the 60s of headroom the initial check bought, so the token used to go
+      // dead partway and the rest of the run failed as "JWT expired".
+      // getSession is a local read; the refresh only fires near expiry.
+      if (!(await freshSession(supa)))
+        throw new Error("Your session expired mid-upload. Sign in again and retry.");
       const entry = j.tables[t];
       const all = await loadColl(t);
       const idSet = new Set(entry.changed);
