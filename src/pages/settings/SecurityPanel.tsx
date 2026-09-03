@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../lib/auth";
 import { rememberLocalCredential } from "../../lib/localAuth";
 import { checkPassword } from "../../lib/password";
 import { isLocalMode } from "../../lib/dataMode";
@@ -324,6 +325,7 @@ export function ChangePasswordModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [ok, setOk] = useState(false);
+  const { refreshMfaPending } = useAuth();
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -380,6 +382,13 @@ export function ChangePasswordModal({
     if (error) setErr(error.message);
     else {
       setOk(true);
+      // The re-auth above started a FRESH session, and a fresh session on a 2FA
+      // account comes back at aal1 — assurance the app was already holding is
+      // silently gone. Re-check now the change is done, not mid-flow: the gate
+      // asks for a code instead of yanking the user out before they see this
+      // succeeded, and anything needing aal2 (turning 2FA off, notably) keeps
+      // working. No-op when 2FA is off.
+      await refreshMfaPending();
       timeoutRef.current = setTimeout(close, 1200);
     }
   };

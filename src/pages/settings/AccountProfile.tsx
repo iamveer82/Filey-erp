@@ -50,7 +50,7 @@ function PwInput({
 }
 
 export default function AccountProfile() {
-  const { profile, user, updateProfile, signInWithPassword } = useAuth();
+  const { profile, user, updateProfile, signInWithPassword, refreshMfaPending } = useAuth();
   const { toast, prompt } = useUI();
   const [p, setP] = useState({
     name: profile?.name ?? "",
@@ -241,6 +241,13 @@ export default function AccountProfile() {
       setCur("");
       setNpw("");
       setCpw("");
+      // The re-auth above started a FRESH session, and a fresh session on a
+      // 2FA account comes back at aal1 — assurance the app was already holding
+      // is silently gone. Re-check now that the flow is finished: the gate asks
+      // for a code (rather than yanking the user out mid-change), and anything
+      // that needs aal2 — turning 2FA off, notably — keeps working. No-op when
+      // 2FA is off.
+      await refreshMfaPending();
     } catch (e: any) {
       setPwMsg({
         ok: false,

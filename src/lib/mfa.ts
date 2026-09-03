@@ -18,7 +18,11 @@
 //
 // Cloud-only by nature: an offline install authenticates against the device's
 // own PBKDF2 hash (localAuth.ts) and never reaches Supabase, so every call
-// here degrades to "no 2FA" when there is no client.
+// here degrades to "no 2FA" when there is no client. That also means
+// sync.ts's cloudSignIn — the separate password sign-in that connects an
+// offline install to the cloud for syncing — gets an aal1 session and is not
+// gated here. It syncs fine (no RLS policy checks assurance), but 2FA is not
+// protecting that path; it protects getting into the app.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";

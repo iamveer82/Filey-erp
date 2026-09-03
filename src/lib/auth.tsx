@@ -324,9 +324,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else stopRealtime();
   }, [session]);
 
-  // Two-factor gate. Recomputed per signed-in user; after a code is accepted
-  // supabase refreshes the token in place (same user id), so the gate calls
-  // refreshMfaPending itself rather than waiting for this effect to re-fire.
+  // Two-factor gate. Keyed on the USER, deliberately not on the access token:
+  // a re-auth mid-session (the change-password screens sign in again to
+  // confirm identity) issues a fresh aal1 token, and re-checking on every
+  // token change would throw the user onto the 2FA gate in the middle of that
+  // flow — before they saw whether their password change worked. Those call
+  // sites invoke refreshMfaPending themselves once they're finished, which is
+  // also how the gate clears itself after a code is accepted.
   const [mfaPending, setMfaPending] = useState(false);
   const refreshMfaPending = async () => setMfaPending(await mfaRequired());
   useEffect(() => {
