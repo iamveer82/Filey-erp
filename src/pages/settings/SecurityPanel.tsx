@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { rememberLocalCredential } from "../../lib/localAuth";
+import { checkPassword } from "../../lib/password";
 import { Modal, Field } from "../../components/ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Lock, KeyRound, Monitor, ShieldAlert } from "lucide-react";
@@ -119,7 +120,10 @@ export function ChangePasswordModal({
 
   const submit = async () => {
     if (currentPw.length < 1) return setErr("Enter your current password first.");
-    if (pw.length < 8) return setErr("New password must be at least 8 characters.");
+    // The same policy signup uses — this screen asked only for 8 characters, so
+    // a password rejected at the front door could be set from inside.
+    const verdict = checkPassword(pw);
+    if (!verdict.ok) return setErr(`${verdict.problem}.`);
     if (pw !== pw2) return setErr("Passwords do not match.");
     if (!supabase) return setErr("Auth not configured.");
     setBusy(true);
