@@ -75,12 +75,29 @@ function fakeCloud(opts?: {
             },
           };
         },
-        select(_cols: string) {
+        select(cols: string) {
           const rows = opts?.pull?.[table] ?? [];
+          // The incremental pull asks for "id, updated_at" first, so the fake
+          // has to actually honour the column list — a mock that always
+          // returned whole rows would hide the egress saving under test.
+          const project = (r: any) =>
+            cols === "*"
+              ? r
+              : Object.fromEntries(
+                  cols.split(",").map((c) => [c.trim(), r[c.trim()]])
+                );
           const chain: any = {
             order: () => chain,
             range: (from: number, to: number) =>
-              Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
+              Promise.resolve({ data: rows.slice(from, to + 1).map(project), error: null }),
+            in(_col: string, ids: any[]) {
+              calls.push({ table, op: "select-in", ids });
+              const want = new Set(ids.map(String));
+              return Promise.resolve({
+                data: rows.filter((r) => want.has(String(r.id))).map(project),
+                error: null,
+              });
+            },
             eq: () => ({
               maybeSingle: () =>
                 Promise.resolve({
@@ -257,6 +274,46 @@ describe("pullNow", () => {
     expect(await pullNow(client)).toBe(true);
     const { data } = await localClient.from("products").select("*");
     expect(data).toEqual([]); // cloud says gone (deleted on another device)
+  });
+
+  it("downloads row bodies only for rows whose updated_at moved", async () => {
+    const cloud = [
+      { id: 1, name: "Untouched", updated_at: "2026-01-01T00:00:00Z" },
+      { id: 2, name: "Edited elsewhere", updated_at: "2026-02-02T00:00:00Z" },
+    ];
+    // Planted without journal entries, so the table is clean and pullable.
+    await replaceColl("products", [
+      { id: 1, name: "Untouched", updated_at: "2026-01-01T00:00:00Z" },
+      { id: 2, name: "Stale copy", updated_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const { client, calls } = fakeCloud({ pull: { products: cloud } });
+    expect(await pullNow(client)).toBe(true);
+
+    // Row 1 was never re-downloaded — that is the egress saving.
+    const bodies = calls.filter((c) => c.table === "products" && c.op === "select-in");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].ids).toEqual([2]);
+    // …and the collection still matches the cloud exactly.
+    const { data } = await localClient.from("products").select("*");
+    expect(data).toEqual(cloud);
+  });
+
+  it("skips the body fetch entirely when nothing changed", async () => {
+    const cloud = [{ id: 1, name: "Same", updated_at: "2026-01-01T00:00:00Z" }];
+    await replaceColl("products", cloud);
+    const { client, calls } = fakeCloud({ pull: { products: cloud } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some((c) => c.table === "products" && c.op === "select-in")).toBe(false);
+  });
+
+  it("still full-snapshots tables that have no updated_at trigger", async () => {
+    // crm_people is pushed but carries no set_updated_at trigger in schema.sql,
+    // so it must keep coming down whole or edits there would go missing.
+    const { client, calls } = fakeCloud({ pull: { crm_people: [{ id: 3, name: "Ada" }] } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some((c) => c.table === "crm_people" && c.op === "select-in")).toBe(false);
+    const { data } = await localClient.from("crm_people").select("*");
+    expect(data).toEqual([{ id: 3, name: "Ada" }]);
   });
 });
 

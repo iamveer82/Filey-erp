@@ -369,11 +369,83 @@ export async function syncNow(
 // path exists in the local storage shim.
 const PULL_SKIP = new Set(["user_files", "user_assets"]);
 
+// Tables carrying the `set_updated_at` BEFORE UPDATE trigger (schema.sql, the
+// `do $$` block that also installs RLS and force_org_id). Only these can be
+// pulled incrementally: without the trigger, updated_at never moves and an
+// edit made on another device would be invisible here. Any table added to the
+// trigger array in schema.sql can be added here.
+const INCREMENTAL = new Set([
+  "products", "orders", "order_items",
+  "employees", "attendance", "payroll",
+  "accounts", "expenses", "transactions",
+  "app_settings",
+  "crm_leads", "crm_customers", "crm_opportunities", "crm_activities",
+  "company_profile", "invoice_docs", "invoice_doc_items", "invoice_payments",
+  "quotations", "quotation_items", "quotation_templates", "tool_runs",
+  "suppliers", "purchase_orders", "purchase_order_items", "stock_movements",
+  "advances", "po_payments", "payment_receipts", "entity_links",
+  "campaigns", "email_optouts",
+]);
+
+/** Page a table out of the cloud, `cols` wide, ordered by id. */
+async function pullPaged(
+  supa: SupabaseClient,
+  t: string,
+  cols: string
+): Promise<Record<string, any>[]> {
+  const rows: Record<string, any>[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supa
+      .from(t)
+      .select(cols)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`${t}: ${error.message}`);
+    rows.push(...((data ?? []) as any[]));
+    if ((data ?? []).length < 1000) break;
+  }
+  return rows;
+}
+
+/** Same result as a full snapshot, a fraction of the egress: pull the id +
+ *  updated_at of every visible row (two small columns), then fetch whole rows
+ *  only for the ones this device doesn't already hold at that timestamp. The
+ *  id list still defines membership, so remote deletes propagate as before.
+ *  This is what stops a 24/7 poll re-downloading base64 logos and signatures
+ *  on every beat — the free-tier egress blowout. */
+async function pullIncremental(
+  supa: SupabaseClient,
+  t: string
+): Promise<Record<string, any>[]> {
+  const meta = await pullPaged(supa, t, "id, updated_at");
+  const local = new Map(
+    (await loadColl(t)).map((r) => [String((r as any).id), r as Record<string, any>])
+  );
+  // "Not held locally" has to be its own test: a row whose updated_at is null
+  // on both sides compares equal, and would otherwise never be downloaded.
+  const stale = meta.filter((m) => {
+    const have = local.get(String(m.id));
+    return !have || have.updated_at !== m.updated_at;
+  });
+
+  const fetched = new Map<string, Record<string, any>>();
+  for (let i = 0; i < stale.length; i += 500) {
+    const ids = stale.slice(i, i + 500).map((m) => m.id);
+    const { data, error } = await supa.from(t).select("*").in("id", ids);
+    if (error) throw new Error(`${t}: ${error.message}`);
+    for (const r of (data ?? []) as any[]) fetched.set(String(r.id), r);
+  }
+  // A row deleted between the two queries resolves to neither — drop it.
+  return meta
+    .map((m) => fetched.get(String(m.id)) ?? local.get(String(m.id)))
+    .filter(Boolean) as Record<string, any>[];
+}
+
 /** Cloud → local: replace every clean (non-dirty) collection with the rows
- *  this account can see — its own plus org-shared ones (RLS decides). Full
- *  snapshot per table: collections are small, and it makes remote deletes
- *  propagate for free. Dirty tables are skipped — local edits win until
- *  they've been pushed. */
+ *  this account can see — its own plus org-shared ones (RLS decides). The id
+ *  list is always a full snapshot, so remote deletes propagate for free; the
+ *  row BODIES come down incrementally where updated_at is trustworthy. Dirty
+ *  tables are skipped — local edits win until they've been pushed. */
 export async function pullNow(client?: SupabaseClient | null): Promise<boolean> {
   const supa = client ?? supabase;
   if (!isLocalMode() || !supa || !autoSyncEnabled() || running) return false;
@@ -389,17 +461,9 @@ export async function pullNow(client?: SupabaseClient | null): Promise<boolean> 
     let changed = false;
     for (const t of PUSH_TABLES) {
       if (PULL_SKIP.has(t) || before.tables[t]) continue;
-      const rows: Record<string, any>[] = [];
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await supa
-          .from(t)
-          .select("*")
-          .order("id", { ascending: true })
-          .range(from, from + 999);
-        if (error) throw new Error(`${t}: ${error.message}`);
-        rows.push(...(data ?? []));
-        if ((data ?? []).length < 1000) break;
-      }
+      const rows = INCREMENTAL.has(t)
+        ? await pullIncremental(supa, t)
+        : await pullPaged(supa, t, "*");
       // A local write raced the pull — stop; the queued push must run first.
       if ((await journalSnapshot()).v !== before.v) break;
       if (await replaceColl(t, rows)) changed = true;
@@ -471,14 +535,12 @@ export function startAutoSync(): void {
     if (!document.hidden) scheduleSync(1000);
   });
   scheduleSync(3000); // catch up on writes made while offline or signed out
-  // Idle poll so teammate / second-device edits land. pullNow re-downloads a
-  // full snapshot of every table, so a short interval on an always-open app
-  // burns cloud egress 24/7 for nothing — this is what exhausted the free-tier
-  // quota. Poll every 5 min, and NOT while the window is hidden (a backgrounded
-  // app syncs nothing until you look at it again — the visibilitychange pull
-  // above catches you up).
-  // ponytail: interval + visibility gate. If egress is still high, make
-  // pullNow incremental (updated_at > lastPull) instead of full-snapshot.
+  // Idle poll so teammate / second-device edits land. A poll used to re-download
+  // a full snapshot of every table, which burnt cloud egress 24/7 for nothing —
+  // that is what exhausted the free-tier quota. Now three things hold it down:
+  // pullNow is incremental (see pullIncremental), the interval is 5 min, and
+  // nothing polls while the window is hidden (a backgrounded app syncs nothing
+  // until you look at it again — the visibilitychange pull above catches up).
   setInterval(() => {
     if (typeof document !== "undefined" && document.hidden) return;
     void syncCycle();
