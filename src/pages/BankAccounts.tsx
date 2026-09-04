@@ -380,6 +380,11 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
           description: t.description || t.account_name,
           date: t.txn_date,
           amount: Number(t.amount),
+          // Cash and bank accounts are assets, so a debit is money arriving and
+          // a credit is money leaving. The ledger keeps every amount positive,
+          // so without this the matcher cannot tell the two apart and will
+          // happily reconcile a payment against a receipt of the same size.
+          direction: (t.txn_type === "debit" ? "in" : "out") as "in" | "out",
         }));
       setResult(matchStatement(lines, book));
     } catch (e) {
