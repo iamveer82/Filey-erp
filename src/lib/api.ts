@@ -2075,8 +2075,26 @@ export const fin = {
   repairLedger: () =>
     online(async () => {
       const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
+      const accts = await sList<Account>("accounts");
+      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+      const deltaOf = (t: any): number =>
+        ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount));
+
+      // Sum the journal as it stands AND as it will stand once the duplicates
+      // are gone, in one pass. Only the DIFFERENCE is applied to each stored
+      // balance.
+      //
+      // Overwriting the balance with the survivors' sum — what this used to do
+      // — throws away everything an account holds that was never posted as a
+      // transaction, and the opening balance typed in when the account was
+      // created is exactly that: createAccount stores it on the row and posts
+      // no journal entry for it. A bank account opened at 50,000 was silently
+      // reset to zero, by a button whose own confirm dialog promises accounts
+      // are untouched. Repairing drift must not destroy the starting position.
       const seen = new Set<string>();
-      let removed = 0;
+      const dupes: any[] = [];
+      const before = new Map<number, number>();
+      const after = new Map<number, number>();
       for (const t of txns) {
         const key = [
           t.account_id ?? "",
@@ -2085,30 +2103,25 @@ export const fin = {
           t.description ?? "",
           t.txn_date ?? "",
         ].join("|");
-        if (seen.has(key)) {
-          await sDelete("transactions", t.id);
-          removed++;
-        } else {
-          seen.add(key);
-        }
-      }
-      // Recompute every account balance from the surviving transactions.
-      const accts = await sList<Account>("accounts");
-      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-      const bal = new Map<number, number>();
-      const survivors = await sList<any>("transactions");
-      for (const t of survivors) {
+        const dupe = seen.has(key);
+        if (dupe) dupes.push(t);
+        else seen.add(key);
         if (!t.account_id) continue;
-        const type = typeById.get(t.account_id) ?? "asset";
-        bal.set(
-          t.account_id,
-          (bal.get(t.account_id) ?? 0) +
-            ledgerDelta(type, t.txn_type, Number(t.amount))
-        );
+        const d = deltaOf(t);
+        before.set(t.account_id, (before.get(t.account_id) ?? 0) + d);
+        if (!dupe) after.set(t.account_id, (after.get(t.account_id) ?? 0) + d);
       }
-      for (const a of accts)
-        await sUpdate("accounts", a.id, { balance: bal.get(a.id) ?? 0 });
-      return { removed };
+
+      for (const t of dupes) await sDelete("transactions", t.id);
+      for (const a of accts) {
+        // Whatever the balance holds beyond the journal is the opening
+        // position; it survives untouched.
+        const opening = Number(a.balance ?? 0) - (before.get(a.id) ?? 0);
+        await sUpdate("accounts", a.id, {
+          balance: r2(opening + (after.get(a.id) ?? 0)),
+        });
+      }
+      return { removed: dupes.length };
     }),
   report: () =>
     readCached<FinanceReport>(
