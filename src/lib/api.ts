@@ -4153,37 +4153,50 @@ export const recurrences = {
       const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
       let made = 0;
       for (const r of due) {
-        const base = await billing.getDoc(r.base_invoice_id).catch(() => null);
+        let base: InvoiceDoc | null = null;
+        try {
+          base = await billing.getDoc(r.base_invoice_id);
+        } catch (e: any) {
+          // Only "that invoice is gone" retires a recurrence. Any other
+          // failure — offline, RLS hiccup, timeout — is temporary, and
+          // cancelling on one silently ends a subscription the user set up,
+          // with no way back from the UI. Skip this run and try next time.
+          const gone =
+            e?.code === "PGRST116" || /no rows/i.test(e?.message ?? String(e));
+          if (!gone) continue;
+        }
         if (!base) {
           await sUpdate("invoice_recurrence", r.id, { active: false });
           continue;
         }
+        // Carry the WHOLE base document and override only what a new
+        // occurrence must change. Listing the fields by hand is how this
+        // drifted: unit_price_formula, each line's `custom` (manual amounts,
+        // per-line discounts and formulas) and round_off were all left behind,
+        // so a recurring invoice could bill a different figure than the
+        // invoice it recurs from — silently, every month.
+        const {
+          id: _id,
+          created_at: _created,
+          updated_at: _updated,
+          // Inheriting these would date the new invoice to the old cycle and
+          // re-link it to a quotation it did not come from.
+          due_date: _due,
+          quotation_id: _quote,
+          ...carried
+        } = base;
         const input: InvoiceDocInput = {
+          ...carried,
           number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
           status: "draft",
-          template: base.template,
-          accent: base.accent,
-          currency: base.currency,
-          seller_name: base.seller_name,
-          seller_address: base.seller_address,
-          seller_trn: base.seller_trn,
-          seller_email: base.seller_email,
-          seller_phone: base.seller_phone,
-          logo: base.logo,
-          customer_id: base.customer_id,
-          customer_name: base.customer_name,
-          customer_address: base.customer_address,
-          customer_trn: base.customer_trn,
-          customer_email: base.customer_email,
           issue_date: today,
-          notes: base.notes,
-          terms: base.terms,
-          tax_rate: base.tax_rate,
-          discount: base.discount,
           items: base.items.map((it) => ({
             description: it.description,
             qty: it.qty,
             unit_price: it.unit_price,
+            unit: it.unit,
+            custom: it.custom,
+            tax_category: it.tax_category,
             product_id: it.product_id,
           })),
         };
