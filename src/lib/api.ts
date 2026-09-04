@@ -1023,7 +1023,13 @@ async function adjustProductStock(
       .eq("id", productId)
       .single();
     if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
-    const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
+    // NOT clamped at zero. Clamping loses the overshoot, and every stock move
+    // here has a reverse: selling 5 from a stock of 3 clamped to 0, then
+    // reverting that invoice added 5 back and left 5 on hand where 3 had been.
+    // Overselling invented inventory, silently, and the stock_movements ledger
+    // (which records the true -5/+5) stopped agreeing with the product row.
+    // Negative stock is information — it says you owe units — so record it.
+    const next = (Number(row?.quantity) || 0) + delta;
     const { error: ue } = await sb()
       .from("products")
       .update({ quantity: next })
