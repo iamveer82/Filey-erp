@@ -375,8 +375,34 @@ export async function journalMark(
     window.dispatchEvent(new Event("filey:local-write"));
 }
 
+/** A COPY of the journal, isolated from writes that land afterwards.
+ *
+ *  It has to be a copy. On desktop journalLoad hands back the memo object that
+ *  journalMark mutates in place, so a caller holding a "before" snapshot was
+ *  holding the live journal: `snapshot.v !== current.v` compared a number with
+ *  itself and could never be true. Both guards built on that comparison were
+ *  dead — journalCommit's "don't clear what wasn't pushed", and pullNow's "a
+ *  local write raced this pull, stop". A row edited during a sync could be
+ *  cleared from the journal without ever being pushed, and then overwritten by
+ *  the next pull with the cloud's older copy.
+ *
+ *  Browser mode always re-read and re-parsed localStorage, so it was already
+ *  getting a fresh object and never had the bug. */
 export async function journalSnapshot(): Promise<SyncJournal> {
-  return journalLoad();
+  const j = await journalLoad();
+  const tables: SyncJournal["tables"] = {};
+  for (const t of Object.keys(j.tables)) {
+    const e = j.tables[t];
+    tables[t] = { ...e, changed: [...e.changed], deleted: [...e.deleted] };
+  }
+  return { v: j.v, tables };
+}
+
+/** Just the version counter. Callers polling "has anything written since?" in
+ *  a loop want this, not a full copy of a journal that may hold thousands of
+ *  ids after a bulk import. */
+export async function journalVersion(): Promise<number> {
+  return (await journalLoad()).v;
 }
 
 /** Clear pushed tables from the journal — but only if nothing wrote since the

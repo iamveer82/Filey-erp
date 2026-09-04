@@ -25,6 +25,7 @@ import {
   replaceColl,
   readBlobBytes,
   journalSnapshot,
+  journalVersion,
   journalCommit,
   journalMark,
 } from "./localdb";
@@ -465,7 +466,7 @@ export async function pullNow(client?: SupabaseClient | null): Promise<boolean> 
         ? await pullIncremental(supa, t)
         : await pullPaged(supa, t, "*");
       // A local write raced the pull — stop; the queued push must run first.
-      if ((await journalSnapshot()).v !== before.v) break;
+      if ((await journalVersion()) !== before.v) break;
       if (await replaceColl(t, rows)) changed = true;
     }
     if (changed && typeof window !== "undefined")

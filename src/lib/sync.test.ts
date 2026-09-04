@@ -3,7 +3,7 @@
 // ownership, flags org sharing; pullNow brings cloud rows down into clean
 // collections.
 import { describe, it, expect, beforeEach } from "vitest";
-import { localClient, journalSnapshot, replaceColl } from "./localdb";
+import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus } from "./sync";
 
 // syncNow only runs in local mode.
@@ -133,6 +133,35 @@ describe("local write journal", () => {
     await localClient.from("notifications").insert({ body: "hi" });
     const j = await journalSnapshot();
     expect(j.tables.notifications).toBeUndefined();
+  });
+
+  // The contract both sync guards rest on. A snapshot is a photograph, not a
+  // window: pullNow decides "did a write race me?" and journalCommit decides
+  // "is it safe to clear what I pushed?" by comparing one against the live
+  // journal, and neither question can be answered with an object that keeps
+  // changing underneath. (Desktop returned the live memo and so answered "no
+  // writes" always; browser mode re-parsed localStorage and never did.)
+  it("takes a snapshot writes afterwards cannot change", async () => {
+    await localClient.from("products").insert({ name: "First" });
+    const snap = await journalSnapshot();
+
+    await localClient.from("products").insert({ name: "Raced in mid-sync" });
+
+    expect(await journalVersion()).not.toBe(snap.v);
+    expect(snap.tables.products.changed).toEqual([1]);
+  });
+
+  it("refuses to clear a table that was written to since the snapshot", async () => {
+    await localClient.from("products").insert({ name: "Pushed" });
+    const snap = await journalSnapshot();
+    await localClient.from("products").insert({ name: "Not pushed yet" });
+
+    await journalCommit(snap.v, ["products"]);
+
+    // Still dirty: clearing here would drop row 2 from the journal without it
+    // ever reaching the cloud, and the next pull would overwrite it.
+    const after = await journalSnapshot();
+    expect(after.tables.products?.changed).toEqual([1, 2]);
   });
 });
 
