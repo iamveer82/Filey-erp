@@ -5010,12 +5010,12 @@ export const advances = {
     online(async () => {
       const tag = `applied:inv#${invoiceId}`;
       const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
+      // Matched on the tag alone, not the party. The tag already names one
+      // invoice, so scoping the purge by party_id only meant that changing an
+      // invoice's customer stranded the old consumption on the old customer —
+      // credit permanently eaten by an invoice that is no longer theirs.
       for (const r of rows)
-        if (
-          r.party_type === "customer" &&
-          String(r.party_id) === String(partyId) &&
-          r.note === tag
-        )
+        if (r.party_type === "customer" && r.note === tag)
           await sDelete("advances", r.id);
       if (amount > 0)
         await sInsert("advances", {
@@ -5041,8 +5041,16 @@ export const advances = {
     invoiceId?: number
   ): Promise<number> => {
     const rows = await advances.forParty("customer", partyId);
+    // `tag &&` is load-bearing. A deposit entered without a note is stored with
+    // note = null, and on a NEW invoice there is no id, so the tag was null
+    // too — `a.note === tag` matched every plain deposit and excluded it. The
+    // editor asked how much credit was available before the invoice had been
+    // saved and was told zero, however much the customer had on account.
     const tag = invoiceId ? `applied:inv#${invoiceId}` : null;
-    return rows.reduce((s, a) => s + (a.note === tag ? 0 : Number(a.amount)), 0);
+    return rows.reduce(
+      (s, a) => s + (tag && a.note === tag ? 0 : Number(a.amount)),
+      0
+    );
   },
 };
 
