@@ -1,0 +1,36 @@
+# Line endings.
+#
+# This repo had no rule, so it drifted: 77 files were committed with CRLF while
+# everything around them was LF, and src/lib/api.ts ended up MIXED — a CRLF file
+# with an LF island inside it. The cost is not tidiness. Any editor that rewrites
+# a whole file then produces a several-hundred-line diff around a three-line
+# change, which buries the real edit in review and turns every concurrent edit
+# into a conflict.
+#
+# LF in the repository, always. Working copies on Windows get LF too (eol=lf),
+# which every tool in this project — node, vite, tsc, rust, PowerShell — reads
+# without complaint.
+* text=auto eol=lf
+
+# cmd.exe genuinely requires CRLF: a batch file with LF endings misparses.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch the bytes of these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.gz binary
+*.zip binary
+*.wasm binary
+*.traineddata binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp4 binary
+*.webm binary
