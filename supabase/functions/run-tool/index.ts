@@ -103,13 +103,12 @@ serve(async (req) => {
           upsert: true,
           contentType: "application/pdf",
         });
-      if (!up.error) {
-        paths.push(path);
-        total += o.bytes.byteLength;
-      }
+      if (up.error) throw new Error(`Could not save ${o.name}: ${up.error.message}`);
+      paths.push(path);
+      total += o.bytes.byteLength;
     }
 
-    await client
+    const { error: completionError } = await client
       .from("tool_jobs")
       .update({
         status: "done",
@@ -118,6 +117,7 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);
+    if (completionError) throw completionError;
 
     return json({ ok: true, outputPaths: paths });
   } catch (e) {

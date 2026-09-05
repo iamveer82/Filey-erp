@@ -167,13 +167,12 @@ async function processJob(job) {
       const up = await sb.storage
         .from(OUTPUT_BUCKET)
         .upload(dest, buf, { upsert: true, contentType: o.type });
-      if (!up.error) {
-        paths.push(dest);
-        total += buf.length;
-      }
+      if (up.error) throw new Error(`Could not save ${o.name}: ${up.error.message}`);
+      paths.push(dest);
+      total += buf.length;
     }
 
-    await sb
+    const { error: completionError } = await sb
       .from("tool_jobs")
       .update({
         status: "done",
@@ -182,6 +181,7 @@ async function processJob(job) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", job.id);
+    if (completionError) throw completionError;
     console.log(`✓ ${job.tool} ${job.id} -> ${paths.length} file(s)`);
   } catch (e) {
     const msg = (e && e.message) || String(e);
