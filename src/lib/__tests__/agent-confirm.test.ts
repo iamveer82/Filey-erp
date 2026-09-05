@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool, setToolConfirm } from "../aiTools";
 import { isOwnerNumber } from "../waAgent";
+import { setDataMode } from "../dataMode";
 
 /* The WhatsApp path routes sensitive-tool approval over chat instead of the
  * in-app modal, via a per-run `confirm` override on runTool. These pin that the
  * override — not the global handler — is what decides, in both directions. */
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); setDataMode("local"); });
 afterEach(() => setToolConfirm(() => false));
 
 describe("runTool confirm override", () => {

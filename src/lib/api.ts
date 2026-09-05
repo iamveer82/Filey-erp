@@ -3016,49 +3016,58 @@ function ledgerDelta(type: string, txnType: string, amount: number): number {
  *  account balances. Type-aware, so it exactly undoes each posting (an earlier
  *  fixed-sign version double-counted asset/expense legs). Used before re-posting
  *  or when a document is reverted to draft / deleted. */
+type InvoiceTxn = {
+  id: number; account_id: number | null; txn_type: string; amount: number | string;
+  invoice_id?: number | null; source?: string | null; ref?: string | null;
+  description?: string; txn_date?: string;
+};
+
+async function reverseTransactions(txns: InvoiceTxn[]): Promise<void> {
+  if (!txns.length) return;
+  const accts = await sList<Account>("accounts");
+  const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+  for (const t of txns) {
+    const delta = t.account_id
+      ? -ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount))
+      : 0;
+    if (t.account_id) {
+      await adjustAccountBalance(t.account_id, delta);
+    }
+    try {
+      await sDelete("transactions", t.id);
+    } catch (error) {
+      if (t.account_id) await adjustAccountBalance(t.account_id, -delta);
+      throw error;
+    }
+  }
+}
+
 async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
-  ref: string
+  ref: string,
+  includePayments = false
 ): Promise<number> {
   // Match by BOTH keys. Postings made before invoice_id was tracked carry only
   // a ref; reversing by either key keeps re-finalize from leaving orphan rows
   // that pile up (the "8 invoices → 15 entries" bug). Dedup by row id so a row
   // matched on both keys isn't reversed twice.
-  type TxnRow = { id: number; account_id: number | null; txn_type: string; amount: number | string };
-  const rows = new Map<number, TxnRow>();
+  const rows = new Map<number, InvoiceTxn>();
   const byRef = await sb().from("transactions").select("*").eq("ref", ref);
   if (byRef.error) throw byRef.error;
-  for (const t of (byRef.data ?? []) as TxnRow[]) rows.set(t.id, t);
+  for (const t of (byRef.data ?? []) as InvoiceTxn[]) {
+    if (!t.invoice_id || t.invoice_id === invoiceId) rows.set(t.id, t);
+  }
   if (invoiceId) {
     const byId = await sb()
       .from("transactions")
       .select("*")
       .eq("invoice_id", invoiceId);
     if (byId.error) throw byId.error;
-    for (const t of (byId.data ?? []) as TxnRow[]) rows.set(t.id, t);
+    for (const t of (byId.data ?? []) as InvoiceTxn[]) rows.set(t.id, t);
   }
-  const txns = [...rows.values()];
-  if (txns.length) {
-    const accts = await sList<Account>("accounts");
-    const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-    for (const t of txns) {
-      if (!t.account_id) continue;
-      const type = typeById.get(t.account_id) ?? "asset";
-      await adjustAccountBalance(
-        t.account_id,
-        -ledgerDelta(type, t.txn_type, Number(t.amount))
-      );
-    }
-  }
-  const delRef = await sb().from("transactions").delete().eq("ref", ref);
-  if (delRef.error) throw delRef.error;
-  if (invoiceId) {
-    const delId = await sb()
-      .from("transactions")
-      .delete()
-      .eq("invoice_id", invoiceId);
-    if (delId.error) throw delId.error;
-  }
+  const txns = [...rows.values()].filter((t) => includePayments ||
+    (t.source !== "payment" && !/ Payment(?: #\d+)?$/.test(t.ref ?? "")));
+  await reverseTransactions(txns);
   return txns.length;
 }
 
@@ -3072,16 +3081,29 @@ async function reverseInvoiceOrderAndStock(
 ) {
   if (!isPurchase) {
     const orderNumber = `SO-${number}`;
-    const { data: order } = await sb()
+    const { data: order, error } = await sb()
       .from("orders")
       .select("id")
       .eq("order_number", orderNumber)
       .maybeSingle();
+    if (error) throw error;
     if (order?.id) {
-      await sb().from("orders").delete().eq("id", order.id);
+      await sDelete("orders", order.id);
     }
   }
   const dir = isPurchase ? -1 : 1;
+  const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+  const movements = await sChildren<{ product_id: number; qty: number }>("stock_movements", "ref", ref);
+  if (movements.length) {
+    const net = new Map<number, number>();
+    for (const m of movements) net.set(m.product_id, (net.get(m.product_id) ?? 0) + Number(m.qty));
+    for (const [productId, qty] of net) {
+      if (qty) await adjustProductStock(productId, -qty, {
+        type: isPurchase ? "purchase" : "sale", ref, note: "Posting reversed",
+      });
+    }
+    return;
+  }
   for (const it of items) {
     if (!it.product_id || !it.qty) continue;
     await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)), {
@@ -3101,7 +3123,7 @@ async function reverseInvoiceOrderAndStock(
  * collecting payment — which moves the invoice to "paid" — reversed the very
  * postings the sale had created, emptying the books for work already invoiced.
  */
-const POSTED_STATUSES = new Set(["sent", "paid"]);
+const POSTED_STATUSES = new Set(["sent", "paid", "overdue"]);
 const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
 
 async function propagateInvoice(
@@ -3331,6 +3353,7 @@ async function propagateInvoice(
     }
   } catch (e) {
     console.error("Invoice propagation failed:", e);
+    throw e;
   }
 }
 
@@ -3346,9 +3369,10 @@ async function unpropagateInvoice(
     const isPurchase = doc.doc_type === "purchase";
     const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
     const prior = await reverseInvoiceTransactions(id || undefined, ref);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
+    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, items, isPurchase);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
+    throw e;
   }
 }
 
@@ -3613,14 +3637,19 @@ export const billing = {
       // the invoice permanently empty and showing a zero total. The delete is
       // deferred until the replacements are safely written.
       let staleItemIds: number[] = [];
+      let previousDoc: Record<string, unknown> | null = null;
+      let previousItems: any[] = [];
       if (id && id > 0) {
-        await sUpdate("invoice_docs", id, row);
+        const previous = await sb().from("invoice_docs").select("*").eq("id", id).single();
+        if (previous.error) throw previous.error;
+        previousDoc = previous.data;
         const { data: existing, error } = await sb()
           .from("invoice_doc_items")
-          .select("id")
+          .select("*")
           .eq("invoice_id", id);
         if (error) throw error;
         staleItemIds = ((existing ?? []) as { id: number }[]).map((r) => r.id);
+        previousItems = existing ?? [];
         docId = id;
       } else {
         await checkFreeInvoiceCap(invoicesThisMonth);
@@ -3646,6 +3675,7 @@ export const billing = {
         // still in the table, so the invoice survives a failed save intact.
         if (error) throw error;
       }
+      if (previousDoc) await sUpdate("invoice_docs", docId, row);
       // Replacements are in. Retiring the old lines by id (rather than by
       // invoice_id) is what keeps the ones just written.
       if (staleItemIds.length) {
@@ -3657,7 +3687,9 @@ export const billing = {
       }
       // Keep Orders, Inventory and Accounting in sync with the invoice state.
       // Pass the saved id so postings carry invoice_id and can be reversed.
-      // Idempotent + best-effort: failures are logged but never block saving.
+      // Reverse the PREVIOUS quantities and number before posting the edit.
+      // Reversing the new lines invented stock when quantities/products changed.
+      if (previousDoc) await unpropagateInvoice(previousDoc, previousItems);
       const docRow: Record<string, unknown> = {
         ...(row as Record<string, unknown>),
         id: docId,
@@ -3670,7 +3702,7 @@ export const billing = {
       return docId;
     }),
   deleteDoc: (docId: number) =>
-    write({ k: "delete", t: "invoice_docs", id: docId }, async () => {
+    online(async () => {
       const { data: doc, error } = await sb()
         .from("invoice_docs")
         .select("*")
@@ -3678,7 +3710,6 @@ export const billing = {
         .single();
       if (error) throw error;
       const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
-      await sDelete("invoice_docs", docId);
       await unpropagateInvoice(
         doc as Record<string, unknown>,
         items
@@ -3688,21 +3719,23 @@ export const billing = {
             unit_price: i.unit_price,
           }))
       );
+      // Reverse receipts while the foreign key still identifies their invoice.
+      await reverseInvoiceTransactions(docId, `Invoice ${doc.number} Payment`, true);
       // Restore any advance credit this invoice had consumed — otherwise the
       // negative `applied:inv#<id>` ledger row outlives the invoice and the
       // customer's credit stays reduced by a document that no longer exists.
-      try {
-        const tag = `applied:inv#${docId}`;
-        const advs = await sList<any>("advances");
-        for (const a of advs) if (a.note === tag) await sDelete("advances", a.id);
-      } catch {
-        /* best-effort — never block the delete */
+      const advs = await sList<any>("advances");
+      for (const a of advs) if (a.note === `applied:inv#${docId}`) await sDelete("advances", a.id);
+      // Local storage has no FK cascades; explicitly clean child rows in both modes.
+      for (const table of ["invoice_payments", "invoice_doc_items"]) {
+        const { error: childError } = await sb().from(table).delete().eq("invoice_id", docId);
+        if (childError) throw childError;
       }
+      await sDelete("invoice_docs", docId);
       return undefined;
-    }, undefined),
+    }),
   setStatus: (docId: number, status: string) =>
-    write(
-      { k: "update", t: "invoice_docs", id: docId, row: { status } },
+    online(
       async () => {
         const { data: doc, error } = await sb()
           .from("invoice_docs")
@@ -3712,20 +3745,21 @@ export const billing = {
         if (error) throw error;
         const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
         await sUpdate("invoice_docs", docId, { status });
+        if (isPostedStatus(status) === isPostedStatus(doc.status)) return;
         const docItems = items
           .map((i) => ({
             product_id: i.product_id ?? undefined,
             qty: i.qty,
             unit_price: i.unit_price,
             custom: i.custom ?? undefined, // keep meta so the order total matches
+            tax_category: i.tax_category ?? undefined,
           }));
         if (isPostedStatus(status)) {
           await propagateInvoice(doc as Record<string, unknown>, docItems);
         } else {
           await unpropagateInvoice(doc as Record<string, unknown>, docItems);
         }
-      },
-      undefined
+      }
     ),
   shareDoc: (docId: number, shared: boolean) =>
     online(() =>
@@ -3797,7 +3831,8 @@ export const billing = {
     paidAt: string
   ) =>
     online(async () => {
-      const { data: pay } = await sb()
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+      const { data: pay, error: paymentError } = await sb()
         .from("invoice_payments")
         .insert({
           invoice_id: invoiceId,
@@ -3807,6 +3842,7 @@ export const billing = {
         })
         .select("id")
         .single();
+      if (paymentError) throw paymentError;
       const paymentId = (pay as { id: number } | null)?.id;
 
       // Auto-mark the invoice paid once the balance is cleared.
@@ -3862,7 +3898,7 @@ export const billing = {
         ? amountBase
         : docAmountInAed(amount, docCurrency, null, payRates);
       const fxDiff = Number((amountSpot - amountBase).toFixed(2));
-      const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
+      const ref = `Invoice payment #${paymentId}`;
       const cashId = await findOrCreateCashAccount();
       const arId = await findOrCreateArAccount();
       if (cashId > 0) {
@@ -3925,21 +3961,55 @@ export const billing = {
         .single();
       if (error) throw error;
       const invoiceId = (p as { invoice_id?: number } | null)?.invoice_id;
-      await sDelete("invoice_payments", id);
       if (invoiceId) {
         // Reverse the accounting entries for this payment.
-        const { data: doc } = await sb()
+        const { data: doc, error: docError } = await sb()
           .from("invoice_docs")
-          .select("number,status")
+          .select("*")
           .eq("id", invoiceId)
           .single();
-        const docMeta = doc as { number?: string; status?: string } | null;
-        const ref = `Invoice ${docMeta?.number ?? invoiceId} Payment`;
-        await reverseInvoiceTransactions(invoiceId, ref);
-        // If the invoice was fully paid, move it back to sent.
-        if (docMeta?.status === "paid") {
-          await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        if (docError) throw docError;
+        const docMeta = doc as InvoiceDoc;
+        const txns = await sChildren<InvoiceTxn>("transactions", "invoice_id", invoiceId);
+        let selected = txns.filter((t) => t.ref === `Invoice payment #${id}`);
+        if (!selected.length) {
+          // Older versions gave every receipt the same ref. Recover each receipt's
+          // cash / optional FX / AR bundle, never the invoice's sale or COGS legs.
+          const legacy = txns.filter((t) => t.source === "payment" &&
+            / Payment$/.test(t.ref ?? "")).sort((a, b) => a.id - b.id);
+          const bundles: InvoiceTxn[][] = [];
+          let bundle: InvoiceTxn[] = [];
+          for (const t of legacy) {
+            bundle.push(t);
+            if (t.description?.endsWith("— AR reduction")) {
+              bundles.push(bundle);
+              bundle = [];
+            }
+          }
+          const baseAmount = docAmountInAed(Number(p.amount), docMeta.currency, docMeta.fx_rate,
+            await getExchangeRates().catch(() => ({})));
+          const matches = bundles.filter((b) => b.every((t) =>
+            t.txn_date?.slice(0, 10) === String(p.paid_at).slice(0, 10)) &&
+            Math.abs(Number(b[b.length - 1].amount) - baseAmount) < 0.005);
+          const signature = (b: InvoiceTxn[]) => JSON.stringify(b.map((t) =>
+            [t.account_id, t.txn_type, Number(t.amount)]));
+          if (legacy.length && (!matches.length || matches.some((b) =>
+            signature(b) !== signature(matches[0])))) {
+            throw new Error("This older payment cannot be matched safely to its ledger entries. Reconcile it before deleting it.");
+          }
+          selected = matches[0] ?? [];
         }
+        await reverseTransactions(selected);
+        await sDelete("invoice_payments", id);
+        // If the invoice was fully paid, move it back to sent.
+        if (docMeta.status === "paid") {
+          const remaining = await sChildren<InvoicePayment>("invoice_payments", "invoice_id", invoiceId);
+          const items = await sChildren<any>("invoice_doc_items", "invoice_id", invoiceId);
+          if (remaining.reduce((sum, r) => sum + Number(r.amount), 0) < docTotal(docMeta, items) - 0.005)
+            await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        }
+      } else {
+        await sDelete("invoice_payments", id);
       }
     }),
   getCompany: () =>
@@ -5110,6 +5180,7 @@ export interface ReceiptSummary {
   status: string;
   template: string;
   amount: number;
+  currency?: string;
   payment_date: string;
   payment_method?: string;
   shared?: boolean;
@@ -5172,6 +5243,7 @@ export const receipts = {
           template: r.template,
           amount: Number(r.amount),
           payment_date: r.issue_date,
+          currency: r.currency,
           payment_method: r.payment_method,
           shared: r.shared ?? false,
           updated_at: r.updated_at,
