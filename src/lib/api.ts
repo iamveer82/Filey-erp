@@ -2391,6 +2391,11 @@ export const crm = {
       () => sList<EmailOptOut>("email_optouts", [{ col: "id", asc: false }]),
       []
     ),
+  /** The same list, for the send path. No cache and no empty fallback: a read
+   *  that fails must not look like "nobody has unsubscribed", so the error
+   *  travels and the campaign stops instead of mailing the whole opt-out list. */
+  optOutsStrict: () =>
+    sList<EmailOptOut>("email_optouts", [{ col: "id", asc: false }]),
   addOptOut: (email: string, reason: EmailOptOut["reason"] = "manual") => {
     const row = clean({ email: email.trim().toLowerCase(), reason });
     return write({ k: "insert", t: "email_optouts", row }, () =>
