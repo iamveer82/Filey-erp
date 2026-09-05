@@ -17,6 +17,11 @@ export default tseslint.config(
       "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
       "src-tauri/target",
+      "mobile/android/**/build/**",
+      "mobile/android/.gradle/**",
+      "mobile/android/app/src/main/assets/public/**",
+      "mobile/ios/**/public/**",
+      "mobile/dist/**",
       "public/sw.js", // service-worker globals, hand-written
       "public/tesseract", // vendored tesseract.js worker + wasm (minified)
       "worker", // separate Cloudflare worker deploy, Node runtime
