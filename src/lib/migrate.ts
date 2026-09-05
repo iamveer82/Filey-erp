@@ -10,6 +10,7 @@ import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
 import { cleanRowForPush, pushCollection } from "./sync";
+import { loadColl, replaceColl, clearLocalCache } from "./localdb";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -111,6 +112,10 @@ export async function normalizeLocalEmirates(): Promise<number> {
     }
     if (dirty) await localSet("localdb:" + coll, JSON.stringify(rows));
   }
+  // Written straight to the key, so anything already holding a parsed copy of
+  // these collections is now behind. Cheaper than routing a one-off repair
+  // through the query layer.
+  if (changed) clearLocalCache();
   return changed;
 }
 
@@ -157,14 +162,11 @@ export async function migrateLocalToCloud(
   const out: MigrateResult[] = [];
 
   for (const t of PUSH_TABLES) {
-    const raw = await localGet("localdb:" + t);
-    let rows: any[] = [];
-    try {
-      rows = raw ? JSON.parse(raw) : [];
-    } catch {
-      rows = [];
-    }
-    if (!Array.isArray(rows) || rows.length === 0) continue;
+    // Through loadColl, not the raw key: oversized fields (the logo a doc was
+    // issued with) are stored as {__blob} markers pointing at a shared payload,
+    // and the cloud must receive the real value, not the marker.
+    const rows = await loadColl(t);
+    if (rows.length === 0) continue;
 
     onProgress?.(`Pushing ${t}…`);
     const cleaned = rows.map((r) => cleanRowForPush(r as Record<string, any>, uid));
@@ -250,7 +252,11 @@ export async function migrateCloudToLocal(
         continue;
       }
       const rows = data ?? [];
-      await localSet("localdb:" + t, JSON.stringify(rows));
+      // replaceColl rather than a raw key write: it splits oversized fields out
+      // the same way a normal save does, and it keeps the in-memory collection
+      // cache in step — a raw write behind its back left readers on pre-migration
+      // rows until the next reload.
+      await replaceColl(t, rows);
       if (t === "user_files") fileRows = rows as { storage_path?: string }[];
       out.push({ table: t, rows: rows.length });
     } catch (e: any) {

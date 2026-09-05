@@ -8,20 +8,15 @@ import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
 import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
+import { checkPassword, strengthLabel } from "../../lib/password";
 
 /* ---------------- Account & Profile ---------------- */
 
-const PW_RULES = [
-  { label: "At least 8 characters", test: (p: string) => p.length >= 8 },
-  {
-    label: "Contains uppercase and lowercase letters",
-    test: (p: string) => /[a-z]/.test(p) && /[A-Z]/.test(p),
-  },
-  {
-    label: "Contains a number or special character",
-    test: (p: string) => /[0-9!@#$%^&*]/.test(p),
-  },
-];
+// The composition rules that used to live here (mixed case, a digit or symbol)
+// are gone. They are what NIST SP 800-63B tells you not to do: they rule out
+// "correct horse battery staple" and wave through "Passw0rd1", and they were
+// stricter than signup, so a password accepted at the front door was refused
+// here. One policy now, in lib/password.
 
 function PwInput({
   val,
@@ -55,7 +50,7 @@ function PwInput({
 }
 
 export default function AccountProfile() {
-  const { profile, user, updateProfile, signInWithPassword } = useAuth();
+  const { profile, user, updateProfile, signInWithPassword, refreshMfaPending } = useAuth();
   const { toast, prompt } = useUI();
   const [p, setP] = useState({
     name: profile?.name ?? "",
@@ -112,7 +107,6 @@ export default function AccountProfile() {
   const [pwBusy, setPwBusy] = useState(false);
   const [usernameBusy, setUsernameBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
-  const pwValid = PW_RULES.every((r) => r.test(npw));
   // cloudConfigured is true in every build (Supabase is baked in), so it says
   // nothing about whether this install has an account — and offline mode is
   // NOT the answer either: an offline install still signs in to the cloud for
@@ -138,6 +132,10 @@ export default function AccountProfile() {
    *  claimed it — that is the same address, so show it rather than nothing. */
   const accountEmail =
     cloudEmail ?? getLocalCredential()?.email ?? profile?.email ?? "";
+  // Declared after accountEmail on purpose — the policy checks the new password
+  // against the address it protects.
+  const pwVerdict = checkPassword(npw, accountEmail || undefined);
+  const pwValid = pwVerdict.ok;
   // An email change in flight: the new address plus the code sent to it.
   const [pending, setPending] = useState<{ next: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -218,7 +216,10 @@ export default function AccountProfile() {
 
   const updatePassword = async () => {
     setPwMsg(null);
-    if (!pwValid) return setPwMsg({ ok: false, t: "New password too weak." });
+    // Say which rule it missed. "Too weak" leaves the user guessing, and the
+    // usual guess is to bolt a "1!" on the end.
+    if (!pwValid)
+      return setPwMsg({ ok: false, t: `${pwVerdict.problem}.` });
     if (npw !== cpw) return setPwMsg({ ok: false, t: "Passwords do not match." });
     if (!supabase || !accountEmail) return;
     setPwBusy(true);
@@ -240,6 +241,13 @@ export default function AccountProfile() {
       setCur("");
       setNpw("");
       setCpw("");
+      // The re-auth above started a FRESH session, and a fresh session on a
+      // 2FA account comes back at aal1 — assurance the app was already holding
+      // is silently gone. Re-check now that the flow is finished: the gate asks
+      // for a code (rather than yanking the user out mid-change), and anything
+      // that needs aal2 — turning 2FA off, notably — keeps working. No-op when
+      // 2FA is off.
+      await refreshMfaPending();
     } catch (e: any) {
       setPwMsg({
         ok: false,
@@ -604,28 +612,27 @@ export default function AccountProfile() {
               toggle={() => setShow({ ...show, n: !show.n })}
             />
           </FormField>
-          <ul className="space-y-1.5">
-            {PW_RULES.map((r) => {
-              const ok = r.test(npw);
-              return (
-                <li
-                  key={r.label}
-                  className={`flex items-center gap-2 text-xs ${
-                    ok ? "text-success" : "text-brand-400"
-                  }`}
-                >
-                  <span
-                    className={`grid place-items-center w-4 h-4 rounded-full ${
-                      ok ? "bg-success text-white" : "bg-brand-200 text-white"
-                    }`}
-                  >
-                    <Check size={10} strokeWidth={3} />
-                  </span>
-                  {r.label}
-                </li>
-              );
-            })}
-          </ul>
+          {/* One line that says what is actually wrong, rather than a checklist
+              of composition rules that a weak password can satisfy in full. */}
+          {npw.length > 0 && (
+            <p
+              className={`flex items-center gap-2 text-xs ${
+                pwVerdict.ok ? "text-success" : "text-brand-400"
+              }`}
+              aria-live="polite"
+            >
+              <span
+                className={`grid place-items-center w-4 h-4 rounded-full shrink-0 ${
+                  pwVerdict.ok ? "bg-success text-white" : "bg-brand-200 text-white"
+                }`}
+              >
+                <Check size={10} strokeWidth={3} />
+              </span>
+              {pwVerdict.ok
+                ? `Strength: ${strengthLabel(pwVerdict.score)}`
+                : pwVerdict.problem}
+            </p>
+          )}
           <FormField label="Confirm New Password">
             <PwInput
               val={cpw}

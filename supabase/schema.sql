@@ -1483,10 +1483,16 @@ create policy audit_log_insert on audit_log for insert
 -- counter (select → compute → update) loses concurrent updates. These do the
 -- arithmetic in a single statement. SECURITY INVOKER (default) so RLS still
 -- scopes the write to rows the caller may update.
+-- Deliberately NOT greatest(0, …). Every move through this function has a
+-- reverse (revert an invoice to draft, delete a bill), and clamping made the
+-- pair asymmetric: selling 5 from a stock of 3 clamped to 0, and reverting it
+-- added 5 back to leave 5 where 3 had been. Overselling invented inventory and
+-- desynced the products row from the stock_movements ledger, which records the
+-- true -5/+5. Negative stock is a fact worth keeping — it says units are owed.
 create or replace function public.adjust_product_stock(p_id bigint, p_delta numeric)
 returns bigint language sql as $$
   update public.products
-     set quantity = greatest(0, quantity + p_delta)
+     set quantity = quantity + p_delta
    where id = p_id
   returning quantity;
 $$;

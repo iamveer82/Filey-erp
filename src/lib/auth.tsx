@@ -12,6 +12,7 @@ import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
 import { registerCloudDevice, entitlement } from "./license";
+import { mfaRequired } from "./mfa";
 import {
   getLocalCredential,
   hasLocalCredential,
@@ -161,6 +162,13 @@ interface AuthValue {
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
   /** Google OAuth (web only — embedded webviews are blocked by Google). */
   signInWithGoogle: () => Promise<void>;
+  /** True when the session is real but still owes a 2FA code. Supabase hands
+   *  back a session at assurance level aal1 after a correct password even when
+   *  the account has a verified factor, so "signed in" is not "allowed in" —
+   *  App gates on this before rendering anything. */
+  mfaPending: boolean;
+  /** Re-check the assurance level (after a code is accepted). */
+  refreshMfaPending: () => Promise<void>;
   /** True when the org is at its cloud device limit and THIS device was
    *  refused a slot. UI gates on this only when licensing is enforced. */
   deviceLimitBlocked: boolean;
@@ -315,6 +323,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (session?.user) void startRealtime();
     else stopRealtime();
   }, [session]);
+
+  // Two-factor gate. Keyed on the USER, deliberately not on the access token:
+  // a re-auth mid-session (the change-password screens sign in again to
+  // confirm identity) issues a fresh aal1 token, and re-checking on every
+  // token change would throw the user onto the 2FA gate in the middle of that
+  // flow — before they saw whether their password change worked. Those call
+  // sites invoke refreshMfaPending themselves once they're finished, which is
+  // also how the gate clears itself after a code is accepted.
+  const [mfaPending, setMfaPending] = useState(false);
+  const refreshMfaPending = async () => setMfaPending(await mfaRequired());
+  useEffect(() => {
+    if (local || !session?.user) {
+      setMfaPending(false);
+      return;
+    }
+    void refreshMfaPending();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id, local]);
 
   // Cloud device registry (5 per org): claim/refresh this device's slot on
   // session start. Best-effort — a network blip must not lock the app.
@@ -601,6 +627,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     signInWithPassword,
     signInWithGoogle,
+    mfaPending,
+    refreshMfaPending,
     deviceLimitBlocked,
     retryDeviceRegistration,
     signUpWithPassword,

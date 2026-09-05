@@ -24,7 +24,7 @@ pub struct EmailMessage {
 /// Send a single HTML email over SMTP (Gmail: smtp.gmail.com:587 with
 /// an App Password). Runs in the desktop shell only.
 #[tauri::command]
-pub fn send_email(config: EmailConfig, message: EmailMessage) -> AppResult<()> {
+pub async fn send_email(config: EmailConfig, message: EmailMessage) -> AppResult<()> {
     let from = format!("{} <{}>", config.from_name, config.from_email);
     let email = Message::builder()
         .from(

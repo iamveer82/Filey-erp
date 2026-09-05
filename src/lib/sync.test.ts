@@ -3,7 +3,7 @@
 // ownership, flags org sharing; pullNow brings cloud rows down into clean
 // collections.
 import { describe, it, expect, beforeEach } from "vitest";
-import { localClient, journalSnapshot, replaceColl } from "./localdb";
+import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus } from "./sync";
 
 // syncNow only runs in local mode.
@@ -28,20 +28,23 @@ function fakeCloud(opts?: {
   const uid = opts?.uid ?? UID;
   const refreshes: number[] = [];
   const calls: { table: string; op: string; payload?: any; ids?: any[] }[] = [];
+  // supabase-js stores the session and a refresh REPLACES it, so the next
+  // getSession sees the new expiry. Modelling that matters: the push checks the
+  // token per table, and a fake that kept handing back the dying token would
+  // make one refresh look like one per table.
+  let session = {
+    user: { id: uid },
+    expires_at: Math.floor(Date.now() / 1000) + (opts?.expiresInSecs ?? 3600),
+  };
   const client = {
     auth: {
       async getSession() {
-        const expires_at =
-          Math.floor(Date.now() / 1000) + (opts?.expiresInSecs ?? 3600);
-        return { data: { session: { user: { id: uid }, expires_at } } };
+        return { data: { session } };
       },
       async refreshSession() {
         refreshes.push(Date.now());
-        const expires_at = Math.floor(Date.now() / 1000) + 3600;
-        return {
-          data: { session: { user: { id: uid }, expires_at } },
-          error: null,
-        };
+        session = { user: { id: uid }, expires_at: Math.floor(Date.now() / 1000) + 3600 };
+        return { data: { session }, error: null };
       },
     },
     async rpc(name: string) {
@@ -72,12 +75,29 @@ function fakeCloud(opts?: {
             },
           };
         },
-        select(_cols: string) {
+        select(cols: string) {
           const rows = opts?.pull?.[table] ?? [];
+          // The incremental pull asks for "id, updated_at" first, so the fake
+          // has to actually honour the column list — a mock that always
+          // returned whole rows would hide the egress saving under test.
+          const project = (r: any) =>
+            cols === "*"
+              ? r
+              : Object.fromEntries(
+                  cols.split(",").map((c) => [c.trim(), r[c.trim()]])
+                );
           const chain: any = {
             order: () => chain,
             range: (from: number, to: number) =>
-              Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
+              Promise.resolve({ data: rows.slice(from, to + 1).map(project), error: null }),
+            in(_col: string, ids: any[]) {
+              calls.push({ table, op: "select-in", ids });
+              const want = new Set(ids.map(String));
+              return Promise.resolve({
+                data: rows.filter((r) => want.has(String(r.id))).map(project),
+                error: null,
+              });
+            },
             eq: () => ({
               maybeSingle: () =>
                 Promise.resolve({
@@ -113,6 +133,35 @@ describe("local write journal", () => {
     await localClient.from("notifications").insert({ body: "hi" });
     const j = await journalSnapshot();
     expect(j.tables.notifications).toBeUndefined();
+  });
+
+  // The contract both sync guards rest on. A snapshot is a photograph, not a
+  // window: pullNow decides "did a write race me?" and journalCommit decides
+  // "is it safe to clear what I pushed?" by comparing one against the live
+  // journal, and neither question can be answered with an object that keeps
+  // changing underneath. (Desktop returned the live memo and so answered "no
+  // writes" always; browser mode re-parsed localStorage and never did.)
+  it("takes a snapshot writes afterwards cannot change", async () => {
+    await localClient.from("products").insert({ name: "First" });
+    const snap = await journalSnapshot();
+
+    await localClient.from("products").insert({ name: "Raced in mid-sync" });
+
+    expect(await journalVersion()).not.toBe(snap.v);
+    expect(snap.tables.products.changed).toEqual([1]);
+  });
+
+  it("refuses to clear a table that was written to since the snapshot", async () => {
+    await localClient.from("products").insert({ name: "Pushed" });
+    const snap = await journalSnapshot();
+    await localClient.from("products").insert({ name: "Not pushed yet" });
+
+    await journalCommit(snap.v, ["products"]);
+
+    // Still dirty: clearing here would drop row 2 from the journal without it
+    // ever reaching the cloud, and the next pull would overwrite it.
+    const after = await journalSnapshot();
+    expect(after.tables.products?.changed).toEqual([1, 2]);
   });
 });
 
@@ -255,6 +304,46 @@ describe("pullNow", () => {
     const { data } = await localClient.from("products").select("*");
     expect(data).toEqual([]); // cloud says gone (deleted on another device)
   });
+
+  it("downloads row bodies only for rows whose updated_at moved", async () => {
+    const cloud = [
+      { id: 1, name: "Untouched", updated_at: "2026-01-01T00:00:00Z" },
+      { id: 2, name: "Edited elsewhere", updated_at: "2026-02-02T00:00:00Z" },
+    ];
+    // Planted without journal entries, so the table is clean and pullable.
+    await replaceColl("products", [
+      { id: 1, name: "Untouched", updated_at: "2026-01-01T00:00:00Z" },
+      { id: 2, name: "Stale copy", updated_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const { client, calls } = fakeCloud({ pull: { products: cloud } });
+    expect(await pullNow(client)).toBe(true);
+
+    // Row 1 was never re-downloaded — that is the egress saving.
+    const bodies = calls.filter((c) => c.table === "products" && c.op === "select-in");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].ids).toEqual([2]);
+    // …and the collection still matches the cloud exactly.
+    const { data } = await localClient.from("products").select("*");
+    expect(data).toEqual(cloud);
+  });
+
+  it("skips the body fetch entirely when nothing changed", async () => {
+    const cloud = [{ id: 1, name: "Same", updated_at: "2026-01-01T00:00:00Z" }];
+    await replaceColl("products", cloud);
+    const { client, calls } = fakeCloud({ pull: { products: cloud } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some((c) => c.table === "products" && c.op === "select-in")).toBe(false);
+  });
+
+  it("still full-snapshots tables that have no updated_at trigger", async () => {
+    // crm_people is pushed but carries no set_updated_at trigger in schema.sql,
+    // so it must keep coming down whole or edits there would go missing.
+    const { client, calls } = fakeCloud({ pull: { crm_people: [{ id: 3, name: "Ada" }] } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some((c) => c.table === "crm_people" && c.op === "select-in")).toBe(false);
+    const { data } = await localClient.from("crm_people").select("*");
+    expect(data).toEqual([{ id: 3, name: "Ada" }]);
+  });
 });
 
 describe("syncCycle first-run seeding", () => {
@@ -300,5 +389,24 @@ describe('expired session', () => {
     const { client, refreshes } = fakeCloud({ expiresInSecs: 3600 });
     await syncNow(client, { manual: true });
     expect(refreshes.length).toBe(0);
+  });
+
+  // A first seed is every table at once and takes far longer than the 60s of
+  // headroom the opening check buys. The token used to be read once, so when it
+  // died partway the rest of the run failed as "JWT expired" — a message that
+  // names the first table in PUSH_TABLES and nothing about signing in.
+  it('stops with a sign-in message when the session dies mid-push', async () => {
+    await localClient.from('products').insert({ name: 'Widget' });
+    await localClient.from('customers').insert({ name: 'Acme' });
+    const { client } = fakeCloud();
+    // Alive for the opening check, gone by the time the first table is done.
+    let calls = 0;
+    client.auth.getSession = async () =>
+      ({ data: { session: calls++ < 1 ? { user: { id: UID }, expires_at: Math.floor(Date.now() / 1000) + 3600 } : null } }) as any;
+
+    expect(await syncNow(client, { manual: true })).toBe(false);
+    const s = getSyncStatus();
+    expect(s.state).toBe('error');
+    expect(s.error ?? '').toMatch(/sign in/i);
   });
 });

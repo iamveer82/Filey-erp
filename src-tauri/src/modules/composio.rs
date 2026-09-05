@@ -95,8 +95,8 @@ fn call(key: &str, method: &str, url: &str, body: Option<Value>) -> AppResult<Va
 /// auth config exists, then returns an OAuth `redirect_url` for the user to
 /// authorize, plus the `connected_account_id` to poll for status.
 #[tauri::command]
-pub fn composio_connect(
-    db: State<Db>,
+pub async fn composio_connect(
+    db: State<'_, Db>,
     toolkit: String,
     user_id: Option<String>,
 ) -> AppResult<Value> {
@@ -149,8 +149,8 @@ pub fn composio_connect(
 
 /// Poll a connection's status (e.g. INITIATED → ACTIVE after the user authorizes).
 #[tauri::command]
-pub fn composio_connection_status(
-    db: State<Db>,
+pub async fn composio_connection_status(
+    db: State<'_, Db>,
     connected_account_id: String,
 ) -> AppResult<Value> {
     let key = api_key(&db)?;
@@ -164,7 +164,7 @@ pub fn composio_connection_status(
 
 /// List all connected accounts (for the integrations status view).
 #[tauri::command]
-pub fn composio_list_connections(db: State<Db>) -> AppResult<Value> {
+pub async fn composio_list_connections(db: State<'_, Db>) -> AppResult<Value> {
     let key = api_key(&db)?;
     call(&key, "GET", &format!("{BASE}/connected_accounts?limit=50"), None)
 }
@@ -172,8 +172,8 @@ pub fn composio_list_connections(db: State<Db>) -> AppResult<Value> {
 /// Search the whole app catalogue. The shortlist on screen is a starting point,
 /// not the limit of what a customer may connect.
 #[tauri::command]
-pub fn composio_search_toolkits(
-    db: State<Db>,
+pub async fn composio_search_toolkits(
+    db: State<'_, Db>,
     query: Option<String>,
     limit: Option<u32>,
 ) -> AppResult<Value> {
@@ -189,8 +189,8 @@ pub fn composio_search_toolkits(
 /// The actions available on the connected apps, so the agent can discover what
 /// it may do instead of being shipped a fixed list that goes stale.
 #[tauri::command]
-pub fn composio_list_tools(
-    db: State<Db>,
+pub async fn composio_list_tools(
+    db: State<'_, Db>,
     toolkits: Option<String>,
     limit: Option<u32>,
 ) -> AppResult<Value> {
@@ -205,8 +205,8 @@ pub fn composio_list_tools(
 
 /// Execute a Composio tool (e.g. GMAIL_SEND_EMAIL) for a user's connected account.
 #[tauri::command]
-pub fn composio_execute(
-    db: State<Db>,
+pub async fn composio_execute(
+    db: State<'_, Db>,
     tool_slug: String,
     arguments: Value,
     user_id: Option<String>,

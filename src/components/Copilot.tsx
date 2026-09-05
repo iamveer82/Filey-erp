@@ -10,6 +10,7 @@ import {
   Share2,
   Trash2,
   Paperclip,
+  Square,
 } from "lucide-react";
 import { cn, fmtDate } from "../lib/format";
 import {
@@ -82,6 +83,15 @@ export default function Copilot() {
   const [view, setView] = useState<View>("chat");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // What the agent has said so far this turn. One send() can be a dozen model
+  // round-trips; with only the dots on screen the whole minute reads as a hang.
+  const [live, setLive] = useState("");
+  /** Lets Stop cut a run short. A turn is up to MAX_TOOL_ROUNDS model calls, so
+   *  without this the only way out of a run gone long was to quit the app. */
+  const abortRef = useRef<AbortController | null>(null);
+  /** Mirrors `live` for the catch block: reading the state there would get the
+   *  value from the render that started the run, not the latest. */
+  const liveRef = useRef("");
   const [err, setErr] = useState<string | null>(null);
   const [persona, setPersonaState] = useState<AiPersona>(getPersona);
   const [ctx, setCtx] = useState<string>("");
@@ -136,7 +146,7 @@ export default function Copilot() {
   }, [open, ready, persona.onboarded, view]);
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, busy]);
+  }, [turns, busy, live]);
   useEffect(() => {
     if (open && ready && persona.onboarded && !ctx)
       buildAiContext(profile?.company)
@@ -227,7 +237,11 @@ export default function Copilot() {
     );
     persist(afterUser);
     setInput("");
+    setLive("");
+    liveRef.current = "";
     setBusy(true);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
     // This turn's slot in the file toolbox: attachment in, produced files out.
     // Keyed per turn — the full-page agent can be mid-run at the same time, and
     // the two used to share one module-global file.
@@ -271,18 +285,36 @@ export default function Copilot() {
           console.warn("Failed to attach image for AI vision:", e);
         }
       }
-      const reply = await aiAgent(messages, { maxTokens: 900, turnId });
+      const reply = await aiAgent(messages, {
+        maxTokens: 900,
+        turnId,
+        signal: ctl.signal,
+        onProgress: (t) => {
+          liveRef.current = t;
+          setLive(t);
+        },
+      });
       appendReply(reply || "(no response)", endTurn(turnId));
     } catch (e) {
-      setErr(
-        e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e)
-      );
-      endTurn(turnId); // never leak into the next turn's reply
-      // The user turn is already on screen; a bare question with no answer and
-      // no marker reads as "seen but ignored". Mark the failure instead.
-      appendReply("(no reply — the request failed. Resend to try again.)");
+      // Stopping is not failing: keep whatever the agent had already said
+      // rather than replacing a half-written answer with an error.
+      if (ctl.signal.aborted) {
+        const partial = liveRef.current.trim();
+        appendReply(partial ? `${partial}\n\n_Stopped._` : "_Stopped._", endTurn(turnId));
+      } else {
+        setErr(
+          e instanceof AiError ? e.message : e instanceof Error ? e.message : String(e)
+        );
+        endTurn(turnId); // never leak into the next turn's reply
+        // The user turn is already on screen; a bare question with no answer and
+        // no marker reads as "seen but ignored". Mark the failure instead.
+        appendReply("(no reply — the request failed. Resend to try again.)");
+      }
     } finally {
+      if (abortRef.current === ctl) abortRef.current = null;
       setBusy(false);
+      setLive("");
+      liveRef.current = "";
       setFile(null);
     }
   }, [input, busy, chats, activeId, ctx, file, persist, select]);
@@ -574,8 +606,12 @@ export default function Copilot() {
               ))
             )}
             {busy && view === "chat" && (
-              <div className="mr-auto w-fit rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
-                <ThinkingDots />
+              <div className="mr-auto w-fit max-w-[85%] rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-400 dark:bg-white/8">
+                {live ? (
+                  <span className="whitespace-pre-wrap">{live}</span>
+                ) : (
+                  <ThinkingDots />
+                )}
               </div>
             )}
             {err && view === "chat" && (
@@ -631,14 +667,25 @@ export default function Copilot() {
                   placeholder={online ? "Ask Filey AI… (⌘/Ctrl+Enter)" : "Offline…"}
                   className="textarea max-h-32 min-h-[40px] flex-1 py-2"
                 />
-                <button
-                  onClick={() => void send()}
-                  disabled={busy || (!input.trim() && !file) || !online}
-                  aria-label="Send"
-                  className="btn-primary h-10 w-10 shrink-0 !px-0"
-                >
-                  <Send size={16} />
-                </button>
+                {busy ? (
+                  <button
+                    onClick={() => abortRef.current?.abort()}
+                    aria-label="Stop"
+                    title="Stop"
+                    className="btn-primary h-10 w-10 shrink-0 !px-0"
+                  >
+                    <Square size={14} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => void send()}
+                    disabled={(!input.trim() && !file) || !online}
+                    aria-label="Send"
+                    className="btn-primary h-10 w-10 shrink-0 !px-0"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </div>
             </div>
           )}

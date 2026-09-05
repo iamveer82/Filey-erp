@@ -22,6 +22,7 @@ import {
   type LinkedRecord,
 } from "./links";
 import { notifyDataChanged } from "./realtime";
+import { log } from "./log";
 
 // ===== Types =====
 export interface Product {
@@ -625,6 +626,19 @@ async function outboxRemove(id: number): Promise<void> {
   }
 }
 
+/** True for a failure that repeating cannot fix: Postgres integrity-violation
+ *  classes (23xxx — unique key taken, foreign key gone, NOT NULL) and
+ *  PostgREST's no-rows. A row deleted on another device, or an id already
+ *  claimed there, will read the same way on every retry.
+ *
+ *  Everything else is treated as temporary — offline, timeout, 5xx, an expired
+ *  token — and left queued. Erring that way costs a retry; erring the other
+ *  way discards a write the user made. */
+export function outboxOpIsDoomed(e: unknown): boolean {
+  const code = String((e as { code?: string } | null)?.code ?? "");
+  return /^23\d\d\d$/.test(code) || code === "PGRST116";
+}
+
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
@@ -655,8 +669,23 @@ export async function flushOutbox(): Promise<void> {
           if (error) throw error;
         }
         await outboxRemove(entry.id);
-      } catch {
-        break; // stop; retry remaining on next reconnect
+      } catch (e) {
+        // Order matters here — an insert must land before the update that
+        // follows it — so a temporary failure stops the whole replay and
+        // everything waits for the next reconnect.
+        if (!outboxOpIsDoomed(e)) break;
+        // But an op that can NEVER apply used to stop it the same way, and
+        // nothing ever cleared it: the queue jammed on that one entry, every
+        // offline write made afterwards piled up behind it, and none of them
+        // ever reached the cloud. No error surfaced anywhere. Drop the doomed
+        // op and keep draining — it was already lost, the ones behind it were
+        // not.
+        log.warn(
+          "outbox",
+          `dropping ${op.k} on ${op.t} — it cannot succeed`,
+          (e as { message?: string })?.message ?? e
+        );
+        await outboxRemove(entry.id);
       }
     }
   } finally {
@@ -730,6 +759,33 @@ async function write<T>(
   return offlineResult;
 }
 
+/** Many-row write in ONE round trip.
+ *
+ *  A CSV import used to call the single-row create per row, and each of those
+ *  reloads the whole collection, re-serialises it, rewrites the sync journal
+ *  and fires a local-write event. Measured on this store: 4000 rows in one
+ *  call is ~13ms; the same rows one at a time is ~400x more per row, which is
+ *  the import sitting there frozen.
+ *
+ *  ponytail: offline in cloud mode still queues one outbox op per row — the
+ *  outbox is row-shaped, and a replay is not the slow path worth reshaping it
+ *  for. Add a bulk op kind if offline imports ever get big. */
+async function writeMany<T>(
+  ops: OutboxOp[],
+  run: () => Promise<T>,
+  offlineResult: T
+): Promise<T> {
+  markWrite();
+  if (isLocalMode()) return run();
+  if (!isConfigured) throw new Error("Cloud storage is not configured.");
+  if (onLine()) {
+    await flushOutbox();
+    return run();
+  }
+  for (const op of ops) await outboxAdd(op);
+  return offlineResult;
+}
+
 /** Multi-step / read-modify-write op — requires a live connection. */
 async function online<T>(run: () => Promise<T>): Promise<T> {
   // Conservative: online() covers read-modify-write ops, so treat it as a
@@ -789,6 +845,46 @@ async function sInsert(
   if (error) throw error;
   return (data as { id: number }).id;
 }
+/** Rows per round trip. A 5000-row import in one request is a body big enough
+ *  to time out against PostgREST, and the matching delete filter would blow
+ *  past the URL length limit — the continuous sync chunks its deletes at 100
+ *  for exactly that reason. Chunked, the import is still one write per chunk
+ *  instead of one per row, which is where the win actually came from. */
+const BULK_CHUNK = 500;
+const chunked = <T>(xs: T[], n: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+};
+
+/** Insert an array of rows. All-or-nothing per chunk, like Postgres — callers
+ *  that need to know WHICH row was bad retry the slow way on failure. */
+async function sInsertMany(
+  table: string,
+  rows: Record<string, unknown>[],
+  client: any = null
+): Promise<number[]> {
+  if (!rows.length) return [];
+  const ids: number[] = [];
+  for (const part of chunked(rows, BULK_CHUNK)) {
+    const { data, error } = await (client ?? sb())
+      .from(table)
+      .insert(part)
+      .select("id");
+    // Earlier chunks are already committed, so the count rides on the error: a
+    // caller that retries row by row must start after them or it writes the
+    // successful rows a second time.
+    if (error) throw Object.assign(new Error(error.message), { inserted: ids.length });
+    for (const r of (data ?? []) as { id: number }[]) ids.push(r.id);
+  }
+  return ids;
+}
+
+/** How many rows a failed bulk insert had already written. */
+export const insertedBefore = (e: unknown): number =>
+  typeof (e as { inserted?: unknown })?.inserted === "number"
+    ? (e as { inserted: number }).inserted
+    : 0;
 async function sUpdate(
   table: string,
   id: number,
@@ -801,6 +897,21 @@ async function sUpdate(
 async function sDelete(table: string, id: number, client: any = null): Promise<void> {
   const { error } = await (client ?? sb()).from(table).delete().eq("id", id);
   if (error) throw error;
+}
+/** Delete many ids in one statement. Selecting 200 rows and deleting them one
+ *  at a time rewrote the whole collection 200 times. */
+async function sDeleteMany(
+  table: string,
+  ids: number[],
+  client: any = null
+): Promise<void> {
+  if (!ids.length) return;
+  // 100, not BULK_CHUNK: this filter rides in the URL, and that is the size
+  // the continuous sync settled on for the same reason.
+  for (const part of chunked(ids, 100)) {
+    const { error } = await (client ?? sb()).from(table).delete().in("id", part);
+    if (error) throw error;
+  }
 }
 
 /** Org/team data lives ONLY in the cloud. In local mode sb() is the on-device
@@ -941,7 +1052,13 @@ async function adjustProductStock(
       .eq("id", productId)
       .single();
     if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
-    const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
+    // NOT clamped at zero. Clamping loses the overshoot, and every stock move
+    // here has a reverse: selling 5 from a stock of 3 clamped to 0, then
+    // reverting that invoice added 5 back and left 5 on hand where 3 had been.
+    // Overselling invented inventory, silently, and the stock_movements ledger
+    // (which records the true -5/+5) stopped agreeing with the product row.
+    // Negative stock is information — it says you owe units — so record it.
+    const next = (Number(row?.quantity) || 0) + delta;
     const { error: ue } = await sb()
       .from("products")
       .update({ quantity: next })
@@ -1061,6 +1178,15 @@ export const erp = {
       sInsert("products", row), -1
     );
   },
+  /** Import path: every row in one write. See writeMany. */
+  createProducts: (inputs: Omit<Product, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "products", row })),
+      () => sInsertMany("products", rows),
+      []
+    );
+  },
   updateStock: (productId: number, delta: number, note?: string) =>
     online(async () => {
       // Atomic — avoids lost updates when two clients adjust stock at once.
@@ -1115,6 +1241,13 @@ export const erp = {
   deleteProduct: (productId: number) =>
     write({ k: "delete", t: "products", id: productId }, () =>
       sDelete("products", productId), undefined
+    ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteProducts: (productIds: number[]) =>
+    writeMany(
+      productIds.map((id) => ({ k: "delete" as const, t: "products", id })),
+      () => sDeleteMany("products", productIds),
+      undefined
     ),
   orders: () =>
     readCached<Order[]>(
@@ -1977,8 +2110,26 @@ export const fin = {
   repairLedger: () =>
     online(async () => {
       const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
+      const accts = await sList<Account>("accounts");
+      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+      const deltaOf = (t: any): number =>
+        ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount));
+
+      // Sum the journal as it stands AND as it will stand once the duplicates
+      // are gone, in one pass. Only the DIFFERENCE is applied to each stored
+      // balance.
+      //
+      // Overwriting the balance with the survivors' sum — what this used to do
+      // — throws away everything an account holds that was never posted as a
+      // transaction, and the opening balance typed in when the account was
+      // created is exactly that: createAccount stores it on the row and posts
+      // no journal entry for it. A bank account opened at 50,000 was silently
+      // reset to zero, by a button whose own confirm dialog promises accounts
+      // are untouched. Repairing drift must not destroy the starting position.
       const seen = new Set<string>();
-      let removed = 0;
+      const dupes: any[] = [];
+      const before = new Map<number, number>();
+      const after = new Map<number, number>();
       for (const t of txns) {
         const key = [
           t.account_id ?? "",
@@ -1987,30 +2138,25 @@ export const fin = {
           t.description ?? "",
           t.txn_date ?? "",
         ].join("|");
-        if (seen.has(key)) {
-          await sDelete("transactions", t.id);
-          removed++;
-        } else {
-          seen.add(key);
-        }
-      }
-      // Recompute every account balance from the surviving transactions.
-      const accts = await sList<Account>("accounts");
-      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-      const bal = new Map<number, number>();
-      const survivors = await sList<any>("transactions");
-      for (const t of survivors) {
+        const dupe = seen.has(key);
+        if (dupe) dupes.push(t);
+        else seen.add(key);
         if (!t.account_id) continue;
-        const type = typeById.get(t.account_id) ?? "asset";
-        bal.set(
-          t.account_id,
-          (bal.get(t.account_id) ?? 0) +
-            ledgerDelta(type, t.txn_type, Number(t.amount))
-        );
+        const d = deltaOf(t);
+        before.set(t.account_id, (before.get(t.account_id) ?? 0) + d);
+        if (!dupe) after.set(t.account_id, (after.get(t.account_id) ?? 0) + d);
       }
-      for (const a of accts)
-        await sUpdate("accounts", a.id, { balance: bal.get(a.id) ?? 0 });
-      return { removed };
+
+      for (const t of dupes) await sDelete("transactions", t.id);
+      for (const a of accts) {
+        // Whatever the balance holds beyond the journal is the opening
+        // position; it survives untouched.
+        const opening = Number(a.balance ?? 0) - (before.get(a.id) ?? 0);
+        await sUpdate("accounts", a.id, {
+          balance: r2(opening + (after.get(a.id) ?? 0)),
+        });
+      }
+      return { removed: dupes.length };
     }),
   report: () =>
     readCached<FinanceReport>(
@@ -2214,6 +2360,15 @@ export const crm = {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "crm_customers", row }, () =>
       sInsert("crm_customers", row), -1
+    );
+  },
+  /** Import path: every row in one write. See writeMany. */
+  createCustomers: (inputs: Omit<CrmCustomer, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "crm_customers", row })),
+      () => sInsertMany("crm_customers", rows),
+      []
     );
   },
   updateCustomer: (
@@ -4027,37 +4182,50 @@ export const recurrences = {
       const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
       let made = 0;
       for (const r of due) {
-        const base = await billing.getDoc(r.base_invoice_id).catch(() => null);
+        let base: InvoiceDoc | null = null;
+        try {
+          base = await billing.getDoc(r.base_invoice_id);
+        } catch (e: any) {
+          // Only "that invoice is gone" retires a recurrence. Any other
+          // failure — offline, RLS hiccup, timeout — is temporary, and
+          // cancelling on one silently ends a subscription the user set up,
+          // with no way back from the UI. Skip this run and try next time.
+          const gone =
+            e?.code === "PGRST116" || /no rows/i.test(e?.message ?? String(e));
+          if (!gone) continue;
+        }
         if (!base) {
           await sUpdate("invoice_recurrence", r.id, { active: false });
           continue;
         }
+        // Carry the WHOLE base document and override only what a new
+        // occurrence must change. Listing the fields by hand is how this
+        // drifted: unit_price_formula, each line's `custom` (manual amounts,
+        // per-line discounts and formulas) and round_off were all left behind,
+        // so a recurring invoice could bill a different figure than the
+        // invoice it recurs from — silently, every month.
+        const {
+          id: _id,
+          created_at: _created,
+          updated_at: _updated,
+          // Inheriting these would date the new invoice to the old cycle and
+          // re-link it to a quotation it did not come from.
+          due_date: _due,
+          quotation_id: _quote,
+          ...carried
+        } = base;
         const input: InvoiceDocInput = {
+          ...carried,
           number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
           status: "draft",
-          template: base.template,
-          accent: base.accent,
-          currency: base.currency,
-          seller_name: base.seller_name,
-          seller_address: base.seller_address,
-          seller_trn: base.seller_trn,
-          seller_email: base.seller_email,
-          seller_phone: base.seller_phone,
-          logo: base.logo,
-          customer_id: base.customer_id,
-          customer_name: base.customer_name,
-          customer_address: base.customer_address,
-          customer_trn: base.customer_trn,
-          customer_email: base.customer_email,
           issue_date: today,
-          notes: base.notes,
-          terms: base.terms,
-          tax_rate: base.tax_rate,
-          discount: base.discount,
           items: base.items.map((it) => ({
             description: it.description,
             qty: it.qty,
             unit_price: it.unit_price,
+            unit: it.unit,
+            custom: it.custom,
+            tax_category: it.tax_category,
             product_id: it.product_id,
           })),
         };
@@ -4230,6 +4398,13 @@ export const quotes = {
   deleteDoc: (docId: number) =>
     write({ k: "delete", t: "quotations", id: docId }, () =>
       sDelete("quotations", docId), undefined
+    ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteDocs: (docIds: number[]) =>
+    writeMany(
+      docIds.map((id) => ({ k: "delete" as const, t: "quotations", id })),
+      () => sDeleteMany("quotations", docIds),
+      undefined
     ),
   setStatus: (docId: number, status: string) =>
     write(
@@ -4883,12 +5058,12 @@ export const advances = {
     online(async () => {
       const tag = `applied:inv#${invoiceId}`;
       const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
+      // Matched on the tag alone, not the party. The tag already names one
+      // invoice, so scoping the purge by party_id only meant that changing an
+      // invoice's customer stranded the old consumption on the old customer —
+      // credit permanently eaten by an invoice that is no longer theirs.
       for (const r of rows)
-        if (
-          r.party_type === "customer" &&
-          String(r.party_id) === String(partyId) &&
-          r.note === tag
-        )
+        if (r.party_type === "customer" && r.note === tag)
           await sDelete("advances", r.id);
       if (amount > 0)
         await sInsert("advances", {
@@ -4914,8 +5089,16 @@ export const advances = {
     invoiceId?: number
   ): Promise<number> => {
     const rows = await advances.forParty("customer", partyId);
+    // `tag &&` is load-bearing. A deposit entered without a note is stored with
+    // note = null, and on a NEW invoice there is no id, so the tag was null
+    // too — `a.note === tag` matched every plain deposit and excluded it. The
+    // editor asked how much credit was available before the invoice had been
+    // saved and was told zero, however much the customer had on account.
     const tag = invoiceId ? `applied:inv#${invoiceId}` : null;
-    return rows.reduce((s, a) => s + (a.note === tag ? 0 : Number(a.amount)), 0);
+    return rows.reduce(
+      (s, a) => s + (tag && a.note === tag ? 0 : Number(a.amount)),
+      0
+    );
   },
 };
 

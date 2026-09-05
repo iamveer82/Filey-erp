@@ -160,6 +160,12 @@ export function validateEInvoice(doc: EInvoiceDoc): {
 
 const esc = (s: unknown) =>
   String(s ?? "")
+    // XML 1.0 forbids control characters outright (tab, LF and CR excepted),
+    // so one arriving in a customer name from a paste or a CSV import makes the
+    // whole document unparseable, and the FTA rejects it with an error that
+    // points nowhere near the field that caused it. Drop them before escaping.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
