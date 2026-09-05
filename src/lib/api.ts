@@ -5580,6 +5580,12 @@ export const links = {
             .eq("to_type", type)
             .eq("to_id", id),
         ]);
+        // A read that FAILED is not evidence there are no links. Swallowing the
+        // error rendered "nothing linked here", and readCached would then store
+        // that empty list as this record’s truth. Throw instead — readCached
+        // falls back to the last good copy.
+        if (out.error) throw out.error;
+        if (inc.error) throw inc.error;
         const rows = [
           ...((out.data ?? []) as any[]).map((r) => ({ r, direction: "outgoing" as const })),
           ...((inc.data ?? []) as any[]).map((r) => ({ r, direction: "incoming" as const })),
@@ -5651,7 +5657,7 @@ export const links = {
       // constraint error. Postgres has a unique index for this, but the
       // offline shim has neither that nor upsert's onConflict — so the check
       // is done here, where both modes get it.
-      const { data: dupe } = await sb()
+      const { data: dupe, error: dupeError } = await sb()
         .from("entity_links")
         .select("id")
         .eq("from_type", row.from_type)
@@ -5659,6 +5665,10 @@ export const links = {
         .eq("to_type", row.to_type)
         .eq("to_id", row.to_id)
         .eq("kind", row.kind);
+      // A failed check read as "no duplicate" and fell through to the insert.
+      // Offline that is the only guard there is — the shim has no unique index —
+      // so one failed read left a second identical edge on the graph.
+      if (dupeError) throw dupeError;
       const existing = ((dupe ?? []) as { id: number }[])[0];
       if (existing) return existing.id;
 
@@ -5682,7 +5692,10 @@ export const links = {
     const col = ENTITY_LABEL_COL[type];
     let q = sb().from(ENTITY_TABLE[type]).select(`id, ${col}`).limit(limit);
     if (term.trim()) q = q.ilike(col, `%${term.trim()}%`);
-    const { data } = await q;
+    const { data, error } = await q;
+    // "Nothing found" and "the search broke" look identical to someone staring
+    // at an empty picker. The caller catches this and can say which it was.
+    if (error) throw error;
     return ((data ?? []) as any[]).map((r) => ({
       id: Number(r.id),
       label: String(r[col] ?? "").trim() || `#${r.id}`,
