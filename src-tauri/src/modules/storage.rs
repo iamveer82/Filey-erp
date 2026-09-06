@@ -69,7 +69,7 @@ fn sanitize(name: &str) -> String {
 
 /// Write document bytes as a real file into `dir`. Returns the full path.
 #[tauri::command]
-pub fn write_doc_file(dir: String, filename: String, bytes: Vec<u8>) -> AppResult<String> {
+pub async fn write_doc_file(dir: String, filename: String, bytes: Vec<u8>) -> AppResult<String> {
     let target = PathBuf::from(&dir);
     fs::create_dir_all(&target).map_err(|e| AppError::Io(e.to_string()))?;
     let path = target.join(sanitize(&filename));
@@ -171,7 +171,7 @@ fn decrypt_blob(data: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn blob_write(app: AppHandle, path: String, bytes: Vec<u8>) -> AppResult<()> {
+pub async fn blob_write(app: AppHandle, path: String, bytes: Vec<u8>) -> AppResult<()> {
     let p = blob_path(&app, &path).ok_or_else(|| AppError::Io("invalid path".into()))?;
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::Io(e.to_string()))?;
@@ -182,14 +182,14 @@ pub fn blob_write(app: AppHandle, path: String, bytes: Vec<u8>) -> AppResult<()>
 }
 
 #[tauri::command]
-pub fn blob_read(app: AppHandle, path: String) -> AppResult<Vec<u8>> {
+pub async fn blob_read(app: AppHandle, path: String) -> AppResult<Vec<u8>> {
     let p = blob_path(&app, &path).ok_or_else(|| AppError::Io("invalid path".into()))?;
     let raw = fs::read(&p).map_err(|e| AppError::Io(e.to_string()))?;
     decrypt_blob(&raw).map_err(AppError::Io)
 }
 
 #[tauri::command]
-pub fn blob_delete(app: AppHandle, path: String) -> AppResult<()> {
+pub async fn blob_delete(app: AppHandle, path: String) -> AppResult<()> {
     if let Some(p) = blob_path(&app, &path) {
         if p.exists() {
             fs::remove_file(&p).map_err(|e| AppError::Io(e.to_string()))?;
@@ -207,7 +207,7 @@ fn pending_restore_file(app: &AppHandle) -> PathBuf {
 /// Export a clean, consistent copy of the database to `dest` (VACUUM INTO needs
 /// the target not to exist, so remove it first).
 #[tauri::command]
-pub fn backup_db(db: State<Db>, dest: String) -> AppResult<String> {
+pub async fn backup_db(db: State<'_, Db>, dest: String) -> AppResult<String> {
     let p = PathBuf::from(&dest);
     if p.exists() {
         fs::remove_file(&p).map_err(|e| AppError::Io(e.to_string()))?;
@@ -220,7 +220,7 @@ pub fn backup_db(db: State<Db>, dest: String) -> AppResult<String> {
 /// Queue a restore: record the source file; it's applied at the next startup
 /// (before the DB opens) so the live, open database is never overwritten.
 #[tauri::command]
-pub fn restore_db(app: AppHandle, src: String) -> AppResult<()> {
+pub async fn restore_db(app: AppHandle, src: String) -> AppResult<()> {
     if !PathBuf::from(&src).exists() {
         return Err(AppError::Io("backup file not found".into()));
     }
@@ -249,8 +249,22 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
 /// Full backup into `dest` folder: a clean DB copy (filey-erp.db) plus the My
 /// Files blob tree (files/). One self-contained folder the user can move to a
 /// USB drive or synced location.
+/// spawn_blocking, not a plain async command: this copies the whole files/ tree
+/// and can run for minutes on a library of scanned PDFs. Tauri's runtime is
+/// multi-threaded, so a plain async command would only occupy one worker rather
+/// than stall everything — but cache_get and cache_set ride that same pool on
+/// every collection read, and the UI waits on those. Long work belongs on the
+/// blocking pool. `Db` is fetched inside the closure because `State` borrows
+/// from the app and cannot cross the thread boundary.
 #[tauri::command]
-pub fn backup_all(app: AppHandle, db: State<Db>, dest: String) -> AppResult<String> {
+pub async fn backup_all(app: AppHandle, dest: String) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || backup_all_blocking(app, dest))
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))?
+}
+
+fn backup_all_blocking(app: AppHandle, dest: String) -> AppResult<String> {
+    let db = app.state::<Db>();
     let dir = PathBuf::from(&dest);
     fs::create_dir_all(&dir).map_err(|e| AppError::Io(e.to_string()))?;
     let db_dest = dir.join("filey-erp.db");
@@ -273,8 +287,16 @@ pub fn backup_all(app: AppHandle, db: State<Db>, dest: String) -> AppResult<Stri
 /// Restore a full backup folder. Files (not locked) are copied back immediately;
 /// the DB is queued and applied at the next startup (it's open right now). Caller
 /// restarts after this returns.
+/// Off the runtime for the same reason as backup_all: it deletes and re-copies
+/// the entire files/ tree.
 #[tauri::command]
-pub fn restore_all(app: AppHandle, src: String) -> AppResult<()> {
+pub async fn restore_all(app: AppHandle, src: String) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || restore_all_blocking(app, src))
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))?
+}
+
+fn restore_all_blocking(app: AppHandle, src: String) -> AppResult<()> {
     let dir = PathBuf::from(&src);
     let db_src = dir.join("filey-erp.db");
     if !db_src.exists() {

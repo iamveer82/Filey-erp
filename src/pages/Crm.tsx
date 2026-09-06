@@ -507,17 +507,22 @@ export default function Crm() {
         title="Import customers"
         onClose={() => setImportOpen(false)}
         onImport={async (rows) => {
-          for (const r of rows) {
-            if (!String(r.name ?? "").trim()) continue;
-            await crm.createCustomer({
-              name: String(r.name ?? ""),
-              company: String(r.company ?? "") || undefined,
-              email: String(r.email ?? "") || undefined,
-              phone: String(r.phone ?? "") || undefined,
-              address: String(r.address ?? "") || undefined,
-              segment: String(r.segment ?? "") || undefined,
-            } as Omit<CrmCustomer, "id" | "created_at">);
-          }
+          // One write for the whole file — see erp.createProducts for why.
+          await crm.createCustomers(
+            rows
+              .filter((r) => String(r.name ?? "").trim())
+              .map(
+                (r) =>
+                  ({
+                    name: String(r.name ?? ""),
+                    company: String(r.company ?? "") || undefined,
+                    email: String(r.email ?? "") || undefined,
+                    phone: String(r.phone ?? "") || undefined,
+                    address: String(r.address ?? "") || undefined,
+                    segment: String(r.segment ?? "") || undefined,
+                  }) as Omit<CrmCustomer, "id" | "created_at">
+              )
+          );
           load();
         }}
         fields={[

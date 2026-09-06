@@ -34,8 +34,23 @@ fn workspace() -> PathBuf {
 /// ponytail: `output()` runs on a thread with a recv_timeout bound — a command
 /// that outlives the timeout leaks its process (the caller must kill it). Add
 /// kill-on-timeout (spawn + try_wait) if long-running commands become common.
+///
+/// Async so the wait leaves the main thread: `recv_timeout` blocks for up to
+/// fifteen minutes, and as a synchronous command that wait ran ON the main
+/// thread — one agent shell call could hold the window hostage for the length
+/// of an `npm install`.
 #[tauri::command]
-pub fn shell_exec(
+pub async fn shell_exec(
+    cmd: String,
+    timeout: Option<u64>,
+    cwd: Option<String>,
+) -> Result<ShellResult, String> {
+    tauri::async_runtime::spawn_blocking(move || shell_exec_blocking(cmd, timeout, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub fn shell_exec_blocking(
     cmd: String,
     timeout: Option<u64>,
     cwd: Option<String>,
@@ -79,7 +94,7 @@ mod tests {
     #[test]
     fn runs_in_the_workspace_and_reports_where() {
         let echo = if cfg!(windows) { "cd" } else { "pwd" };
-        let r = shell_exec(echo.to_string(), Some(30_000), None).expect("command ran");
+        let r = shell_exec_blocking(echo.to_string(), Some(30_000), None).expect("command ran");
         assert_eq!(r.exit_code, 0, "stderr: {}", r.stderr);
         // The shell's own idea of where it is must match what we reported.
         assert_eq!(r.stdout.trim(), r.cwd.trim_end_matches(['/', '\\']));
@@ -90,7 +105,7 @@ mod tests {
     fn an_explicit_cwd_wins() {
         let tmp = std::env::temp_dir().join("filey-shell-test");
         let echo = if cfg!(windows) { "cd" } else { "pwd" };
-        let r = shell_exec(
+        let r = shell_exec_blocking(
             echo.to_string(),
             Some(30_000),
             Some(tmp.to_string_lossy().to_string()),

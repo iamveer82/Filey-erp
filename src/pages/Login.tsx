@@ -16,6 +16,8 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
 import { isLocalMode } from "../lib/dataMode";
 import { getLocalCredential, hasLocalCredential } from "../lib/localAuth";
+import { checkPassword, strengthLabel } from "../lib/password";
+import { cn } from "../lib/format";
 
 /** Supabase answers in its own vocabulary, and two of its replies actively
  *  mislead: a missing account reads as a wrong password, and a code request for
@@ -163,6 +165,11 @@ export default function Login() {
     );
   const clearFieldErrors = () => setFieldErrors({});
 
+  const pwVerdict = checkPassword(
+    password,
+    channel === "email" ? identifier : undefined
+  );
+
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
   const idPlaceholder = channel === "email" ? "you@company.com" : "+9715XXXXXXXX";
@@ -206,9 +213,15 @@ export default function Login() {
       if (!password) {
         setFieldError("password", "Password is required");
         hasError = true;
-      } else if (password.length < 8) {
-        setFieldError("password", "Password must be at least 8 characters");
-        hasError = true;
+      } else if (mode === "signup") {
+        // Only on the way IN. Judging an existing password at sign-in would
+        // lock out anyone who set one before this policy existed, and tell an
+        // attacker which guesses are worth making.
+        const verdict = checkPassword(password, channel === "email" ? identifier : undefined);
+        if (!verdict.ok) {
+          setFieldError("password", verdict.problem ?? "Choose a stronger password");
+          hasError = true;
+        }
       }
       if (mode === "signup" && password !== confirm) {
         setFieldError("confirm", "Passwords do not match");
@@ -396,7 +409,11 @@ export default function Login() {
                 <FormField
                   label="Password"
                   error={fieldErrors.password}
-                  hint="At least 8 characters"
+                  hint={
+                    mode === "signup"
+                      ? "At least 8 characters. Length beats symbols — a short phrase works well."
+                      : undefined
+                  }
                   required
                 >
                   <div className="relative">
@@ -428,6 +445,34 @@ export default function Login() {
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
+                  {/* Signup only, and only once there is something to judge.
+                      Telling someone their password is weak after they submit
+                      is how you get "12345678" on the second attempt. */}
+                  {mode === "signup" && password.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex h-1 flex-1 gap-1" aria-hidden="true">
+                        {[0, 1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className={cn(
+                              "h-full flex-1 rounded-full transition-colors duration-200",
+                              i < pwVerdict.score
+                                ? pwVerdict.score >= 3
+                                  ? "bg-emerald-500"
+                                  : "bg-amber-500"
+                                : "bg-brand-100 dark:bg-white/10"
+                            )}
+                          />
+                        ))}
+                      </div>
+                      <span
+                        className="text-xs text-brand-400 tabular-nums"
+                        aria-live="polite"
+                      >
+                        {pwVerdict.ok ? strengthLabel(pwVerdict.score) : "Weak"}
+                      </span>
+                    </div>
+                  )}
                 </FormField>
               )}
 

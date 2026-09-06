@@ -20,8 +20,24 @@ pub struct ProxyResponse {
     pub body: String,
 }
 
+// A synchronous #[tauri::command] runs on the MAIN thread, and ureq blocks for
+// as long as the provider takes — up to the 180s timeout below. That froze the
+// entire window for the length of every model call, and one agent turn is many
+// calls back to back, so "Filey is thinking" meant "the app is dead". Async +
+// spawn_blocking puts the wait on a worker thread; the UI keeps painting.
 #[tauri::command]
-pub fn ai_proxy(
+pub async fn ai_proxy(
+    method: String,
+    url: String,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+) -> AppResult<ProxyResponse> {
+    tauri::async_runtime::spawn_blocking(move || ai_proxy_blocking(method, url, headers, body))
+        .await
+        .map_err(|e| AppError::Http(e.to_string()))?
+}
+
+fn ai_proxy_blocking(
     method: String,
     url: String,
     headers: HashMap<String, String>,

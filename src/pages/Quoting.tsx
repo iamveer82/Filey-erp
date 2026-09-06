@@ -2464,7 +2464,7 @@ export default function Quoting() {
                 danger: true,
               });
               if (!ok) return;
-              for (const d of sel) await quotes.deleteDoc(d.id);
+              await quotes.deleteDocs(sel.map((d) => d.id));
               loadDocs();
               toast.success(`Deleted ${sel.length}.`);
             },

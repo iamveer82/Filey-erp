@@ -394,12 +394,31 @@ const isTauri =
 /** Origin of the OpenCode Zen gateway. */
 const ZEN_ORIGIN = "https://opencode.ai";
 
+/** Reject the moment `signal` fires, whatever `p` is still doing. */
+function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return p;
+  const abortErr = () => new DOMException("Aborted", "AbortError");
+  if (signal.aborted) return Promise.reject(abortErr());
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      signal.addEventListener("abort", () => reject(abortErr()), { once: true })
+    ),
+  ]);
+}
+
 /** One request. In the browser this is plain fetch (CORS applies — only
  *  providers that allow browser calls work). Under Tauri it goes through the
  *  native `ai_proxy` command, which has no CORS, so any OpenAI-compatible /
  *  Anthropic endpoint (Ollama Cloud, Groq, Mistral, xAI, …) works on desktop.
- *  ponytail: the abort signal isn't forwarded to the native call — desktop AI
- *  requests run to completion; add cancellation if it ever matters. */
+ *
+ *  Abort stops the CALLER, not the request: the native call keeps running on
+ *  its worker thread and its answer is dropped. That is the point — without it
+ *  Stop meant "wait out the round in flight", up to the 180s native timeout,
+ *  which is indistinguishable from the freeze Stop is there to end.
+ *  ponytail: the provider still bills the abandoned call. Real cancellation
+ *  needs a request id and a cancel command; add it if that waste ever shows up
+ *  on a bill. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
   if (!isTauri) {
     // OpenCode Zen serves no CORS headers, so a cross-origin call from a
@@ -420,12 +439,15 @@ async function transportFetch(input: string, init: RequestInit): Promise<Respons
   const headers: Record<string, string> = {};
   const h = init.headers as Record<string, string> | undefined;
   if (h) for (const k of Object.keys(h)) headers[k] = h[k];
-  const r = await invoke<{ status: number; body: string }>("ai_proxy", {
-    method: (init.method ?? "GET").toString().toUpperCase(),
-    url: input,
-    headers,
-    body: typeof init.body === "string" ? init.body : undefined,
-  });
+  const r = await withAbort(
+    invoke<{ status: number; body: string }>("ai_proxy", {
+      method: (init.method ?? "GET").toString().toUpperCase(),
+      url: input,
+      headers,
+      body: typeof init.body === "string" ? init.body : undefined,
+    }),
+    init.signal
+  );
   return new Response(r.body, {
     status: r.status,
     headers: { "content-type": "application/json" },
@@ -439,8 +461,9 @@ const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
  *  exponential backoff, honouring a `Retry-After` header. Throws AiError after
  *  the final attempt. User aborts (signal) and non-retryable 4xx are never
  *  retried — they throw immediately. Keeps a long autonomous run alive through
- *  a rate-limit blip instead of dying at round 19.
- *  ponytail: backoff sleep ignores abort mid-wait; next attempt throws AbortError. */
+ *  a rate-limit blip instead of dying at round 19. The backoff waits are
+ *  abortable too — a `Retry-After: 60` must not mean Stop does nothing for a
+ *  minute. */
 export async function aiFetch(
   input: string,
   init: RequestInit,
@@ -456,13 +479,13 @@ export async function aiFetch(
       if (!RETRYABLE.has(res.status) || attempt === retries)
         throw new AiError(await errText(res));
       const ra = Number(res.headers.get("retry-after"));
-      await sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt);
+      await withAbort(sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt), init.signal);
     } catch (e) {
       if (e instanceof AiError) throw e; // non-retryable HTTP status
       if ((e as Error)?.name === "AbortError") throw e; // user cancelled
       lastErr = e; // network failure
       if (attempt === retries) break;
-      await sleep(base * 2 ** attempt);
+      await withAbort(sleep(base * 2 ** attempt), init.signal);
     }
   }
   throw new AiError(

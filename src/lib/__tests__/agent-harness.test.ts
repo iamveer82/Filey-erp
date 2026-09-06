@@ -95,6 +95,28 @@ describe("agent harness", () => {
     expect(final).toBe("Nothing on file.");
   });
 
+  // The Stop button in both chats keys off the throw. The loop used to treat an
+  // abort as a provider hiccup, so pressing Stop answered "the model call
+  // failed (Aborted)" and threw away the partial reply instead of keeping it.
+  it("lets a user abort out rather than reporting it as a failed model call", async () => {
+    setAiConfig({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+      apiKey: "k",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      })
+    );
+
+    await expect(
+      collect(aiAgentStream([{ role: "user", text: "hi" }]))
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("reports the same steps whichever provider ran them", async () => {
     setAiConfig({
       provider: "openai",

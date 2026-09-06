@@ -22,6 +22,7 @@ import {
   type LinkedRecord,
 } from "./links";
 import { notifyDataChanged } from "./realtime";
+import { log } from "./log";
 
 // ===== Types =====
 export interface Product {
@@ -625,6 +626,19 @@ async function outboxRemove(id: number): Promise<void> {
   }
 }
 
+/** True for a failure that repeating cannot fix: Postgres integrity-violation
+ *  classes (23xxx — unique key taken, foreign key gone, NOT NULL) and
+ *  PostgREST's no-rows. A row deleted on another device, or an id already
+ *  claimed there, will read the same way on every retry.
+ *
+ *  Everything else is treated as temporary — offline, timeout, 5xx, an expired
+ *  token — and left queued. Erring that way costs a retry; erring the other
+ *  way discards a write the user made. */
+export function outboxOpIsDoomed(e: unknown): boolean {
+  const code = String((e as { code?: string } | null)?.code ?? "");
+  return /^23\d\d\d$/.test(code) || code === "PGRST116";
+}
+
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
@@ -655,8 +669,23 @@ export async function flushOutbox(): Promise<void> {
           if (error) throw error;
         }
         await outboxRemove(entry.id);
-      } catch {
-        break; // stop; retry remaining on next reconnect
+      } catch (e) {
+        // Order matters here — an insert must land before the update that
+        // follows it — so a temporary failure stops the whole replay and
+        // everything waits for the next reconnect.
+        if (!outboxOpIsDoomed(e)) break;
+        // But an op that can NEVER apply used to stop it the same way, and
+        // nothing ever cleared it: the queue jammed on that one entry, every
+        // offline write made afterwards piled up behind it, and none of them
+        // ever reached the cloud. No error surfaced anywhere. Drop the doomed
+        // op and keep draining — it was already lost, the ones behind it were
+        // not.
+        log.warn(
+          "outbox",
+          `dropping ${op.k} on ${op.t} — it cannot succeed`,
+          (e as { message?: string })?.message ?? e
+        );
+        await outboxRemove(entry.id);
       }
     }
   } finally {
@@ -730,6 +759,33 @@ async function write<T>(
   return offlineResult;
 }
 
+/** Many-row write in ONE round trip.
+ *
+ *  A CSV import used to call the single-row create per row, and each of those
+ *  reloads the whole collection, re-serialises it, rewrites the sync journal
+ *  and fires a local-write event. Measured on this store: 4000 rows in one
+ *  call is ~13ms; the same rows one at a time is ~400x more per row, which is
+ *  the import sitting there frozen.
+ *
+ *  ponytail: offline in cloud mode still queues one outbox op per row — the
+ *  outbox is row-shaped, and a replay is not the slow path worth reshaping it
+ *  for. Add a bulk op kind if offline imports ever get big. */
+async function writeMany<T>(
+  ops: OutboxOp[],
+  run: () => Promise<T>,
+  offlineResult: T
+): Promise<T> {
+  markWrite();
+  if (isLocalMode()) return run();
+  if (!isConfigured) throw new Error("Cloud storage is not configured.");
+  if (onLine()) {
+    await flushOutbox();
+    return run();
+  }
+  for (const op of ops) await outboxAdd(op);
+  return offlineResult;
+}
+
 /** Multi-step / read-modify-write op — requires a live connection. */
 async function online<T>(run: () => Promise<T>): Promise<T> {
   // Conservative: online() covers read-modify-write ops, so treat it as a
@@ -789,6 +845,46 @@ async function sInsert(
   if (error) throw error;
   return (data as { id: number }).id;
 }
+/** Rows per round trip. A 5000-row import in one request is a body big enough
+ *  to time out against PostgREST, and the matching delete filter would blow
+ *  past the URL length limit — the continuous sync chunks its deletes at 100
+ *  for exactly that reason. Chunked, the import is still one write per chunk
+ *  instead of one per row, which is where the win actually came from. */
+const BULK_CHUNK = 500;
+const chunked = <T>(xs: T[], n: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+};
+
+/** Insert an array of rows. All-or-nothing per chunk, like Postgres — callers
+ *  that need to know WHICH row was bad retry the slow way on failure. */
+async function sInsertMany(
+  table: string,
+  rows: Record<string, unknown>[],
+  client: any = null
+): Promise<number[]> {
+  if (!rows.length) return [];
+  const ids: number[] = [];
+  for (const part of chunked(rows, BULK_CHUNK)) {
+    const { data, error } = await (client ?? sb())
+      .from(table)
+      .insert(part)
+      .select("id");
+    // Earlier chunks are already committed, so the count rides on the error: a
+    // caller that retries row by row must start after them or it writes the
+    // successful rows a second time.
+    if (error) throw Object.assign(new Error(error.message), { inserted: ids.length });
+    for (const r of (data ?? []) as { id: number }[]) ids.push(r.id);
+  }
+  return ids;
+}
+
+/** How many rows a failed bulk insert had already written. */
+export const insertedBefore = (e: unknown): number =>
+  typeof (e as { inserted?: unknown })?.inserted === "number"
+    ? (e as { inserted: number }).inserted
+    : 0;
 async function sUpdate(
   table: string,
   id: number,
@@ -801,6 +897,21 @@ async function sUpdate(
 async function sDelete(table: string, id: number, client: any = null): Promise<void> {
   const { error } = await (client ?? sb()).from(table).delete().eq("id", id);
   if (error) throw error;
+}
+/** Delete many ids in one statement. Selecting 200 rows and deleting them one
+ *  at a time rewrote the whole collection 200 times. */
+async function sDeleteMany(
+  table: string,
+  ids: number[],
+  client: any = null
+): Promise<void> {
+  if (!ids.length) return;
+  // 100, not BULK_CHUNK: this filter rides in the URL, and that is the size
+  // the continuous sync settled on for the same reason.
+  for (const part of chunked(ids, 100)) {
+    const { error } = await (client ?? sb()).from(table).delete().in("id", part);
+    if (error) throw error;
+  }
 }
 
 /** Org/team data lives ONLY in the cloud. In local mode sb() is the on-device
@@ -941,7 +1052,13 @@ async function adjustProductStock(
       .eq("id", productId)
       .single();
     if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
-    const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
+    // NOT clamped at zero. Clamping loses the overshoot, and every stock move
+    // here has a reverse: selling 5 from a stock of 3 clamped to 0, then
+    // reverting that invoice added 5 back and left 5 on hand where 3 had been.
+    // Overselling invented inventory, silently, and the stock_movements ledger
+    // (which records the true -5/+5) stopped agreeing with the product row.
+    // Negative stock is information — it says you owe units — so record it.
+    const next = (Number(row?.quantity) || 0) + delta;
     const { error: ue } = await sb()
       .from("products")
       .update({ quantity: next })
@@ -1061,6 +1178,15 @@ export const erp = {
       sInsert("products", row), -1
     );
   },
+  /** Import path: every row in one write. See writeMany. */
+  createProducts: (inputs: Omit<Product, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "products", row })),
+      () => sInsertMany("products", rows),
+      []
+    );
+  },
   updateStock: (productId: number, delta: number, note?: string) =>
     online(async () => {
       // Atomic — avoids lost updates when two clients adjust stock at once.
@@ -1115,6 +1241,13 @@ export const erp = {
   deleteProduct: (productId: number) =>
     write({ k: "delete", t: "products", id: productId }, () =>
       sDelete("products", productId), undefined
+    ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteProducts: (productIds: number[]) =>
+    writeMany(
+      productIds.map((id) => ({ k: "delete" as const, t: "products", id })),
+      () => sDeleteMany("products", productIds),
+      undefined
     ),
   orders: () =>
     readCached<Order[]>(
@@ -1977,8 +2110,26 @@ export const fin = {
   repairLedger: () =>
     online(async () => {
       const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
+      const accts = await sList<Account>("accounts");
+      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+      const deltaOf = (t: any): number =>
+        ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount));
+
+      // Sum the journal as it stands AND as it will stand once the duplicates
+      // are gone, in one pass. Only the DIFFERENCE is applied to each stored
+      // balance.
+      //
+      // Overwriting the balance with the survivors' sum — what this used to do
+      // — throws away everything an account holds that was never posted as a
+      // transaction, and the opening balance typed in when the account was
+      // created is exactly that: createAccount stores it on the row and posts
+      // no journal entry for it. A bank account opened at 50,000 was silently
+      // reset to zero, by a button whose own confirm dialog promises accounts
+      // are untouched. Repairing drift must not destroy the starting position.
       const seen = new Set<string>();
-      let removed = 0;
+      const dupes: any[] = [];
+      const before = new Map<number, number>();
+      const after = new Map<number, number>();
       for (const t of txns) {
         const key = [
           t.account_id ?? "",
@@ -1987,30 +2138,25 @@ export const fin = {
           t.description ?? "",
           t.txn_date ?? "",
         ].join("|");
-        if (seen.has(key)) {
-          await sDelete("transactions", t.id);
-          removed++;
-        } else {
-          seen.add(key);
-        }
-      }
-      // Recompute every account balance from the surviving transactions.
-      const accts = await sList<Account>("accounts");
-      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-      const bal = new Map<number, number>();
-      const survivors = await sList<any>("transactions");
-      for (const t of survivors) {
+        const dupe = seen.has(key);
+        if (dupe) dupes.push(t);
+        else seen.add(key);
         if (!t.account_id) continue;
-        const type = typeById.get(t.account_id) ?? "asset";
-        bal.set(
-          t.account_id,
-          (bal.get(t.account_id) ?? 0) +
-            ledgerDelta(type, t.txn_type, Number(t.amount))
-        );
+        const d = deltaOf(t);
+        before.set(t.account_id, (before.get(t.account_id) ?? 0) + d);
+        if (!dupe) after.set(t.account_id, (after.get(t.account_id) ?? 0) + d);
       }
-      for (const a of accts)
-        await sUpdate("accounts", a.id, { balance: bal.get(a.id) ?? 0 });
-      return { removed };
+
+      for (const t of dupes) await sDelete("transactions", t.id);
+      for (const a of accts) {
+        // Whatever the balance holds beyond the journal is the opening
+        // position; it survives untouched.
+        const opening = Number(a.balance ?? 0) - (before.get(a.id) ?? 0);
+        await sUpdate("accounts", a.id, {
+          balance: r2(opening + (after.get(a.id) ?? 0)),
+        });
+      }
+      return { removed: dupes.length };
     }),
   report: () =>
     readCached<FinanceReport>(
@@ -2214,6 +2360,15 @@ export const crm = {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "crm_customers", row }, () =>
       sInsert("crm_customers", row), -1
+    );
+  },
+  /** Import path: every row in one write. See writeMany. */
+  createCustomers: (inputs: Omit<CrmCustomer, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "crm_customers", row })),
+      () => sInsertMany("crm_customers", rows),
+      []
     );
   },
   updateCustomer: (
@@ -2861,49 +3016,58 @@ function ledgerDelta(type: string, txnType: string, amount: number): number {
  *  account balances. Type-aware, so it exactly undoes each posting (an earlier
  *  fixed-sign version double-counted asset/expense legs). Used before re-posting
  *  or when a document is reverted to draft / deleted. */
+type InvoiceTxn = {
+  id: number; account_id: number | null; txn_type: string; amount: number | string;
+  invoice_id?: number | null; source?: string | null; ref?: string | null;
+  description?: string; txn_date?: string;
+};
+
+async function reverseTransactions(txns: InvoiceTxn[]): Promise<void> {
+  if (!txns.length) return;
+  const accts = await sList<Account>("accounts");
+  const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+  for (const t of txns) {
+    const delta = t.account_id
+      ? -ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount))
+      : 0;
+    if (t.account_id) {
+      await adjustAccountBalance(t.account_id, delta);
+    }
+    try {
+      await sDelete("transactions", t.id);
+    } catch (error) {
+      if (t.account_id) await adjustAccountBalance(t.account_id, -delta);
+      throw error;
+    }
+  }
+}
+
 async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
-  ref: string
+  ref: string,
+  includePayments = false
 ): Promise<number> {
   // Match by BOTH keys. Postings made before invoice_id was tracked carry only
   // a ref; reversing by either key keeps re-finalize from leaving orphan rows
   // that pile up (the "8 invoices → 15 entries" bug). Dedup by row id so a row
   // matched on both keys isn't reversed twice.
-  type TxnRow = { id: number; account_id: number | null; txn_type: string; amount: number | string };
-  const rows = new Map<number, TxnRow>();
+  const rows = new Map<number, InvoiceTxn>();
   const byRef = await sb().from("transactions").select("*").eq("ref", ref);
   if (byRef.error) throw byRef.error;
-  for (const t of (byRef.data ?? []) as TxnRow[]) rows.set(t.id, t);
+  for (const t of (byRef.data ?? []) as InvoiceTxn[]) {
+    if (!t.invoice_id || t.invoice_id === invoiceId) rows.set(t.id, t);
+  }
   if (invoiceId) {
     const byId = await sb()
       .from("transactions")
       .select("*")
       .eq("invoice_id", invoiceId);
     if (byId.error) throw byId.error;
-    for (const t of (byId.data ?? []) as TxnRow[]) rows.set(t.id, t);
+    for (const t of (byId.data ?? []) as InvoiceTxn[]) rows.set(t.id, t);
   }
-  const txns = [...rows.values()];
-  if (txns.length) {
-    const accts = await sList<Account>("accounts");
-    const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-    for (const t of txns) {
-      if (!t.account_id) continue;
-      const type = typeById.get(t.account_id) ?? "asset";
-      await adjustAccountBalance(
-        t.account_id,
-        -ledgerDelta(type, t.txn_type, Number(t.amount))
-      );
-    }
-  }
-  const delRef = await sb().from("transactions").delete().eq("ref", ref);
-  if (delRef.error) throw delRef.error;
-  if (invoiceId) {
-    const delId = await sb()
-      .from("transactions")
-      .delete()
-      .eq("invoice_id", invoiceId);
-    if (delId.error) throw delId.error;
-  }
+  const txns = [...rows.values()].filter((t) => includePayments ||
+    (t.source !== "payment" && !/ Payment(?: #\d+)?$/.test(t.ref ?? "")));
+  await reverseTransactions(txns);
   return txns.length;
 }
 
@@ -2917,16 +3081,29 @@ async function reverseInvoiceOrderAndStock(
 ) {
   if (!isPurchase) {
     const orderNumber = `SO-${number}`;
-    const { data: order } = await sb()
+    const { data: order, error } = await sb()
       .from("orders")
       .select("id")
       .eq("order_number", orderNumber)
       .maybeSingle();
+    if (error) throw error;
     if (order?.id) {
-      await sb().from("orders").delete().eq("id", order.id);
+      await sDelete("orders", order.id);
     }
   }
   const dir = isPurchase ? -1 : 1;
+  const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+  const movements = await sChildren<{ product_id: number; qty: number }>("stock_movements", "ref", ref);
+  if (movements.length) {
+    const net = new Map<number, number>();
+    for (const m of movements) net.set(m.product_id, (net.get(m.product_id) ?? 0) + Number(m.qty));
+    for (const [productId, qty] of net) {
+      if (qty) await adjustProductStock(productId, -qty, {
+        type: isPurchase ? "purchase" : "sale", ref, note: "Posting reversed",
+      });
+    }
+    return;
+  }
   for (const it of items) {
     if (!it.product_id || !it.qty) continue;
     await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)), {
@@ -2946,7 +3123,7 @@ async function reverseInvoiceOrderAndStock(
  * collecting payment — which moves the invoice to "paid" — reversed the very
  * postings the sale had created, emptying the books for work already invoiced.
  */
-const POSTED_STATUSES = new Set(["sent", "paid"]);
+const POSTED_STATUSES = new Set(["sent", "paid", "overdue"]);
 const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
 
 async function propagateInvoice(
@@ -3176,6 +3353,7 @@ async function propagateInvoice(
     }
   } catch (e) {
     console.error("Invoice propagation failed:", e);
+    throw e;
   }
 }
 
@@ -3191,9 +3369,10 @@ async function unpropagateInvoice(
     const isPurchase = doc.doc_type === "purchase";
     const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
     const prior = await reverseInvoiceTransactions(id || undefined, ref);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
+    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, items, isPurchase);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
+    throw e;
   }
 }
 
@@ -3458,14 +3637,19 @@ export const billing = {
       // the invoice permanently empty and showing a zero total. The delete is
       // deferred until the replacements are safely written.
       let staleItemIds: number[] = [];
+      let previousDoc: Record<string, unknown> | null = null;
+      let previousItems: any[] = [];
       if (id && id > 0) {
-        await sUpdate("invoice_docs", id, row);
+        const previous = await sb().from("invoice_docs").select("*").eq("id", id).single();
+        if (previous.error) throw previous.error;
+        previousDoc = previous.data;
         const { data: existing, error } = await sb()
           .from("invoice_doc_items")
-          .select("id")
+          .select("*")
           .eq("invoice_id", id);
         if (error) throw error;
         staleItemIds = ((existing ?? []) as { id: number }[]).map((r) => r.id);
+        previousItems = existing ?? [];
         docId = id;
       } else {
         await checkFreeInvoiceCap(invoicesThisMonth);
@@ -3491,6 +3675,7 @@ export const billing = {
         // still in the table, so the invoice survives a failed save intact.
         if (error) throw error;
       }
+      if (previousDoc) await sUpdate("invoice_docs", docId, row);
       // Replacements are in. Retiring the old lines by id (rather than by
       // invoice_id) is what keeps the ones just written.
       if (staleItemIds.length) {
@@ -3502,7 +3687,9 @@ export const billing = {
       }
       // Keep Orders, Inventory and Accounting in sync with the invoice state.
       // Pass the saved id so postings carry invoice_id and can be reversed.
-      // Idempotent + best-effort: failures are logged but never block saving.
+      // Reverse the PREVIOUS quantities and number before posting the edit.
+      // Reversing the new lines invented stock when quantities/products changed.
+      if (previousDoc) await unpropagateInvoice(previousDoc, previousItems);
       const docRow: Record<string, unknown> = {
         ...(row as Record<string, unknown>),
         id: docId,
@@ -3515,7 +3702,7 @@ export const billing = {
       return docId;
     }),
   deleteDoc: (docId: number) =>
-    write({ k: "delete", t: "invoice_docs", id: docId }, async () => {
+    online(async () => {
       const { data: doc, error } = await sb()
         .from("invoice_docs")
         .select("*")
@@ -3523,7 +3710,6 @@ export const billing = {
         .single();
       if (error) throw error;
       const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
-      await sDelete("invoice_docs", docId);
       await unpropagateInvoice(
         doc as Record<string, unknown>,
         items
@@ -3533,21 +3719,23 @@ export const billing = {
             unit_price: i.unit_price,
           }))
       );
+      // Reverse receipts while the foreign key still identifies their invoice.
+      await reverseInvoiceTransactions(docId, `Invoice ${doc.number} Payment`, true);
       // Restore any advance credit this invoice had consumed — otherwise the
       // negative `applied:inv#<id>` ledger row outlives the invoice and the
       // customer's credit stays reduced by a document that no longer exists.
-      try {
-        const tag = `applied:inv#${docId}`;
-        const advs = await sList<any>("advances");
-        for (const a of advs) if (a.note === tag) await sDelete("advances", a.id);
-      } catch {
-        /* best-effort — never block the delete */
+      const advs = await sList<any>("advances");
+      for (const a of advs) if (a.note === `applied:inv#${docId}`) await sDelete("advances", a.id);
+      // Local storage has no FK cascades; explicitly clean child rows in both modes.
+      for (const table of ["invoice_payments", "invoice_doc_items"]) {
+        const { error: childError } = await sb().from(table).delete().eq("invoice_id", docId);
+        if (childError) throw childError;
       }
+      await sDelete("invoice_docs", docId);
       return undefined;
-    }, undefined),
+    }),
   setStatus: (docId: number, status: string) =>
-    write(
-      { k: "update", t: "invoice_docs", id: docId, row: { status } },
+    online(
       async () => {
         const { data: doc, error } = await sb()
           .from("invoice_docs")
@@ -3557,20 +3745,21 @@ export const billing = {
         if (error) throw error;
         const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
         await sUpdate("invoice_docs", docId, { status });
+        if (isPostedStatus(status) === isPostedStatus(doc.status)) return;
         const docItems = items
           .map((i) => ({
             product_id: i.product_id ?? undefined,
             qty: i.qty,
             unit_price: i.unit_price,
             custom: i.custom ?? undefined, // keep meta so the order total matches
+            tax_category: i.tax_category ?? undefined,
           }));
         if (isPostedStatus(status)) {
           await propagateInvoice(doc as Record<string, unknown>, docItems);
         } else {
           await unpropagateInvoice(doc as Record<string, unknown>, docItems);
         }
-      },
-      undefined
+      }
     ),
   shareDoc: (docId: number, shared: boolean) =>
     online(() =>
@@ -3642,7 +3831,8 @@ export const billing = {
     paidAt: string
   ) =>
     online(async () => {
-      const { data: pay } = await sb()
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+      const { data: pay, error: paymentError } = await sb()
         .from("invoice_payments")
         .insert({
           invoice_id: invoiceId,
@@ -3652,6 +3842,7 @@ export const billing = {
         })
         .select("id")
         .single();
+      if (paymentError) throw paymentError;
       const paymentId = (pay as { id: number } | null)?.id;
 
       // Auto-mark the invoice paid once the balance is cleared.
@@ -3707,7 +3898,7 @@ export const billing = {
         ? amountBase
         : docAmountInAed(amount, docCurrency, null, payRates);
       const fxDiff = Number((amountSpot - amountBase).toFixed(2));
-      const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
+      const ref = `Invoice payment #${paymentId}`;
       const cashId = await findOrCreateCashAccount();
       const arId = await findOrCreateArAccount();
       if (cashId > 0) {
@@ -3770,21 +3961,55 @@ export const billing = {
         .single();
       if (error) throw error;
       const invoiceId = (p as { invoice_id?: number } | null)?.invoice_id;
-      await sDelete("invoice_payments", id);
       if (invoiceId) {
         // Reverse the accounting entries for this payment.
-        const { data: doc } = await sb()
+        const { data: doc, error: docError } = await sb()
           .from("invoice_docs")
-          .select("number,status")
+          .select("*")
           .eq("id", invoiceId)
           .single();
-        const docMeta = doc as { number?: string; status?: string } | null;
-        const ref = `Invoice ${docMeta?.number ?? invoiceId} Payment`;
-        await reverseInvoiceTransactions(invoiceId, ref);
-        // If the invoice was fully paid, move it back to sent.
-        if (docMeta?.status === "paid") {
-          await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        if (docError) throw docError;
+        const docMeta = doc as InvoiceDoc;
+        const txns = await sChildren<InvoiceTxn>("transactions", "invoice_id", invoiceId);
+        let selected = txns.filter((t) => t.ref === `Invoice payment #${id}`);
+        if (!selected.length) {
+          // Older versions gave every receipt the same ref. Recover each receipt's
+          // cash / optional FX / AR bundle, never the invoice's sale or COGS legs.
+          const legacy = txns.filter((t) => t.source === "payment" &&
+            / Payment$/.test(t.ref ?? "")).sort((a, b) => a.id - b.id);
+          const bundles: InvoiceTxn[][] = [];
+          let bundle: InvoiceTxn[] = [];
+          for (const t of legacy) {
+            bundle.push(t);
+            if (t.description?.endsWith("— AR reduction")) {
+              bundles.push(bundle);
+              bundle = [];
+            }
+          }
+          const baseAmount = docAmountInAed(Number(p.amount), docMeta.currency, docMeta.fx_rate,
+            await getExchangeRates().catch(() => ({})));
+          const matches = bundles.filter((b) => b.every((t) =>
+            t.txn_date?.slice(0, 10) === String(p.paid_at).slice(0, 10)) &&
+            Math.abs(Number(b[b.length - 1].amount) - baseAmount) < 0.005);
+          const signature = (b: InvoiceTxn[]) => JSON.stringify(b.map((t) =>
+            [t.account_id, t.txn_type, Number(t.amount)]));
+          if (legacy.length && (!matches.length || matches.some((b) =>
+            signature(b) !== signature(matches[0])))) {
+            throw new Error("This older payment cannot be matched safely to its ledger entries. Reconcile it before deleting it.");
+          }
+          selected = matches[0] ?? [];
         }
+        await reverseTransactions(selected);
+        await sDelete("invoice_payments", id);
+        // If the invoice was fully paid, move it back to sent.
+        if (docMeta.status === "paid") {
+          const remaining = await sChildren<InvoicePayment>("invoice_payments", "invoice_id", invoiceId);
+          const items = await sChildren<any>("invoice_doc_items", "invoice_id", invoiceId);
+          if (remaining.reduce((sum, r) => sum + Number(r.amount), 0) < docTotal(docMeta, items) - 0.005)
+            await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        }
+      } else {
+        await sDelete("invoice_payments", id);
       }
     }),
   getCompany: () =>
@@ -4027,37 +4252,50 @@ export const recurrences = {
       const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
       let made = 0;
       for (const r of due) {
-        const base = await billing.getDoc(r.base_invoice_id).catch(() => null);
+        let base: InvoiceDoc | null = null;
+        try {
+          base = await billing.getDoc(r.base_invoice_id);
+        } catch (e: any) {
+          // Only "that invoice is gone" retires a recurrence. Any other
+          // failure — offline, RLS hiccup, timeout — is temporary, and
+          // cancelling on one silently ends a subscription the user set up,
+          // with no way back from the UI. Skip this run and try next time.
+          const gone =
+            e?.code === "PGRST116" || /no rows/i.test(e?.message ?? String(e));
+          if (!gone) continue;
+        }
         if (!base) {
           await sUpdate("invoice_recurrence", r.id, { active: false });
           continue;
         }
+        // Carry the WHOLE base document and override only what a new
+        // occurrence must change. Listing the fields by hand is how this
+        // drifted: unit_price_formula, each line's `custom` (manual amounts,
+        // per-line discounts and formulas) and round_off were all left behind,
+        // so a recurring invoice could bill a different figure than the
+        // invoice it recurs from — silently, every month.
+        const {
+          id: _id,
+          created_at: _created,
+          updated_at: _updated,
+          // Inheriting these would date the new invoice to the old cycle and
+          // re-link it to a quotation it did not come from.
+          due_date: _due,
+          quotation_id: _quote,
+          ...carried
+        } = base;
         const input: InvoiceDocInput = {
+          ...carried,
           number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
           status: "draft",
-          template: base.template,
-          accent: base.accent,
-          currency: base.currency,
-          seller_name: base.seller_name,
-          seller_address: base.seller_address,
-          seller_trn: base.seller_trn,
-          seller_email: base.seller_email,
-          seller_phone: base.seller_phone,
-          logo: base.logo,
-          customer_id: base.customer_id,
-          customer_name: base.customer_name,
-          customer_address: base.customer_address,
-          customer_trn: base.customer_trn,
-          customer_email: base.customer_email,
           issue_date: today,
-          notes: base.notes,
-          terms: base.terms,
-          tax_rate: base.tax_rate,
-          discount: base.discount,
           items: base.items.map((it) => ({
             description: it.description,
             qty: it.qty,
             unit_price: it.unit_price,
+            unit: it.unit,
+            custom: it.custom,
+            tax_category: it.tax_category,
             product_id: it.product_id,
           })),
         };
@@ -4230,6 +4468,13 @@ export const quotes = {
   deleteDoc: (docId: number) =>
     write({ k: "delete", t: "quotations", id: docId }, () =>
       sDelete("quotations", docId), undefined
+    ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteDocs: (docIds: number[]) =>
+    writeMany(
+      docIds.map((id) => ({ k: "delete" as const, t: "quotations", id })),
+      () => sDeleteMany("quotations", docIds),
+      undefined
     ),
   setStatus: (docId: number, status: string) =>
     write(
@@ -4883,12 +5128,12 @@ export const advances = {
     online(async () => {
       const tag = `applied:inv#${invoiceId}`;
       const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
+      // Matched on the tag alone, not the party. The tag already names one
+      // invoice, so scoping the purge by party_id only meant that changing an
+      // invoice's customer stranded the old consumption on the old customer —
+      // credit permanently eaten by an invoice that is no longer theirs.
       for (const r of rows)
-        if (
-          r.party_type === "customer" &&
-          String(r.party_id) === String(partyId) &&
-          r.note === tag
-        )
+        if (r.party_type === "customer" && r.note === tag)
           await sDelete("advances", r.id);
       if (amount > 0)
         await sInsert("advances", {
@@ -4914,8 +5159,16 @@ export const advances = {
     invoiceId?: number
   ): Promise<number> => {
     const rows = await advances.forParty("customer", partyId);
+    // `tag &&` is load-bearing. A deposit entered without a note is stored with
+    // note = null, and on a NEW invoice there is no id, so the tag was null
+    // too — `a.note === tag` matched every plain deposit and excluded it. The
+    // editor asked how much credit was available before the invoice had been
+    // saved and was told zero, however much the customer had on account.
     const tag = invoiceId ? `applied:inv#${invoiceId}` : null;
-    return rows.reduce((s, a) => s + (a.note === tag ? 0 : Number(a.amount)), 0);
+    return rows.reduce(
+      (s, a) => s + (tag && a.note === tag ? 0 : Number(a.amount)),
+      0
+    );
   },
 };
 
@@ -4927,6 +5180,7 @@ export interface ReceiptSummary {
   status: string;
   template: string;
   amount: number;
+  currency?: string;
   payment_date: string;
   payment_method?: string;
   shared?: boolean;
@@ -4989,6 +5243,7 @@ export const receipts = {
           template: r.template,
           amount: Number(r.amount),
           payment_date: r.issue_date,
+          currency: r.currency,
           payment_method: r.payment_method,
           shared: r.shared ?? false,
           updated_at: r.updated_at,
@@ -5325,6 +5580,12 @@ export const links = {
             .eq("to_type", type)
             .eq("to_id", id),
         ]);
+        // A read that FAILED is not evidence there are no links. Swallowing the
+        // error rendered "nothing linked here", and readCached would then store
+        // that empty list as this record’s truth. Throw instead — readCached
+        // falls back to the last good copy.
+        if (out.error) throw out.error;
+        if (inc.error) throw inc.error;
         const rows = [
           ...((out.data ?? []) as any[]).map((r) => ({ r, direction: "outgoing" as const })),
           ...((inc.data ?? []) as any[]).map((r) => ({ r, direction: "incoming" as const })),
@@ -5396,7 +5657,7 @@ export const links = {
       // constraint error. Postgres has a unique index for this, but the
       // offline shim has neither that nor upsert's onConflict — so the check
       // is done here, where both modes get it.
-      const { data: dupe } = await sb()
+      const { data: dupe, error: dupeError } = await sb()
         .from("entity_links")
         .select("id")
         .eq("from_type", row.from_type)
@@ -5404,6 +5665,10 @@ export const links = {
         .eq("to_type", row.to_type)
         .eq("to_id", row.to_id)
         .eq("kind", row.kind);
+      // A failed check read as "no duplicate" and fell through to the insert.
+      // Offline that is the only guard there is — the shim has no unique index —
+      // so one failed read left a second identical edge on the graph.
+      if (dupeError) throw dupeError;
       const existing = ((dupe ?? []) as { id: number }[])[0];
       if (existing) return existing.id;
 
@@ -5427,7 +5692,10 @@ export const links = {
     const col = ENTITY_LABEL_COL[type];
     let q = sb().from(ENTITY_TABLE[type]).select(`id, ${col}`).limit(limit);
     if (term.trim()) q = q.ilike(col, `%${term.trim()}%`);
-    const { data } = await q;
+    const { data, error } = await q;
+    // "Nothing found" and "the search broke" look identical to someone staring
+    // at an empty picker. The caller catches this and can say which it was.
+    if (error) throw error;
     return ((data ?? []) as any[]).map((r) => ({
       id: Number(r.id),
       label: String(r[col] ?? "").trim() || `#${r.id}`,

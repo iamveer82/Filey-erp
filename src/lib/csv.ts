@@ -4,8 +4,18 @@
 
 import { hasTauri, saveBytes } from "./localPaths";
 
+// Excel and Google Sheets EXECUTE a cell that opens with one of these, so an
+// exported customer name of =HYPERLINK("http://…","Click") runs the moment the
+// file is opened — and every field in these exports is text somebody typed
+// into the app. Prefixing with an apostrophe makes the cell literal text.
+const RISKY_LEAD = /^[=+\-@\t\r]/;
+// …but this is an accounting export, and -500 must stay a number. A plain
+// numeric cell is never a formula, so it is left exactly as it is.
+const PLAIN_NUMBER = /^-?\d+(?:\.\d+)?$/;
+
 function escapeCell(v: unknown): string {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  if (RISKY_LEAD.test(s) && !PLAIN_NUMBER.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

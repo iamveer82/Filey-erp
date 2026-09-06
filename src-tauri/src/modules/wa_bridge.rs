@@ -132,9 +132,20 @@ fn kill_stale_sidecars() {
 
 /// Start (or restart) the bridge. No webhook — messages route to the app's own
 /// agent over stdin/stdout.
+///
+/// Async because getting here is not free: stopping the old bridge waits on a
+/// child process and `kill_stale_sidecars` shells out to taskkill. On the main
+/// thread that is a window that stops painting, and a sidecar that refuses to
+/// die is a window that never comes back.
 #[tauri::command]
-pub fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
-    wa_bridge_stop(app.clone()).ok();
+pub async fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
+    tauri::async_runtime::spawn_blocking(move || wa_bridge_start_blocking(app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
+    wa_bridge_stop_blocking();
     kill_stale_sidecars();
 
     let bin = sidecar_path(&app)?;
@@ -318,8 +329,16 @@ pub fn wa_bridge_send_file(
         .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
 }
 
+/// Async for the same reason as start: `child.wait()` has no timeout, so a
+/// sidecar that ignores the kill would otherwise hang the window for good.
 #[tauri::command]
-pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
+pub async fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(wa_bridge_stop_blocking)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn wa_bridge_stop_blocking() {
     let mut guard = BRIDGE.lock().unwrap();
     if let Some(sup) = guard.as_mut() {
         if let Some(child) = sup.child.as_mut() {
@@ -335,7 +354,6 @@ pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
             me: None,
         };
     }
-    Ok(())
 }
 
 /// Forget the pairing and start fresh, so the next start shows a QR.
@@ -347,17 +365,21 @@ pub fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
 /// on the phone too. This is the only way out, and it needs to be a button
 /// rather than "go delete a folder in AppData".
 #[tauri::command]
-pub fn wa_bridge_reset(app: AppHandle) -> Result<BridgeState, String> {
-    wa_bridge_stop(app.clone()).ok();
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("wa-bridge");
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir).map_err(|e| format!("could not clear session: {e}"))?;
-    }
-    wa_bridge_start(app)
+pub async fn wa_bridge_reset(app: AppHandle) -> Result<BridgeState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        wa_bridge_stop_blocking();
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("wa-bridge");
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(|e| format!("could not clear session: {e}"))?;
+        }
+        wa_bridge_start_blocking(app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

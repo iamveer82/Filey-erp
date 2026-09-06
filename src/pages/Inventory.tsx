@@ -25,7 +25,15 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
+import {
+  erp,
+  pos,
+  shareRecord,
+  billing,
+  insertedBefore,
+  Product,
+  type StockMovement,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { MenuPopover, MenuItemRow } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
@@ -522,7 +530,7 @@ export default function Inventory() {
                 });
                 if (!ok) return;
                 try {
-                  for (const p of sel) await erp.deleteProduct(p.id);
+                  await erp.deleteProducts(sel.map((p) => p.id));
                   load();
                   toast.success(`Deleted ${sel.length}.`);
                 } catch (e) {
@@ -776,22 +784,37 @@ export default function Inventory() {
         onImport={async (rows) => {
           let ok = 0;
           const failed: string[] = [];
-          for (const r of rows) {
-            if (!String(r.name ?? "").trim()) continue;
-            try {
-              await erp.createProduct({
-                sku: String(r.sku ?? ""),
-                name: String(r.name ?? ""),
-                category: String(r.category ?? "") || undefined,
-                unit_price: Number(r.unit_price) || 0,
-                cost_price: Number(r.cost_price) || 0,
-                quantity: Number(r.quantity) || 0,
-                reorder_level: Number(r.reorder_level) || 0,
-                description: "",
-              } as Omit<Product, "id" | "created_at">);
-              ok++;
-            } catch {
-              failed.push(String(r.name));
+          const toProduct = (r: Record<string, unknown>) =>
+            ({
+              sku: String(r.sku ?? ""),
+              name: String(r.name ?? ""),
+              category: String(r.category ?? "") || undefined,
+              unit_price: Number(r.unit_price) || 0,
+              cost_price: Number(r.cost_price) || 0,
+              quantity: Number(r.quantity) || 0,
+              reorder_level: Number(r.reorder_level) || 0,
+              description: "",
+            }) as Omit<Product, "id" | "created_at">;
+          const usable = rows.filter((r) => String(r.name ?? "").trim());
+          try {
+            // One write for the whole file. Row-at-a-time reloads and rewrites
+            // the entire collection per product, which is what made a big
+            // import look like a hang.
+            await erp.createProducts(usable.map(toProduct));
+            ok = usable.length;
+          } catch (e) {
+            // A bulk insert cannot say WHICH row was bad, so a failed import
+            // pays to find out row by row. It resumes after the rows that were
+            // already written — the write is chunked, so an earlier chunk may
+            // have committed, and starting from zero would import those twice.
+            ok = insertedBefore(e);
+            for (const r of usable.slice(ok)) {
+              try {
+                await erp.createProduct(toProduct(r));
+                ok++;
+              } catch {
+                failed.push(String(r.name));
+              }
             }
           }
           if (failed.length) {

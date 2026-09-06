@@ -539,6 +539,10 @@ export async function* runAgentStream(
       }
       data = await res.json();
     } catch (e) {
+      // A stop the user asked for is not a provider hiccup. Swallowing it here
+      // reported "the model call failed (Aborted)" as the agent's answer, and
+      // the callers' Stop handling — which keys off the throw — never ran.
+      if ((e as Error)?.name === "AbortError") throw e;
       const msg = e instanceof Error ? e.message : String(e);
       log.error("agent", "model call failed", msg);
       const text = `The model call failed (${msg}). Anything I did before that is saved — ask me to continue and I'll pick up from there.`;
