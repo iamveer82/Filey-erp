@@ -14,6 +14,7 @@ import FreedomContactModal from "../../components/FreedomContactModal";
 import { billing, erp, crm, quotes } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 const ENTERPRISE_MAILTO =
   "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
@@ -119,150 +120,174 @@ export default function BillingPanel() {
     limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100));
 
   return (
-    <div className="space-y-4">
-      <div className="card-accent flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium text-ink/70">Current plan</p>
-          {subLoading ? (
-            <p className="mt-1 text-2xl font-medium text-muted-foreground">…</p>
-          ) : (
-          <p className="mt-1 text-2xl font-medium text-ink">
-            {current.name}
-            {sub.plan !== "free" && sub.plan_status ? ` · ${sub.plan_status}` : ""}
-          </p>
-          )}
-          {sub.plan !== "free" && sub.current_period_end && (
-            <p className="mt-1 text-sm text-ink/70">
-              Renews {fmtDate(sub.current_period_end)}
-            </p>
-          )}
-        </div>
-        {sub.plan !== "free" && (
-          <button className="btn-ghost" onClick={manage} disabled={busy === "manage"}>
-            {busy === "manage" ? "Opening…" : "Manage billing"}
-          </button>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="font-medium text-ink">Storage usage</p>
-          <span className="text-sm text-brand-500">
-            {used.toLocaleString()}
-            {limit !== Infinity ? ` / ${limit.toLocaleString()}` : ""} records
-          </span>
-        </div>
-        {limit !== Infinity && (
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/[0.06]">
-            <div
-              className="h-full rounded-full transition-[width]"
-              style={{
-                width: `${pctUsed}%`,
-                // design.md: no gradients — flat amber accent, red at ≥90%.
-                background: pctUsed >= 90 ? "hsl(var(--danger))" : "hsl(var(--primary-400))",
-              }}
-            />
-          </div>
-        )}
-        <p className="mt-2 text-[11px] text-brand-400">
-          {limit === Infinity
-            ? "Unlimited on your plan."
-            : pctUsed >= 90
-              ? "You're nearly out of space - upgrade your plan for more."
-              : "Counts customers, products, invoices, orders and quotes."}
-        </p>
-      </div>
-
-      {/* Two plans now, so two columns - a 4-up grid left them stranded at
-          half width on desktop. */}
-      <div className="grid gap-4 sm:grid-cols-2 items-stretch">
-        {PLANS.map((p) => (
-          <div
-            key={p.id}
-            className={cn(
-              "card flex flex-col !p-5",
-              p.id === current.id
-                ? "ring-2 ring-primary-400"
-                : p.recommended && "border-ink/25 dark:border-white/25"
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-400">
-                {p.name}
-              </p>
-              {p.id === current.id ? (
-                <span className="pill bg-primary-100 text-ink text-[11px]">Current</span>
-              ) : (
-                p.recommended && (
-                  <span className="pill bg-primary-100 text-ink text-[11px]">
-                    Recommended
-                  </span>
-                )
-              )}
-            </div>
-            <p className="mt-2 text-2xl font-bold tabular-nums text-ink">
-              {p.price}
-              {p.period && (
-                <span className="text-sm font-medium text-brand-400">{p.period}</span>
-              )}
-            </p>
-            <p className="mt-1 text-sm text-brand-500">{p.blurb}</p>
-            <ul className="mt-4 flex-1 space-y-2 border-t border-brand-100 pt-4 text-sm text-brand-500 dark:border-white/10">
-              {p.features.map((f) => (
-                <li key={f} className="flex gap-2">
-                  <Check size={14} className="mt-0.5 shrink-0 text-success" />
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-5">
-              {p.id === current.id ? (
-                <button className="btn-ghost w-full" disabled>
-                  Your plan
-                </button>
-              ) : p.id === "free" ? (
-                <p className="py-2 text-center text-xs text-brand-400">
-                  Downgrade anytime in the billing portal
+    <>
+      <SettingsPanel>
+        <SettingsSection
+          title="Current plan"
+          description="Your subscription and renewal details."
+        >
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              {subLoading ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Loading plan…
                 </p>
               ) : (
-                <button
-                  className={cn("w-full", p.recommended ? "btn-primary" : "btn-ghost")}
-                  onClick={() => buy(p)}
-                  disabled={busy === p.id}
-                >
-                  {busy === p.id
-                    ? "Redirecting…"
-                    : p.kind === "contact"
-                      ? "Contact sales"
-                      : p.kind === "license"
-                        ? `Get ${p.name} - ${p.price}`
-                        : `Get ${p.name}`}
-                </button>
+                <p className="text-base font-semibold text-foreground">
+                  {current.name}
+                  {sub.plan !== "free" && sub.plan_status ? ` · ${sub.plan_status}` : ""}
+                </p>
+              )}
+              {sub.plan !== "free" && sub.current_period_end && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Renews {fmtDate(sub.current_period_end)}
+                </p>
               )}
             </div>
+            {sub.plan !== "free" && (
+              <button className="btn-ghost" onClick={manage} disabled={busy === "manage"}>
+                {busy === "manage" ? "Opening…" : "Manage billing"}
+              </button>
+            )}
           </div>
-        ))}
-      </div>
+        </SettingsSection>
 
-      <div className="card">
-        <p className="mb-3 font-medium text-ink">Usage</p>
-        {statsError ? (
-          <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">
-            Couldn't load your usage counts — check your connection and refresh.
-          </p>
-        ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {Object.entries(stats).map(([k, v]) => (
-            <div key={k} className="rounded-xl border border-brand-200 p-3 text-center">
-              <p className="text-2xl font-medium text-ink">{v}</p>
-              <p className="mt-0.5 text-[11px] text-brand-400">{k}</p>
+        <SettingsSection
+          title="Storage usage"
+          description="Customers, products, invoices, orders and quotations saved in this workspace."
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium tabular-nums text-foreground">
+              {used.toLocaleString()}
+              {limit !== Infinity ? ` / ${limit.toLocaleString()}` : ""} records
+            </span>
+          </div>
+          {limit !== Infinity && (
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full bg-hover"
+              role="progressbar"
+              aria-label="Storage usage"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={pctUsed}
+            >
+              <div
+                className="h-full rounded-full transition-[width]"
+                style={{
+                  width: `${pctUsed}%`,
+                  // design.md: no gradients — flat amber accent, red at ≥90%.
+                  background:
+                    pctUsed >= 90 ? "hsl(var(--danger))" : "hsl(var(--primary-400))",
+                }}
+              />
             </div>
-          ))}
-        </div>
-        )}
-      </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {limit === Infinity
+              ? "Unlimited on your plan."
+              : pctUsed >= 90
+                ? "You're nearly out of space - upgrade your plan for more."
+                : "Counts customers, products, invoices, orders and quotes."}
+          </p>
+          {statsError ? (
+            <p role="alert" className="text-sm text-danger">
+              Couldn't load your usage counts — check your connection and refresh.
+            </p>
+          ) : (
+            <dl className="grid grid-cols-2 gap-x-5 gap-y-3 border-t border-border pt-4 sm:grid-cols-3 xl:grid-cols-5">
+              {Object.entries(stats).map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-xs text-muted-foreground">{k}</dt>
+                  <dd className="mt-1 text-sm font-medium tabular-nums text-foreground">
+                    {v.toLocaleString()}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </SettingsSection>
+
+        <SettingsSection
+          title="Available plans"
+          description="Choose the plan that fits your workspace."
+          stacked
+        >
+          <div className="grid gap-4 md:grid-cols-2 items-stretch">
+            {PLANS.map((p) => (
+              <div
+                key={p.id}
+                className={cn(
+                  "flex min-w-0 flex-col rounded-lg border p-5",
+                  p.id === current.id ? "border-foreground/30" : "border-border"
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-foreground">{p.name}</p>
+                  {p.id === current.id ? (
+                    <span className="pill bg-hover text-foreground text-xs">Current</span>
+                  ) : (
+                    p.recommended && (
+                      <span className="pill bg-hover text-muted-foreground text-xs">
+                        Recommended
+                      </span>
+                    )
+                  )}
+                </div>
+                <p className="mt-3 text-xl font-semibold tabular-nums text-foreground">
+                  {p.price}
+                  {p.period && (
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {p.period}
+                    </span>
+                  )}
+                </p>
+                <p className="mt-1 text-sm text-brand-500">{p.blurb}</p>
+                <ul className="mt-4 flex-1 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground">
+                  {p.features.map((f) => (
+                    <li key={f} className="flex gap-2">
+                      <Check
+                        size={14}
+                        className="mt-0.5 shrink-0 text-muted-foreground"
+                      />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-5">
+                  {p.id === current.id ? (
+                    <button className="btn-ghost w-full" disabled>
+                      Your plan
+                    </button>
+                  ) : p.id === "free" ? (
+                    <p className="py-2 text-center text-xs text-brand-400">
+                      Downgrade anytime in the billing portal
+                    </p>
+                  ) : (
+                    <button
+                      className={cn(
+                        "w-full",
+                        p.recommended ? "btn-primary" : "btn-ghost"
+                      )}
+                      onClick={() => buy(p)}
+                      disabled={busy === p.id}
+                    >
+                      {busy === p.id
+                        ? "Redirecting…"
+                        : p.kind === "contact"
+                          ? "Contact sales"
+                          : p.kind === "license"
+                            ? `Get ${p.name} - ${p.price}`
+                            : `Get ${p.name}`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SettingsSection>
+      </SettingsPanel>
 
       <FreedomContactModal open={leadOpen} onClose={() => setLeadOpen(false)} />
-    </div>
+    </>
   );
 }

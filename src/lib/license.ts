@@ -5,14 +5,14 @@
 // the embedded public key below on every launch — no network call. The
 // cloud (Pro) tier is the opposite: a live org-plan check (subscription.ts).
 //
-// Enforcement is ON (ENFORCE_LICENSING, below): offline mode requires a Lite
-// license. The header used to say the paywall was still off, which stopped
-// being true when the flag flipped for the v2.3.0 licensing launch.
+// Licensing preserves paid benefits. Core local storage and local invoicing
+// are free; hosted service quotas remain separately enforced.
 
 import { invoke } from "@tauri-apps/api/core";
 import { supabase, invokeFn } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
+import { PUSH_TABLES } from "./syncTables";
 
 /** Gates desktop features behind the four-tier plan model. Flipped on for the
  *  v2.3.0 licensing launch — the matching server-side cap (supabase/
@@ -122,12 +122,7 @@ export async function verifyStoredLicense(): Promise<LicenseState> {
 }
 
 /** Collections whose presence proves this device has been used offline. */
-const LOCAL_DATA_KEYS = [
-  "localdb:company_profile",
-  "localdb:invoice_docs",
-  "localdb:crm_customers",
-  "localdb:products",
-];
+const LOCAL_DATA_KEYS = PUSH_TABLES.map(table => `localdb:${table}`);
 
 /** True when this device already holds offline data. */
 /** True when this device already holds offline records. Exported so the mode
@@ -140,16 +135,9 @@ export async function hasLocalData(): Promise<boolean> {
   return false;
 }
 
-/** Offline/local mode is the paid Lite feature: cloud is the free default,
- *  keeping data on-device needs a desktop license (buy it, or claim a free
- *  seat with a voucher — see redeemVoucher). Always true if
- *  ENFORCE_LICENSING is ever turned back off, and always true when this device
- *  already has offline data — a licence check must never lock someone out of
- *  data that is already on their own machine. */
+/** Core local ERP/CRM is free. Paid licenses still unlock paid entitlements. */
 export async function canUseLocalMode(): Promise<boolean> {
-  if (!ENFORCE_LICENSING) return true;
-  if ((await verifyStoredLicense()).valid) return true;
-  return hasLocalData();
+  return true;
 }
 
 /** Activate this device against the signed-in account's license (one server
@@ -335,7 +323,7 @@ export function currentTier(): Tier {
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
-  if (!ENFORCE_LICENSING) return;
+  if (!ENFORCE_LICENSING || isLocalMode()) return;
   if ((await entitlement()) !== "free") return;
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth)

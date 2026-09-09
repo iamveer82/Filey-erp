@@ -28,11 +28,11 @@ export const PLANS: PlanCard[] = [
     kind: "subscription",
     name: "Free",
     price: "AED 0",
-    blurb: "Start free with the essentials.",
+    blurb: "Core business tools, free on your device.",
     features: [
       "Core ERP & CRM, all modules",
-      "5 invoices/month",
-      "Cloud sync & backup included",
+      "Unlimited local invoices; hosted cloud: 5/month",
+      "Local storage and backups; optional cloud connection",
       "“Made with Filey” on documents",
       "Bring-your-own AI key",
     ],
@@ -48,7 +48,7 @@ export const PLANS: PlanCard[] = [
     blurb: "Own it outright. Yours, on your machine.",
     features: [
       "Unlimited invoices, no monthly cap",
-      "Works fully offline, data stays on your device",
+      "Paid edition works offline after device activation",
       "Cloud sync on demand, whenever you want it",
       "2 device slots",
       "Free updates included",
