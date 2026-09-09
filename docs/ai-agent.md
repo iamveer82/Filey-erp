@@ -1,18 +1,21 @@
 # Filey AI — the agent
 
 Filey ships with an AI agent that can read your business data, draft documents,
-and learn how you work. It runs on three surfaces, all sharing one safety
-model:
+and learn reusable procedures. It can run through the following surfaces:
 
 | Surface | Where it runs | Model key | Best for |
 |---|---|---|---|
 | In-app copilot | Inside Filey (browser/desktop) | Your own key (BYOK) | Working in the app: drafting, scanning documents, autonomous goals |
+| Desktop WhatsApp agent | Paired phone and Filey desktop, while open | Your configured in-app model | Owner tasks and replies through the local QR bridge |
 | Channel agent | Supabase edge function, 24/7 | `ANTHROPIC_API_KEY` secret | Chatting from Telegram / WhatsApp / Slack, anywhere |
 | MCP server | Your own machine | Your Filey login / JWT | Claude Code, Hermes and other MCP clients driving Filey |
 
-One safety model across all three: reads are scoped to your org, writes are
-drafts you review, and anything with an external effect (like emailing a
-customer) needs an explicit approval from you.
+Business data stays scoped to the signed-in workspace. In-app and desktop
+WhatsApp actions follow the selected approval mode: **Accept edits** asks before
+sensitive actions, **Manual** asks before writes, **Plan** blocks writes, and
+**Auto** pre-approves enabled tools. Hosted channels have their own owner checks
+and confirmation codes. [Computer access](computer-use.md) also requires an
+explicit temporary grant in the Windows app, regardless of mode.
 
 ---
 
@@ -29,8 +32,9 @@ your device to the model provider. Nothing passes through Filey's servers.
    - **Anthropic** — native Claude Messages API.
    - **OpenAI-compatible** — works with OpenAI, OpenRouter, Together, Groq,
      Mistral, or a local Ollama / LM Studio via a custom base URL.
-3. Paste your API key and set the model (e.g. `claude-opus-4-8`, `gpt-4o`,
-   or whatever your endpoint serves).
+3. Paste your API key and select a model served by your endpoint. Local endpoints
+   can run without a hosted API key; choose a model with tool calling and, for
+   screenshots, image support.
 4. Save. The chat orb in the app is now live.
 
 On the desktop app, requests go through a native proxy, so providers that
@@ -57,9 +61,10 @@ Playful**. Persona is remembered permanently on that device.
 
 Give the agent a goal ("reconcile this week's invoices", "find what's about
 to run out of stock and draft POs") and it works end-to-end: plan → act with
-tools → observe → verify → report. Money or outbound actions (marking paid,
-sending email, adjusting stock) still pop an approval dialog — autonomous
-mode doesn't bypass the confirm gate.
+tools → observe → verify → report. Multi-step tasks show a checklist and live
+action results. Autonomous mode follows the same approval mode and capability
+switches as normal chat. Stop cancels pending approvals and remaining actions;
+it cannot undo an action already accepted by another app or service.
 
 ### Scanning documents
 
@@ -198,7 +203,7 @@ The service-role key never leaves the function — see §4 for what that means.
    token to your `WHATSAPP_VERIFY_TOKEN`. Meta calls the function with a
    `hub.challenge` handshake; the function answers only when the verify token
    matches. Subscribe to the **messages** webhook field.
-5. Optional but recommended: set `WHATSAPP_APP_SECRET` to your app secret so
+5. Required: set `WHATSAPP_APP_SECRET` to your app secret so
    every payload's `X-Hub-Signature-256` HMAC is verified.
 6. Message the business number from your own phone — only
    `WHATSAPP_OWNER_PHONE` gets the agent; everyone else is ignored.
@@ -340,9 +345,10 @@ mark attendance and list employees; navigate the app (`open_page`); read and
 process attached PDFs/images; and run connected Composio integrations (Gmail
 etc.). Tools that move money or send things outbound — `send_invoice`,
 `mark_invoice_paid`, `set_recurring`, `adjust_stock`, `email_invoice`,
-Composio actions — are flagged *sensitive* and always ask for your click
-first, even in autonomous mode. The agent will refuse to touch Settings,
-passwords, or security configuration, full stop.
+Composio actions — are flagged *sensitive*. Accept edits and Manual require
+confirmation, Plan blocks them, and Auto runs enabled tools without another
+prompt. Native computer access is separate and temporary; it can interact with
+other Windows apps only while its user-issued grant is active.
 
 ### Built-in context compression (headroom)
 
@@ -370,3 +376,92 @@ error messages always pass through whole.
 | In-app: "No AI model connected" | Settings → AI Assistant → add provider + key. |
 | In-app: requests fail in browser but work on desktop | Provider blocks browser CORS. Use the desktop app or an OpenAI-compatible endpoint that allows browser calls. |
 | Agent forgot something between chats | Memory only persists durable facts it saved with `remember`. Tell it "remember that …" — or check Settings → AI Assistant → Memory. Channel memories are in `agent_memories`. |
+
+## Learning and channel reliability — September 2026
+
+The app, copilot and desktop WhatsApp agent now put relevant saved memories
+ahead of unrelated recent notes. Recall supports Arabic and other Unicode
+words. When a user corrects a saved fact, the agent can use `remember` with
+`replace_id` from `recall` to replace it; it does not have to retain both
+contradictory versions. Storage failures are returned as errors instead of
+claiming the fact was saved.
+
+Ordinary in-app conversations and desktop WhatsApp runs now also record tool
+failures in the bounded device journal used by autonomous tasks. Subsequent
+runs receive those observations so they can adapt. This is learning through
+memory and prior outcomes, not model retraining or autonomous code changes.
+Existing approval rules still apply.
+
+Hosted Telegram, WhatsApp Cloud and Slack share the owner's `agent_memories`
+table. Their recall now ranks relevant notes and supports `replace_id`.
+Device-local memory, skills and run journals remain on the device; they are
+not automatically shared with hosted channels.
+
+Channel connection proposals now require the verification credentials:
+WhatsApp needs `phone_number_id` and `app_secret`; Slack needs
+`signing_secret`. Telegram registers its webhook on approval. WhatsApp and
+Slack return the remaining provider setup steps, without claiming the
+connection is already live. New pairing codes expire after 15 minutes,
+must be used privately for Telegram, and cannot overwrite another concurrent
+pairing. Unused older codes without an expiry must be replaced by reconnecting.
+Already paired channels keep their identity. Credential changes and disabled
+channels propagate to warm webhook instances within 30 seconds.
+
+Long replies are split into bounded Unicode-safe messages. Delivery is only
+accepted when the provider acknowledges it; failures and partial sends do not
+produce a successful outbound log. An ambiguous timeout is not retried
+automatically because the provider may already have accepted the message.
+Provider acceptance is not a read receipt or proof of final device delivery.
+`WHATSAPP_GRAPH_VERSION` can override the default `v23.0` endpoint.
+
+### Deploy and verify
+
+No new database migration is required for this update. Existing deployments
+need the `agent_memories`, `agent_channels`, and agent-hardening migrations
+described above and in `supabase/MIGRATIONS.md`.
+
+1. Run `npm run build`, `npm test`, and
+   `npx vitest run -c supabase/vitest.config.ts`.
+2. Deploy `channel-webhook` with `--no-verify-jwt`. It verifies provider
+   signatures itself; keep the owner identity and provider secrets configured.
+3. Publish the web build or build the desktop app to use the device changes.
+4. From the paired owner account, ask the bot to remember a harmless preference,
+   correct it, and recall it. Verify the corrected fact from another hosted
+   channel belonging to the same owner.
+5. Ask for a read-only business summary. Verify it against Filey. A proposed
+   outbound action must still wait for approval. Check long replies and a
+   disconnected channel before relying on unattended use.
+
+Provider references: [Telegram Bot API](https://core.telegram.org/bots/api),
+[Slack chat.postMessage](https://docs.slack.dev/reference/methods/chat.postmessage),
+and [Meta WhatsApp Cloud API](https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api).
+
+### Desktop WhatsApp delivery and account binding
+
+The desktop bridge now waits for WhatsApp to accept text and PDF uploads before
+reporting success. A disconnected socket, missing file, rejected upload or missing
+message ID returns an error to Filey. A timeout is ambiguous: check the conversation
+before retrying. Provider acceptance does not mean the recipient has read the message.
+
+Pairing belongs to one Filey account and organization. Existing pairings require one
+deliberate **Connect** in **Integrations → WhatsApp** after this update; they are not
+assigned automatically. Local/cloud switching within that account retains the binding.
+Another account cannot send through or command that pairing: use **Re-pair** to remove
+the old phone session and scan your own phone. Owner-number preferences are scoped to
+the account; older unscoped owner numbers must be entered again. Signing out stops the
+bridge, and unbound or signed-out sessions cannot run the owner agent.
+
+Incoming voice notes are checked against the signed-in owner before transcription.
+Repeated provider message IDs are ignored within the bridge's bounded replay window.
+Chat approvals authorize one matching call once; timed-out runs are aborted, and
+queued requests from a different workspace are discarded. Tools already in progress
+may finish, so inspect the app before repeating a timed-out action.
+
+Rebuild **both** the desktop app and `tools/wa-bridge/index.mjs` sidecar for this
+protocol update; the sidecar build in `build.ps1` includes `delivery.mjs`. A web-only
+update cannot install the native bridge. The local QR bridge still requires the
+desktop app to remain open. It uses an unofficial WhatsApp transport, so a paired
+phone and a healthy session are required; no shared API key is bundled. Hosted
+WhatsApp, Telegram and Slack continue to require the provider credentials and
+webhook setup described above. Hosted Slack app mentions now reach the same owner
+gate, and batched WhatsApp messages use their matching contact names.

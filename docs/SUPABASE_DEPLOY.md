@@ -111,7 +111,7 @@ supabase secrets set SITE_URL=https://app.fileyerp.com
   - Get credentials from Google Cloud Console
   - Set redirect URL from Supabase
 - Set Site URL to your app URL
-- Add email templates for welcome, reset, OTP
+  - Preserve the welcome and OTP templates. For password recovery, configure Supabase Auth's custom SMTP with Resend and install `supabase/templates/recovery.html` as the Reset password template. Deploy the matching frontend first. See [password recovery setup and verification](password-recovery.md); Edge Function secrets alone do not configure Auth email.
 
 ## 7. Set Up Scheduled Jobs
 - Go to Database → Scheduled Functions (pg_cron)
