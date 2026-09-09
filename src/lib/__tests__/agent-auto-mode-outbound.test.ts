@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
+import { setCacheOrg } from "../api";
 
 const sendWa = vi.fn();
 vi.mock("../waBridge", () => ({
@@ -23,6 +24,8 @@ vi.mock("../waLog", () => ({ waLogAdd: () => {}, waLogList: () => [] }));
 beforeEach(() => {
   sendWa.mockClear();
   localStorage.clear();
+  localStorage.setItem("filey_data_mode", "local");
+  setCacheOrg("test-org", "test-user");
 });
 
 describe("Auto mode vs a caller-supplied confirm", () => {

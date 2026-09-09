@@ -14,6 +14,7 @@ import { aiAutonomous, aiReady } from "../lib/ai";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
+import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -32,6 +33,7 @@ export default function AutomationsDrawer({
 
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [running, setRunning] = useState<string | null>(null);
+  const activeRun = useRef<{ scope: string; controller: AbortController } | null>(null);
 
   // create form
   const [name, setName] = useState("");
@@ -44,6 +46,18 @@ export default function AutomationsDrawer({
   const refresh = () => setTasks(loadTasks());
   useEffect(() => {
     if (open) refresh();
+    const changed = () => {
+      if (activeRun.current && activeRun.current.scope !== agentStorageScope())
+        activeRun.current.controller.abort();
+      if (open) refresh();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
+    window.addEventListener("filey:workspace-changed", changed);
+    return () => {
+      activeRun.current?.controller.abort();
+      window.removeEventListener(AGENT_STORAGE_EVENT, changed);
+      window.removeEventListener("filey:workspace-changed", changed);
+    };
   }, [open]);
 
   if (!open) return null;
@@ -71,22 +85,44 @@ export default function AutomationsDrawer({
   };
 
   const runNow = async (t: AgentTask) => {
+    if (activeRun.current) return;
     if (!aiReady()) {
       toastRef.current?.error("Connect a model first (Settings → AI Assistant).");
       return;
     }
+    const scope = agentStorageScope();
+    if (!scope)
+      return toastRef.current?.error(
+        "Sign in to this workspace before running an automation."
+      );
     setRunning(t.id);
+    const controller = new AbortController();
+    activeRun.current = { scope, controller };
     try {
-      const summary = await aiAutonomous(t.goal, { maxRounds: 15 });
-      updateTask(t.id, { lastRun: Date.now(), lastResult: summary, lastError: undefined });
+      const summary = await aiAutonomous(t.goal, {
+        maxRounds: 15,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || agentStorageScope() !== scope) return;
+      updateTask(
+        t.id,
+        { lastRun: Date.now(), lastResult: summary, lastError: undefined },
+        scope
+      );
       toastRef.current?.success(`"${t.name}" ran`);
     } catch (e) {
-      updateTask(t.id, {
-        lastRun: Date.now(),
-        lastError: e instanceof Error ? e.message : String(e),
-      });
+      if (controller.signal.aborted || agentStorageScope() !== scope) return;
+      updateTask(
+        t.id,
+        {
+          lastRun: Date.now(),
+          lastError: e instanceof Error ? e.message : String(e),
+        },
+        scope
+      );
       toastRef.current?.error(`"${t.name}" failed`);
     } finally {
+      activeRun.current = null;
       setRunning(null);
       refresh();
     }
@@ -110,7 +146,11 @@ export default function AutomationsDrawer({
             <Timer size={18} className="text-primary-500" />
             <p className="font-semibold text-ink">Automations</p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-brand-400 hover:text-ink">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-brand-400 hover:text-ink"
+          >
             <X size={16} />
           </button>
         </div>
@@ -185,10 +225,7 @@ export default function AutomationsDrawer({
               </p>
             ) : (
               tasks.map((t) => (
-                <div
-                  key={t.id}
-                  className="rounded-xl border border-brand-200 p-3"
-                >
+                <div key={t.id} className="rounded-xl border border-brand-200 p-3">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-ink">{t.name}</p>
@@ -208,7 +245,11 @@ export default function AutomationsDrawer({
                         updateTask(t.id, { enabled: !t.enabled });
                         refresh();
                       }}
-                      title={t.enabled ? "Enabled - click to pause" : "Paused - click to enable"}
+                      title={
+                        t.enabled
+                          ? "Enabled - click to pause"
+                          : "Paused - click to enable"
+                      }
                       className={cn(
                         "relative h-5 w-9 shrink-0 rounded-full transition-colors",
                         t.enabled ? "bg-primary-400" : "bg-brand-300"
@@ -257,8 +298,8 @@ export default function AutomationsDrawer({
         </div>
 
         <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400">
-          Automations run while Filey is open. Sensitive actions (send/pay) still
-          ask for approval - best for summaries & reports.
+          Automations run while Filey is open. Sensitive actions (send/pay) still ask for
+          approval - best for summaries & reports.
         </p>
       </div>
     </div>,

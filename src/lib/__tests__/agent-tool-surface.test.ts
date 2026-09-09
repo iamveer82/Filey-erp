@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { offeredTools } from "../agentHarness";
 import { TOOLS } from "../aiTools";
@@ -5,7 +6,7 @@ import { setAgentMode } from "../agentMode";
 import { setCapabilityEnabled } from "../capabilities";
 import { TOOLSETS } from "../toolsets";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
 const names = (opened: string[] = [], opts = {}) =>
   offeredTools({ isOwner: true, ...opts }, new Set(opened)).map((t) => t.name);

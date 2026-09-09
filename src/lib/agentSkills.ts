@@ -4,6 +4,8 @@
  * only when relevant — progressive disclosure, like Claude skills.
  */
 
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+
 export interface Skill {
   id: string;
   name: string;
@@ -22,7 +24,7 @@ const KEY = "filey.agent.skills";
 
 export function loadSkills(): Skill[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = readAgentStorage(KEY);
     const v = raw ? JSON.parse(raw) : [];
     return Array.isArray(v) ? (v as Skill[]) : [];
   } catch {
@@ -31,8 +33,8 @@ export function loadSkills(): Skill[] {
   }
 }
 
-export function saveSkills(skills: Skill[]): void {
-  localStorage.setItem(KEY, JSON.stringify(skills));
+export function saveSkills(skills: Skill[], expectedScope?: string): void {
+  writeAgentStorage(KEY, JSON.stringify(skills), expectedScope);
 }
 
 /** Add a skill, or rewrite the one that already owns this name. Names are the
@@ -40,13 +42,16 @@ export function saveSkills(skills: Skill[]): void {
  *  re-learning something it already knows should sharpen the entry, not stack a
  *  second copy behind it. */
 export function addSkill(
-  s: Omit<Skill, "id" | "createdAt" | "enabled"> & { enabled?: boolean }
+  s: Omit<Skill, "id" | "createdAt" | "enabled"> & { enabled?: boolean },
+  expectedScope?: string
 ): Skill {
   const existing = loadSkills();
   const key = s.name.trim().toLowerCase();
   const prior = existing.find((x) => x.name.trim().toLowerCase() === key);
   const skill: Skill = {
-    id: prior?.id ?? `skill_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
+    id:
+      prior?.id ??
+      `skill_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
     createdAt: prior?.createdAt ?? Date.now(),
     enabled: s.enabled ?? prior?.enabled ?? true,
     name: s.name,
@@ -57,7 +62,8 @@ export function addSkill(
     ...(s.source ? { source: s.source } : {}),
   };
   saveSkills(
-    prior ? existing.map((x) => (x.id === prior.id ? skill : x)) : [...existing, skill]
+    prior ? existing.map((x) => (x.id === prior.id ? skill : x)) : [...existing, skill],
+    expectedScope
   );
   return skill;
 }
@@ -74,7 +80,10 @@ export function removeSkill(id: string): void {
 export function findSkill(name: string): Skill | undefined {
   const q = name.trim().toLowerCase();
   const on = loadSkills().filter((s) => s.enabled);
-  return on.find((s) => s.name.toLowerCase() === q) || on.find((s) => s.name.toLowerCase().includes(q));
+  return (
+    on.find((s) => s.name.toLowerCase() === q) ||
+    on.find((s) => s.name.toLowerCase().includes(q))
+  );
 }
 
 /** Short index of enabled skills for the system prompt. "" when none. */

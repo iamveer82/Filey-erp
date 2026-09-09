@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { X, SlidersHorizontal } from "lucide-react";
+import { Modal, ErrorBanner } from "./ui";
 import {
   CAPABILITIES,
   isCapabilityEnabled,
@@ -20,6 +19,7 @@ export default function CapabilitiesDrawer({
 }) {
   const [state, setState] = useState<Record<string, boolean>>({});
   const [mode, setMode] = useState<AgentMode>("accept_edits");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -27,110 +27,88 @@ export default function CapabilitiesDrawer({
     for (const c of CAPABILITIES) next[c.id] = isCapabilityEnabled(c.id);
     setState(next);
     setMode(getAgentMode());
+    setError("");
   }, [open]);
 
   if (!open) return null;
 
   const toggle = (id: string) => {
     const v = !(state[id] ?? true);
-    setCapabilityEnabled(id, v);
-    setState((p) => ({ ...p, [id]: v }));
+    try {
+      setCapabilityEnabled(id, v);
+      setState((p) => ({ ...p, [id]: v }));
+      setError("");
+    } catch {
+      setError("Could not save this access setting. Your previous selection is unchanged.");
+    }
   };
 
-  // Portaled out of <main>: see SkillsDrawer — WebView2 half-paints a `fixed`
-  // overlay that sits inside a scrolling ancestor.
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 bg-black/40"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="absolute right-0 top-0 flex h-full w-[26rem] max-w-[90vw] flex-col bg-white shadow-sm"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-brand-200 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal size={18} className="text-primary-500" />
-            <p className="font-semibold text-ink">Capabilities</p>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="text-brand-400 hover:text-ink">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="flex-1 space-y-2 overflow-auto p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-400">
-            How much it does on its own
-          </p>
-          <div className="space-y-1.5 pb-2">
+  return (
+    <Modal open={open} onClose={onClose} title="Agent access" size="lg">
+      <p className="mb-5 text-[13px] leading-relaxed text-muted-foreground">Choose when Filey asks for approval and which groups of actions it may use. These settings are saved for this account, workspace and storage mode on this device.</p>
+      {error && <ErrorBanner message={error} />}
+      <fieldset>
+        <legend className="mb-3 text-sm font-semibold text-foreground">Approval mode</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {AGENT_MODES.map((m) => {
               const on = mode === m.id;
               return (
-                <button
+                <label
                   key={m.id}
-                  onClick={() => {
-                    setAgentMode(m.id);
-                    setMode(m.id);
-                  }}
-                  aria-pressed={on}
                   className={cn(
-                    "w-full rounded-xl border px-4 py-2.5 text-left transition-colors",
+                    "flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors focus-within:ring-2 focus-within:ring-ring",
                     on
-                      ? "border-primary-400 bg-primary-50"
-                      : "border-brand-200 hover:border-brand-300"
+                      ? "border-primary-400/60 bg-primary-400/10"
+                      : "border-border bg-card hover:bg-hover"
                   )}
                 >
-                  <p className="text-sm font-medium text-ink">{m.name}</p>
-                  <p className="text-xs text-brand-400">{m.description}</p>
-                </button>
+                  <input type="radio" name="agent-approval-mode" value={m.id} checked={on} aria-label={m.name} aria-describedby={`agent-mode-${m.id}`} className="mt-0.5 h-4 w-4 shrink-0 accent-primary-400" onChange={() => { setAgentMode(m.id); setMode(getAgentMode()); }} />
+                  <span className="min-w-0"><span className="block text-[13px] font-medium text-foreground">{m.name}</span><span id={`agent-mode-${m.id}`} className="mt-1 block text-xs leading-relaxed text-muted-foreground">{m.description}</span></span>
+                </label>
               );
             })}
           </div>
-
-          <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-brand-400">
-            What it may touch
-          </p>
+      </fieldset>
+      <section className="mt-6" aria-labelledby="agent-action-groups">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <h3 id="agent-action-groups" className="text-sm font-semibold text-foreground">Action groups</h3>
+          <span className="text-xs tabular-nums text-muted-foreground">{CAPABILITIES.filter((c) => state[c.id] ?? true).length} of {CAPABILITIES.length} enabled</span>
+        </div>
+        <p className="mb-3 text-xs leading-relaxed text-muted-foreground">Turning a group off blocks its tools. Enabling one gives permission; external services still need a working connection.</p>
+        <div className="divide-y divide-border">
           {CAPABILITIES.map((c) => {
             const on = state[c.id] ?? true;
             return (
               <div
                 key={c.id}
-                className="flex items-start gap-3 rounded-xl border border-brand-200 px-4 py-3"
+                className="flex items-center gap-4 py-3"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-ink">{c.name}</p>
-                  <p className="text-xs text-brand-400">{c.description}</p>
+                  <p className="text-[13px] font-medium text-foreground">{c.name}</p>
+                  <p id={`agent-capability-${c.id}`} className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{c.description}</p>
                 </div>
                 <button
                   onClick={() => toggle(c.id)}
                   role="switch"
                   aria-checked={on}
                   aria-label={`${c.name} ${on ? "enabled" : "disabled"}`}
+                  aria-describedby={`agent-capability-${c.id}`}
                   className={cn(
-                    "relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors",
-                    on ? "bg-primary-400" : "bg-brand-300"
+                    "btn-ghost min-w-[76px] shrink-0",
+                    on && "!border-primary-400/50 !bg-primary-400/15"
                   )}
                 >
-                  <span
-                    className={cn(
-                      "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all",
-                      on ? "left-[18px]" : "left-0.5"
-                    )}
-                  />
+                  {on ? "Enabled" : "Disabled"}
                 </button>
               </div>
             );
           })}
         </div>
-
-        <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400">
-          Turning a group off blocks those actions for the agent. Reading data,
-          navigation, memory and skills are always allowed.
-        </p>
+      </section>
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+        <p className="max-w-md text-xs leading-relaxed text-muted-foreground">Other lookups and navigation remain available. Autonomous runs follow the same approval mode and action groups.</p>
+        <button type="button" className="btn-ghost" onClick={onClose}>Done</button>
       </div>
-    </div>,
-    document.body
+    </Modal>
   );
 }

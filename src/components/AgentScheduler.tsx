@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { loadTasks, isDue, updateTask } from "../lib/agentTasks";
 import { aiAutonomous, aiReady, DENY_SENSITIVE } from "../lib/ai";
 import { useUI } from "../lib/ui";
+import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
 
 /* Runs due agent tasks while the app is open. Checks once a minute; each due
  * task runs its goal autonomously. Renders nothing.
@@ -24,31 +25,54 @@ export default function AgentScheduler() {
 
   useEffect(() => {
     let alive = true;
+    let controller: AbortController | undefined;
+    let runScope: string | null = null;
+    const stopChangedWorkspace = () => {
+      if (runScope !== agentStorageScope()) controller?.abort();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, stopChangedWorkspace);
+    window.addEventListener("filey:workspace-changed", stopChangedWorkspace);
 
     const tick = async () => {
-      if (!alive || ticking.current || !aiReady()) return;
+      const scope = agentStorageScope();
+      if (!alive || ticking.current || !aiReady() || !scope) return;
       ticking.current = true;
       try {
         for (const t of loadTasks()) {
-          if (!alive) return;
+          if (!alive || scope !== agentStorageScope()) return;
           if (!isDue(t) || running.current.has(t.id)) continue;
           running.current.add(t.id);
+          runScope = scope;
+          controller = new AbortController();
           try {
             const summary = await aiAutonomous(t.goal, {
               maxRounds: 15,
               confirm: DENY_SENSITIVE,
+              signal: controller.signal,
             });
-            updateTask(t.id, {
-              lastRun: Date.now(),
-              lastResult: summary,
-              lastError: undefined,
-            });
+            if (!alive || controller.signal.aborted || scope !== agentStorageScope())
+              return;
+            updateTask(
+              t.id,
+              {
+                lastRun: Date.now(),
+                lastResult: summary,
+                lastError: undefined,
+              },
+              scope
+            );
             toastRef.current?.success(`Automation "${t.name}" ran`);
           } catch (e) {
-            updateTask(t.id, {
-              lastRun: Date.now(),
-              lastError: e instanceof Error ? e.message : String(e),
-            });
+            if (!alive || controller.signal.aborted || scope !== agentStorageScope())
+              return;
+            updateTask(
+              t.id,
+              {
+                lastRun: Date.now(),
+                lastError: e instanceof Error ? e.message : String(e),
+              },
+              scope
+            );
             toastRef.current?.error(`Automation "${t.name}" failed`);
           } finally {
             running.current.delete(t.id);
@@ -63,6 +87,9 @@ export default function AgentScheduler() {
     const iv = setInterval(tick, 60_000);
     return () => {
       alive = false;
+      controller?.abort();
+      window.removeEventListener(AGENT_STORAGE_EVENT, stopChangedWorkspace);
+      window.removeEventListener("filey:workspace-changed", stopChangedWorkspace);
       clearTimeout(first);
       clearInterval(iv);
     };

@@ -1,7 +1,9 @@
+import { agentStorageKey } from "../agentStorage";
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { gateFor, getAgentMode, setAgentMode, modeSystemNote } from "../agentMode";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
 // One read tool, one plain write, one money/outbound tool — the three kinds the
 // modes have to tell apart.
@@ -45,7 +47,7 @@ describe("agent mode gate", () => {
   });
 
   it("survives a junk stored value rather than widening permissions", () => {
-    localStorage.setItem("filey.agent.mode", "god");
+    localStorage.setItem(agentStorageKey("filey.agent.mode")!, "god");
     expect(getAgentMode()).toBe("accept_edits");
     expect(gateFor(SENSITIVE, true)).toBe("ask");
   });

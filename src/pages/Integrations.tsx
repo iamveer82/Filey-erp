@@ -1,5 +1,8 @@
+import FreeConnections from "../components/FreeConnections";
+import WorkServices from "../components/WorkServices";
+import EmailConnection from "../components/EmailConnection";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Calculator,
   Check,
@@ -23,9 +26,9 @@ import {
   Zap,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { PageHeader, Badge, FilterChip, MetricCard } from "../components/ui";
+import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
-import { cn, num } from "../lib/format";
+import { cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import {
@@ -47,7 +50,6 @@ import {
   setZernioConfig,
   usingOwnZernioKey,
   zernioKeySource,
-  zernioReady,
   listAccounts,
   type ZernioConfig,
 } from "../lib/zernio";
@@ -94,6 +96,7 @@ type Integration = {
   to?: string;
   action?: string;
   connected?: boolean;
+  available?: boolean;
   builtin?: boolean;
   soon?: boolean;
   note?: string;
@@ -120,6 +123,20 @@ const TOOLKIT_CATEGORY: Record<string, string> = {
 
 export default function Integrations() {
   const { notice } = useUI();
+  const [params, setParams] = useSearchParams();
+  const requestedTab = params.get("tab") || "available";
+  const tab = ["available", "free", "services", "providers"].includes(requestedTab)
+    ? requestedTab
+    : "available";
+  const setTab = (next: string) =>
+    setParams(
+      (current) => {
+        const copy = new URLSearchParams(current);
+        copy.set("tab", next);
+        return copy;
+      },
+      { replace: true }
+    );
   const [cat, setCat] = useState("All");
   const [active, setActive] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<KeySource>("none");
@@ -129,29 +146,50 @@ export default function Integrations() {
   const [found, setFound] = useState<ToolkitInfo[]>([]);
   const [searching, setSearching] = useState(false);
   const reachOn = reachReady();
-  const socialOn = zernioReady();
+  const [socialOn, setSocialOn] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
+      const keySource = await composioKeySource();
+      setSource(keySource);
+      if (keySource === "none") {
+        setActive(new Set());
+        setMsg(
+          "Configure Composio in Provider setup to connect third-party apps. Built-in connections are available now."
+        );
+        return;
+      }
       const list = await composioList();
       const on = new Set<string>();
       for (const c of list.items ?? [])
         if ((c.status ?? "").toUpperCase() === "ACTIVE" && c.toolkit?.slug)
           on.add(c.toolkit.slug);
       setActive(on);
-    } catch {
-      /* no key yet — the cards simply show as not connected */
+    } catch (e) {
+      setMsg(
+        "Could not refresh connected apps: " +
+          (e instanceof Error ? e.message : String(e))
+      );
     }
   }, []);
 
   useEffect(() => {
     void composioKeySource().then(setSource);
+    void listAccounts()
+      .then((accounts) => setSocialOn(accounts.length > 0))
+      .catch(() => setSocialOn(false));
     void refresh();
   }, [refresh]);
 
   const runSearch = async () => {
     const q = search.trim();
     if (!q) return setFound([]);
+    if (source === "none") {
+      setMsg(
+        "Showing matching built-in apps. Configure a provider to search its full catalogue."
+      );
+      return;
+    }
     setSearching(true);
     setMsg("");
     try {
@@ -175,7 +213,9 @@ export default function Integrations() {
       // there is no opener plugin, and a new tab is the same thing.
       if (hasDesktop) await openUrl(link.redirect_url);
       else window.open(link.redirect_url, "_blank", "noopener");
-      setMsg(`Authorize ${slug} in the browser window - this flips to Connected when you're done.`);
+      setMsg(
+        `Authorize ${slug} in the browser window - this flips to Connected when you're done.`
+      );
       const id = link.connected_account_id;
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000));
@@ -231,7 +271,7 @@ export default function Integrations() {
         category: "Messaging",
         icon: <BrandIcon name="whatsapp" className="h-5 w-5" />,
         builtin: true,
-        note: "No setup - use Send → WhatsApp.",
+        note: "Opens a text draft. Use Share PDF or paired desktop WhatsApp for attachments.",
       },
       {
         key: "templates",
@@ -246,7 +286,7 @@ export default function Integrations() {
       {
         key: "ai",
         name: "Filey AI",
-        desc: "Connect an AI provider to power the agent and the smart features.",
+        desc: "Run Ollama or LM Studio on your device, or bring your own provider key. Hosted free tiers have provider limits.",
         category: "AI",
         icon: <Sparkles className="h-5 w-5" />,
         to: "/settings?section=ai",
@@ -255,12 +295,12 @@ export default function Integrations() {
       {
         key: "reach",
         name: "Web research",
-        desc: "Let the Filey AI read and search public web pages to answer questions the books can't.",
+        desc: "Read public pages without a key; add your Jina key for web search.",
         category: "AI",
         icon: <Globe className="h-5 w-5" />,
         to: "/integrations/web-research",
         action: reachOn ? "Manage" : "Set up",
-        connected: reachOn,
+        available: reachOn,
       },
       {
         key: "leads",
@@ -270,7 +310,7 @@ export default function Integrations() {
         icon: <UserSearch className="h-5 w-5" />,
         to: "/integrations/lead-enrichment",
         action: reachOn ? "Manage" : "Set up",
-        connected: reachOn,
+        available: reachOn,
       },
       {
         key: "pdf",
@@ -290,7 +330,7 @@ export default function Integrations() {
         icon: <BrandIcon name="supabase" className="h-5 w-5" />,
         to: "/settings?section=datamode",
         action: "Configure",
-        connected: cloudConfigured,
+        available: cloudConfigured,
       },
       /* No real backend for these yet — disabled, never a fake toggle. */
       {
@@ -351,172 +391,233 @@ export default function Integrations() {
       },
     ];
     // Connectable apps lead: they are the ones that do something new today.
-    return [...results, ...apps, ...own];
+    return [...results, ...apps, ...own].filter((item) => !item.soon);
   }, [active, found, reachOn, socialOn]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(integrations.map((i) => i.category)))],
     [integrations]
   );
-  const filtered =
-    cat === "All" ? integrations : integrations.filter((i) => i.category === cat);
+  const filtered = integrations.filter(
+    (i) =>
+      (cat === "All" || i.category === cat) &&
+      (!search.trim() ||
+        `${i.name} ${i.desc} ${i.category}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()))
+  );
 
   const connectedCount = integrations.filter((i) => i.connected).length;
   const builtinCount = integrations.filter((i) => i.builtin).length;
-  const soonCount = integrations.filter((i) => i.soon).length;
 
   return (
     <div className="pb-10">
       <PageHeader
         title="Integrations"
         subtitle="Connect Filey with the tools you already use, and let the AI agent work in them"
+        action={
+          <Link className="btn-ghost" to="/browser">
+            <Globe size={15} />
+            Open browser
+          </Link>
+        }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
-        <MetricCard
-          label="Connected"
-          value={num(connectedCount)}
-          change={connectedCount > 0 ? "Live integrations" : "Nothing connected yet"}
-          changeTone={connectedCount > 0 ? "up" : "warn"}
-        />
-        <MetricCard
-          label="Built in"
-          value={num(builtinCount)}
-          change="Ready to open"
-          changeTone="up"
-        />
-        <MetricCard
-          label="Coming soon"
-          value={num(soonCount)}
-          change="On the roadmap"
-          changeTone="up"
-        />
-      </div>
-
-      <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
-        <ComposioProvider source={source} onSourceChange={setSource} onSaved={refresh} />
-        <ZernioProvider />
-        <WhatsAppBridgeProvider />
-      </div>
-
-      <div className="mb-4 flex gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Search every app: Instagram, Zoho, Xero, Shopify…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void runSearch()}
-        />
-        <button className="btn-secondary" onClick={runSearch} disabled={searching}>
-          {searching ? <Loader2 size={15} className="animate-spin" /> : "Search"}
-        </button>
-        <button
-          className="btn-ghost"
-          onClick={refresh}
-          title="Refresh connected apps"
-          aria-label="Refresh connected apps"
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
-
-      {msg && (
-        <p className="mb-4 rounded-xl bg-hover px-3 py-2 text-[12.5px] font-medium text-muted-foreground">
-          {msg}
-        </p>
-      )}
-
-      <div className="mb-4 flex items-center gap-1.5 flex-wrap">
-        {categories.map((c) => (
-          <FilterChip key={c} active={cat === c} onClick={() => setCat(c)}>
-            {c}
-          </FilterChip>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border">
-        {filtered.map((i) => (
-          <div
-            key={i.key}
-            className={cn("bg-card p-5 flex flex-col", i.soon && "opacity-60")}
+      <div className="mb-6 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+        {[
+          ["available", "App directory"],
+          ["services", "Free work tools"],
+          ["free", "Built-in connections"],
+          ["providers", "Provider setup"],
+        ].map(([key, title]) => (
+          <button
+            key={key}
+            className={cn("chip", tab === key && "chip-active")}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
           >
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0 overflow-hidden">
-                {i.slug ? <AppLogo slug={i.slug} logo={i.logo} /> : i.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="text-[14px] font-semibold text-foreground">
-                    {i.name}
-                  </div>
-                  {i.soon ? (
-                    <Badge tone="neutral">Coming soon</Badge>
-                  ) : i.connected ? (
-                    <Badge tone="success">
-                      <Check size={11} /> Connected
-                    </Badge>
-                  ) : i.builtin ? (
-                    <Badge tone="info">Built in</Badge>
-                  ) : null}
-                </div>
-                <div className="text-[12px] text-muted-foreground mt-0.5">
-                  {i.category}
-                </div>
-              </div>
-            </div>
-
-            <p className="text-[13px] text-muted-foreground mt-3 leading-relaxed flex-1 line-clamp-3">
-              {i.desc}
-            </p>
-
-            <div className="mt-4 flex items-center gap-2 flex-wrap">
-              {i.soon ? (
-                <button
-                  className="btn-secondary"
-                  onClick={() =>
-                    void notice({
-                      message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
-                    })
-                  }
-                >
-                  Not available yet
-                </button>
-              ) : i.slug ? (
-                <>
-                  <button
-                    className="btn-secondary"
-                    onClick={() => connect(i.slug!)}
-                    disabled={source === "none" || connecting === i.slug}
-                  >
-                    {connecting === i.slug ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <ExternalLink size={14} />
-                    )}
-                    {i.connected ? "Reconnect" : "Connect"}
-                  </button>
-                  {source === "none" && (
-                    <span className="text-[12px] text-muted-foreground">
-                      Sign in to connect
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  {i.to && (
-                    <Link to={i.to} className="btn-secondary">
-                      {i.connected ? "Manage" : (i.action ?? "Configure")}
-                    </Link>
-                  )}
-                  {i.note && (
-                    <span className="text-[12px] text-muted-foreground">{i.note}</span>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+            {title}
+          </button>
         ))}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {connectedCount} connected · {builtinCount} built in
+        </span>
+        <Link to="/docs?article=integrations" className="btn-ghost">
+          Setup guide
+        </Link>
       </div>
+      {tab === "services" && <WorkServices />}
+      {tab === "free" && (
+        <>
+          <EmailConnection />
+          <FreeConnections />
+        </>
+      )}
+      {tab === "providers" && (
+        <>
+          <section className="card mb-4 flex flex-wrap items-center gap-4">
+            <Sparkles size={20} className="shrink-0" />
+            <div className="flex-1 min-w-48">
+              <h2 className="font-semibold text-sm">AI models · local or your own key</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Set up local Ollama or LM Studio, OpenRouter free models, or another
+                compatible provider.
+              </p>
+            </div>
+            <Link className="btn-secondary" to="/settings?section=ai">
+              Configure AI
+            </Link>
+            <Link className="btn-ghost" to="/docs?article=ai-setup">
+              Setup guide
+            </Link>
+          </section>
+          <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+            <ComposioProvider
+              source={source}
+              onSourceChange={setSource}
+              onSaved={refresh}
+            />
+            <ZernioProvider />
+            <WhatsAppBridgeProvider />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Your own keys use your provider account. Provider charges, quotas and app
+            authorization still apply; Filey does not supply unlimited third-party access.
+          </p>
+        </>
+      )}
+      {tab === "available" && (
+        <>
+          <div className="mb-4 flex gap-2">
+            <input
+              className="input flex-1"
+              aria-label="Search integrations"
+              placeholder="Search every app: Instagram, Zoho, Xero, Shopify…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void runSearch()}
+            />
+            <button className="btn-secondary" onClick={runSearch} disabled={searching}>
+              {searching ? "Searching…" : "Search"}
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={refresh}
+              title="Refresh connected apps"
+              aria-label="Refresh connected apps"
+            >
+              <RefreshCw size={14} />
+            </button>
+          </div>
+
+          {msg && (
+            <p className="mb-4 rounded-xl bg-hover px-3 py-2 text-[12.5px] font-medium text-muted-foreground">
+              {msg}
+            </p>
+          )}
+
+          <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+            {categories.map((c) => (
+              <FilterChip key={c} active={cat === c} onClick={() => setCat(c)}>
+                {c}
+              </FilterChip>
+            ))}
+          </div>
+
+          <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+            {filtered.map((i) => (
+              <div
+                key={i.key}
+                className="bg-card p-4 grid gap-3 md:grid-cols-[250px_1fr_180px] md:items-center"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0 overflow-hidden">
+                    {i.slug ? <AppLogo slug={i.slug} logo={i.logo} /> : i.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-[14px] font-semibold text-foreground">
+                        {i.name}
+                      </div>
+                      {i.soon ? (
+                        <Badge tone="neutral">Coming soon</Badge>
+                      ) : i.connected ? (
+                        <Badge tone="success">
+                          <Check size={11} /> Connected
+                        </Badge>
+                      ) : i.available ? (
+                        <Badge tone="neutral">Available</Badge>
+                      ) : i.builtin ? (
+                        <Badge tone="info">Built in</Badge>
+                      ) : null}
+                    </div>
+                    <div className="text-[12px] text-muted-foreground mt-0.5">
+                      {i.category}
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[13px] text-muted-foreground leading-relaxed">
+                  {i.desc}
+                </p>
+
+                <div className="flex items-center gap-2 flex-wrap md:justify-end">
+                  {i.soon ? (
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        void notice({
+                          message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
+                        })
+                      }
+                    >
+                      Not available yet
+                    </button>
+                  ) : i.slug ? (
+                    <>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => connect(i.slug!)}
+                        disabled={source === "none" || connecting === i.slug}
+                      >
+                        {connecting === i.slug ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <ExternalLink size={14} />
+                        )}
+                        {i.connected ? "Reconnect" : "Connect"}
+                      </button>
+                      {source === "none" && (
+                        <span className="text-[12px] text-muted-foreground">
+                          Configure provider first
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {i.to && (
+                        <Link to={i.to} className="btn-secondary">
+                          {i.connected ? "Manage" : (i.action ?? "Configure")}
+                        </Link>
+                      )}
+                      {i.note && (
+                        <span className="text-[12px] text-muted-foreground">
+                          {i.note}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {filtered.length === 0 && (
+            <p className="py-10 text-sm text-muted-foreground text-center">
+              No integrations match. Clear your search or choose another category.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -569,10 +670,7 @@ function ComposioProvider({
   useEffect(() => {
     // Desktop keeps the key on the device; the browser's lives in the cloud,
     // where it can be seen to exist but never read back.
-    (hasDesktop
-      ? getComposioKey().then((k) => !!k.trim())
-      : hasCloudKey("composio")
-    )
+    (hasDesktop ? getComposioKey().then((k) => !!k.trim()) : hasCloudKey("composio"))
       .then(setHasKey)
       .catch(() => setHasKey(false));
   }, []);
@@ -647,23 +745,29 @@ function ComposioProvider({
                 : "Kept in your workspace — replaceable, never readable; calls spend your key, not your plan."}
             </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="field flex-1">
+              <label className="field flex-1">
                 <span className="label">Composio API key</span>
                 <input
                   type="password"
+                  autoComplete="new-password"
+                  disabled={busy}
                   className="input"
                   placeholder={hasKey ? "•••••••• (saved - paste to replace)" : "ak_…"}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
                 />
-              </div>
-              <button className="btn-primary" onClick={save} disabled={busy || !key.trim()}>
-                {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+              </label>
+              <button
+                className="btn-primary"
+                onClick={save}
+                disabled={busy || !key.trim()}
+              >
+                {busy ? "Checking…" : "Save & check"}
               </button>
             </div>
             {hasKey && (
               <button
-                className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
+                className="btn-ghost mt-2 text-danger"
                 onClick={removeKey}
                 disabled={busy}
               >
@@ -674,7 +778,11 @@ function ComposioProvider({
         )}
       </details>
 
-      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && (
+        <p role="status" className="mt-2 text-[12px] font-medium text-muted-foreground">
+          {msg}
+        </p>
+      )}
     </div>
   );
 }
@@ -682,8 +790,8 @@ function ComposioProvider({
 /** Compact one-line key status — the full sentences live in the key panel. */
 function KeyBadge({ source, own }: { source: KeySource; own: boolean }) {
   if (own) return <Badge tone="info">Own key</Badge>;
-  if (source === "platform") return <Badge tone="success">Included</Badge>;
-  return <Badge tone="neutral">Sign in</Badge>;
+  if (source === "platform") return <Badge tone="success">Filey provider</Badge>;
+  return <Badge tone="neutral">Not configured</Badge>;
 }
 
 /* ── Zernio: social publishing ──────────────────────────────────────────── */
@@ -749,7 +857,8 @@ function ZernioProvider() {
             <KeyBadge source={source} own={own} />
           </div>
           <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-            Post and schedule to Instagram, LinkedIn, X and more — link accounts at zernio.com.
+            Post and schedule to Instagram, LinkedIn, X and more — link accounts at
+            zernio.com.
           </p>
         </div>
       </div>
@@ -759,7 +868,11 @@ function ZernioProvider() {
           Open publisher
         </Link>
         <button className="btn-ghost" onClick={check} disabled={busy}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={13} />}
+          {busy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <RefreshCw size={13} />
+          )}
           Check
         </button>
       </div>
@@ -771,23 +884,29 @@ function ZernioProvider() {
         </summary>
         <div className="mt-2">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="field flex-1">
+            <label className="field flex-1">
               <span className="label">Zernio API key</span>
               <input
                 type="password"
+                autoComplete="new-password"
+                disabled={busy}
                 className="input"
                 placeholder={own ? "•••••••• (saved - paste to replace)" : "sk_…"}
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
               />
-            </div>
-            <button className="btn-primary" onClick={saveOwn} disabled={busy || !key.trim()}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+            </label>
+            <button
+              className="btn-primary"
+              onClick={saveOwn}
+              disabled={busy || !key.trim()}
+            >
+              {busy ? "Checking…" : "Save & check"}
             </button>
           </div>
           {own && (
             <button
-              className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
+              className="btn-ghost mt-2 text-danger"
               onClick={removeOwn}
               disabled={busy}
             >
@@ -797,7 +916,11 @@ function ZernioProvider() {
         </div>
       </details>
 
-      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && (
+        <p role="status" className="mt-2 text-[12px] font-medium text-muted-foreground">
+          {msg}
+        </p>
+      )}
     </div>
   );
 }
@@ -834,6 +957,8 @@ function WhatsAppBridgeProvider() {
     setMsg("");
     try {
       await fn();
+      setSt(await bridgeState());
+      setCfg(getBridgeConfig());
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     }
@@ -850,6 +975,7 @@ function WhatsAppBridgeProvider() {
         connected: "Connected",
         reconnecting: "Reconnecting…",
         logged_out: "Logged out — re-pair",
+        error: "Connection problem",
       };
 
   return (
@@ -892,17 +1018,19 @@ function WhatsAppBridgeProvider() {
 
       {locked && (
         <p className="mt-3 rounded-lg bg-hover px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground">
-          QR pairing runs in the Filey desktop app — open Integrations there and
-          press Connect to generate the QR.
+          QR pairing runs in the Filey desktop app — open Integrations there and press
+          Connect to generate the QR.
         </p>
       )}
 
       {connected && st.me && (
         <p className="mt-3 text-[11.5px] text-muted-foreground">
-          Paired as <b className="text-foreground">+{st.me.split("@")[0].split(":")[0]}</b>
+          Paired as{" "}
+          <b className="text-foreground">+{st.me.split("@")[0].split(":")[0]}</b>
           {cfg.ownerNumber ? (
             <>
-              {" "}· takes orders from{" "}
+              {" "}
+              · takes orders from{" "}
               <b className="text-foreground">+{cfg.ownerNumber.replace(/\D/g, "")}</b>
             </>
           ) : (
@@ -925,9 +1053,7 @@ function WhatsAppBridgeProvider() {
                 <span
                   className={cn(
                     "mt-0.5 shrink-0 rounded px-1 py-px text-[10px] font-semibold",
-                    e.dir === "in"
-                      ? "bg-info/10 text-info"
-                      : "bg-success/10 text-success"
+                    e.dir === "in" ? "bg-info/10 text-info" : "bg-success/10 text-success"
                   )}
                 >
                   {e.dir === "in" ? "IN" : "OUT"}
@@ -951,8 +1077,8 @@ function WhatsAppBridgeProvider() {
         <div className="mt-3 flex items-start gap-3 rounded-xl border border-border p-3">
           <img src={st.qr} alt="WhatsApp pairing QR code" className="h-32 w-32" />
           <p className="text-[12px] text-muted-foreground">
-            On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a
-            device, then scan.
+            On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a device,
+            then scan.
           </p>
         </div>
       )}
@@ -1012,13 +1138,17 @@ function WhatsAppBridgeProvider() {
           onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
         />
         <span className="mt-1 block text-[11.5px] text-muted-foreground">
-          The agent answers you and nobody else. Empty is right when you paired
-          your own phone. This drives a real account through an unofficial
-          connection — use a number you can afford to lose.
+          The agent answers you and nobody else. Empty is right when you paired your own
+          phone. This drives a real account through an unofficial connection — use a
+          number you can afford to lose.
         </span>
       </label>
 
-      {msg && <p className="mt-2 text-[12px] font-medium text-danger">{msg}</p>}
+      {(msg || st.error) && (
+        <p role="status" className="mt-2 text-[12px] font-medium text-danger">
+          {msg || st.error}
+        </p>
+      )}
     </div>
   );
 }

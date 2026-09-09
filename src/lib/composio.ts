@@ -90,13 +90,13 @@ export async function usingOwnKeyAnywhere(): Promise<boolean> {
  *  (which needs a cloud session, since that is what the proxy authenticates). */
 export async function composioReady(): Promise<boolean> {
   if (await usingOwnKey()) return true;
-  return platformAvailable();
+  return platformAvailable("composio");
 }
 
 /** Which key is paying for this install's integrations. */
 export async function composioKeySource(): Promise<KeySource> {
   if (await usingOwnKeyAnywhere()) return "own";
-  return (await platformAvailable()) ? "platform" : "none";
+  return (await platformAvailable("composio")) ? "platform" : "none";
 }
 
 export interface ConnectLink {

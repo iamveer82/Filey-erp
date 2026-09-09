@@ -1,8 +1,9 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { addSkill, loadSkills } from "../agentSkills";
 import { seedDefaultSkills } from "../defaultSkills";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
 /* Skills are looked up by name, so the same name twice is a bug — the agent
  * re-learning something must sharpen the entry, not stack a copy behind it. */

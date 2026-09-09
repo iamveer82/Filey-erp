@@ -9,6 +9,7 @@
 // already lists exactly the write/action tools (reads, navigation, memory and
 // skills are deliberately absent), so membership there IS the write set.
 import { isWriteTool } from "./capabilities";
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 export type AgentMode = "auto" | "accept_edits" | "manual" | "plan";
 
@@ -52,8 +53,15 @@ const valid = (v: unknown): v is AgentMode =>
 
 export function getAgentMode(): AgentMode {
   try {
-    const v = localStorage.getItem(KEY);
-    return valid(v) ? v : DEFAULT;
+    const v = readAgentStorage(KEY);
+    if (valid(v)) return v;
+    // Unattributed legacy choices may restrict access, never grant it. Keep a
+    // former Plan/Manual choice until this workspace explicitly chooses a mode.
+    if (v === null) {
+      const legacy = localStorage.getItem(KEY);
+      if (legacy === "plan" || legacy === "manual") return legacy;
+    }
+    return DEFAULT;
   } catch {
     return DEFAULT;
   }
@@ -61,7 +69,7 @@ export function getAgentMode(): AgentMode {
 
 export function setAgentMode(mode: AgentMode): void {
   try {
-    localStorage.setItem(KEY, mode);
+    writeAgentStorage(KEY, mode);
   } catch {
     // A read-only localStorage must not break the agent; it stays on the default.
   }

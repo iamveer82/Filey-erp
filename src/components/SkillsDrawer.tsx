@@ -10,6 +10,7 @@ import {
 } from "../lib/agentSkills";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
+import { AGENT_STORAGE_EVENT } from "../lib/agentStorage";
 
 /* Manage reusable agent skills. The agent sees enabled skills' names +
  * descriptions in its prompt and pulls full instructions via the use_skill
@@ -33,6 +34,11 @@ export default function SkillsDrawer({
   const refresh = () => setSkills(loadSkills());
   useEffect(() => {
     if (open) refresh();
+    const changed = () => {
+      if (open) refresh();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
+    return () => window.removeEventListener(AGENT_STORAGE_EVENT, changed);
   }, [open]);
 
   if (!open) return null;
@@ -74,7 +80,11 @@ export default function SkillsDrawer({
             <BookOpen size={18} className="text-primary-500" />
             <p className="font-semibold text-ink">Skills</p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-brand-400 hover:text-ink">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-brand-400 hover:text-ink"
+          >
             <X size={16} />
           </button>
         </div>
@@ -112,10 +122,7 @@ export default function SkillsDrawer({
               </p>
             ) : (
               skills.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-brand-200 p-3"
-                >
+                <div key={s.id} className="rounded-xl border border-brand-200 p-3">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-ink">{s.name}</p>
@@ -126,7 +133,11 @@ export default function SkillsDrawer({
                         updateSkill(s.id, { enabled: !s.enabled });
                         refresh();
                       }}
-                      title={s.enabled ? "Enabled - click to disable" : "Disabled - click to enable"}
+                      title={
+                        s.enabled
+                          ? "Enabled - click to disable"
+                          : "Disabled - click to enable"
+                      }
                       className={cn(
                         "relative h-5 w-9 shrink-0 rounded-full transition-colors",
                         s.enabled ? "bg-primary-400" : "bg-brand-300"
@@ -159,8 +170,8 @@ export default function SkillsDrawer({
         </div>
 
         <p className="border-t border-brand-200 px-4 py-2.5 text-[11px] text-brand-400">
-          Enabled skills appear to the agent by name; it loads the full steps
-          on demand with the use_skill tool.
+          Enabled skills appear to the agent by name; it loads the full steps on demand
+          with the use_skill tool.
         </p>
       </div>
     </div>,

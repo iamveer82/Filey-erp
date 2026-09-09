@@ -1,8 +1,9 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isToolAllowed, setCapabilityEnabled } from "../capabilities";
 import { isDue, type AgentTask } from "../agentTasks";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
 describe("capabilities gate", () => {
   it("ungrouped read/nav tools are always allowed", () => {

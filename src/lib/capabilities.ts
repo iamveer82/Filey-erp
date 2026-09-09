@@ -10,14 +10,29 @@ export interface Capability {
   description: string;
   /** Tool names (from aiTools TOOLS) gated by this capability. */
   tools: string[];
+  /** Explicit read tools may be disabled without turning lookups into writes. */
+  readOnlyTools?: string[];
 }
 
 export const CAPABILITIES: Capability[] = [
   {
+    id: "computer",
+    name: "Computer use",
+    description:
+      "Open isolated browser windows and use Windows apps during a temporary computer-access session you enable",
+    tools: ["computer_use", "workspace_browser"],
+  },
+  {
+    id: "service",
+    name: "Projects & helpdesk",
+    description:
+      "Create and update delivery projects, tasks, time entries and support tickets",
+    tools: ["save_work_item"],
+  },
+  {
     id: "sales",
     name: "Sales documents",
-    description:
-      "Create/send invoices & quotes, mark paid, recurring, orders, templates",
+    description: "Create/send invoices & quotes, mark paid, recurring, orders, templates",
     tools: [
       "create_invoice_draft",
       "revise_invoice",
@@ -43,11 +58,7 @@ export const CAPABILITIES: Capability[] = [
     id: "purchasing",
     name: "Purchasing",
     description: "Create purchase orders, supplier bills and supplier records",
-    tools: [
-      "create_purchase_order",
-      "create_purchase_invoice_draft",
-      "create_supplier",
-    ],
+    tools: ["create_purchase_order", "create_purchase_invoice_draft", "create_supplier"],
   },
   {
     id: "logistics",
@@ -78,6 +89,8 @@ export const CAPABILITIES: Capability[] = [
       "set_deal_contact",
       "log_activity",
       "create_lead",
+      "save_crm_record",
+      "convert_lead",
     ],
   },
   {
@@ -95,7 +108,7 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "email",
     name: "Email",
-    description: "Email invoices to customers (SMTP)",
+    description: "Email invoices to customers through Resend",
     tools: ["email_invoice"],
   },
   {
@@ -108,6 +121,9 @@ export const CAPABILITIES: Capability[] = [
       "share_document_link",
       "connect_whatsapp",
       "send_whatsapp",
+      "send_whatsapp_file",
+      "send_invoice_whatsapp",
+      "prepare_invoice_whatsapp",
     ],
   },
   {
@@ -144,8 +160,10 @@ export const CAPABILITIES: Capability[] = [
     id: "web",
     name: "Web research",
     description: "Read and search public web pages, enrich leads from their own site",
+    readOnlyTools: ["work_service"],
     tools: [
       "read_web_page",
+      "work_service",
       "search_web",
       "enrich_company_website",
       "find_prospects",
@@ -160,18 +178,38 @@ export const CAPABILITIES: Capability[] = [
   },
 ];
 
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
 const KEY = "filey.agent.capabilities";
 
 /** id → enabled. Absent = enabled (default on). */
 type CapState = Record<string, boolean>;
 
 function load(): CapState {
+  let restrictive: CapState = {};
   try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as CapState) : {};
+    const legacy = JSON.parse(localStorage.getItem(KEY) || "{}");
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy))
+      restrictive = Object.fromEntries(
+        Object.entries(legacy).filter(([, enabled]) => enabled === false)
+      ) as CapState;
   } catch {
-    return {};
+    /* A malformed legacy value grants no permissions. */
   }
+  try {
+    const scoped = JSON.parse(readAgentStorage(KEY) || "{}");
+    if (scoped && typeof scoped === "object" && !Array.isArray(scoped))
+      return {
+        ...restrictive,
+        ...Object.fromEntries(
+          Object.entries(scoped).filter(
+            (entry): entry is [string, boolean] => typeof entry[1] === "boolean"
+          )
+        ),
+      };
+  } catch {
+    /* Keep legacy restrictions until an explicit workspace choice. */
+  }
+  return restrictive;
 }
 
 export function isCapabilityEnabled(id: string): boolean {
@@ -181,7 +219,7 @@ export function isCapabilityEnabled(id: string): boolean {
 export function setCapabilityEnabled(id: string, enabled: boolean): void {
   const state = load();
   state[id] = enabled;
-  localStorage.setItem(KEY, JSON.stringify(state));
+  writeAgentStorage(KEY, JSON.stringify(state));
 }
 
 /** Is this tool permitted? Ungrouped tools (reads, nav, memory, skills) always
@@ -195,5 +233,7 @@ export function isToolAllowed(toolName: string): boolean {
  *  so being in a group is what makes a tool a write — this saves flagging every
  *  read tool by hand. Used by the agent modes (see agentMode.ts). */
 export function isWriteTool(toolName: string): boolean {
-  return CAPABILITIES.some((c) => c.tools.includes(toolName));
+  return CAPABILITIES.some(
+    (c) => c.tools.includes(toolName) && !c.readOnlyTools?.includes(toolName)
+  );
 }

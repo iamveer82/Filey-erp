@@ -4,6 +4,7 @@
 // not generic dev skills. The agent can add its own via `learn_skill`; these
 // are just the starting set.
 import { addSkill } from "./agentSkills";
+import { agentStorageScope, readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 // Bumped when the pack gains skills, so existing installs get them too.
 // addSkill upserts by name, so re-seeding rewrites the pack's own entries and
@@ -105,9 +106,9 @@ const PACK: SeedSkill[] = [
 
 /** Seed the default skill pack once per pack version. */
 export function seedDefaultSkills(): void {
-  if (localStorage.getItem(SEEDED_KEY)) return;
-  localStorage.setItem(SEEDED_KEY, "1");
+  if (!agentStorageScope() || readAgentStorage(SEEDED_KEY)) return;
   for (const s of PACK) {
     addSkill({ name: s.name, description: s.description, instructions: s.instructions });
   }
+  writeAgentStorage(SEEDED_KEY, "1");
 }

@@ -1,7 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const aiFetch = vi.fn();
+const platformCall = vi.fn();
+const platformAvailable = vi.fn();
+const identity = vi.hoisted(() => ({
+  account: "org-1:user:u1" as string | null,
+  mode: "local",
+}));
 vi.mock("../ai", () => ({ aiFetch }));
+vi.mock("../api", () => ({ getCacheScope: () => identity.account }));
+vi.mock("../supabase", () => ({ cloudConfigured: true }));
+vi.mock("../integrations", () => ({ platformCall, platformAvailable }));
+vi.mock("../agentStorage", () => ({
+  AGENT_STORAGE_EVENT: "filey:agent-storage",
+  agentStorageScope: () =>
+    identity.account ? `${identity.mode}:${identity.account}` : null,
+  requireAgentStorageScope: (expected?: string) => {
+    const scope = identity.account ? `${identity.mode}:${identity.account}` : null;
+    if (!scope) throw new Error("Sign in before publishing.");
+    if (expected && expected !== scope) throw new Error("Your workspace changed.");
+    return scope;
+  },
+}));
 
 const {
   overLimit,
@@ -12,6 +32,8 @@ const {
   zernioReady,
   usingOwnZernioKey,
   getZernioConfig,
+  deletePost,
+  zernioKeySource,
 } = await import("../zernio");
 
 const jsonRes = (body: unknown) =>
@@ -19,7 +41,13 @@ const jsonRes = (body: unknown) =>
 
 beforeEach(() => {
   localStorage.clear();
+  identity.account = "org-1:user:u1";
+  identity.mode = "local";
   aiFetch.mockReset().mockResolvedValue(jsonRes({ accounts: [] }));
+  platformCall
+    .mockReset()
+    .mockRejectedValue(new Error("Sign in to connect social publishing."));
+  platformAvailable.mockReset().mockResolvedValue(false);
   setZernioConfig({ enabled: true, apiKey: "sk_test" });
 });
 
@@ -62,7 +90,56 @@ describe("config", () => {
     setZernioConfig({ apiKey: "sk_secret" });
     expect(getZernioConfig().apiKey).toBe("sk_secret");
     const keys = Object.keys(localStorage);
-    expect(keys).toEqual(["filey_zernio_config"]);
+    expect(keys).toEqual([
+      `filey_zernio_config:${encodeURIComponent(identity.account!)}`,
+    ]);
+  });
+
+  it("isolates credentials by account and company while preserving them across storage modes", () => {
+    const original = getZernioConfig();
+    setZernioConfig({ profileId: "profile-a" });
+    identity.mode = "cloud";
+    expect(getZernioConfig()).toMatchObject({
+      apiKey: "sk_test",
+      profileId: "profile-a",
+    });
+    identity.account = "org-2:user:u1";
+    expect(getZernioConfig()).toEqual({ enabled: false, apiKey: "" });
+    expect(usingOwnZernioKey(original)).toBe(false);
+    setZernioConfig({ enabled: true, apiKey: "sk_other" });
+    identity.account = "org-1:user:u2";
+    expect(getZernioConfig().apiKey).toBe("");
+    identity.account = "org-1:user:u1";
+    expect(getZernioConfig()).toMatchObject({
+      apiKey: "sk_test",
+      profileId: "profile-a",
+    });
+  });
+
+  it("leaves the unowned legacy key untouched and requires a scoped reconnect", () => {
+    localStorage.clear();
+    const legacy = JSON.stringify({
+      enabled: true,
+      apiKey: "legacy-secret",
+      profileId: "old",
+    });
+    localStorage.setItem("filey_zernio_config", legacy);
+    expect(getZernioConfig()).toEqual({ apiKey: "", enabled: false });
+    expect(usingOwnZernioKey()).toBe(false);
+    setZernioConfig({ apiKey: "new-account-secret", enabled: true });
+    expect(localStorage.getItem("filey_zernio_config")).toBe(legacy);
+    expect(getZernioConfig().apiKey).toBe("new-account-secret");
+  });
+
+  it("does not reveal or write credentials after sign-out", async () => {
+    identity.account = null;
+    expect(getZernioConfig()).toEqual({ apiKey: "", enabled: false });
+    expect(zernioReady()).toBe(false);
+    expect(() => setZernioConfig({ apiKey: "not-saved" })).toThrow("Sign in");
+    expect(await zernioKeySource()).toBe("none");
+    await expect(listAccounts()).rejects.toThrow("Sign in");
+    expect(aiFetch).not.toHaveBeenCalled();
+    expect(platformCall).not.toHaveBeenCalled();
   });
 });
 
@@ -72,6 +149,44 @@ describe("listAccounts", () => {
     expect(await listAccounts()).toHaveLength(1);
     aiFetch.mockResolvedValueOnce(jsonRes({ accounts: [{ id: "2", platform: "ig" }] }));
     expect(await listAccounts()).toHaveLength(1);
+  });
+
+  it("rejects provider data and errors that arrive after the workspace changed", async () => {
+    aiFetch.mockImplementationOnce(async () => {
+      identity.account = "other-org:user:u1";
+      return jsonRes({ accounts: [{ id: "private-old-account" }] });
+    });
+    await expect(listAccounts()).rejects.toThrow("workspace changed");
+    identity.account = "org-1:user:u1";
+    aiFetch.mockResolvedValueOnce({
+      text: async () => {
+        identity.mode = "cloud";
+        return JSON.stringify({ accounts: [{ id: "private-old-account" }] });
+      },
+    });
+    await expect(listAccounts()).rejects.toThrow("workspace changed");
+    aiFetch.mockImplementationOnce(async () => {
+      identity.account = null;
+      throw new Error("Private provider detail");
+    });
+    await expect(listAccounts()).rejects.toThrow("Sign in");
+  });
+
+  it("passes the captured scope to the proxy and ignores stale availability", async () => {
+    localStorage.clear();
+    platformCall.mockResolvedValueOnce({ accounts: [] });
+    await listAccounts();
+    expect(platformCall).toHaveBeenCalledWith(
+      "zernio",
+      "accounts",
+      {},
+      "local:org-1:user:u1"
+    );
+    platformAvailable.mockImplementationOnce(async () => {
+      identity.account = "other-org:user:u1";
+      return true;
+    });
+    expect(await zernioKeySource()).toBe("none");
   });
 });
 
@@ -113,6 +228,14 @@ describe("overLimit", () => {
 });
 
 describe("createPost", () => {
+  it("never automatically retries writes, while preserving safe read retries", async () => {
+    await createPost({ accountIds: ["1"], content: "Reviewed post" });
+    expect(aiFetch.mock.calls[0][2]).toEqual({ retries: 0 });
+    await deletePost("p-1");
+    expect(aiFetch.mock.calls[1][2]).toEqual({ retries: 0 });
+    await listAccounts();
+    expect(aiFetch.mock.calls[2][2]).toEqual({ retries: 3 });
+  });
   it("refuses an empty post and a post with no accounts", async () => {
     await expect(createPost({ accountIds: [], content: "hi" })).rejects.toThrow(
       /at least one account/i

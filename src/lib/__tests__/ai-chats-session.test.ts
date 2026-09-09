@@ -1,8 +1,10 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveOpeningChat, saveChats, setActiveId, newChat, loadChats } from "../aiChats";
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user");
   sessionStorage.clear();
 });
 

@@ -1,3 +1,5 @@
+import { agentStorageKey } from "../agentStorage";
+import { setCacheOrg } from "../api";
 // The agent's memory of its own competence — see agentJournal.ts.
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -10,6 +12,7 @@ import {
 
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user");
   clearJournal();
 });
 
@@ -99,7 +102,7 @@ describe("journalDigest", () => {
   });
 
   it("survives a corrupt journal rather than breaking the run", () => {
-    localStorage.setItem("filey.agent.journal", "{not json");
+    localStorage.setItem(agentStorageKey("filey.agent.journal")!, "{not json");
     expect(journalDigest()).toBe("");
     expect(listRuns()).toEqual([]);
   });
