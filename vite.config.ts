@@ -42,8 +42,9 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // Native/sidecar output is not frontend source. Bun's temporary executable
+      // is locked while building on Windows and would crash the Vite watcher.
+      ignored: ["**/src-tauri/**", "**/tools/wa-bridge/**"],
     },
     proxy: {
       // OpenCode Zen sends no CORS headers, so a plain browser can never call

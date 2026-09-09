@@ -40,6 +40,7 @@ headroom_memory.db
 *.db
 
 # Local dev scratch / CLI temp
+output/
 dev-output.txt
 dev-error.txt
 claude_cmds.sh

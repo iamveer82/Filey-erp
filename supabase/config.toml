@@ -1,2 +1,14 @@
 ﻿project_id = "filey-erp"
 
+
+[auth.email.template.recovery]
+subject = "Reset your Filey password"
+content_path = "./supabase/templates/recovery.html"
+
+# send-email verifies the session with auth.getUser before every action.
+[functions.send-email]
+verify_jwt = false
+
+# Validate current signing keys inside the function.
+[functions.integrations]
+verify_jwt = false

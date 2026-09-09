@@ -50,10 +50,10 @@ export default {
           900: "hsl(var(--primary-900) / <alpha-value>)",
         },
         secondary: {
-          DEFAULT: "#FFBA3D",
-          400: "#FFBA3D",
-          500: "#F5A623",
-          600: "#E0900F",
+          DEFAULT: "hsl(var(--primary-400) / <alpha-value>)",
+          400: "hsl(var(--primary-400) / <alpha-value>)",
+          500: "hsl(var(--primary-500) / <alpha-value>)",
+          600: "hsl(var(--foreground) / <alpha-value>)",
         },
         // Legacy `brand-*` ramp — aliased onto the token system so every
         // existing page inherits the new theme without edits. Light end =
