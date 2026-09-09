@@ -54,13 +54,18 @@ function saveCache(rates: Rates, ttlMs: number = CACHE_TTL_MS): void {
 }
 
 async function fetchFresh(): Promise<Rates> {
-  // Try frankfurter.app (free, no key, EUR base)
-  // Then convert to AED base using AED pegged rate
+  // v2 includes AED; the old ECB-only endpoint omitted it and therefore
+  // silently selected approximate fallback rates on every successful request.
   try {
-    const res = await fetch("https://api.frankfurter.app/latest?from=EUR");
+    const res = await fetch("https://api.frankfurter.dev/v2/rates?base=EUR", { signal: AbortSignal.timeout(12000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const eurRates: Rates = data.rates as Rates;
+    const data: unknown = await res.json();
+    if (!Array.isArray(data)) throw new Error("Invalid exchange-rate response");
+    const eurRates: Rates = {};
+    for (const row of data) {
+      if (row?.base !== "EUR" || typeof row.quote !== "string" || !/^[A-Z]{3}$/.test(row.quote) || typeof row.rate !== "number" || !Number.isFinite(row.rate) || row.rate <= 0) continue;
+      eurRates[row.quote] = row.rate;
+    }
     // Convert from EUR base to AED base
     // AED = USD * 3.6725
     // 1 EUR = X USD → 1 EUR = X * 3.6725 AED

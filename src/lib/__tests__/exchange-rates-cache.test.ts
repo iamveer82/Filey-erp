@@ -5,9 +5,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { getExchangeRates, unratedCurrency, docAmountInAed } from "../exchange-rates";
 
-// frankfurter is queried with from=EUR and, like most rate APIs, omits the base
-// currency from its own rates object.
-const apiBody = { rates: { USD: 1.09, AED: 4.0, GBP: 0.85 } };
+// v2 supplies one row per currency pair and includes AED.
+const apiBody = Object.entries({ USD: 1.09, AED: 4.0, GBP: 0.85 }).map(([quote, rate]) => ({ base: "EUR", quote, rate, date: "2026-09-06" }));
 
 const mockFetch = (impl: () => Promise<unknown>) => {
   vi.stubGlobal("fetch", vi.fn(impl));
@@ -82,5 +81,6 @@ describe("a good fetch", () => {
     await getExchangeRates();
 
     expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith("https://api.frankfurter.dev/v2/rates?base=EUR", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 });

@@ -52,6 +52,7 @@ export interface EInvoiceDoc {
   // Rate to AED for the mandatory tax total in the accounting currency when the
   // document currency isn't AED (BT-6 / BR-53). 1 doc-currency unit = N AED.
   aed_exchange_rate?: number | null;
+  tax_country_code?: string | null;
   seller_name?: string | null;
   seller_address?: string | null;
   seller_trn?: string | null;
@@ -120,6 +121,7 @@ export function validateEInvoice(doc: EInvoiceDoc): {
   warnings: string[];
 } {
   const errors: string[] = [];
+  if (doc.tax_country_code && doc.tax_country_code !== "AE") errors.push("PINT-AE export requires a UAE tax document");
   const warnings: string[] = [];
   if (!doc.number?.trim()) errors.push("Invoice number");
   if (!doc.issue_date) errors.push("Invoice date");
@@ -250,6 +252,7 @@ ${p.legalId ? `        <cbc:CompanyID${p.legalScheme ? ` schemeAgencyID="${esc(p
 
 /** Serialize an invoice to PINT-AE UBL 2.1 XML. */
 export function buildInvoiceXml(doc: EInvoiceDoc): string {
+  if (doc.tax_country_code && doc.tax_country_code !== "AE") throw new Error("PINT-AE export requires a UAE tax document.");
   const ccy = doc.currency || "AED";
   const t = computeTotals(doc);
   const typeCode = doc.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE;
