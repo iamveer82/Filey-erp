@@ -14,7 +14,7 @@ export interface DocTemplate {
 
 export const DOC_TEMPLATES: DocTemplate[] = [
   { id: "minimal", name: "Minimal" },
-  { id: "fta", name: "UAE FTA Tax Invoice" },
+  { id: "fta", name: "Structured" },
   { id: "classic", name: "Classic" },
   { id: "modern", name: "Modern" },
   { id: "corporate", name: "Corporate" },
@@ -25,7 +25,7 @@ export const DOC_TEMPLATES: DocTemplate[] = [
   { id: "receipt", name: "Receipt" },
   { id: "monogram", name: "Monogram" },
   { id: "green-gold", name: "Green Gold" },
-  { id: "uae", name: "UAE Professional" },
+  { id: "uae", name: "Professional" },
   { id: "industrial", name: "Industrial" },
   { id: "executive", name: "Executive" },
   { id: "fresh", name: "Fresh" },
@@ -34,7 +34,7 @@ export const DOC_TEMPLATES: DocTemplate[] = [
 export const TEMPLATE_IDS = DOC_TEMPLATES.map((t) => t.id);
 
 /** Resolve what a person actually typed to a template id: "the Corporate one",
- *  "green gold", "UAE professional". Returns undefined when nothing matches,
+ *  "green gold", "professional". Returns undefined when nothing matches,
  *  so a caller can list the options rather than silently pick a default. */
 export function resolveTemplate(input: string): string | undefined {
   const q = input.trim().toLowerCase().replace(/[\s_]+/g, "-");

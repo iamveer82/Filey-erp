@@ -54,16 +54,16 @@ function Calendar({
         day: "h-8 w-8 text-center text-sm p-0 relative",
         day_button: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-8 w-8 p-0 font-normal aria-selected:opacity-100 text-ink hover:bg-brand-100 rounded-lg"
+          "h-8 w-8 p-0 border-transparent bg-transparent font-normal aria-selected:opacity-100 text-ink hover:bg-hover"
         ),
         selected:
-          "[&>button]:bg-primary-500 [&>button]:text-white [&>button]:hover:bg-primary-600 [&>button]:hover:text-white [&>button]:focus:bg-primary-500 [&>button]:focus:text-white",
+          "[&>button]:bg-primary-400 [&>button]:text-neutral-900 [&>button]:hover:bg-primary-300 [&>button]:hover:text-neutral-900 [&>button]:focus:bg-primary-400 [&>button]:focus:text-neutral-900",
         today: "[&>button]:border [&>button]:border-primary-300",
         outside:
           "[&>button]:text-brand-400 [&>button]:opacity-50 aria-selected:bg-brand-100/50",
         disabled: "[&>button]:text-brand-300 [&>button]:opacity-50",
-        range_start: "[&>button]:rounded-l-lg",
-        range_end: "[&>button]:rounded-r-lg",
+        range_start: "[&>button]:rounded-none [&>button]:rounded-l-full",
+        range_end: "[&>button]:rounded-none [&>button]:rounded-r-full",
         range_middle:
           "[&>button]:bg-brand-100 [&>button]:text-ink [&>button]:rounded-none",
         hidden: "invisible",

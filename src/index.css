@@ -10,13 +10,14 @@
    the whole app. Values are verbatim from the reference frontend. */
 @layer base {
   :root {
+    color-scheme: light;
     /* Light theme */
     --background: 0 0% 100%;
     /* Ground behind the page content. Cards are pure white and their outline is
        white too, so this soft tint is what makes each card read as a separate
        tile. In dark mode the card is already lighter than the page, so --page
        just matches --background there. */
-    --page: 240 5% 97%;
+    --page: 45 15% 97%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -36,21 +37,21 @@
     --info: 201 96% 32%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 74% 42%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
     --radius: 0.5rem;
-    --sidebar: 240 4% 97.5%;
+    --sidebar: 45 12% 98%;
     --hover: 240 4.8% 95.9%;
 
     /* Chart palette (light) — consumed by recharts via useChartColors and
        the legacy --chart-* names below. */
     --chart-primary: 240 10% 3.9%;
     --chart-secondary: 240 3.8% 46.1%;
-    --chart-grid: #f3f4f6;
-    --chart-axis: 240 3.8% 60%;
+    --chart-grid: #e4e4e7;
+    --chart-axis: 240 3.8% 46%;
     --tooltip-bg: 0 0% 100%;
     --tooltip-border: 240 5.9% 90%;
     --tooltip-fg: 240 10% 3.9%;
@@ -61,7 +62,7 @@
     --chart-fill-end: hsl(var(--primary-200));
     --chart-fill-opacity-start: 0.35;
     --chart-fill-opacity-end: 0.05;
-    --chart-tick: #9ca3af;
+    --chart-tick: #71717a;
     --chart-tooltip-bg: #ffffff;
     --chart-tooltip-border: #e5e7eb;
 
@@ -73,9 +74,9 @@
        ponytail: hue+sat swap, not a per-accent hand-tuned ramp. `--p-l400`
        is the one escape hatch, for hues that read too dark under the
        always-dark ink on primary surfaces (see .text-ink rules below). */
-    --p-h: 38;
-    --p-s: 92%;
-    --p-l400: 56%;
+    --p-h: 45;
+    --p-s: 96%;
+    --p-l400: 54%;
     --primary-50: var(--p-h) var(--p-s) 96%;
     --primary-100: var(--p-h) var(--p-s) 89%;
     --primary-200: var(--p-h) var(--p-s) 77%;
@@ -99,6 +100,7 @@
   [data-accent="slate"] { --p-h: 215; --p-s: 16%; --p-l400: 62%; }
 
   .dark {
+    color-scheme: dark;
     /* Dark theme — near-black */
     --background: 0 0% 4%;
     --page: 0 0% 4%;
@@ -129,7 +131,7 @@
     --chart-primary: 0 0% 96%;
     --chart-secondary: 0 0% 63%;
     --chart-grid: #1f1f1f;
-    --chart-axis: 0 0% 45%;
+    --chart-axis: 0 0% 63%;
     --tooltip-bg: 0 0% 8%;
     --tooltip-border: 0 0% 15%;
     --tooltip-fg: 0 0% 93%;
@@ -137,7 +139,7 @@
     --chart-stroke: hsl(var(--primary-400));
     --chart-fill-start: hsl(var(--primary-400));
     --chart-fill-end: hsl(var(--primary-900));
-    --chart-tick: #666666;
+    --chart-tick: #a1a1aa;
     --chart-tooltip-bg: #0e0e0e;
     --chart-tooltip-border: #262626;
   }
@@ -238,6 +240,10 @@
   label[for],
   summary {
     @apply cursor-pointer;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: hsl(var(--primary-400));
   }
   /* Accessible focus ring — 2px primary-blue ring, 2px offset. Blue (not ink)
      so keyboard focus reads as an interactive affordance app-wide. */
@@ -452,10 +458,10 @@
     @apply text-[22px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
   }
 
-  /* ── Buttons — reference scale: 32px height, 6px radius, 13px text.
+  /* ── Buttons — reference scale: 32px height, pill radius, 13px text.
         Primary = amber CTA; ghost = bordered card surface (SectionButton). ── */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            bg-primary-400 px-3 text-[13px] font-medium text-neutral-900 select-none
            border border-primary-500/60
            transition-colors duration-200 hover:bg-primary-300
@@ -465,7 +471,7 @@
            disabled:hover:bg-primary-400 cursor-pointer;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            bg-foreground px-3 text-[13px] font-medium text-background
            border border-foreground select-none
            transition-opacity duration-200 hover:opacity-90
@@ -474,7 +480,7 @@
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            px-3 text-[13px] font-medium text-foreground border border-border
            bg-card select-none transition-colors duration-200
            hover:bg-hover active:scale-[0.97]
@@ -482,11 +488,18 @@
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
-           bg-danger px-3 text-[13px] font-semibold text-white select-none
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
+           bg-destructive px-3 text-[13px] font-medium text-white select-none
            transition-colors duration-200 hover:opacity-90 active:scale-[0.97]
            outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none cursor-pointer;
+  }
+
+  .btn-link {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full text-[13px]
+           font-medium text-foreground underline-offset-4 hover:underline
+           outline-none focus-visible:ring-2 focus-visible:ring-ring
+           focus-visible:ring-offset-2 disabled:opacity-50 cursor-pointer;
   }
 
   /* Tactile press: buttons scale down 3% on press (Apple — respond on
@@ -500,6 +513,7 @@
     transition-property: color, background-color, border-color, box-shadow,
       transform;
     transition-duration: 140ms;
+    white-space: nowrap;
   }
   @media (prefers-reduced-motion: reduce) {
     .btn-primary:active,
@@ -515,7 +529,7 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-md border border-border bg-background px-3 text-[13px]
+    @apply w-full rounded-[8px] border border-border bg-card px-3 text-[13px]
            text-foreground placeholder:text-muted-foreground
            transition-[border-color] duration-200
            focus:outline-none focus:border-muted-foreground
@@ -524,7 +538,7 @@
   }
   .input,
   .select {
-    @apply h-9;
+    @apply h-10;
   }
   .textarea {
     @apply py-2 min-h-[88px] resize-y leading-relaxed;
@@ -551,9 +565,10 @@
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-border;
   }
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-border
+    @apply inline-flex items-center gap-1.5 rounded-full border border-border
            bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground
-           transition-colors duration-200 hover:bg-hover hover:text-foreground cursor-pointer;
+           transition-colors duration-200 hover:bg-hover hover:text-foreground cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
   }
   .chip-active {
     @apply border-foreground/30 bg-hover text-foreground;

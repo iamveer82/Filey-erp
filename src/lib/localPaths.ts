@@ -50,6 +50,18 @@ export async function saveBytes(
 
 export const openFolder = (path: string) => openPath(path);
 
+/** Small text exports do not need to load the PDF/image conversion toolchain. */
+export async function downloadText(filename: string, text: string, mime = "text/plain;charset=utf-8"): Promise<void> {
+  const bytes = new TextEncoder().encode(text);
+  if (hasTauri) { await saveBytes(filename, bytes); return; }
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
 // ---- backup / restore ----
 const BACKUP_FILTER = [{ name: "Filey backup", extensions: ["db"] }];
 

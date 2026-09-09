@@ -1,3 +1,5 @@
+import CountryTaxFields from "./CountryTaxFields";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useEffect, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
 import { Modal, Field } from "./ui";
@@ -5,7 +7,7 @@ import { billing, type CompanyProfile } from "../lib/api";
 import { errMsg } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
-import { loadCustomTemplates } from "./TemplateDesigner";
+import { useCustomTemplates } from "../lib/customTemplates";
 import { templatesForDocType, type DocType } from "./DocTemplates";
 import {
   loadDocPresets,
@@ -38,6 +40,7 @@ export default function CompanyModal({
   docType?: DocType;
 }) {
   const { toast } = useUI();
+  const { templates: customTemplates, error: templateError } = useCustomTemplates(open);
   const [c, setC] = useState<CompanyProfile>(company);
   const [preset, setPreset] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -93,6 +96,8 @@ export default function CompanyModal({
   return (
     <Modal open={open} onClose={onClose} title="Company Profile">
       <div className="space-y-3">
+        {templateError && <p role="alert" className="text-xs text-danger">Could not load saved templates: {templateError}</p>}
+        <CountryTaxFields company={c} onChange={setC} />
         <Field label="Company Name">
           <input
             className="input"
@@ -108,11 +113,11 @@ export default function CompanyModal({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="TRN">
+          <Field label={taxRegimeFor(c.currency, c.country_code).trnLabel}>
             <input
               className="input"
               value={c.trn ?? ""}
-              onChange={(e) => setC({ ...c, trn: e.target.value })}
+              onChange={(e) => setC({ ...c, trn: e.target.value, vat_number:e.target.value })}
             />
           </Field>
           <Field label="Phone">
@@ -137,7 +142,7 @@ export default function CompanyModal({
               onChange={(v) => setC({ ...c, default_template: v })}
               options={[
                 ...DOC_TEMPLATES,
-                ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
+                ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
               ].map((t) => ({ value: t.id, label: t.name }))}
             />
           </Field>
@@ -159,7 +164,7 @@ export default function CompanyModal({
               onChange={setPreset}
               options={[
                 ...templatesForDocType(docType),
-                ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
+                ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
               ].map((t) => ({ value: t.id, label: t.name }))}
             />
           </Field>

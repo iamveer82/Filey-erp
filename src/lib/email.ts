@@ -40,7 +40,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
  *  This used to be discarded and replaced with a guess about the function not
  *  being deployed, which sent everyone looking in the wrong place — a customer
  *  who had simply hit their daily cap was told to go check a deployment. */
-async function edgeErrorMessage(error: unknown): Promise<string> {
+export async function edgeErrorMessage(error: unknown): Promise<string> {
   const ctx = (error as { context?: { json?: () => Promise<unknown> } }).context;
   try {
     const body = (await ctx?.json?.()) as { error?: string } | undefined;
@@ -67,6 +67,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
 
   const { data, error } = (await invokeFn(supabase, "send-email", {
     body: {
+      requestId: crypto.randomUUID(),
       to: msg.to,
       subject: msg.subject,
       html: msg.html,
@@ -96,7 +97,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
 
   if (failure) throw new Error(failure);
 
-  await bumpEmailCount();
+  await bumpEmailCount().catch((error) => console.warn("Email sent; local usage counter could not refresh", error));
 }
 
 /** Written as a separate import so email.ts does not pull the whole api module

@@ -14,6 +14,7 @@ import {
   FileSignature,
   FileText,
   FolderOpen,
+  Globe,
   HeartHandshake,
   Inbox,
   Landmark,
@@ -42,6 +43,7 @@ import {
  * hand-drawn SVG mask set. Same string keys, so the module registry and
  * every AppIcon call site keep working unchanged. */
 const iconMap: Record<string, LucideIcon> = {
+  browser: Globe,
   overview: LayoutGrid,
   dashboard: LayoutGrid,
   invoice: FileText,

@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { redactBoxes, type RedactBox, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Draw opaque redaction boxes over a page and bake them in. Multiple boxes,
  * across pages, free width/height (unlike the aspect-locked image stamps).
@@ -138,9 +135,6 @@ export default function RedactStudio({
         }))
       );
       onApply(out);
-      toast.success(
-        `${boxes.length} area${boxes.length > 1 ? "s" : ""} redacted & downloaded.`
-      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -247,7 +241,8 @@ export default function RedactStudio({
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
         Drag to draw black boxes over anything to hide. Double-click a box to remove it,
-        then <strong>Apply</strong>.
+        then <strong>Apply</strong>. The result contains page images only, so covered text
+        cannot be copied or recovered. Search and editable forms are removed.
       </p>
     </div>
   );

@@ -61,7 +61,8 @@ export default function ColorPicker({
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Pick a colour"
-        className="flex h-9 items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 text-ink shadow-black/5 transition-colors hover:border-brand-300 cursor-pointer"
+        aria-expanded={open}
+        className="btn-ghost"
       >
         <span
           className="h-5 w-5 rounded-xl border border-black/10"

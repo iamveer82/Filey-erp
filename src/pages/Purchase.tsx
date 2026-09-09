@@ -74,8 +74,9 @@ export default function Purchase() {
   const avgEntry = expenses.length ? totalSpend / expenses.length : 0;
 
   const save = async () => {
+    if (saving) return;
     const amt = Number(form.amount);
-    if (!amt || amt <= 0) {
+    if (!Number.isFinite(amt) || amt <= 0) {
       toast.error("Enter a valid amount");
       return;
     }
@@ -246,7 +247,8 @@ export default function Purchase() {
                     <td className="px-5 py-3">
                       <button
                         onClick={() => remove(e.id)}
-                        className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-danger hover:bg-hover"
+                        aria-label={`Delete ${e.category} expense from ${fmtDate(e.expense_date)}`}
+                        className="btn-ghost w-10 !px-0 text-danger"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -262,12 +264,14 @@ export default function Purchase() {
       {/* Add expense modal */}
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => { if (!saving) setOpen(false); }}
         title="Log expense"
       >
-        <div className="space-y-4">
+        <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
           <Field label="Category">
             <SelectMenu
+              ariaLabel="Expense category"
               value={form.category}
               onChange={(v) => setForm({ ...form, category: v })}
               options={CATEGORIES.map((c) => ({ value: c, label: c }))}
@@ -281,10 +285,13 @@ export default function Purchase() {
               className="input"
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Amount (AED)">
               <input
                 type="number"
+                required
+                min="0.01"
+                step="0.01"
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
                 placeholder="0.00"
@@ -294,25 +301,27 @@ export default function Purchase() {
             <Field label="Date">
               <input
                 type="date"
+                required
                 value={form.expense_date}
                 onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
                 className="input"
               />
             </Field>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-ghost" onClick={() => setOpen(false)}>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
             <button
               className="btn-primary"
-              onClick={save}
+              type="submit"
               disabled={saving}
             >
               {saving ? "Saving…" : "Log expense"}
             </button>
           </div>
-        </div>
+        </fieldset>
+        </form>
       </Modal>
     </div>
   );

@@ -1,5 +1,5 @@
+import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -12,9 +12,6 @@ import {
   X,
   Copy,
   Send,
-  Monitor,
-  Smartphone,
-  Minus,
   Settings,
   StickyNote,
   Stamp,
@@ -72,6 +69,7 @@ import {
   bytesToBase64,
 } from "../lib/email";
 import FitPreview from "../components/FitPreview";
+import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
@@ -93,6 +91,7 @@ import {
 } from "../lib/docItems";
 import {
   PageHeader,
+  ErrorBanner,
   MetricCard,
   DataTable,
   Badge,
@@ -130,7 +129,7 @@ import {
   EMPTY_STAMP_SIG,
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
-import TemplateDesigner, { syncCustomTemplates } from "../components/TemplateDesigner";
+import TemplateDesigner from "../components/TemplateDesigner";
 
 type CustomColumn = { key: string; label: string };
 
@@ -175,7 +174,7 @@ function blankForm(
   formats?: DocFormats
 ): Form {
   // Same rule as invoicing: new quotes adopt the active display currency and
-  // its tax regime (INR → GST, AED → VAT).
+  // company country controls tax independently.
   const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     number: pickQuoteNumber(existing, formats),
@@ -185,6 +184,7 @@ function blankForm(
     accent: c.default_accent || "#222222",
     currency,
     seller_name: c.name,
+    tax_country_code: c.country_code,
     seller_address: c.address,
     seller_trn: c.trn,
     seller_email: c.email,
@@ -201,7 +201,7 @@ function blankForm(
     terms:
       "1. This quotation is valid until the date mentioned above.\n2. Prices are subject to applicable taxes.\n3. Payment terms as agreed.",
     discount: 0,
-    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
+    tax_rate: c.tax_type === "None" ? 0 : defaultTaxRate(c.currency, c.default_tax_rate, c.country_code),
     round_off: false,
     items: [
       {
@@ -311,6 +311,7 @@ export default function Quoting() {
     "all" | "draft" | "sent" | "accepted"
   >("all");
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
   const [converting, setConverting] = useState(false);
   const [quickView, setQuickView] = useState<{
     d: QuotationSummary;
@@ -321,11 +322,16 @@ export default function Quoting() {
   const [custModal, setCustModal] = useState(false);
   const [invModal, setInvModal] = useState(false);
 
-  const loadDocs = () =>
-    quotes
+  const [docsLoading, setDocsLoading] = useState(true);
+  const [docsError, setDocsError] = useState(false);
+  const loadDocs = () => {
+    setDocsLoading(true);
+    return quotes
       .listDocs()
-      .then(setDocs)
-      .catch(() => toast.error("Failed to load quotations"));
+      .then((rows) => { setDocs(rows); setDocsError(false); })
+      .catch(() => { setDocsError(true); toast.error("Failed to load quotations"); })
+      .finally(() => setDocsLoading(false));
+  };
   const loadCustomers = () =>
     crm
       .customers()
@@ -373,6 +379,7 @@ export default function Quoting() {
         accent: d.accent,
         currency: d.currency,
         seller_name: d.seller_name,
+        tax_country_code: d.tax_country_code,
         seller_address: d.seller_address,
         seller_trn: d.seller_trn,
         seller_email: d.seller_email,
@@ -463,7 +470,7 @@ export default function Quoting() {
   };
 
   const commit = async (targetStatus?: string) => {
-    if (!form) return;
+    if (!form || saving) return;
     if (!form.number.trim()) {
       toast.error("Quotation number is required");
       return;
@@ -682,10 +689,14 @@ export default function Quoting() {
     return () => window.removeEventListener("keydown", onKey);
   }, [viewOpen]);
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     const el = exportRef.current || quoteRef.current;
-    if (el) downloadElementAsPdf(el, form?.number || "quotation");
-    else window.print();
+    try {
+      if (el) await downloadElementAsPdf(el, form?.number || "quotation");
+      else window.print();
+    } catch (error) {
+      toast.error(`Could not export quotation: ${errMsg(error)}`);
+    }
   };
 
   // Editor keyboard shortcuts (no-op unless a quote is open).
@@ -830,75 +841,83 @@ export default function Quoting() {
     const isLastViewPage = viewPageIdx === viewPageCount - 1;
 
     const emailQuote = async () => {
+      if (saving || sending || converting) return;
       if (!form.customer_email) {
         toast.error("Add a customer email to send this quotation.");
         return;
       }
-      const t = totals(form);
-      let portalUrl = "";
+      setSending(true);
       try {
-        if (form.id) {
-          const token = await quotes.publicLink(form.id);
+        const savedId = await commit();
+        if (!savedId) return;
+        const t = totals(form);
+        let portalUrl = "";
+        try {
+          const token = await quotes.publicLink(savedId);
           portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+        } catch {
+          /* link optional */
         }
-      } catch {
-        /* link optional */
-      }
-      // Attach the rendered quotation, as the invoice email does — a customer
-      // asked to approve a price expects the document, not a summary and a
-      // link. Best-effort: a PDF failure must not stop the email going out.
-      let attachments: { filename: string; content: string }[] | undefined;
-      try {
-        const el = exportRef.current || quoteRef.current;
-        if (el) {
-          const pdf = await elementToPdfBytes(el, form.number || "quotation");
-          attachments = [
-            {
-              filename: `${form.number || "quotation"}.pdf`,
-              content: bytesToBase64(pdf.bytes),
-            },
-          ];
+        // Sending a quotation includes its PDF; report export failures before
+        // dispatch so the recipient cannot receive an incomplete document.
+        let attachments: { filename: string; content: string }[] | undefined;
+        try {
+          const el = exportRef.current || quoteRef.current;
+          if (!el) throw new Error("Quotation preview is not ready.");
+          if (el) {
+            const pdf = await elementToPdfBytes(el, form.number || "quotation");
+            attachments = [
+              {
+                filename: `${form.number || "quotation"}.pdf`,
+                content: bytesToBase64(pdf.bytes),
+              },
+            ];
+          }
+        } catch (error) {
+          throw new Error(`Could not create the quotation PDF: ${errMsg(error)}. The email was not sent.`);
         }
-      } catch {
-        /* attachment optional */
-      }
-      try {
-        await sendEmail({
-          to: form.customer_email,
-          subject: `Quotation ${form.number} from ${form.seller_name}`,
-          attachments,
-          html: emailShell(
-            `Quotation ${form.number}`,
-            `<p>Dear ${esc(form.customer_name || "customer")},</p>
-             <p>Please find your quotation <b>${esc(form.number)}</b>, valid until ${esc(
-               form.valid_until || ""
-             )}.</p>
-             <table style="width:100%;font-size:14px;margin:12px 0">
-               <tr><td>Subtotal</td><td style="text-align:right">${m(t.subtotal)}</td></tr>
+        try {
+          await sendEmail({
+            to: form.customer_email,
+            subject: `Quotation ${form.number} from ${form.seller_name}`,
+            attachments,
+            html: emailShell(
+              `Quotation ${form.number}`,
+              `<p>Dear ${esc(form.customer_name || "customer")},</p>
+               <p>Please find your quotation <b>${esc(form.number)}</b>, valid until ${esc(
+                 form.valid_until || ""
+               )}.</p>
+               <table style="width:100%;font-size:14px;margin:12px 0">
+                 <tr><td>Subtotal</td><td style="text-align:right">${m(t.subtotal)}</td></tr>
+                 ${
+                   t.discount
+                     ? `<tr><td>Discount</td><td style="text-align:right">-${m(t.discount)}</td></tr>`
+                     : ""
+                 }
+                 ${
+                   t.tax
+                     ? `<tr><td>Tax</td><td style="text-align:right">${m(t.tax)}</td></tr>`
+                     : ""
+                 }
+                 <tr><td><b>Total</b></td><td style="text-align:right"><b>${m(t.total)}</b></td></tr>
+               </table>
                ${
-                 t.discount
-                   ? `<tr><td>Discount</td><td style="text-align:right">-${m(t.discount)}</td></tr>`
+                 portalUrl
+                   ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View online</a></p>`
                    : ""
                }
-               ${
-                 t.tax
-                   ? `<tr><td>Tax</td><td style="text-align:right">${m(t.tax)}</td></tr>`
-                   : ""
-               }
-               <tr><td><b>Total</b></td><td style="text-align:right"><b>${m(t.total)}</b></td></tr>
-             </table>
-             ${
-               portalUrl
-                 ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View online</a></p>`
-                 : ""
-             }
-             <p>${esc(form.notes ?? "")}</p>
-             <p>${esc(form.terms ?? "")}</p>`
-          ),
-        });
-        toast.success(`Quotation emailed to ${form.customer_email}`);
+               <p>${esc(form.notes ?? "")}</p>
+               <p>${esc(form.terms ?? "")}</p>`
+            ),
+          });
+          toast.success(`Quotation emailed to ${form.customer_email}`);
+        } catch (e) {
+          toast.error(errMsg(e));
+        }
       } catch (e) {
         toast.error(errMsg(e));
+      } finally {
+        setSending(false);
       }
     };
 
@@ -958,7 +977,7 @@ export default function Quoting() {
     };
 
     return (
-      <>
+      <fieldset disabled={saving || sending || converting} aria-busy={saving || sending || converting} className="m-0 min-w-0 border-0 p-0">
         {company && (
           <CompanyModal
             open={companyOpen}
@@ -972,6 +991,7 @@ export default function Quoting() {
                 return {
                   ...prev,
                   seller_name: c.name,
+    tax_country_code: c.country_code,
                   seller_address: c.address ?? prev.seller_address,
                   seller_trn: c.trn ?? prev.seller_trn,
                   seller_email: c.email ?? prev.seller_email,
@@ -1005,38 +1025,32 @@ export default function Quoting() {
 
         <div>
           {/* Toolbar */}
-          <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
-            <div className="flex items-start gap-3">
+          <PageHeader
+            title={form.id ? "Edit Quotation" : "New Quotation"}
+            subtitle="Build quotations with per-line discount/tax and convert them to invoices"
+            action={<div className="no-print flex items-center gap-2 flex-wrap">
               <button
-                className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
+                className="btn-ghost shrink-0"
                 onClick={() => {
                   setForm(null);
                   loadDocs();
                 }}
                 aria-label="Back"
               >
-                <ArrowLeft size={18} />
+                <ArrowLeft size={15} /> Back
               </button>
-              <div>
-                <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Quotation</h1>
-                <p className="text-sm text-brand-500 mt-0.5">
-                  Build quotations with per-line discount/tax and convert them to invoices
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
               <Badge tone={statusTone(form.status)}>{form.status}</Badge>
               {!form.id && (
                 <span className="text-xs font-medium text-brand-400">Unsaved</span>
               )}
               <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-                <Maximize2 size={15} /> View
+                <Maximize2 size={15} /> Preview
               </button>
               <button className="btn-ghost" onClick={downloadPdf} title="Download PDF (Ctrl+P)">
                 <Download size={15} /> PDF
               </button>
               <button
-                className="btn-ghost"
+                className="btn-primary"
                 onClick={() => commit()}
                 disabled={saving}
                 title="Save (Ctrl+S)"
@@ -1057,12 +1071,10 @@ export default function Quoting() {
               >
                 <Building2 size={15} /> Company
               </button>
-              {/* One-click status, the way the invoice editor does it. A quote
-                  moves draft → sent → accepted, so the primary button is
-                  whatever comes next rather than a dropdown of every state. */}
+              {/* Status changes remain separate from the primary Save action. */}
               {form.status === "draft" ? (
                 <button
-                  className="btn-primary"
+                  className="btn-ghost"
                   onClick={() => commit("sent")}
                   disabled={saving}
                   title="Mark this quotation as sent to the customer"
@@ -1071,7 +1083,7 @@ export default function Quoting() {
                 </button>
               ) : form.status === "sent" ? (
                 <button
-                  className="btn-primary"
+                  className="btn-ghost"
                   onClick={() => commit("accepted")}
                   disabled={saving}
                   title="The customer accepted this quotation"
@@ -1088,15 +1100,13 @@ export default function Quoting() {
                   <Pencil size={15} /> Move to draft
                 </button>
               )}
-              {/* Sending is the primary outbound action here exactly as it is in
-                  the invoice editor, so it carries the same label and weight. */}
               <button
-                className="btn-primary"
+                className="btn-ghost"
                 onClick={emailQuote}
-                disabled={!form.customer_email}
+                disabled={saving || sending || converting || !form.customer_email}
                 title="Save and email the quotation to the customer"
               >
-                <Send size={15} /> Send
+                <Send size={15} /> {sending ? "Sending…" : "Send"}
               </button>
               <button
                 className="btn-ghost"
@@ -1115,8 +1125,8 @@ export default function Quoting() {
               >
                 <FileText size={15} /> {converting ? "Converting…" : "Convert"}
               </button>
-            </div>
-          </div>
+            </div>}
+          />
 
           <ResizablePanels
             left={
@@ -1127,15 +1137,21 @@ export default function Quoting() {
                   title="Choose Template"
                   subtitle="Select a template for your quotation"
                   action={
+                    <div className="flex flex-wrap items-center gap-2">
+                    <button className="btn-ghost text-xs" onClick={() => setViewAll((value) => !value)}>
+                      {viewAll ? "Show less" : "View all templates"}
+                    </button>
                     <button
                       className="btn-ghost text-xs flex items-center gap-1"
                       onClick={() => setDesigning(true)}
                     >
                       <Plus size={13} /> Create template
                     </button>
+                    </div>
                   }
                 >
                   <DocTemplateGallery
+                                      hideHeader
                                       key={tplNonce}
                                       value={form.template}
                                       onChange={(id) => set("template", id)}
@@ -1183,15 +1199,16 @@ export default function Quoting() {
                           <button
                             type="button"
                             className="btn-ghost shrink-0"
-                            onClick={() => setCustModal(true)}
-                            title="Add customer"
+                          onClick={() => setCustModal(true)}
+                          title="Add customer"
+                          aria-label="Add customer"
                           >
                             <Plus size={15} />
                           </button>
                         </div>
                       </Field>
                       <Field label="Customer / Company Name">
-                        <input
+                        <input aria-label="Customer name"
                           className="input"
                           placeholder="Gulf Line Trading LLC"
                           value={form.customer_name}
@@ -1209,15 +1226,15 @@ export default function Quoting() {
                       </Field>
                       <Field label="Customer Email / TRN">
                         <div className="grid grid-cols-2 gap-2">
-                          <input
+                          <input aria-label="Customer email"
                             className="input"
                             placeholder="Email"
                             value={form.customer_email ?? ""}
                             onChange={(e) => set("customer_email", e.target.value)}
                           />
-                          <input
+                          <input aria-label="Customer tax registration number"
                             className="input"
-                            placeholder={taxRegimeFor(form.currency).trnLabel}
+                            placeholder={taxRegimeFor(form.currency, form.tax_country_code).trnLabel}
                             value={form.customer_trn ?? ""}
                             onChange={(e) => set("customer_trn", e.target.value)}
                           />
@@ -1226,7 +1243,7 @@ export default function Quoting() {
                     </div>
                     <div className="space-y-3">
                       <Field label="Document Title">
-                        <input
+                        <input aria-label="Document title"
                           className="input"
                           placeholder="Quotation"
                           value={form.doc_title || ""}
@@ -1241,7 +1258,7 @@ export default function Quoting() {
                         </datalist>
                       </Field>
                       <Field label="Quotation Number">
-                        <input
+                        <input aria-label="Quotation number"
                           className="input"
                           value={form.number}
                           onChange={(e) => set("number", e.target.value)}
@@ -1261,7 +1278,11 @@ export default function Quoting() {
                         />
                       </Field>
                       <div className="grid grid-cols-2 gap-3">
-                        <Field label="Currency">
+                        <Field label="Tax country">
+                  <SelectMenu value={form.tax_country_code || ""} onChange={v => setForm({ ...form, tax_country_code: v || undefined, template:v && v !== "AE" && /(^|-)uae($|-)/.test(form.template || "") ? "minimal" : form.template })}
+                    options={[{ value:"", label:"Legacy currency defaults" }, ...COUNTRY_OPTIONS]} />
+                </Field>
+                <Field label="Currency">
                           <SelectMenu
                             value={form.currency || "AED"}
                             onChange={(v) => set("currency", v)}
@@ -1272,7 +1293,7 @@ export default function Quoting() {
                           />
                         </Field>
                         <Field label="Sales Person">
-                          <input
+                          <input aria-label="Salesperson"
                             className="input"
                             placeholder="Name"
                             value={form.sales_person ?? ""}
@@ -1306,6 +1327,9 @@ export default function Quoting() {
                       Multiply a custom field with rate
                       <button
                         type="button"
+                        role="switch"
+                        aria-label="Multiply custom field with rate"
+                        aria-checked={!!form.unit_price_formula}
                         onClick={() =>
                           set(
                             "unit_price_formula",
@@ -1396,6 +1420,7 @@ export default function Quoting() {
                                   removeCustomColumn(col.key);
                                 }}
                                 title="Remove column"
+                                aria-label={`Remove ${col.label} column`}
                               >
                                 ×
                               </button>
@@ -1420,7 +1445,7 @@ export default function Quoting() {
                               )}
                             </td>
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Description for line " + (i + 1)}
                                 className="input"
                                 placeholder="Item description"
                                 value={it.product}
@@ -1428,7 +1453,7 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Quantity for line " + (i + 1)}
                                 type="number"
                                 className="input text-right !px-2"
                                 value={it.qty || ""}
@@ -1450,7 +1475,7 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Unit for line " + (i + 1)}
                                 className="input text-right !px-2"
                                 placeholder="pcs"
                                 value={it.unit || ""}
@@ -1517,7 +1542,7 @@ export default function Quoting() {
                             </td>
                             {form.customColumns.map((col) => (
                               <td key={col.key} className="py-2 px-2">
-                                <input
+                                <input aria-label={col.label + " for line " + (i + 1)}
                                   className="input text-right !px-2 !py-1 text-xs"
                                   placeholder={col.label}
                                   value={it.custom?.[col.key] || ""}
@@ -1526,7 +1551,7 @@ export default function Quoting() {
                               </td>
                             ))}
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Unit price for line " + (i + 1)}
                                 type="number"
                                 className={`input text-right !px-2 ${
                                   form.unit_price_formula?.a && form.unit_price_formula?.b
@@ -1539,7 +1564,7 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Discount percent for line " + (i + 1)}
                                 type="number"
                                 className="input text-right !px-2"
                                 placeholder="0"
@@ -1550,7 +1575,7 @@ export default function Quoting() {
                               />
                             </td>
                             <td className="py-2 px-2">
-                              <input
+                              <input aria-label={"Tax percent for line " + (i + 1)}
                                 type="number"
                                 className="input text-right !px-2"
                                 placeholder="0"
@@ -1560,7 +1585,7 @@ export default function Quoting() {
                             </td>
                             <td className="py-2 px-2 text-right font-medium text-ink">
                               {it.calcMode === "manual" ? (
-                                <input
+                                <input aria-label={"Line amount for line " + (i + 1)}
                                   type="number"
                                   className="input text-right !px-2"
                                   placeholder="0"
@@ -1594,7 +1619,7 @@ export default function Quoting() {
                                         : "Insert page break before this item"
                                   }
                                   disabled={i === 0}
-                                  className={`rounded-lg p-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                                  className={`btn-ghost h-10 w-10 p-0 disabled:opacity-30 ${
                                     it.pageBreakBefore
                                       ? "text-primary-700 bg-primary-100"
                                       : "text-brand-400 hover:text-ink hover:bg-brand-50 cursor-pointer"
@@ -1607,7 +1632,7 @@ export default function Quoting() {
                                 </button>
                                 <button
                                   aria-label="Remove line"
-                                  className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                                  className="btn-ghost h-10 w-10 p-0 hover:text-danger hover:bg-danger/10"
                                   onClick={() => removeItem(i)}
                                 >
                                   <Trash2 size={14} />
@@ -1660,6 +1685,7 @@ export default function Quoting() {
                               removeCustomColumn(col.key);
                             }}
                             title="Remove"
+                            aria-label={`Remove ${col.label} field`}
                           >
                             ×
                           </button>
@@ -1685,6 +1711,7 @@ export default function Quoting() {
                           <button
                             key={lbl}
                             type="button"
+                            aria-pressed={active}
                             onClick={() =>
                               setForm({
                                 ...form,
@@ -1695,9 +1722,9 @@ export default function Quoting() {
                                   : 0,
                               })
                             }
-                            className={`flex-1 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
+                            className={`btn-ghost flex-1 ${
                               active
-                                ? "bg-background text-foreground shadow-sm"
+                                ? "bg-background text-foreground"
                                 : "text-brand-500 hover:text-ink"
                             }`}
                           >
@@ -1707,10 +1734,10 @@ export default function Quoting() {
                       })}
                     </div>
                     {(form.tax_rate || 0) > 0 && (
-                      <input
+                      <input aria-label="Document tax rate percent"
                         type="number"
                         className="input mt-2"
-                        placeholder={`${taxRegimeFor(form.currency).taxLabel} rate %`}
+                        placeholder={`${taxRegimeFor(form.currency, form.tax_country_code).taxLabel} rate %`}
                         value={form.tax_rate}
                         onChange={(e) =>
                           setForm({ ...form, tax_rate: numInput(e.target.value) })
@@ -1923,7 +1950,6 @@ export default function Quoting() {
                   <TemplateDesigner
                     onSave={(tpl) => {
                       setForm({ ...form, template: tpl.id });
-                      syncCustomTemplates().catch(() => {});
                       setTplNonce((n) => n + 1);
                       setDesigning(false);
                     }}
@@ -2114,7 +2140,7 @@ export default function Quoting() {
                   {previewPages > 1 && (
                     <div className="no-print flex items-center justify-center gap-2 mt-2">
                       <button
-                        className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                        className="btn-ghost disabled:opacity-40"
                         disabled={previewPage <= 1}
                         onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
                       >
@@ -2124,7 +2150,7 @@ export default function Quoting() {
                         Page {previewPage} / {previewPages}
                       </span>
                       <button
-                        className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                        className="btn-ghost disabled:opacity-40"
                         disabled={previewPage >= previewPages}
                         onClick={() => setPreviewPage((p) => Math.min(previewPages, p + 1))}
                       >
@@ -2133,63 +2159,14 @@ export default function Quoting() {
                     </div>
                   )}
 
-                  <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
-                      <button
-                        className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                          device === "desktop"
-                            ? "bg-primary-100 text-primary-700"
-                            : "text-brand-500 hover:text-ink"
-                        }`}
-                        onClick={() => setDevice("desktop")}
-                        aria-label="Desktop preview"
-                      >
-                        <Monitor size={15} />
-                      </button>
-                      <button
-                        className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                          device === "mobile"
-                            ? "bg-primary-100 text-primary-700"
-                            : "text-brand-500 hover:text-ink"
-                        }`}
-                        onClick={() => setDevice("mobile")}
-                        aria-label="Mobile preview"
-                      >
-                        <Smartphone size={15} />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                        onClick={() => setZoom((z) => Math.max(50, z - 10))}
-                        aria-label="Zoom out"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span className="text-xs font-semibold text-brand-500 w-10 text-center">
-                        {zoom}%
-                      </span>
-                      <button
-                        className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                        onClick={() => setZoom((z) => Math.min(150, z + 10))}
-                        aria-label="Zoom in"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        className="btn-ghost text-xs"
-                        onClick={() => commit()}
-                        disabled={saving}
-                      >
-                        <Save size={14} /> Save
-                      </button>
-                      <button className="btn-primary text-xs" onClick={downloadPdf}>
-                        <Download size={14} /> PDF
-                      </button>
-                    </div>
-                  </div>
+                  <DocumentPreviewControls device={device} onDeviceChange={setDevice} zoom={zoom} onZoomChange={setZoom}>
+                    <button className="btn-primary" onClick={() => commit()} disabled={saving}>
+                      <Save size={14} /> {saving ? "Saving…" : "Save"}
+                    </button>
+                    <button className="btn-ghost" onClick={downloadPdf}>
+                      <Download size={14} /> PDF
+                    </button>
+                  </DocumentPreviewControls>
                 </div>
               </div>
             }
@@ -2197,59 +2174,16 @@ export default function Quoting() {
 
           {/* Portaled out of <main>'s scrolling subtree - WebView2 half-paints
               a `fixed` overlay that stays inside it. */}
-          {viewOpen && createPortal(
-            <div
-              className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
-              onClick={() => setViewOpen(false)}
-            >
-              <div
-                className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border shadow-lg outline-none"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-lg font-semibold text-ink">
-                      {form.number || "Quotation preview"}
-                    </h2>
-                    <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
-                      Page {viewPage} of {viewPageCount}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {viewPageCount > 1 && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                          disabled={viewPage <= 1}
-                          onClick={() => setViewPage((p) => Math.max(1, p - 1))}
-                        >
-                          Prev
-                        </button>
-                        <span className="text-xs text-brand-500 font-medium w-16 text-center">
-                          {viewPage} / {viewPageCount}
-                        </span>
-                        <button
-                          className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                          disabled={viewPage >= viewPageCount}
-                          onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}
-                        >
-                          Next
-                        </button>
-                      </div>
-                    )}
-                    <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
-                      <Download size={14} /> PDF
-                    </button>
-                    <button
-                      onClick={() => setViewOpen(false)}
-                      className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
-                      aria-label="Close"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-auto p-6">
+          {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.number || "Quotation preview"} size="full">
+            <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+              {viewPageCount > 1 && <div className="flex flex-wrap items-center gap-2">
+              <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage(p => Math.max(1, p - 1))} aria-label="Back to previous preview page">Back</button>
+              <span className="text-xs text-muted-foreground tabular-nums">Page {viewPage} of {viewPageCount}</span>
+              <button className="btn-ghost" disabled={viewPage >= viewPageCount} onClick={() => setViewPage(p => Math.min(viewPageCount, p + 1))} aria-label="Next preview page">Next</button>
+            </div>}
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
+            </div>
+            <div className="min-w-0 overflow-auto">
                   <div className="mx-auto max-w-5xl">
                     <div
                       className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
@@ -2315,12 +2249,9 @@ export default function Quoting() {
                     </div>
                   </div>
                 </div>
-              </div>
-            </div>,
-            document.body
-          )}
+          </Modal>}
         </div>
-      </>
+      </fieldset>
     );
   }
 
@@ -2407,11 +2338,22 @@ export default function Quoting() {
         </div>
       </div>
 
+      {docsError && (
+        <div className="mb-4">
+          <ErrorBanner message="Could not refresh quotations. Displayed records may be incomplete." />
+          <button className="btn-ghost mt-2" disabled={docsLoading} onClick={() => void loadDocs()}>
+            {docsLoading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       <DataTable<QuotationSummary>
         pageSize={10}
         rows={filteredDocs}
+        loading={docsLoading}
         empty={
-          search ? "No quotes match your search" : "No quotes yet - create your first one"
+          docsError
+            ? "Quotations could not be loaded"
+            : search ? "No quotes match your search" : "No quotes yet - create your first one"
         }
         rowKey={(d) => d.id}
         onRowClick={(d) => editQuote(d.id)}
@@ -2539,7 +2481,7 @@ export default function Quoting() {
                     e.stopPropagation();
                     convertRow(d);
                   }}
-                  className="text-[12px] px-2 h-7 rounded-md border border-border hover:bg-background text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+                    className="btn-ghost"
                   title="Convert to invoice"
                 >
                   <FileSignature size={13} /> Convert
@@ -2698,7 +2640,7 @@ function CustomerModal({
     <Modal open={open} onClose={onClose} title="Add Customer">
       <div className="space-y-3">
         <Field label="Company / Legal Name">
-          <input
+          <input aria-label="Company name"
             className="input"
             placeholder="Gulf Line Trading LLC"
             value={f.company}
@@ -2707,14 +2649,14 @@ function CustomerModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Contact Name">
-            <input
+            <input aria-label="Contact name"
               className="input"
               value={f.name}
               onChange={(e) => setF({ ...f, name: e.target.value })}
             />
           </Field>
           <Field label="Phone">
-            <input
+            <input aria-label="Phone number"
               className="input"
               value={f.phone}
               onChange={(e) => setF({ ...f, phone: e.target.value })}
@@ -2731,14 +2673,14 @@ function CustomerModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Email">
-            <input
+            <input aria-label="Email address"
               className="input"
               value={f.email}
               onChange={(e) => setF({ ...f, email: e.target.value })}
             />
           </Field>
-          <Field label={taxRegimeFor(getDisplayCurrency()).trnLabel}>
-            <input
+          <Field label="Tax registration ID">
+            <input aria-label="Tax registration number"
               className="input"
               value={f.trn}
               onChange={(e) => setF({ ...f, trn: e.target.value })}
@@ -2844,4 +2786,3 @@ function InventoryImportModal({
     </Modal>
   );
 }
-

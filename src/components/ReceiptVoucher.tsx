@@ -19,6 +19,7 @@ function darken(hex: string | undefined, k = 0.72): string {
 }
 
 export interface ReceiptVoucherProps {
+  taxCountry?: string | null;
   sellerName?: string | null;
   sellerAddress?: string | null;
   sellerTrn?: string | null;
@@ -38,6 +39,7 @@ export interface ReceiptVoucherProps {
 }
 
 export default function ReceiptVoucher({
+  taxCountry,
   sellerName,
   sellerAddress,
   sellerTrn,
@@ -81,7 +83,7 @@ export default function ReceiptVoucher({
         )}
         {sellerTrn && (
           <p className="text-[11px] mt-0.5" style={{ color: accent }}>
-            {taxRegimeFor(currency).trnLabel}: {sellerTrn}
+            {taxRegimeFor(currency, taxCountry).trnLabel}: {sellerTrn}
           </p>
         )}
       </div>

@@ -13,8 +13,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "./InputOTP";
 import { useAuth } from "../lib/auth";
 import { mfaFactor, mfaVerify } from "../lib/mfa";
 
-const CTA =
-  "flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 text-sm font-semibold text-[#1A1206] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-60 disabled:hover:brightness-100";
+const CTA = "btn-primary h-11 w-full";
 
 export default function TwoFactorGate() {
   const { signOut, refreshMfaPending } = useAuth();

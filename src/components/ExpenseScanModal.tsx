@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Upload, Sparkles, Loader2, Receipt } from "lucide-react";
-import { Modal } from "./ui";
+import { Modal, Field } from "./ui";
 import { SelectMenu } from "./ui-menu";
 import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";
@@ -96,7 +96,7 @@ export default function ExpenseScanModal({
       title="Scan a receipt with AI"
     >
       {!data ? (
-        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-brand-300 px-6 py-10 text-center transition-colors hover:bg-brand-50 dark:hover:bg-white/5">
+        <label className="relative flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center transition-colors hover:bg-hover focus-within:ring-2 focus-within:ring-ring">
           {busy ? (
             <Loader2 size={28} className="animate-spin text-primary-500" />
           ) : (
@@ -113,7 +113,8 @@ export default function ExpenseScanModal({
           <input
             type="file"
             accept="application/pdf,image/*"
-            className="hidden"
+            className="sr-only"
+            aria-label="Upload receipt PDF or image"
             disabled={busy}
             onChange={(e) => void onFile(e.target.files?.[0])}
           />
@@ -124,43 +125,44 @@ export default function ExpenseScanModal({
             <Receipt size={14} /> {fileName} - review &amp; save.
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Labeled label="Vendor">
+            <Field label="Vendor">
               <input
                 className="input"
                 value={data.vendor ?? ""}
                 onChange={(e) => setData({ ...data, vendor: e.target.value })}
               />
-            </Labeled>
-            <Labeled label="Amount">
+            </Field>
+            <Field label="Amount">
               <input
                 className="input"
                 value={String(data.amount ?? "")}
                 onChange={(e) => setData({ ...data, amount: numInput(e.target.value) })}
               />
-            </Labeled>
-            <Labeled label="Date">
+            </Field>
+            <Field label="Date">
               <DateField
                 value={data.date ?? ""}
                 onChange={(v) => setData({ ...data, date: v })}
                 clearable={false}
               />
-            </Labeled>
-            <Labeled label="Category">
+            </Field>
+            <Field label="Category">
               <SelectMenu
+                ariaLabel="Category"
                 value={data.category || "Other"}
                 onChange={(v) => setData({ ...data, category: v })}
                 options={CATEGORIES.map((c) => ({ value: c, label: c }))}
               />
-            </Labeled>
+            </Field>
           </div>
-          <Labeled label="Note">
+          <Field label="Note">
             <input
               className="input"
               value={data.description ?? ""}
               onChange={(e) => setData({ ...data, description: e.target.value })}
             />
-          </Labeled>
-          <div className="flex justify-end gap-2 pt-1">
+          </Field>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
             <button className="btn-ghost" onClick={reset}>
               Scan another
             </button>
@@ -176,14 +178,5 @@ export default function ExpenseScanModal({
         </div>
       )}
     </Modal>
-  );
-}
-
-function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="field">
-      <span className="label">{label}</span>
-      {children}
-    </div>
   );
 }

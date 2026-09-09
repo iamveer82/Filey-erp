@@ -1,5 +1,5 @@
+import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -13,9 +13,6 @@ import {
   Pencil,
   Copy,
   Maximize2,
-  Monitor,
-  Smartphone,
-  Minus,
   Stamp,
   PenTool,
   CreditCard,
@@ -60,6 +57,7 @@ import {
   type DocFormats,
 } from "../lib/numberFormat";
 import FitPreview from "../components/FitPreview";
+import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
 import ColorPicker from "../components/ColorPicker";
@@ -147,8 +145,7 @@ function blankForm(
   existing: string[] = [],
   formats?: DocFormats
 ): Form {
-  // Same rule as invoicing: new POs adopt the active display currency and its
-  // tax regime (INR → GST, AED → VAT).
+  // New POs use the display currency; company country controls tax independently.
   const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     po_number: pickDocNumber("purchase_order", existing, formats),
@@ -159,6 +156,7 @@ function blankForm(
     accent: c.default_accent || "#222222",
     currency,
     seller_name: c.name,
+    tax_country_code: c.country_code,
     seller_address: c.address,
     seller_trn: c.trn,
     seller_email: c.email,
@@ -174,7 +172,7 @@ function blankForm(
     expected_date: undefined,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days of invoice.",
-    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
+    tax_rate: c.tax_type === "None" ? 0 : defaultTaxRate(c.currency, c.default_tax_rate, c.country_code),
     discount: 0,
     items: [
       {
@@ -308,6 +306,7 @@ export default function PurchaseOrders() {
                 return {
                   ...prev,
                   seller_name: c.name,
+    tax_country_code: c.country_code,
                   seller_address: c.address ?? prev.seller_address,
                   seller_trn: c.trn ?? prev.seller_trn,
                   seller_email: c.email ?? prev.seller_email,
@@ -664,7 +663,7 @@ export default function PurchaseOrders() {
                 <button
                   aria-label="Record payment"
                   title="Record payment"
-                  className="text-brand-500 hover:text-primary-700 hover:bg-brand-50 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                  className="btn-ghost h-10 w-10 p-0"
                   onClick={() => setPayFor(r)}
                 >
                   <CreditCard size={15} />
@@ -673,7 +672,7 @@ export default function PurchaseOrders() {
                   <button
                     aria-label="Receive stock"
                     title="Receive into inventory"
-                    className="text-success hover:bg-success/10 rounded-lg p-1.5 cursor-pointer transition-colors duration-200"
+                    className="btn-ghost h-10 w-10 p-0 hover:text-success hover:bg-success/10"
                     onClick={() => receiveRow(r, confirm, toast, loadRows)}
                   >
                     <PackageCheck size={15} />
@@ -795,6 +794,8 @@ function poDocToForm(
     accent: po.accent || company?.default_accent || "#222222",
     currency: po.currency || company?.currency || "AED",
     seller_name: po.seller_name || company?.name || "",
+    tax_country_code: po.tax_country_code,
+    fx_rate: po.fx_rate,
     seller_address: po.seller_address || company?.address,
     seller_trn: po.seller_trn || company?.trn,
     seller_email: po.seller_email || company?.email,
@@ -919,6 +920,7 @@ function Editor({
   const exportRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [previewPage, setPreviewPage] = useState(1);
+  const [viewAll, setViewAll] = useState(false);
   const [designing, setDesigning] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
@@ -949,8 +951,8 @@ function Editor({
   const docItems = useMemo(() => form.items.map(toDocItem), [form.items]);
   const pages = useMemo(() => paginateItems(docItems), [docItems]);
   const totals = useMemo(
-    () => docTotals(docItems, 0, 0, form.unit_price_formula),
-    [docItems, form.unit_price_formula]
+    () => docTotals(docItems, form.discount ?? 0, form.tax_rate ?? 0, form.unit_price_formula),
+    [docItems, form.discount, form.tax_rate, form.unit_price_formula]
   );
 
   useEffect(() => {
@@ -1118,9 +1120,7 @@ function Editor({
       // Remove the in-memory aliases that don't exist on the DB model.
       delete (payload as any).customColumns;
 
-      // The payload carries `total` (from totals.total above) because pos.save
-      // trusts a passed total and only falls back to qty × unit_cost when none
-      // is given — which is what makes formula-priced lines persist correctly.
+      // The API recalculates the same formula-aware amount from the saved lines.
       const id = await pos.save(payload);
       setForm({ ...form, id });
       await onSaved();
@@ -1203,10 +1203,14 @@ function Editor({
     }
   };
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     const el = exportRef.current || poRef.current;
-    if (el) downloadElementAsPdf(el, form.po_number || "po");
-    else window.print();
+    try {
+      if (el) await downloadElementAsPdf(el, form.po_number || "po");
+      else window.print();
+    } catch (error) {
+      toast.error(`Could not export purchase order: ${errMsg(error)}`);
+    }
   };
 
   // Keyboard shortcuts
@@ -1240,6 +1244,7 @@ function Editor({
       number: form.po_number,
       logo: form.logo,
       seller_name: form.seller_name,
+      tax_country_code: form.tax_country_code,
       seller_address: form.seller_address,
       seller_trn: form.seller_trn,
       seller_email: form.seller_email,
@@ -1318,28 +1323,22 @@ function Editor({
   return (
     <div>
       {/* Header bar */}
-      <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
-        <div className="flex items-start gap-3">
+      <PageHeader
+        title={form.id ? "Edit Purchase Order" : "New Purchase Order"}
+        subtitle="Create and share purchase orders with your suppliers"
+        action={<div className="no-print flex items-center gap-2 flex-wrap">
           <button
-            className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
+            className="btn-ghost shrink-0"
             onClick={onBack}
             aria-label="Back"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={15} /> Back
           </button>
-          <div>
-            <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Purchase Order</h1>
-            <p className="text-sm text-brand-500 mt-0.5">
-              Create and share purchase orders with your suppliers
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
           <Badge tone={statusTone(form.status)}>{form.status}</Badge>
           {!form.id && <span className="text-xs font-medium text-brand-400">Unsaved</span>}
 
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Maximize2 size={15} /> View
+            <Maximize2 size={15} /> Preview
           </button>
           <button className="btn-ghost" onClick={downloadPdf} title="Download PDF (Ctrl+P)">
             <Download size={15} /> PDF
@@ -1347,7 +1346,7 @@ function Editor({
           <button className="btn-ghost" onClick={duplicate}>
             <Copy size={15} /> Duplicate
           </button>
-          <button className="btn-ghost" onClick={handleSave} disabled={saving}>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
           <button
@@ -1360,13 +1359,13 @@ function Editor({
 
 
           {form.status === "draft" && (
-            <button className="btn-primary" onClick={() => setStatus("sent")} disabled={saving}>
+            <button className="btn-ghost" onClick={() => setStatus("sent")} disabled={saving}>
               <Send size={15} /> Mark sent
             </button>
           )}
           {form.status === "sent" && (
             <>
-              <button className="btn-primary" onClick={handleReceive} disabled={saving}>
+              <button className="btn-ghost" onClick={handleReceive} disabled={saving}>
                 <Truck size={15} /> Mark received
               </button>
               <button className="btn-ghost" onClick={() => setStatus("cancelled")} disabled={saving}>
@@ -1401,8 +1400,8 @@ function Editor({
               }}
             />
           )}
-        </div>
-      </div>
+        </div>}
+      />
 
       <SupplierQuickAdd
         open={supplierModal}
@@ -1427,8 +1426,20 @@ function Editor({
         left={
           <div className="no-print space-y-4">
             {/* 1 · Template */}
-            <Step n={1} title="Choose Template">
+            <Step n={1} title="Choose Template" subtitle="Select a template for your purchase order" action={
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-ghost text-xs" onClick={() => setViewAll((value) => !value)}>
+                  {viewAll ? "Show less" : "View all templates"}
+                </button>
+                <button className="btn-ghost text-xs" onClick={() => setDesigning(true)}>
+                  <Plus size={13} /> Create template
+                </button>
+              </div>
+            }>
               <DocTemplateGallery
+                              hideHeader
+                              viewAll={viewAll}
+                              onViewAllToggle={setViewAll}
                               key={tplRev}
                               value={form.template}
                               onChange={(id) => set("template", id)}
@@ -1468,6 +1479,7 @@ function Editor({
                         className="btn-ghost shrink-0"
                         onClick={() => setSupplierModal(true)}
                         title="Add supplier"
+                        aria-label="Add supplier"
                       >
                         <Plus size={15} />
                       </button>
@@ -1500,7 +1512,7 @@ function Editor({
                       />
                       <input
                         className="input"
-                        placeholder={taxRegimeFor(form.currency).trnLabel}
+                        placeholder={taxRegimeFor(form.currency, form.tax_country_code).trnLabel}
                         value={form.supplier_trn ?? ""}
                         onChange={(e) => set("supplier_trn", e.target.value)}
                       />
@@ -1536,10 +1548,14 @@ function Editor({
                       onChange={(v) => set("expected_date", v)}
                     />
                   </Field>
-                  <Field label="Currency">
+                  <Field label="Tax country">
+                  <SelectMenu value={form.tax_country_code || ""} onChange={v => setForm({ ...form, tax_country_code: v || undefined, template:v && v !== "AE" && /(^|-)uae($|-)/.test(form.template || "") ? "minimal" : form.template })}
+                    options={[{ value:"", label:"Legacy currency defaults" }, ...COUNTRY_OPTIONS]} />
+                </Field>
+                <Field label="Currency">
                     <SelectMenu
                       value={form.currency || "AED"}
-                      onChange={(v) => set("currency", v)}
+                      onChange={(v) => setForm({ ...form, currency:v, fx_rate:null })}
                       options={CURRENCIES.map((c) => ({
                         value: c.code,
                         label: `${c.code} - ${c.name}`,
@@ -1560,6 +1576,9 @@ function Editor({
                   Multiply field with unit cost
                   <button
                     type="button"
+                    role="switch"
+                    aria-label="Multiply custom field with unit cost"
+                    aria-checked={!!form.unit_price_formula}
                     onClick={() =>
                       set(
                         "unit_price_formula",
@@ -1645,6 +1664,7 @@ function Editor({
                               removeCustomColumn(col.key);
                             }}
                             title="Remove column"
+                            aria-label={`Remove ${col.label} column`}
                           >
                             ×
                           </button>
@@ -1652,7 +1672,7 @@ function Editor({
                       ))}
                       <th className="py-2 px-2 w-32 text-right">Unit Cost</th>
                       {(form.tax_rate || 0) > 0 && (
-                        <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency).taxLabel}</th>
+                        <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel}</th>
                       )}
                       <th className="py-2 px-2 w-28 text-right">Amount</th>
                       <th className="w-8" />
@@ -1747,7 +1767,7 @@ function Editor({
                                     : "Insert page break before this item"
                               }
                               disabled={i === 0}
-                              className={`rounded-lg p-1.5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                              className={`btn-ghost h-10 w-10 p-0 disabled:opacity-30 ${
                                 it.pageBreakBefore
                                   ? "text-primary-700 bg-primary-100"
                                   : "text-brand-400 hover:text-ink hover:bg-brand-50 cursor-pointer"
@@ -1758,7 +1778,7 @@ function Editor({
                             </button>
                             <button
                               aria-label="Remove line"
-                              className="text-brand-500 hover:text-danger hover:bg-danger/10 rounded-lg p-1.5 cursor-pointer transition-colors"
+                              className="btn-ghost h-10 w-10 p-0 hover:text-danger hover:bg-danger/10"
                               onClick={() => removeItem(i)}
                             >
                               <Trash2 size={14} />
@@ -1810,6 +1830,7 @@ function Editor({
                           removeCustomColumn(col.key);
                         }}
                         title="Remove"
+                        aria-label={`Remove ${col.label} field`}
                       >
                         ×
                       </button>
@@ -1980,7 +2001,7 @@ function Editor({
                     Tip: set this once in Settings → Company Details to auto-fill every PO.
                   </p>
                   <div className="space-y-2 pt-2">
-                    <Field label={`${taxRegimeFor(form.currency).taxLabel} rate %`}>
+                    <Field label={`${taxRegimeFor(form.currency, form.tax_country_code).taxLabel} rate %`}>
                       <input
                         type="number"
                         className="input"
@@ -2095,7 +2116,7 @@ function Editor({
               {previewPages > 1 && (
                 <div className="no-print flex items-center justify-center gap-2 mt-2">
                   <button
-                    className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                    className="btn-ghost disabled:opacity-40"
                     disabled={previewPage <= 1}
                     onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
                   >
@@ -2105,7 +2126,7 @@ function Editor({
                     Page {previewPage} / {previewPages}
                   </span>
                   <button
-                    className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                    className="btn-ghost disabled:opacity-40"
                     disabled={previewPage >= previewPages}
                     onClick={() => setPreviewPage((p) => Math.min(previewPages, p + 1))}
                   >
@@ -2114,59 +2135,14 @@ function Editor({
                 </div>
               )}
 
-              <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-                <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
-                  <button
-                    className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                      device === "desktop"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-brand-500 hover:text-ink"
-                    }`}
-                    onClick={() => setDevice("desktop")}
-                    aria-label="Desktop preview"
-                  >
-                    <Monitor size={15} />
-                  </button>
-                  <button
-                    className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                      device === "mobile"
-                        ? "bg-primary-100 text-primary-700"
-                        : "text-brand-500 hover:text-ink"
-                    }`}
-                    onClick={() => setDevice("mobile")}
-                    aria-label="Mobile preview"
-                  >
-                    <Smartphone size={15} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                    onClick={() => setZoom((z) => Math.max(50, z - 10))}
-                    aria-label="Zoom out"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <span className="text-xs font-semibold text-brand-500 w-10 text-center">
-                    {zoom}%
-                  </span>
-                  <button
-                    className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                    onClick={() => setZoom((z) => Math.min(150, z + 10))}
-                    aria-label="Zoom in"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="btn-ghost text-xs" onClick={handleSave} disabled={saving}>
-                    <Save size={14} /> Save
-                  </button>
-                  <button className="btn-primary text-xs" onClick={downloadPdf}>
-                    <Download size={14} /> PDF
-                  </button>
-                </div>
-              </div>
+              <DocumentPreviewControls device={device} onDeviceChange={setDevice} zoom={zoom} onZoomChange={setZoom}>
+                    <button className="btn-primary" onClick={handleSave} disabled={saving}>
+                      <Save size={14} /> {saving ? "Saving…" : "Save"}
+                    </button>
+                    <button className="btn-ghost" onClick={downloadPdf}>
+                      <Download size={14} /> PDF
+                    </button>
+                  </DocumentPreviewControls>
             </div>
           </div>
         }
@@ -2248,59 +2224,16 @@ function Editor({
 
       {/* Full-screen view modal. Portaled out of <main>'s scrolling subtree —
           WebView2 half-paints a `fixed` overlay that stays inside it. */}
-      {viewOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
-          onClick={() => setViewOpen(false)}
-        >
-          <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border outline-none shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">
-              <div className="flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-ink">
-                  {form.po_number || "PO preview"}
-                </h2>
-                <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
-                  Page {viewPage} of {viewPageCount}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {viewPageCount > 1 && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                      disabled={viewPage <= 1}
-                      onClick={() => setViewPage((p) => Math.max(1, p - 1))}
-                    >
-                      Prev
-                    </button>
-                    <span className="text-xs text-brand-500 font-medium w-16 text-center">
-                      {viewPage} / {viewPageCount}
-                    </span>
-                    <button
-                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                      disabled={viewPage >= viewPageCount}
-                      onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
-                  <Download size={14} /> PDF
-                </button>
-                <button
-                  onClick={() => setViewOpen(false)}
-                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
-                  aria-label="Close"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+      {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.po_number || "PO preview"} size="full">
+            <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+              {viewPageCount > 1 && <div className="flex flex-wrap items-center gap-2">
+              <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage(p => Math.max(1, p - 1))} aria-label="Back to previous preview page">Back</button>
+              <span className="text-xs text-muted-foreground tabular-nums">Page {viewPage} of {viewPageCount}</span>
+              <button className="btn-ghost" disabled={viewPage >= viewPageCount} onClick={() => setViewPage(p => Math.min(viewPageCount, p + 1))} aria-label="Next preview page">Next</button>
+            </div>}
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
             </div>
-            <div className="flex-1 overflow-auto p-6">
+            <div className="min-w-0 overflow-auto">
               <div className="mx-auto max-w-5xl">
                 <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]" data-no-i18n dir="ltr">
                   <div style={{ position: "relative", minHeight: 1059 }}>
@@ -2327,10 +2260,7 @@ function Editor({
                 </div>
               </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </Modal>}
     </div>
   );
 }
@@ -2501,7 +2431,7 @@ function SupplierQuickAdd({
             <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
-        <Field label={taxRegimeFor(getDisplayCurrency()).trnLabel}>
+        <Field label="Tax registration ID">
           <input
             className="input"
             value={trn}
@@ -2598,19 +2528,20 @@ function PoPaymentsModal({
         </div>
       </div>
 
-      <div className="flex items-end gap-2 mb-4 p-3 bg-brand-50 rounded-xl">
+      <div className="flex flex-wrap items-end gap-3 mb-4 p-3 bg-muted rounded-xl">
         <div className="flex-1">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Amount</label>
+          <label htmlFor="po-payment-amount" className="label">Amount</label>
           <input
+            id="po-payment-amount"
             type="number"
             min={0}
-            className="input tabular-nums"
+            className="input tabular-nums min-w-28"
             value={amount || ""}
             onChange={(e) => setAmount(Number(e.target.value) || 0)}
           />
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Method</label>
+          <label className="label">Method</label>
           <SelectMenu
             ariaLabel="Payment method"
             value={method}
@@ -2624,7 +2555,7 @@ function PoPaymentsModal({
           />
         </div>
         <div className="w-32">
-          <label className="text-[10px] font-semibold text-brand-400 block mb-1">Date</label>
+          <label className="label">Date</label>
           <DateField value={paidAt} onChange={setPaidAt} clearable={false} />
         </div>
         <button className="btn-primary shrink-0" disabled={busy || amount <= 0} onClick={add}>
@@ -2653,7 +2584,7 @@ function PoPaymentsModal({
                 <td className="py-2">
                   <button
                     aria-label="Remove payment"
-                    className="text-danger hover:bg-danger/10 rounded p-1 cursor-pointer"
+                    className="btn-ghost h-10 w-10 p-0 hover:text-danger hover:bg-danger/10"
                     onClick={() => remove(p.id)}
                   >
                     <Trash2 size={13} />

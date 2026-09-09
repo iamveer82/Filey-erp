@@ -181,8 +181,8 @@ export default function People() {
         <MetricCard
           label="On Leave"
           value={num(sum?.on_leave ?? 0)}
-          change={sum?.on_leave ? "Absent" : "All present"}
-          changeTone={sum?.on_leave ? "warn" : "up"}
+          change={emps.length === 0 ? "No employees yet" : sum?.on_leave ? "Leave recorded today" : "No leave recorded today"}
+          changeTone={sum?.on_leave ? "warn" : "neutral"}
         />
         <MetricCard
           label="Monthly Payroll"
@@ -451,7 +451,7 @@ export default function People() {
                 footer: (
                   <div className="mt-4 pt-4 border-t border-border flex flex-wrap justify-end gap-2">
                     <button
-                      className="btn-secondary"
+                      className="btn-ghost"
                       onClick={() => {
                         const emp = quickViewFor;
                         setQuickViewFor(null);
@@ -461,7 +461,7 @@ export default function People() {
                       <CalendarOff size={14} /> Mark leave days
                     </button>
                     <button
-                      className="btn-secondary"
+                      className="btn-ghost"
                       onClick={() => {
                         const emp = quickViewFor;
                         setQuickViewFor(null);
@@ -510,8 +510,10 @@ function EmployeeModal({
   const { toast } = useUI();
   const [f, setF] = useState(blankEmployeeForm);
   const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
   useEffect(() => {
     if (!open) return;
+    setTouched(false);
     setF(
       employee
         ? {
@@ -533,10 +535,11 @@ function EmployeeModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       title={employee ? `Edit ${employee.name}` : "Add person"}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Employee Code">
           <input
             className="input"
@@ -544,18 +547,23 @@ function EmployeeModal({
             onChange={(e) => setF({ ...f, employee_code: e.target.value })}
           />
         </Field>
-        <Field label="Full Name *">
+        <Field label="Full name *">
           <input
-            className={cn("input", !f.name.trim() && "border-danger")}
+            required
+            onBlur={() => setTouched(true)}
+            aria-invalid={touched && !f.name.trim()}
+            aria-describedby={touched && !f.name.trim() ? "employee-name-error" : undefined}
+            className={cn("input", touched && !f.name.trim() && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
-          {!f.name.trim() && (
-            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+          {touched && !f.name.trim() && (
+            <p id="employee-name-error" className="text-xs text-danger mt-1">Name is required.</p>
           )}
         </Field>
         <Field label="Email">
           <input
+            type="email"
             className="input"
             value={f.email}
             onChange={(e) => setF({ ...f, email: e.target.value })}
@@ -563,6 +571,7 @@ function EmployeeModal({
         </Field>
         <Field label="Phone">
           <input
+            type="tel"
             className="input"
             value={f.phone}
             onChange={(e) => setF({ ...f, phone: e.target.value })}
@@ -606,7 +615,7 @@ function EmployeeModal({
         <summary className="cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground">
           Payroll (WPS) details - optional
         </summary>
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Labour card no. (14 digits)">
             <input
               className="input"
@@ -625,7 +634,7 @@ function EmployeeModal({
               onChange={(e) => setF({ ...f, bank_routing_code: e.target.value })}
             />
           </Field>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Salary IBAN">
               <input
                 className="input"
@@ -637,7 +646,7 @@ function EmployeeModal({
           </div>
         </div>
       </details>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -645,6 +654,7 @@ function EmployeeModal({
           className="btn-primary"
           disabled={!f.name.trim() || saving}
           onClick={async () => {
+            if (saving) return;
             setSaving(true);
             try {
               const fields = {
@@ -672,9 +682,10 @@ function EmployeeModal({
             }
           }}
         >
-          {saving ? "Saving…" : employee ? "Save Changes" : "Save Employee"}
+          {saving ? "Saving…" : employee ? "Save changes" : "Create employee"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -696,6 +707,8 @@ function LeaveModal({
   }, [employee]);
   if (!employee) return null;
   const save = async () => {
+    if (busy) return;
+    if (!dates.length) return;
     setBusy(true);
     try {
       for (const d of dates) {
@@ -711,7 +724,8 @@ function LeaveModal({
     }
   };
   return (
-    <Modal open={!!employee} onClose={onClose} title={`Mark leave - ${employee.name}`}>
+    <Modal open={!!employee} onClose={() => { if (!busy) onClose(); }} title={`Mark leave - ${employee.name}`}>
+      <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>
       <MultiDatePicker value={dates} onChange={setDates} onConfirm={save} />
       <p className="text-xs text-brand-400 mt-3">
         {dates.length === 0
@@ -721,6 +735,10 @@ function LeaveModal({
       {busy && (
         <p className="text-xs font-medium text-brand-500 mt-2">Saving attendance…</p>
       )}
+      <div className="mt-5 flex justify-end border-t border-border pt-4">
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+      </fieldset>
     </Modal>
   );
 }

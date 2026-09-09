@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   Plus,
   Trash2,
@@ -13,11 +12,10 @@ import {
   MapPin,
   Users,
   Maximize2,
-  X,
 } from "lucide-react";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { fmtDate, numInput, todayYmd } from "../lib/format";
+import { fmtDate, numInput, todayYmd, errMsg } from "../lib/format";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -25,6 +23,7 @@ import {
 } from "../lib/numberFormat";
 import {
   PageHeader,
+  Modal,
   MetricCard,
   DataTable,
   Badge,
@@ -51,20 +50,14 @@ import {
 import { ResizablePanels } from "../components/ResizablePanels";
 import { StampSignatureLayer } from "../components/StampSignature";
 import ColorPicker from "../components/ColorPicker";
-import TemplateDesigner, {
-  loadCustomTemplates,
-  deleteCustomTemplate,
-  syncCustomTemplates,
-  type CustomTemplate,
-} from "../components/TemplateDesigner";
+import TemplateDesigner from "../components/TemplateDesigner";
+import { deleteCustomTemplate, useCustomTemplates } from "../lib/customTemplates";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { tools, billing, crm, type CrmCustomer, type CompanyProfile } from "../lib/api";
+import { billing, crm, type CrmCustomer, type CompanyProfile } from "../lib/api";
 import {
   DC_TYPES,
   DC_STATUSES,
-  DC_STORAGE_KEY,
-  DC_SETTING_KEY,
   loadChallans,
   saveChallans,
   blankChallanForm,
@@ -81,7 +74,7 @@ import CompanyModal from "../components/CompanyModal";
 
 const DC_TEMPLATES = [
   { id: "standard", name: "Standard" },
-  { id: "uae-delivery", name: "UAE Delivery" },
+  { id: "uae-delivery", name: "Professional" },
   { id: "minimal", name: "Minimal" },
   { id: "corporate", name: "Corporate" },
 ];
@@ -143,28 +136,22 @@ function formFromRecord(r: DcRecord, existing: string[]): DcForm {
 const loadDcs = loadChallans;
 const saveDcs = saveChallans;
 
-/** Pull challans saved on the user's other devices; remote wins when present. */
-async function syncDcs(): Promise<DcRecord[]> {
-  try {
-    const settings = await tools.settings();
-    const row = settings.find((s) => s.key === DC_SETTING_KEY);
-    if (row?.value) {
-      const remote: DcRecord[] = JSON.parse(row.value);
-      localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(remote));
-      return remote;
-    }
-  } catch (e) {
-    console.warn("Failed to sync delivery challans from server", e);
-    /* offline / not configured — fall back to local */
-  }
-  return loadDcs();
-}
-
 export default function DeliveryChallan() {
   const { toast, confirm } = useUI();
   const [records, setRecords] = useState<DcRecord[]>([]);
   const [form, setForm] = useState<DcForm | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const refresh = async () => {
+    try {
+      setRecords(await loadDcs());
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Could not load delivery challans.");
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     loadDocFormats()
       .then((f) => {
@@ -178,17 +165,14 @@ export default function DeliveryChallan() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
 
   useEffect(() => {
-    syncDcs().then((r) => {
-      setRecords(r);
-      setLoading(false);
-    });
+    void refresh();
     // CRM lookup only feeds the share actions' phone/email — stay silent on failure.
     crm
       .customers()
       .then(setCustomers)
       .catch(() => {});
   }, []);
-  useLiveSync(() => setRecords(loadDcs()));
+  useLiveSync(() => { void refresh(); });
 
   const del = async (r: DcRecord) => {
     const ok = await confirm({
@@ -198,10 +182,14 @@ export default function DeliveryChallan() {
       danger: true,
     });
     if (!ok) return;
-    const next = records.filter((x) => x.id !== r.id);
-    setRecords(next);
-    saveDcs(next);
-    toast.success("Deleted.");
+    try {
+      const next = (await loadDcs()).filter((x) => x.id !== r.id);
+      await saveDcs(next);
+      setRecords(next);
+      toast.success("Deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete challan.");
+    }
   };
 
   // ---- List-row actions (DEMO parity) ----
@@ -249,10 +237,10 @@ export default function DeliveryChallan() {
         setForm={setForm}
         onBack={() => {
           setForm(null);
-          setRecords(loadDcs());
+          void refresh();
         }}
-        onSave={() => {
-          const next = loadDcs();
+        onSave={async () => {
+          const next = await loadDcs();
           const existing = next.findIndex((r) => r.number === form.number);
           const record: DcRecord = {
             id: existing >= 0 ? next[existing].id : Date.now(),
@@ -271,7 +259,8 @@ export default function DeliveryChallan() {
           };
           if (existing >= 0) next[existing] = record;
           else next.push(record);
-          saveDcs(next);
+          await saveDcs(next);
+          setRecords(next);
           toast.success("Challan saved.");
         }}
       />
@@ -299,11 +288,18 @@ export default function DeliveryChallan() {
           <button
             className="btn-primary"
             onClick={() => setForm(blankDc(records.map((r) => r.number)))}
+            disabled={loading || !!loadError}
           >
             <Plus size={16} /> Assign driver
           </button>
         }
       />
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger/20 p-4 text-sm">
+          <span>{loadError}</span>
+          <button className="btn-ghost" onClick={() => { setLoading(true); void refresh(); }}>Retry</button>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-6">
         <MetricCard
           label="Challans"
@@ -553,25 +549,41 @@ function DcEditor({
   form: DcForm;
   setForm: (f: DcForm) => void;
   onBack: () => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
 }) {
   const { toast, confirm } = useUI();
   const dcRef = useRef<HTMLDivElement>(null);
   const [viewOpen, setViewOpen] = useState(false);
-  const downloadPdf = () => {
-    if (dcRef.current) {
-      const sheet = dcRef.current.closest(".invoice-print") as HTMLElement;
-      const el = sheet || dcRef.current;
-      // The preview root carries floating stamp/signature layers as extra
-      // child divs — without this the exporter splits them into junk pages.
-      el.dataset.pdfSingle = "true";
-      void downloadElementAsPdf(el, form.number || "challan");
-    } else window.print();
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const downloadPdf = async () => {
+    try {
+      if (dcRef.current) {
+        const sheet = dcRef.current.closest(".invoice-print") as HTMLElement;
+        const el = sheet || dcRef.current;
+        // The preview's floating stamp/signature layers belong to one sheet.
+        el.dataset.pdfSingle = "true";
+        await downloadElementAsPdf(el, form.number || "challan");
+      } else window.print();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not export delivery challan.");
+    }
   };
   // Save the record, then archive the challan PDF to My Files (deduped, best-effort).
   const handleSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     const el = (dcRef.current?.closest(".invoice-print") as HTMLElement) || dcRef.current;
-    onSave();
+    try {
+      await onSave();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save challan.");
+      return;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
     if (!el) return;
     try {
       el.dataset.pdfSingle = "true";
@@ -615,14 +627,7 @@ function DcEditor({
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [customTemplates, setCustomTemplates] =
-    useState<CustomTemplate[]>(loadCustomTemplates);
-  // Pull templates saved on the user's other devices (Supabase-backed).
-  useEffect(() => {
-    syncCustomTemplates()
-      .then(setCustomTemplates)
-      .catch(() => {});
-  }, []);
+  const { templates: customTemplates, error: templateError, reload: reloadTemplates } = useCustomTemplates();
   const allTemplates = [
     ...DC_TEMPLATES,
     ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
@@ -645,9 +650,11 @@ function DcEditor({
       }))
     )
       return;
-    setCustomTemplates(deleteCustomTemplate(id));
-    if (form.template === id) set("template", "standard");
-    toast.success("Template deleted.");
+    try {
+      await deleteCustomTemplate(id);
+      if (form.template === id) set("template", "standard");
+      toast.success("Template deleted.");
+    } catch (error) { toast.error("Could not delete template: " + errMsg(error)); }
   };
   useEffect(() => {
     if (!viewOpen) return;
@@ -674,31 +681,25 @@ function DcEditor({
 
   return (
     <div>
-      <div className="no-print flex items-start justify-between mb-6 gap-3 flex-wrap">
-        <div className="flex items-start gap-3">
+      <PageHeader
+        title={typeLabel}
+        subtitle="Create delivery challans, goods received notes & returns"
+        action={<div className="no-print flex items-center gap-2 flex-wrap">
           <button
-            className="rounded-lg p-2 text-brand-500 hover:bg-brand-100 transition-colors cursor-pointer mt-0.5"
+            className="btn-ghost shrink-0"
             onClick={onBack}
             aria-label="Back"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={15} /> Back
           </button>
-          <div>
-            <h1 className="text-[28px] leading-9 font-medium text-ink">{typeLabel}</h1>
-            <p className="text-sm text-brand-500 mt-0.5">
-              Create delivery challans, goods received notes & returns
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Maximize2 size={15} /> View
+            <Maximize2 size={15} /> Preview
           </button>
           <button className="btn-ghost" onClick={downloadPdf}>
             <Download size={15} /> PDF
           </button>
-          <button className="btn-ghost" onClick={handleSave}>
-            <Save size={15} /> Save
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
           <button
             className="btn-ghost"
@@ -707,8 +708,8 @@ function DcEditor({
           >
             <Building2 size={15} /> Company
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {company && (
         <CompanyModal
@@ -731,7 +732,8 @@ function DcEditor({
             <ResizablePanels
         left={
           <div className="no-print space-y-4">
-            
+          {templateError && <div role="alert" className="text-sm text-danger">Could not load templates: {templateError}<button type="button" className="btn-ghost ml-2" onClick={reloadTemplates}>Retry</button></div>}
+
           {/* Template */}
           <Step
             n={1}
@@ -768,6 +770,7 @@ function DcEditor({
                   <button
                     key={tpl.id}
                     onClick={() => applyTemplate(tpl.id)}
+                    aria-pressed={active}
                     className={`group relative shrink-0 w-28 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${active ? "border-primary-400 bg-primary-50" : "border-brand-200 bg-white hover:border-primary-300"}`}
                   >
                     {active && (
@@ -946,6 +949,7 @@ function DcEditor({
                       <td className="py-2 pr-2 text-brand-400">{i + 1}</td>
                       <td className="py-2 px-2">
                         <input
+                          aria-label={`Description for line ${i + 1}`}
                           className="input"
                           placeholder="Item description"
                           value={it.description}
@@ -954,6 +958,7 @@ function DcEditor({
                       </td>
                       <td className="py-2 px-2">
                         <input
+                          aria-label={`Quantity for line ${i + 1}`}
                           type="number"
                           className="input tabular-nums text-right"
                           value={it.qty || ""}
@@ -963,8 +968,8 @@ function DcEditor({
                       <td className="py-2 px-2">
                         {form.items.length > 1 && (
                           <button
-                            aria-label="Remove"
-                            className="text-danger hover:bg-danger/10 rounded-lg p-1 cursor-pointer"
+                            aria-label={`Remove line ${i + 1}`}
+                            className="btn-ghost h-10 w-10 p-0 hover:text-danger hover:bg-danger/10"
                             onClick={() => removeItem(i)}
                           >
                             <Trash2 size={14} />
@@ -1018,60 +1023,39 @@ function DcEditor({
               />
             </Field>
           </Step>
-        
+
           </div>
         }
         right={
           <div className="sticky top-4 space-y-4">
-            
+
           {designing && (
             <div className="mb-4">
               <TemplateDesigner
                 onSave={() => {
                   setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
                 }}
                 onClose={() => {
                   setDesigning(false);
-                  setCustomTemplates(loadCustomTemplates());
                 }}
               />
             </div>
           )}
           <DcPreview form={form} dcRef={dcRef} companyStampSig={companyStampSig} />
-        
+
           </div>
         }
       />
 
       {/* Portaled out of <main>'s scrolling subtree - WebView2 half-paints a
           `fixed` overlay that stays inside it. */}
-      {viewOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-ink/50 p-4"
-          onClick={() => setViewOpen(false)}
-        >
-          <div className="my-4 w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-white">{form.number}</h2>
-              <div className="flex items-center gap-2">
-                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
-                  <Download size={14} /> PDF
-                </button>
-                <button
-                  onClick={() => setViewOpen(false)}
-                  aria-label="Close"
-                  className="grid h-9 w-9 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+      {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.number || "Delivery challan preview"} size="3xl">
+            <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
             </div>
             <DcPreview form={form} companyStampSig={companyStampSig} />
-          </div>
-        </div>,
-        document.body
-      )}
+          </Modal>}
     </div>
   );
 }

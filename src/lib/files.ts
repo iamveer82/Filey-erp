@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sb, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
 import type { OutFile } from "./pdfTools";
+import { errMsg } from "./format";
+import { useLiveSync } from "./realtime";
 
 const fileToDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -148,42 +150,56 @@ export async function autoSaveDocument(
 
 export async function listFiles(): Promise<SavedFile[]> {
   const uid = await userId();
-  if (!uid || !isConfigured) return [];
-  const { data, error } = await sb()
-    .from("user_files")
-    .select("id,name,mime,size,storage_path,tool,folder_id,created_at")
-    .eq("owner", uid)
-    .order("created_at", { ascending: false });
-  if (error || !data) return [];
-  return data.map((r) => ({
-    id: r.id as string,
-    name: r.name as string,
-    mime: r.mime as string,
-    size: Number(r.size),
-    storagePath: r.storage_path as string,
-    tool: (r.tool as string) ?? null,
-    folderId: (r.folder_id as string) ?? null,
-    createdAt: new Date(r.created_at as string).getTime(),
-  }));
+  if (!uid || !isConfigured) throw new Error("Sign in to access your files.");
+  const files: SavedFile[] = [];
+  for (let offset = 0; ; offset += 500) {
+    let query = sb()
+      .from("user_files")
+      .select("id,name,mime,size,storage_path,tool,folder_id,created_at")
+      .eq("owner", uid)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true });
+    if (!isLocalMode()) query = query.range(offset, offset + 499);
+    const { data, error } = await query;
+    if (error) throw error;
+    files.push(...(data ?? []).map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      mime: r.mime as string,
+      size: Number(r.size),
+      storagePath: r.storage_path as string,
+      tool: (r.tool as string) ?? null,
+      folderId: (r.folder_id as string) ?? null,
+      createdAt: new Date(r.created_at as string).getTime(),
+    })));
+    if (isLocalMode() || (data ?? []).length < 500) return files;
+  }
 }
 
 /* ---------------- User folders ---------------- */
 
 export async function listFolders(): Promise<UserFolder[]> {
   const uid = await userId();
-  if (!uid || !isConfigured) return [];
-  const { data, error } = await sb()
-    .from("user_folders")
-    .select("id,name,parent_id,created_at")
-    .eq("owner", uid)
-    .order("name", { ascending: true });
-  if (error || !data) return [];
-  return data.map((r) => ({
-    id: r.id as string,
-    name: r.name as string,
-    parentId: (r.parent_id as string) ?? null,
-    createdAt: new Date(r.created_at as string).getTime(),
-  }));
+  if (!uid || !isConfigured) throw new Error("Sign in to access your folders.");
+  const folders: UserFolder[] = [];
+  for (let offset = 0; ; offset += 500) {
+    let query = sb()
+      .from("user_folders")
+      .select("id,name,parent_id,created_at")
+      .eq("owner", uid)
+      .order("name", { ascending: true })
+      .order("id", { ascending: true });
+    if (!isLocalMode()) query = query.range(offset, offset + 499);
+    const { data, error } = await query;
+    if (error) throw error;
+    folders.push(...(data ?? []).map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      parentId: (r.parent_id as string) ?? null,
+      createdAt: new Date(r.created_at as string).getTime(),
+    })));
+    if (isLocalMode() || (data ?? []).length < 500) return folders;
+  }
 }
 
 export async function createFolder(
@@ -395,23 +411,40 @@ export function useFiles() {
   const [files, setFiles] = useState<SavedFile[]>([]);
   const [folders, setFolders] = useState<UserFolder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const request = useRef(0);
 
   const refresh = useCallback(async () => {
+    const current = ++request.current;
     setLoading(true);
-    const [fs, fl] = await Promise.all([listFiles(), listFolders()]);
-    setFiles(fs);
-    setFolders(fl);
-    setLoading(false);
+    setError("");
+    try {
+      const [fs, fl] = await Promise.all([listFiles(), listFolders()]);
+      if (current !== request.current) return;
+      setFiles(fs);
+      setFolders(fl);
+    } catch (cause) {
+      if (current === request.current) setError(`Could not load your files: ${errMsg(cause)}`);
+    } finally {
+      if (current === request.current) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      // Invalidate the latest request, including manual refreshes after mount.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++request.current;
+    };
   }, [refresh]);
+  useLiveSync(refresh);
 
   return {
     files,
     folders,
     loading,
+    error,
     refresh,
     upload: async (file: File, tool?: string, folderId?: string | null) => {
       await uploadUserFile(file, tool);

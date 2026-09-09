@@ -3,6 +3,7 @@ import { type AppIconName } from "../components/AppIcon";
 
 const ModernOverview = lazy(() => import("../pages/ModernOverview"));
 const AgentChat = lazy(() => import("../pages/AgentChat"));
+const WorkspaceBrowser = lazy(() => import("../pages/WorkspaceBrowser"));
 const Inventory = lazy(() => import("../pages/Inventory"));
 const Orders = lazy(() => import("../pages/Orders"));
 const Invoicing = lazy(() => import("../pages/Invoicing"));
@@ -31,6 +32,7 @@ const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
 const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
 const BankAccounts = lazy(() => import("../pages/BankAccounts"));
 const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
+const Work = lazy(() => import("../pages/Work"));
 const Team = lazy(() => import("../pages/Team"));
 const Comms = lazy(() => import("../pages/Comms"));
 
@@ -47,6 +49,24 @@ export interface AppModule {
 }
 
 export const MODULES: AppModule[] = [
+  {
+    id: "projects",
+    label: "Projects",
+    short: "Projects",
+    desc: "Customer delivery, tasks and time tracking",
+    icon: "files",
+    to: "/projects",
+    Component: Work,
+  },
+  {
+    id: "helpdesk",
+    label: "Helpdesk",
+    short: "Support",
+    desc: "Customer tickets, resolution targets and history",
+    icon: "email",
+    to: "/helpdesk",
+    Component: Work,
+  },
   {
     id: "overview",
     label: "Overview",
@@ -66,6 +86,15 @@ export const MODULES: AppModule[] = [
     to: "/agent",
     Component: AgentChat,
     core: true,
+  },
+  {
+    id: "browser",
+    label: "Browser",
+    short: "Browser",
+    desc: "Business websites and social apps in isolated desktop windows",
+    icon: "browser",
+    to: "/browser",
+    Component: WorkspaceBrowser,
   },
   {
     id: "inventory",
@@ -125,7 +154,7 @@ export const MODULES: AppModule[] = [
     id: "crm",
     label: "CRM",
     short: "CRM",
-    desc: "Customer dashboard & pipeline",
+    desc: "Companies, contacts, leads, deals, tasks & reporting",
     icon: "crm",
     to: "/crm",
     Component: Crm,

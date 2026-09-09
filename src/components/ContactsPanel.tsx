@@ -124,8 +124,8 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
   };
 
   return (
-    <div className="rounded-xl border border-line bg-card">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+    <div className="rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <span className="text-sm text-muted-foreground">
           {loading
             ? "Loading…"
@@ -134,7 +134,7 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
         <button
           type="button"
           onClick={() => setAdding((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-sm text-ink transition-transform active:scale-[0.97]"
+          className="btn-ghost"
         >
           {adding ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {adding ? "Cancel" : "Add contact"}
@@ -142,7 +142,7 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
       </div>
 
       {adding && (
-        <div className="grid gap-2 border-b border-line p-3 sm:grid-cols-2">
+        <div className="grid gap-2 border-b border-border p-3 sm:grid-cols-2">
           {(
             [
               ["name", "Name", "e.g. Fatima Al Suwaidi"],
@@ -165,7 +165,7 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
                   }
                 }}
                 placeholder={placeholder}
-                className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm"
+                className="input"
               />
             </label>
           ))}
@@ -174,7 +174,7 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
               type="button"
               onClick={save}
               disabled={!draft.name.trim() || busy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm text-bg transition-transform active:scale-[0.97] disabled:opacity-40"
+              className="btn-primary"
             >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -196,14 +196,14 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
       <ul className="divide-y divide-line">
         {sorted.map((p) => (
           <li key={p.id} className="group flex items-center gap-3 px-3 py-2.5">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line bg-bg">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border bg-muted">
               <UserRound className="h-4 w-4 text-muted-foreground" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 truncate text-sm text-ink">
                 {p.name}
                 {p.is_primary && (
-                  <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                  <span className="rounded-full bg-primary-400/15 px-1.5 py-0.5 text-[10px] text-foreground">
                     primary
                   </span>
                 )}
@@ -238,7 +238,7 @@ export default function ContactsPanel({ companyId }: { companyId: number }) {
                   title="Make primary contact"
                   aria-label={`Make ${p.name} the primary contact`}
                 >
-                  <Star className="h-4 w-4 text-muted-foreground hover:text-amber-500" />
+                  <Star className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                 </button>
               )}
               <button

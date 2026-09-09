@@ -41,7 +41,7 @@ export default function ProfileSetup() {
     return (
       <div className="min-h-screen grid place-items-center p-6 bg-canvas">
         <div className="card max-w-sm w-full text-center space-y-4">
-          <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 grid place-items-center">
+          <div className="mx-auto w-12 h-12 rounded-full bg-success/10 text-success grid place-items-center">
             <ShieldCheck size={26} />
           </div>
           <h1 className="text-xl font-semibold tracking-tight">You're all set</h1>

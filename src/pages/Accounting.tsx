@@ -204,7 +204,7 @@ export default function Accounting() {
           { key: "description", label: "Description" },
           { key: "amount", label: `Amount (${getDisplayCurrency()})` },
         ]
-      );
+      ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
     } else {
       downloadCsv(
         "chart-of-accounts",
@@ -220,9 +220,8 @@ export default function Accounting() {
           { key: "type", label: "Type" },
           { key: "balance", label: `Balance (${getDisplayCurrency()})` },
         ]
-      );
+      ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
     }
-    toast.success("Exported to CSV");
   };
 
   return (
@@ -231,7 +230,7 @@ export default function Accounting() {
         title="Accounting"
         subtitle="Chart of accounts, journal entries & financial position"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               className="btn-ghost"
               aria-label="Export CSV"
@@ -316,6 +315,7 @@ export default function Accounting() {
               setTab(t);
               setSearch("");
             }}
+            aria-pressed={tab === t}
             className={`chip ${tab === t ? "chip-active" : ""} capitalize`}
           >
             {t === "journal" ? "Journal" : "Chart of Accounts"}
@@ -652,6 +652,7 @@ function AccountModal({
     balance: 0,
   });
   const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
   const isEdit = !!editing;
   useEffect(() => {
     if (open) {
@@ -679,18 +680,20 @@ function AccountModal({
   const nameErr = !f.name.trim();
   const valid = !codeErr && !nameErr;
   return (
-    <Modal open={open} onClose={onClose} title={isEdit ? "Edit Account" : prefill ? "Duplicate Account" : "New Account"}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title={isEdit ? "Edit Account" : prefill ? "Duplicate Account" : "New Account"}>
+      <fieldset disabled={busy} className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Code *">
             <input
               className={cn("input", touched && codeErr && "border-danger")}
               placeholder="1000"
               value={f.code}
+              aria-invalid={touched && codeErr}
+              aria-describedby={touched && codeErr ? "account-code-error" : undefined}
               onChange={(e) => setF({ ...f, code: e.target.value })}
             />
             {touched && codeErr && (
-              <p className="text-[11px] text-danger mt-1">Code is required.</p>
+              <p id="account-code-error" role="alert" className="error-text">Code is required.</p>
             )}
           </Field>
           <Field label="Type">
@@ -707,32 +710,39 @@ function AccountModal({
             className={cn("input", touched && nameErr && "border-danger")}
             placeholder="Cash at Bank"
             value={f.name}
+            aria-invalid={touched && nameErr}
+            aria-describedby={touched && nameErr ? "account-name-error" : undefined}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
           {touched && nameErr && (
-            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+            <p id="account-name-error" role="alert" className="error-text">Name is required.</p>
           )}
         </Field>
-        <Field label={`Opening Balance (${getDisplayCurrency()})`}>
+        <Field label={`${isEdit ? "Current balance" : "Opening balance"} (${getDisplayCurrency()})`}>
           <input
             type="number"
             className="input"
             placeholder="0"
             value={f.balance || ""}
+            readOnly={isEdit}
+            aria-describedby={isEdit ? "account-balance-help" : undefined}
             onChange={(e) => setF({ ...f, balance: numInput(e.target.value) })}
           />
+          {isEdit && <p id="account-balance-help" className="help">Calculated from journal entries. Post an entry to change this balance.</p>}
         </Field>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
+        <button className="btn-ghost" disabled={busy} onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn-primary"
-          disabled={touched && !valid}
+          disabled={busy || (touched && !valid)}
           onClick={async () => {
+            if (busy) return;
             setTouched(true);
             if (!valid) return;
+            setBusy(true);
             try {
               if (isEdit && editing) {
                 await fin.updateAccount(editing.id, {
@@ -751,10 +761,12 @@ function AccountModal({
               onSaved();
             } catch (e: any) {
               toast.error(e?.message || "Failed to save account");
+            } finally {
+              setBusy(false);
             }
           }}
         >
-          Save Account
+          {busy ? "Saving…" : isEdit ? "Save changes" : "Create account"}
         </button>
       </div>
     </Modal>
@@ -776,6 +788,7 @@ function JournalModal({
 }) {
   const { toast } = useUI();
   const isEdit = !!txn;
+  const [busy, setBusy] = useState(false);
   const [f, setF] = useState({
     account_id: 0,
     txn_type: "debit",
@@ -792,7 +805,7 @@ function JournalModal({
           txn_type: txn.txn_type as "debit" | "credit",
           amount: txn.amount,
           description: txn.description ?? "",
-          txn_date: txn.txn_date,
+          txn_date: (txn.txn_date || "").slice(0, 10),
         });
       } else {
         setF({
@@ -808,10 +821,10 @@ function JournalModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose(); }}
       title={isEdit ? "Edit Journal Entry" : "New Journal Entry"}
     >
-      <div className="space-y-3">
+      <fieldset disabled={busy} className="space-y-3">
         <Field label="Account">
           <SelectMenu
             ariaLabel="Account"
@@ -828,7 +841,7 @@ function JournalModal({
             }
           />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Type">
             <SelectMenu
               ariaLabel="Type"
@@ -846,6 +859,8 @@ function JournalModal({
               type="number"
               className="input"
               placeholder="0"
+              min="0.01"
+              step="0.01"
               disabled={isEdit}
               value={f.amount || ""}
               onChange={(e) => setF({ ...f, amount: numInput(e.target.value) })}
@@ -866,15 +881,17 @@ function JournalModal({
             clearable={false}
           />
         </Field>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
+        <button className="btn-ghost" disabled={busy} onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn-primary"
-          disabled={!f.account_id || !f.amount}
+          disabled={busy || !f.account_id || !Number.isFinite(f.amount) || f.amount <= 0 || !f.txn_date}
           onClick={async () => {
+            if (busy) return;
+            setBusy(true);
             try {
               if (isEdit && txn) {
                 await fin.updateTransaction(txn.id, {
@@ -886,16 +903,19 @@ function JournalModal({
                   f.account_id,
                   f.txn_type,
                   f.amount,
-                  f.description || null
+                  f.description || null,
+                  f.txn_date
                 );
               }
               onSaved();
             } catch (e: any) {
               toast.error(e?.message || "Failed to post journal entry");
+            } finally {
+              setBusy(false);
             }
           }}
         >
-          {isEdit ? "Save Changes" : "Post Entry"}
+          {busy ? "Saving…" : isEdit ? "Save changes" : "Post entry"}
         </button>
       </div>
     </Modal>

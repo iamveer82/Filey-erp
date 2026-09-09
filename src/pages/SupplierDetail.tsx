@@ -132,6 +132,7 @@ export default function SupplierDetail() {
   const nav = useNavigate();
   const { toast, confirm } = useUI();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [list, setList] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<PoSummary[]>([]);
   const [showAllPos, setShowAllPos] = useState(false);
@@ -161,6 +162,7 @@ export default function SupplierDetail() {
         setOrders(ps);
         setCompany(co);
       })
+      .catch((error) => { if (alive) setLoadError(errMsg(error)); })
       .finally(() => {
         if (alive) setLoading(false);
       });
@@ -171,7 +173,9 @@ export default function SupplierDetail() {
 
   /** Refetch everything after a mutation (delete / share / edit). */
   const reload = () => {
-    Promise.all([
+    setLoadError("");
+    setLoading(true);
+    return Promise.all([
       suppliersApi.list(),
       pos.list(),
       billing.getCompany().catch(() => null),
@@ -181,7 +185,8 @@ export default function SupplierDetail() {
         setOrders(ps);
         setCompany(co);
       })
-      .catch(() => {});
+      .catch((error) => setLoadError(errMsg(error)))
+      .finally(() => setLoading(false));
   };
 
   const supplier = useMemo(() => list.find((s) => String(s.id) === id), [list, id]);
@@ -195,7 +200,7 @@ export default function SupplierDetail() {
   }, [supplier?.id]);
 
   const saveNotes = async () => {
-    if (!supplier || !id) return;
+    if (!supplier || !id || savingNotes) return;
     setSavingNotes(true);
     try {
       await suppliersApi.update(Number(id), { notes: notesDraft || undefined });
@@ -520,10 +525,23 @@ export default function SupplierDetail() {
     }
   };
 
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <Link to="/suppliers" className="btn-ghost"><ArrowLeft size={16} /> Back to suppliers</Link>
+        <div role="alert" className="rounded-xl border border-border bg-card p-5">
+          <p className="font-medium text-foreground">Could not load supplier</p>
+          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          <button className="btn-ghost mt-4" onClick={() => { void reload(); }}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
   if (!loading && !supplier) {
     return (
       <div className="">
-        <Link to="/suppliers" className="btn-ghost h-9 inline-flex mb-6">
+        <Link to="/suppliers" className="btn-ghost mb-6">
           <ArrowLeft size={15} /> Back to Suppliers
         </Link>
         <Card className="text-center py-16">
@@ -538,13 +556,13 @@ export default function SupplierDetail() {
 
   return (
     <div className="pb-10">
-      {/* DEMO parity header: square back button, 22px title + status pill,
+      {/* Record header: shared pill actions, title and status,
           13px subtitle, right-aligned actions */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <Link
           to="/suppliers"
           aria-label="Back to Suppliers"
-          className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-muted-foreground hover:text-foreground border border-border shrink-0"
+          className="btn-ghost w-10 !px-0 shrink-0"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
@@ -557,7 +575,7 @@ export default function SupplierDetail() {
           </div>
           <p className="text-[13px] text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() =>
               document
@@ -572,14 +590,14 @@ export default function SupplierDetail() {
           <button
             onClick={() => setStmtOpen(true)}
             disabled={!supplier}
-            className="btn-ghost h-8 inline-flex gap-1.5"
+            className="btn-ghost"
           >
             <FileText className="h-3.5 w-3.5" /> Statement
           </button>
           <button
             onClick={() => setEditOpen(true)}
             disabled={!supplier}
-            className="btn-ghost h-8 inline-flex gap-1.5"
+            className="btn-ghost"
           >
             <Pencil className="h-3.5 w-3.5" /> Edit
           </button>
@@ -591,14 +609,14 @@ export default function SupplierDetail() {
                   url: supplier.name,
                 })
               }
-              className="btn-ghost h-8 inline-flex gap-1.5"
+              className="btn-ghost"
             >
               <Mail className="h-3.5 w-3.5" /> Email
             </button>
           )}
           <button
             onClick={() => nav("/purchase-orders?new=1")}
-            className="btn-primary h-8 inline-flex gap-1.5"
+            className="btn-primary"
           >
             <Plus className="h-3.5 w-3.5" /> New PO
           </button>
@@ -610,7 +628,7 @@ export default function SupplierDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
           <div className="flex items-start gap-3">
-            <div className="h-11 w-11 rounded-lg bg-sky-500/10 text-sky-500 grid place-items-center shrink-0">
+            <div className="h-11 w-11 rounded-lg bg-primary-400/15 text-foreground grid place-items-center shrink-0">
               <Building2 className="h-5 w-5" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
@@ -635,7 +653,7 @@ export default function SupplierDetail() {
               <span
                 className={cn(
                   "inline-flex items-center gap-1",
-                  purchaseDelta >= 0 ? "text-emerald-500" : "text-danger"
+                  purchaseDelta >= 0 ? "text-success" : "text-danger"
                 )}
               >
                 {purchaseDelta >= 0 ? (
@@ -709,7 +727,8 @@ export default function SupplierDetail() {
               <div className="text-[12px] text-muted-foreground">Notes</div>
               {!editingNotes && (
                 <button
-                  className="text-muted-foreground hover:text-foreground p-0.5 rounded cursor-pointer"
+                  aria-label="Edit supplier notes"
+                  className="btn-ghost w-10 !px-0"
                   onClick={() => {
                     setNotesDraft(supplier?.notes || "");
                     setEditingNotes(true);
@@ -722,6 +741,8 @@ export default function SupplierDetail() {
             {editingNotes ? (
               <div className="space-y-2">
                 <textarea
+                  aria-label="Supplier notes"
+                  disabled={savingNotes}
                   className="textarea text-xs"
                   rows={4}
                   value={notesDraft}
@@ -730,14 +751,15 @@ export default function SupplierDetail() {
                 />
                 <div className="flex gap-1.5">
                   <button
-                    className="btn-primary text-xs !py-1 !px-2.5"
+                    className="btn-primary"
                     disabled={savingNotes}
                     onClick={saveNotes}
                   >
-                    <Save size={11} /> {savingNotes ? "..." : "Save"}
+                    <Save size={15} /> {savingNotes ? "Saving…" : "Save changes"}
                   </button>
                   <button
-                    className="btn-ghost text-xs !py-1 !px-2.5"
+                    className="btn-ghost"
+                    disabled={savingNotes}
                     onClick={() => setEditingNotes(false)}
                   >
                     <X size={11} /> Cancel
@@ -820,7 +842,7 @@ export default function SupplierDetail() {
                       <td className="px-5 py-2 text-right text-foreground tabular-nums">
                         {l.debit ? money(l.debit, currency) : "—"}
                       </td>
-                      <td className="px-5 py-2 text-right text-emerald-500 tabular-nums">
+                      <td className="px-5 py-2 text-right text-success tabular-nums">
                         {l.credit ? money(l.credit, currency) : "—"}
                       </td>
                     </tr>
@@ -851,20 +873,20 @@ export default function SupplierDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => window.print()}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Printer className="h-3.5 w-3.5" /> Print
               </button>
               <button
                 onClick={copyStatementLink}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Copy className="h-3.5 w-3.5" /> Copy link
               </button>
               <button
                 onClick={emailStatement}
                 disabled={!supplier}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Send className="h-3.5 w-3.5" /> Email
               </button>
@@ -1180,7 +1202,7 @@ function EditSupplierModal({
   const nameErr = !f.name.trim();
 
   const save = async () => {
-    if (!supplier) return;
+    if (!supplier || saving) return;
     setTouched(true);
     if (nameErr) return;
     setSaving(true);
@@ -1203,10 +1225,14 @@ function EditSupplierModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit supplier">
-      <div className="grid grid-cols-2 gap-3">
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="Edit supplier">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Name *">
           <input
+            required
+            aria-invalid={touched && nameErr}
+            aria-describedby={touched && nameErr ? "record-name-error" : undefined}
             className={cn("input", touched && nameErr && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
@@ -1241,7 +1267,7 @@ function EditSupplierModal({
             onChange={(e) => setF({ ...f, tax_id: e.target.value })}
           />
         </Field>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Field label="Address">
             <textarea
               className="input"
@@ -1252,18 +1278,19 @@ function EditSupplierModal({
           </Field>
         </div>
       </div>
-      <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-border">
-        <button onClick={onClose} className="btn-ghost h-8">
+      <div className="flex flex-wrap justify-end gap-2 pt-4 mt-5 border-t border-border">
+        <button onClick={onClose} className="btn-ghost">
           Cancel
         </button>
         <button
           onClick={save}
           disabled={saving}
-          className="btn-primary h-8 inline-flex gap-1.5"
+          className="btn-primary"
         >
           {saving ? "Saving…" : "Save changes"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }

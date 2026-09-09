@@ -27,7 +27,6 @@ import {
   useState,
 } from "react";
 
-const SPRING_EASE: [number, number, number, number] = [0.34, 1.56, 0.64, 1];
 const SMOOTH_EASE: [number, number, number, number] = [0.4, 0, 0.2, 1];
 const WEEK_LENGTH = 7;
 const YEAR_GRID_SIZE = 12; // 3 cols x 4 rows
@@ -63,7 +62,7 @@ type CalendarPalette = {
   navHoverBackground: string;
   dayHoverBackground: string;
   dayHoverShadow: string;
-  selectedGradient: string;
+  selectedBackground: string;
   selectedForeground: string;
   todayDot: string;
   footerBorder: string;
@@ -79,7 +78,6 @@ type CalendarDimensions = {
   cardRadius: number;
   dayCellFontSize: number;
   dayCellMinHeight: number;
-  dayCellRadius: number;
   dayDotBottom: number;
   dayDotSize: number;
   footerLabelFontSize: number;
@@ -101,13 +99,12 @@ type CalendarDimensions = {
 const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
   sm: {
     cardPadding: 12,
-    cardRadius: 14,
-    dayCellFontSize: 11,
+    cardRadius: 12,
+    dayCellFontSize: 12,
     dayCellMinHeight: 30,
-    dayCellRadius: 7,
     dayDotBottom: 3,
     dayDotSize: 3,
-    footerLabelFontSize: 8,
+    footerLabelFontSize: 11,
     footerSpacingTop: 10,
     footerValueFontSize: 11,
     headerGap: 10,
@@ -118,19 +115,18 @@ const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
     navGap: 4,
     navIconSize: 11,
     tableCellPadding: 1,
-    tableHeaderFontSize: 9,
+    tableHeaderFontSize: 11,
     tableHeaderPaddingBottom: 6,
-    yearFontSize: 9,
+    yearFontSize: 11,
   },
   md: {
     cardPadding: 14,
-    cardRadius: 16,
+    cardRadius: 12,
     dayCellFontSize: 12,
     dayCellMinHeight: 34,
-    dayCellRadius: 8,
     dayDotBottom: 4,
     dayDotSize: 4,
-    footerLabelFontSize: 9,
+    footerLabelFontSize: 11,
     footerSpacingTop: 12,
     footerValueFontSize: 12,
     headerGap: 12,
@@ -141,16 +137,15 @@ const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
     navGap: 6,
     navIconSize: 12,
     tableCellPadding: 2,
-    tableHeaderFontSize: 10,
+    tableHeaderFontSize: 11,
     tableHeaderPaddingBottom: 8,
-    yearFontSize: 10,
+    yearFontSize: 11,
   },
   lg: {
     cardPadding: 16,
-    cardRadius: 18,
+    cardRadius: 12,
     dayCellFontSize: 14,
     dayCellMinHeight: 42,
-    dayCellRadius: 10,
     dayDotBottom: 5,
     dayDotSize: 5,
     footerLabelFontSize: 10,
@@ -298,16 +293,6 @@ export const Calendar = ({
     month ?? defaultMonth ?? selected ?? defaultSelected ?? new Date()
   );
 
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const root = window.document.documentElement;
-    return (
-      root.classList.contains("dark") ||
-      root.getAttribute("data-theme") === "dark" ||
-      root.getAttribute("data-mode") === "dark" ||
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-    );
-  });
   const [internalMonth, setInternalMonth] = useState<Date>(() => initialMonth);
   const [internalSelected, setInternalSelected] = useState<Date | null>(
     () => defaultSelected ?? null
@@ -336,81 +321,29 @@ export const Calendar = ({
   );
   const dimensions = CALENDAR_DIMENSIONS[size];
 
-  const palette: CalendarPalette = isDark
-    ? {
-        cardBackground: "linear-gradient(135deg, #000000 0%, #0f0f0f 100%)",
-        cardBorder: "1px solid rgba(255, 255, 255, 0.12)",
-        cardShadow: "none",
-        textPrimary: "#f5f5f5",
-        textMuted: "#a3a3a3",
-        textDim: "rgba(255, 255, 255, 0.35)",
-        titleColor: "#f5f5f5",
-        navBackground: "#171717",
-        navForeground: "#f5f5f5",
-        navHoverBackground: "rgba(255, 255, 255, 0.14)",
-        dayHoverBackground: "#1a1a1a",
-        dayHoverShadow:
-          "0 12px 22px -18px rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.08)",
-        selectedGradient: "linear-gradient(135deg, #f5f5f5, #a3a3a3)",
-        selectedForeground: "#000000",
-        todayDot: "#f5f5f5",
-        footerBorder: "1px solid rgba(255, 255, 255, 0.14)",
-        focusRing: "rgba(245, 245, 245, 0.45)",
-        popoverBackground: "linear-gradient(135deg, #0a0a0a 0%, #161616 100%)",
-        popoverBorder: "1px solid rgba(255, 255, 255, 0.14)",
-        popoverShadow: "0 24px 60px -20px rgba(0, 0, 0, 0.65)",
-        pickerHoverBackground: "rgba(255, 255, 255, 0.08)",
-      }
-    : {
-        cardBackground: "linear-gradient(135deg, #ffffff 0%, #f4f4f5 100%)",
-        cardBorder: "1px solid rgba(0, 0, 0, 0.08)",
-        cardShadow: "none",
-        textPrimary: "#0a0a0a",
-        textMuted: "#737373",
-        textDim: "rgba(0, 0, 0, 0.25)",
-        titleColor: "#0a0a0a",
-        navBackground: "#f4f4f5",
-        navForeground: "#0a0a0a",
-        navHoverBackground: "rgba(20, 20, 20, 0.1)",
-        dayHoverBackground: "#f4f4f5",
-        dayHoverShadow:
-          "0 12px 22px -18px rgba(15, 23, 42, 0.16), inset 0 0 0 1px rgba(10, 10, 10, 0.05)",
-        selectedGradient: "linear-gradient(135deg, #141414, #4a4a4a)",
-        selectedForeground: "#ffffff",
-        todayDot: "#0a0a0a",
-        footerBorder: "1px solid rgba(0, 0, 0, 0.08)",
-        focusRing: "rgba(10, 10, 10, 0.2)",
-        popoverBackground: "linear-gradient(135deg, #ffffff 0%, #f7f7f8 100%)",
-        popoverBorder: "1px solid rgba(0, 0, 0, 0.1)",
-        popoverShadow: "0 24px 60px -20px rgba(15, 23, 42, 0.25)",
-        pickerHoverBackground: "rgba(10, 10, 10, 0.06)",
-      };
-
-  // Theme observer
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => {
-      const root = document.documentElement;
-      setIsDark(
-        root.classList.contains("dark") ||
-          root.getAttribute("data-theme") === "dark" ||
-          root.getAttribute("data-mode") === "dark" ||
-          media.matches
-      );
-    };
-    update();
-    media.addEventListener("change", update);
-    const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "data-theme", "data-mode"],
-    });
-    return () => {
-      media.removeEventListener("change", update);
-      observer.disconnect();
-    };
-  }, []);
+  const palette: CalendarPalette = {
+    cardBackground: "hsl(var(--card))",
+    cardBorder: "1px solid hsl(var(--border))",
+    cardShadow: "none",
+    textPrimary: "hsl(var(--foreground))",
+    textMuted: "hsl(var(--muted-foreground))",
+    textDim: "hsl(var(--muted-foreground))",
+    titleColor: "hsl(var(--foreground))",
+    navBackground: "hsl(var(--card))",
+    navForeground: "hsl(var(--foreground))",
+    navHoverBackground: "hsl(var(--hover))",
+    dayHoverBackground: "hsl(var(--hover))",
+    dayHoverShadow: "none",
+    selectedBackground: "hsl(var(--primary-400))",
+    selectedForeground: "#171717",
+    todayDot: "hsl(var(--foreground))",
+    footerBorder: "1px solid hsl(var(--border))",
+    focusRing: "hsl(var(--ring))",
+    popoverBackground: "hsl(var(--popover))",
+    popoverBorder: "1px solid hsl(var(--border))",
+    popoverShadow: "0 4px 12px rgb(0 0 0 / 0.12)",
+    pickerHoverBackground: "hsl(var(--hover))",
+  };
 
   // Focus management
   useEffect(() => {
@@ -614,7 +547,7 @@ export const Calendar = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       aria-describedby={selectedInfoId}
       aria-labelledby={headingId}
-      initial={{ opacity: 0, y: 30, scale: 0.95 }}
+      initial={{ opacity: 0, y: 4, scale: 1 }}
       role="group"
       style={{
         width: "100%",
@@ -624,14 +557,12 @@ export const Calendar = ({
         background: palette.cardBackground,
         border: palette.cardBorder,
         boxShadow: palette.cardShadow,
-        backdropFilter: "blur(20px)",
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        fontFamily: "inherit",
         color: palette.textPrimary,
         boxSizing: "border-box",
         position: "relative",
       }}
-      transition={{ duration: 0.6, ease: SPRING_EASE }}
+      transition={{ duration: 0.2, ease: SMOOTH_EASE }}
     >
       {/* Header */}
       <div
@@ -760,7 +691,7 @@ export const Calendar = ({
             <tbody>
               {weeks.map((week, weekIndex) => (
                 <tr key={`${monthKey}-week-${weekIndex}`}>
-                  {week.map((day, dayIndex) => (
+                  {week.map((day) => (
                     <td
                       key={getDateKey(day)}
                       style={{
@@ -774,7 +705,6 @@ export const Calendar = ({
                         day={day}
                         dimensions={dimensions}
                         disabled={disabled}
-                        index={weekIndex * WEEK_LENGTH + dayIndex}
                         isFocused={isSameDay(day, focusedDate)}
                         locale={locale}
                         onDayFocus={setFocusedDate}
@@ -865,7 +795,7 @@ export const Calendar = ({
           paddingTop: dimensions.footerSpacingTop,
           borderTop: palette.footerBorder,
         }}
-        transition={{ delay: 0.3 }}
+        transition={{ duration: 0.15 }}
       >
         <p
           style={{
@@ -929,6 +859,7 @@ const HeaderPickerButton = ({
   padding?: string;
 }) => (
   <motion.button
+    className="rounded-full"
     aria-expanded={ariaExpanded}
     aria-haspopup="dialog"
     aria-label={ariaLabel}
@@ -946,7 +877,6 @@ const HeaderPickerButton = ({
       background: "transparent",
       cursor: "pointer",
       padding,
-      borderRadius: 6,
       fontFamily: "inherit",
       outline: "none",
       fontVariantNumeric: "tabular-nums",
@@ -989,15 +919,15 @@ const MonthPicker = ({
       const active = m.index === currentMonthIndex;
       return (
         <motion.button
+          className="rounded-full"
           aria-current={active ? "true" : undefined}
           aria-label={m.full}
           key={m.index}
           onClick={() => onSelect(m.index)}
           style={{
             padding: "10px 6px",
-            borderRadius: dimensions.dayCellRadius,
             border: "none",
-            background: active ? palette.selectedGradient : "transparent",
+            background: active ? palette.selectedBackground : "transparent",
             color: active ? palette.selectedForeground : palette.textPrimary,
             fontWeight: active ? 700 : 500,
             fontSize: dimensions.dayCellFontSize + 1,
@@ -1011,9 +941,9 @@ const MonthPicker = ({
           whileFocus={{ boxShadow: `0 0 0 2px ${palette.focusRing}` }}
           whileHover={{
             backgroundColor: active ? undefined : palette.pickerHoverBackground,
-            scale: 1.03,
+            scale: 1,
           }}
-          whileTap={{ scale: 0.96 }}
+          whileTap={{ scale: 0.97 }}
         >
           {m.short}
         </motion.button>
@@ -1048,15 +978,15 @@ const YearPickerCell = ({
 
   return (
     <motion.button
+      className="rounded-full"
       aria-current={active ? "true" : undefined}
       aria-label={String(year)}
       disabled={outOfRange}
       onClick={() => onSelect(year)}
       style={{
         padding: "7px 4px",
-        borderRadius: dimensions.dayCellRadius,
         border: "none",
-        background: active ? palette.selectedGradient : "transparent",
+        background: active ? palette.selectedBackground : "transparent",
         color: active
           ? palette.selectedForeground
           : outOfRange
@@ -1082,10 +1012,10 @@ const YearPickerCell = ({
               backgroundColor: active
                 ? undefined
                 : palette.pickerHoverBackground,
-              scale: 1.03,
+              scale: 1,
             }
       }
-      whileTap={outOfRange ? undefined : { scale: 0.96 }}
+      whileTap={outOfRange ? undefined : { scale: 0.97 }}
     >
       {year}
     </motion.button>
@@ -1198,7 +1128,6 @@ type DayCellProps = {
   calendarMotionId: string;
   day: Date;
   dimensions: CalendarDimensions;
-  index: number;
   currentMonth: Date;
   disabled?: (date: Date) => boolean;
   isFocused: boolean;
@@ -1219,7 +1148,6 @@ const DayCell = ({
   calendarMotionId,
   day,
   dimensions,
-  index,
   currentMonth,
   disabled,
   isFocused,
@@ -1247,11 +1175,11 @@ const DayCell = ({
   let whileFocus: { boxShadow: string } | undefined;
   if (status.isSelectable) {
     whileFocus = { boxShadow: `0 0 0 2px ${palette.focusRing}` };
-    whileHover.scale = 1.04;
-    whileHover.y = -1.5;
+    whileHover.scale = 1;
+    whileHover.y = 0;
     whileHover.backgroundColor = palette.dayHoverBackground;
     whileHover.boxShadow = palette.dayHoverShadow;
-    whileTap.scale = 0.96;
+    whileTap.scale = 0.97;
   }
 
   const handleClick = () => {
@@ -1261,6 +1189,7 @@ const DayCell = ({
 
   return (
     <motion.button
+      className="rounded-full"
       animate={{ opacity: 1, scale: 1 }}
       aria-current={status.today ? "date" : undefined}
       aria-label={getDayAriaLabel({
@@ -1272,7 +1201,7 @@ const DayCell = ({
         isDisabled: status.isDisabled,
       })}
       disabled={!status.isSelectable}
-      initial={{ opacity: 0, scale: 0.8 }}
+      initial={{ opacity: 0, scale: 1 }}
       onClick={handleClick}
       onFocus={() => onDayFocus(day)}
       onKeyDown={(event) => onDayKeyDown(event, day)}
@@ -1287,7 +1216,6 @@ const DayCell = ({
         minHeight: dimensions.dayCellMinHeight,
         fontSize: dimensions.dayCellFontSize,
         fontWeight: status.today && !status.isSelected ? 700 : 500,
-        borderRadius: dimensions.dayCellRadius,
         border: "none",
         background: "transparent",
         cursor: status.isSelectable ? "pointer" : "default",
@@ -1298,7 +1226,7 @@ const DayCell = ({
         opacity: status.isDisabled ? 0.45 : 1,
       }}
       tabIndex={status.isSelectable ? (isFocused ? 0 : -1) : -1}
-      transition={{ delay: index * 0.012, duration: 0.3, ease: SPRING_EASE }}
+      transition={{ duration: 0.15, ease: SMOOTH_EASE }}
       type="button"
       whileFocus={whileFocus}
       whileHover={whileHover}
@@ -1306,15 +1234,15 @@ const DayCell = ({
     >
       {status.isSelectedInMonth && (
         <motion.div
+          className="rounded-full"
           layoutId={`${calendarMotionId}-selected-day`}
           style={{
             position: "absolute",
             inset: 0,
-            borderRadius: dimensions.dayCellRadius,
-            background: palette.selectedGradient,
-            boxShadow: "0 8px 28px -12px rgba(0, 0, 0, 0.34)",
+            background: palette.selectedBackground,
+            boxShadow: "none",
           }}
-          transition={{ type: "spring", stiffness: 400, damping: 30 }}
+          transition={{ duration: 0.15, ease: SMOOTH_EASE }}
         />
       )}
       <span

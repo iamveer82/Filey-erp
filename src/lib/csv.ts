@@ -51,9 +51,7 @@ export async function downloadCsv(
   const name = filename.endsWith(".csv") ? filename : `${filename}.csv`;
   const bytes = new TextEncoder().encode("﻿" + csv);
   if (hasTauri) {
-    await saveBytes(name, bytes).catch((e) =>
-      console.error("CSV export failed:", e)
-    );
+    await saveBytes(name, bytes);
     return;
   }
   const blob = new Blob([bytes], {

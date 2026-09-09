@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from "react";
-import { Upload, X, FileImage } from "lucide-react";
+import { Upload, X } from "lucide-react";
 import { tools } from "../lib/api";
 
 /* Company letterhead — a single full-page A4 image that prints BEHIND the
@@ -73,42 +73,39 @@ export function LetterheadConfig({
     r.readAsDataURL(f);
   };
   return (
-    <div className="rounded-3xl border border-brand-200 p-3 dark:border-border">
-      <div className="flex items-center gap-2 text-ink font-medium text-sm mb-2">
-        <FileImage size={15} /> Letterhead page (A4)
-      </div>
+    <div className="min-w-0 space-y-3">
       {value.background ? (
-        <div className="relative inline-block rounded-3xl border border-brand-100 bg-brand-50/40 p-2">
+        <div className="flex flex-wrap items-start gap-4">
           <img
             src={value.background}
             alt="Letterhead"
-            className="h-auto w-44 rounded"
+            className="h-auto w-28 rounded-[8px] border border-border"
             style={{ aspectRatio: "210 / 297", objectFit: "cover" }}
           />
           <button
             type="button"
             title="Remove letterhead"
             aria-label="Remove letterhead"
-            className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-3xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
+            className="btn-ghost text-danger"
             onClick={() => onChange({ ...value, background: "" })}
           >
-            <X size={13} />
+            <X size={15} /> Remove letterhead
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => ref.current?.click()}
-          className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-3xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all"
-        >
-          <Upload size={18} className="text-brand-400" />
-          <span className="text-xs font-medium text-brand-600">
-            Upload full A4 letterhead
-          </span>
-          <span className="text-[10px] text-brand-400">
-            Header + footer artwork on one A4 page · PNG or JPG
-          </span>
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => ref.current?.click()}
+            className="btn-ghost"
+          >
+            <Upload size={16} />
+            <span>Upload full A4 letterhead</span>
+          </button>
+          <p className="text-xs text-muted-foreground">
+            Header and footer artwork on one A4 page · PNG or JPG
+          </p>
+        </div>
       )}
       <input
         ref={ref}

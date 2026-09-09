@@ -245,8 +245,8 @@ export function SelectMenu({
           setOpen((v) => !v);
         }}
         className={cn(
-          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-md border border-border bg-background px-3 text-[13px] text-foreground transition-colors",
-          size === "sm" ? "h-8 px-2 text-xs" : "h-9",
+          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-[8px] border border-border bg-card px-3 text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          size === "sm" ? "h-8 px-2 text-xs" : "h-10",
           disabled ? "cursor-not-allowed opacity-40" : "hover:bg-hover",
           className
         )}

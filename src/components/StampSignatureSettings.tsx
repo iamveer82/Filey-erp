@@ -18,7 +18,10 @@ export interface CompanyStampSig {
   signature?: StampSig;
 }
 
-export const EMPTY_STAMP_SIG: CompanyStampSig = { stamp: undefined, signature: undefined };
+export const EMPTY_STAMP_SIG: CompanyStampSig = {
+  stamp: undefined,
+  signature: undefined,
+};
 
 const STAMP_KEY = "company_stamp";
 const SIGN_KEY = "company_signature";
@@ -139,19 +142,20 @@ function UploadCard({
   const previewUrl = value?.data || value?._previewUrl;
 
   return (
-    <div className="rounded-xl border border-brand-200 p-4">
-      <div className="flex items-center gap-2 text-ink font-medium text-sm">
+    <div className="min-w-0">
+      <div className="flex items-center gap-2 text-foreground font-medium text-[13px]">
         {icon} {label}
       </div>
       <div className="mt-3">
         {previewUrl ? (
-          <div className="relative flex items-center justify-center py-4 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
+          <div className="flex flex-wrap items-center gap-3">
             <CompanyAssetImage
               src={previewUrl}
               alt={label}
               className="object-contain rounded"
               style={{
                 width: `${(180 * (value?.scale ?? 100)) / 100}px`,
+                maxWidth: "100%",
                 maxHeight: `${(80 * (value?.scale ?? 100)) / 100}px`,
                 clipPath: `inset(${value?.cropTop}% ${value?.cropRight}% ${value?.cropBottom}% ${value?.cropLeft}%)`,
                 opacity: (value?.opacity ?? 100) / 100,
@@ -160,25 +164,26 @@ function UploadCard({
             <button
               title={`Remove ${label.toLowerCase()}`}
               aria-label={`Remove ${label.toLowerCase()}`}
-              className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
+              className="btn-ghost w-10 shrink-0 p-0 text-danger"
               onClick={() => onChange(undefined)}
             >
-              <X size={13} />
+              <X size={15} />
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => ref.current?.click()}
-            className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all disabled:opacity-60"
-          >
-            <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-medium text-brand-600">
-              {uploading ? "Uploading…" : `Upload ${label}`}
-            </span>
-            <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              aria-label={`Upload ${label}`}
+              disabled={uploading}
+              onClick={() => ref.current?.click()}
+              className="btn-ghost"
+            >
+              <Upload size={16} />
+              <span>{uploading ? "Uploading…" : "Upload"}</span>
+            </button>
+            <p className="text-xs text-muted-foreground">Transparent PNG works best</p>
+          </div>
         )}
         <input
           ref={ref}
@@ -187,7 +192,11 @@ function UploadCard({
           className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
-        {err && <p className="mt-2 text-[11px] text-danger">{err}</p>}
+        {err && (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {err}
+          </p>
+        )}
       </div>
     </div>
   );

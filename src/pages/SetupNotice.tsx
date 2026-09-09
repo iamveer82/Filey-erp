@@ -2,7 +2,6 @@ import { useState, type CSSProperties } from "react";
 import { HardDrive, Cloud, Check, ArrowRight } from "lucide-react";
 import { setDataMode } from "../lib/dataMode";
 import { cloudConfigured } from "../lib/supabase";
-import { canUseLocalMode, ENFORCE_LICENSING } from "../lib/license";
 import Logo from "../components/Logo";
 
 function choose(mode: "local" | "cloud") {
@@ -15,18 +14,7 @@ export default function SetupNotice() {
   // should see one obvious path, not a wall of config (Apple: show the common
   // path first, advanced one level deeper).
   const [showCloudSetup, setShowCloudSetup] = useState(false);
-  const [licenseMsg, setLicenseMsg] = useState("");
-
-  // Offline mode is the licensed tier — cloud is the free default.
-  const chooseLocal = async () => {
-    if (await canUseLocalMode()) {
-      choose("local");
-    } else {
-      setLicenseMsg(
-        "Offline mode comes with Filey Freedom (AED 1,499, one-time). Start free in the cloud, then buy Freedom or redeem a voucher under Settings → Desktop License."
-      );
-    }
-  };
+  const chooseLocal = () => choose("local");
 
   return (
     <div className="min-h-full grid place-items-center bg-canvas p-6">
@@ -58,7 +46,7 @@ export default function SetupNotice() {
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >
               <div className="flex items-start gap-4">
-                <div className="shrink-0 grid place-items-center h-11 w-11 rounded-xl bg-ink text-white">
+                <div className="shrink-0 grid place-items-center h-11 w-11 rounded-xl bg-foreground text-background">
                   <Cloud size={22} />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -113,24 +101,19 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-ink">Use offline</h2>
-                    {ENFORCE_LICENSING && (
+                    {(
                       <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
-                        Desktop license
+                        Free local edition
                       </span>
                     )}
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Everything stays on this computer. No account, no internet.
+                    Free core ERP and CRM on this computer. Sign in once online to link your device.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
               </div>
             </button>
-            {licenseMsg && (
-              <p className="mt-3 text-[13px] text-ink bg-primary-50 dark:bg-white/8 rounded-xl px-3 py-2">
-                {licenseMsg}
-              </p>
-            )}
           </>
         )}
         {!cloudConfigured && (
@@ -144,23 +127,18 @@ export default function SetupNotice() {
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
             >
               <div className="flex items-center gap-3">
-                <div className="shrink-0 grid place-items-center h-9 w-9 rounded-xl bg-ink text-white">
+                <div className="shrink-0 grid place-items-center h-9 w-9 rounded-xl bg-foreground text-background">
                   <HardDrive size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-ink">Use offline</h2>
                   <p className="text-[13px] text-brand-500">
-                    Everything stays on this computer. No account, no internet.
+                    Free core ERP and CRM on this computer. Sign in once online to link your device.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
               </div>
             </button>
-            {licenseMsg && (
-              <p className="mb-4 text-[13px] text-ink bg-primary-50 dark:bg-white/8 rounded-xl px-3 py-2">
-                {licenseMsg}
-              </p>
-            )}
           <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
             <button
               onClick={() => setShowCloudSetup((v) => !v)}
@@ -202,7 +180,7 @@ export default function SetupNotice() {
                     .env
                   </code>
                   :
-                  <pre className="mt-2 bg-ink text-white text-xs rounded-xl p-3 overflow-x-auto">
+                  <pre className="mt-2 bg-foreground text-background text-xs rounded-xl p-3 overflow-x-auto">
                     {`VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
                   </pre>

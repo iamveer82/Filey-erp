@@ -3,9 +3,12 @@ import { amountInWords } from "../lib/words";
 import { docTotals, docLineAmount } from "../lib/docItems";
 import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import { applyRoundOff, type CalcMode } from "../lib/money";
-import { loadCustomTemplates } from "./TemplateDesigner";
+import { DRAGGABLE_SECTIONS, type CustomTemplate } from "./TemplateDesigner";
+import { useCustomTemplates } from "../lib/customTemplates";
+import TemplateBackground from "./TemplateBackground";
 import { resolveTemplateId } from "./DocTemplates";
 import UaePackDoc from "./UaePackDoc";
+import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   INVOICE_TYPE_CODES,
@@ -22,6 +25,17 @@ import {
 /** Map a code to its human label (falls back to the raw code). */
 const codeLabel = (list: Code[], code?: string | null): string =>
   !code ? "" : list.find((c) => c.code === code)?.label || code;
+
+/** Keep coloured print headers readable, including the default Filey yellow. */
+const printTextOn = (background: string) => {
+  const hex = background.replace(/^#/, "");
+  const normalized = hex.length === 3 ? hex.split("").map((v) => v + v).join("") : hex;
+  if (!/^[\da-f]{6}$/i.test(normalized)) return "#20262b";
+  const rgb = [0, 2, 4].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16) / 255)
+    .map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  return luminance > 0.179 ? "#111111" : "#ffffff";
+};
 
 export interface DocViewItem {
   description: string;
@@ -46,6 +60,7 @@ export interface DocViewCustomColumn {
 }
 
 export interface DocViewForm {
+  tax_country_code?: string | null;
   template?: string | null;
   accent?: string | null;
   currency?: string | null;
@@ -120,34 +135,55 @@ interface DocViewProps {
   showTotals?: boolean;
   showFooter?: boolean;
   labels?: DocViewLabels;
+  /** The gallery already loaded this layout in the current workspace. */
+  customTemplate?: CustomTemplate;
 }
 
 export default function DocView({
-  form,
+  form: inputForm,
   pageItems,
   itemStartIndex = 0,
   showTotals = true,
   showFooter = true,
   labels,
+  customTemplate: providedTemplate,
 }: DocViewProps) {
+  const customId = inputForm.template?.startsWith("custom-") ? inputForm.template : null;
+  const { templates, loading, error, reload } = useCustomTemplates(!!customId && !providedTemplate);
+  const customTemplate = customId
+    ? providedTemplate || templates.find((template) => template.id === customId)
+    : null;
+  if (customId && !providedTemplate && (loading || error || !customTemplate)) {
+    return <div data-template-background-status={loading ? "loading" : "error"} role={loading ? "status" : "alert"} className="p-6 text-sm text-neutral-700">
+      {loading ? "Loading saved template…" : error || "This custom template is unavailable in the current workspace. Choose another template or reopen the workspace where it was saved."}
+      {!loading && <button type="button" className="btn-ghost no-print mt-3" onClick={reload}>Retry</button>}
+    </div>;
+  }
+  const form = customTemplate ? {
+    ...inputForm,
+    show_logo: customTemplate.showLogo === false ? false : inputForm.show_logo,
+    notes: customTemplate.showNotes === false ? null : inputForm.notes,
+    terms: customTemplate.showTerms === false ? null : inputForm.terms,
+  } : inputForm;
+  const showSeller = customTemplate?.showSeller !== false;
+  const showCustomer = customTemplate?.showCustomer !== false;
+  const customFont = customTemplate ? { fontFamily: customTemplate.font } : undefined;
   const t = applyRoundOff(
     docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula),
     !!form.round_off
   );
   const ccy = form.currency || "AED";
-  // Labels follow the document's currency regime: an INR document says GST
-  // and GSTIN, an AED one says VAT and TRN — whatever template renders it.
-  const regime = taxRegimeFor(ccy);
+  // Prefer the saved jurisdiction; only legacy documents fall back to currency.
+  const regime = taxRegimeFor(ccy, form.tax_country_code);
   const taxLbl = regime.taxLabel;
   const trnLbl = regime.trnLabel;
   const m = (v: number) => money(v, ccy);
   const itemsToRender = pageItems ?? form.items;
 
-  const baseLayout = resolveTemplateId(form.template);
-  const customTemplate = form.template?.startsWith("custom-")
-    ? loadCustomTemplates().find((ct) => ct.id === form.template)
-    : null;
-  const templateId = customTemplate?.type === "file" ? "file" : baseLayout;
+  const resolvedLayout = resolveTemplateId(form.template);
+  const internationalLayout = !!form.tax_country_code && form.tax_country_code !== "AE" && /(^|-)uae($|-)/.test(resolvedLayout);
+  const baseLayout = internationalLayout ? "minimal" : resolvedLayout;
+  const templateId = customTemplate?.type === "file" ? "file" : customTemplate?.type === "builder" ? customTemplate.layout : baseLayout;
 
   // UAE reference-pack templates render through their own parameterized
   // renderer. "uae" / "em-uae" don't match the "uae-" prefix and fall through
@@ -167,6 +203,7 @@ export default function DocView({
 
   const resolvedAccent = customTemplate?.accent || form.accent || "#222222";
   const a = resolvedAccent;
+  const accentText = printTextOn(a);
 
   const docTitle = labels?.docTitle || form.doc_title || "INVOICE";
   const partyLabel = labels?.partyLabel || "Bill To";
@@ -174,17 +211,17 @@ export default function DocView({
   const dueLabel = labels?.dueLabel || "Due";
   const totalLabel = labels?.totalLabel || "Total";
 
-  const Items = ({ headerBg, bordered }: { headerBg?: string; bordered?: boolean }) => (
-    <table className="w-full text-sm border-collapse mt-2">
+  const Items = ({ headerBg, bordered, compact = false, styled = false }: { headerBg?: string; bordered?: boolean; compact?: boolean; styled?: boolean }) => (
+    <table className={`${styled ? "invoice-items " : ""}w-full border-collapse mt-2 ${compact ? "table-fixed text-[9px] [&_th]:!w-auto [&_th]:break-words [&_td]:break-words [&_th]:!px-1 [&_td]:!px-1" : "text-sm"}`}>
       <thead>
         <tr
-          style={{ background: headerBg, color: headerBg ? "#fff" : a }}
+          style={styled ? undefined : { background: headerBg, color: headerBg ? printTextOn(headerBg) : a }}
           className={bordered ? "" : "border-b-2"}
         >
-          <th className="text-right py-2 px-2 font-semibold w-8">SL</th>
-          <th className="text-left py-2 px-2 font-semibold">Description</th>
-          <th className="text-right py-2 px-2 font-semibold w-14">Qty</th>
-          <th className="text-right py-2 px-2 font-semibold w-14">Unit</th>
+          <th data-column="idx" className="text-right py-2 px-2 font-semibold w-8">SL</th>
+          <th data-column="desc" className="text-left py-2 px-2 font-semibold">Description</th>
+          <th data-column="qty" className="text-right py-2 px-2 font-semibold w-14">Qty</th>
+          <th data-column="unit" className="text-right py-2 px-2 font-semibold w-14">Unit</th>
           {(form.customColumns || []).map((col) => (
             <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">
               {col.label}
@@ -214,19 +251,19 @@ export default function DocView({
     </table>
   );
 
-  const Totals = () =>
+  const Totals = ({ compact = false }: { compact?: boolean } = {}) =>
     showTotals ? (
-      <div className="ml-auto w-72 mt-6 text-sm">
+      <div className={compact ? "ml-auto w-full text-[10px]" : "ml-auto w-72 max-w-full mt-6 text-sm"}>
         <Row k="Subtotal" v={m(t.subtotal)} />
         {(t.discount || 0) > 0 && <Row k="Discount" v={`- ${m(t.discount)}`} />}
-        {(form.tax_rate || 0) > 0 && (
+        {customTemplate?.showTax !== false && (form.tax_rate || 0) > 0 && (
           <Row k={`${taxLbl} (${form.tax_rate}%)`} v={m(t.tax)} />
         )}
         {t.round_off !== 0 && (
           <Row k="Round off" v={`${t.round_off > 0 ? "+" : ""}${m(t.round_off)}`} />
         )}
         <div
-          className="flex justify-between py-2 mt-1 font-bold text-base border-t-2"
+          className={`flex justify-between gap-2 py-2 mt-1 font-bold border-t-2 ${compact ? "text-xs" : "text-base"}`}
           style={{ borderColor: a, color: a }}
         >
           <span>{totalLabel}</span>
@@ -321,6 +358,40 @@ export default function DocView({
       </div>
     );
 
+  // Reuse each design outside the UAE, with country-aware content and the
+  // general totals engine. A country change must not turn every layout Minimal.
+  if (internationalLayout && !customTemplate) {
+    const metadata = [
+      ["Document No.", form.number || "—"],
+      [issuedLabel, fmtDate(form.issue_date)],
+      ...(form.due_date ? [[dueLabel, fmtDate(form.due_date)]] : []),
+      ...(form.date_of_supply ? [["Date of Supply", fmtDate(form.date_of_supply)]] : []),
+      ...(form.po_number ? [["PO Reference", form.po_number]] : []),
+    ];
+    return <InvoiceLayoutFrame
+      templateId={resolvedLayout}
+      accent={a}
+      brand={<div><Logo /><div>
+        <p className="invoice-seller-name">{form.seller_name}</p>
+        <p className="whitespace-pre-line">{form.seller_address}</p>
+        {form.seller_trn && <p>{trnLbl}: {form.seller_trn}</p>}
+        <SellerContact />
+      </div></div>}
+      title={<p className="invoice-title">{docTitle}</p>}
+      meta={<table><tbody>{metadata.map(([key, value]) => <tr key={key}><td>{key}</td><td>{value}</td></tr>)}</tbody></table>}
+      parties={<div className="invoice-party">
+        <p className="invoice-label">{partyLabel}</p>
+        <p className="font-semibold">{form.customer_name}</p>
+        <p className="whitespace-pre-line">{form.customer_address}</p>
+        {form.customer_trn && <p>{trnLbl}: {form.customer_trn}</p>}
+      </div>}
+    >
+      <Items styled />
+      {showTotals && <div className="invoice-general-totals"><Totals /></div>}
+      <Footer />
+    </InvoiceLayoutFrame>;
+  }
+
   // ---- File-based custom template ----
   if (templateId === "file" && customTemplate?.fileData) {
     const pw = customTemplate.paperSize === "Letter" ? 816 : 794;
@@ -331,8 +402,9 @@ export default function DocView({
     const Section = ({ k, children }: { k: string; children: React.ReactNode }) => {
       const p = pos[k];
       if (!p) return null;
+      const section = DRAGGABLE_SECTIONS.find((item) => item.key === k);
       return (
-        <div className="absolute" style={{ left: `${p.x}%`, top: `${p.y}%` }}>
+        <div className="absolute break-words" style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${Math.min((section?.w || 280) / pw * 100, Math.max(0, 100 - p.x))}%` }}>
           {children}
         </div>
       );
@@ -341,45 +413,29 @@ export default function DocView({
     return (
       <div
         className="relative text-neutral-900 overflow-hidden"
-        style={{ width: pw, minHeight: ph, background: "#fff" }}
+        style={{ width: "100%", aspectRatio: `${pw} / ${ph}`, background: "#fff", ...customFont }}
       >
-        <img
-          src={customTemplate.fileData}
-          alt="Template background"
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ objectFit: "cover", opacity: 0.92 }}
-        />
-        <Section k="seller">
+        <TemplateBackground data={customTemplate.fileData} type={customTemplate.fileType || "image"} />
+        {showSeller && <Section k="seller">
           {logoSrc && <img src={logoSrc} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
           <p className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
           <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.seller_address}</p>
           {form.seller_trn && <p className="text-[9px] text-neutral-500 mt-0.5">{trnLbl}: {form.seller_trn}</p>}
-        </Section>
+        </Section>}
         <Section k="header">
           <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>{docTitle}</p>
           <p className="text-xs font-medium text-neutral-800 mt-0.5">{form.number}</p>
           <p className="text-[10px] text-neutral-500 mt-0.5">{fmtDate(form.issue_date)}</p>
           {form.due_date && <p className="text-[10px] text-neutral-500">{dueLabel}: {fmtDate(form.due_date)}</p>}
         </Section>
-        <Section k="customer">
+        {showCustomer && <Section k="customer">
           <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">{partyLabel}</p>
           <p className="font-semibold text-xs text-neutral-900">{form.customer_name}</p>
           <p className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.customer_address}</p>
           {form.customer_trn && <p className="text-[9px] text-neutral-500 mt-0.5">{trnLbl}: {form.customer_trn}</p>}
-        </Section>
-        {pos.items && (
-          <div
-            className="absolute overflow-auto"
-            style={{ left: `${pos.items.x}%`, top: `${pos.items.y}%`, maxWidth: "90%" }}
-          >
-            <Items headerBg={ac} />
-          </div>
-        )}
-        {pos.totals && (
-          <div className="absolute" style={{ left: `${pos.totals.x}%`, top: `${pos.totals.y}%` }}>
-            <Totals />
-          </div>
-        )}
+        </Section>}
+        <Section k="items"><Items headerBg={ac} compact /></Section>
+        <Section k="totals"><Totals compact /></Section>
         <Section k="footer">
           {form.notes && <p className="text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
@@ -397,13 +453,15 @@ export default function DocView({
   // ---- MINIMAL ----
   if (templateId === "minimal") {
     return (
-      <div className="text-neutral-900">
+      <div className="text-neutral-900" style={customFont}>
         <div className="flex justify-between items-start">
           <div>
             <Logo />
+            {showSeller && <>
             <p className="font-bold text-lg mt-3">{form.seller_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
             {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
+            </>}
           </div>
           <div className="text-right">
             <p className="text-3xl font-extrabold tracking-tight" style={{ color: a }}>{docTitle}</p>
@@ -411,12 +469,12 @@ export default function DocView({
           </div>
         </div>
         <div className="flex justify-between mt-10 text-sm">
-          <div>
+          {showCustomer && <div>
             <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
             <p className="font-semibold mt-1">{form.customer_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
             {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
-          </div>
+          </div>}
           <div className="text-right text-xs text-neutral-500">
             <p>{issuedLabel}: {fmtDate(form.issue_date)}</p>
             <p>{dueLabel}: {fmtDate(form.due_date)}</p>
@@ -432,31 +490,31 @@ export default function DocView({
   // ---- CLASSIC ----
   if (templateId === "classic") {
     return (
-      <div className="text-neutral-900">
+      <div className="text-neutral-900" style={customFont}>
         <div
           className="flex justify-between items-center px-6 py-5 -mx-12 -mt-12 mb-8"
-          style={{ background: a, color: "#fff" }}
+          style={{ background: a, color: accentText }}
         >
           <div className="flex items-center gap-3">
             <Logo size={88} />
-            <p className="font-bold text-xl">{form.seller_name}</p>
+            {showSeller && <p className="font-bold text-xl">{form.seller_name}</p>}
           </div>
           <p className="text-2xl font-extrabold tracking-widest">{docTitle}</p>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="border border-neutral-300 p-4">
+          {showSeller && <div className="border border-neutral-300 p-4">
             <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">From</p>
             <p className="font-semibold">{form.seller_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
             {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
             {form.seller_email && <p className="text-xs text-neutral-500">{form.seller_email}</p>}
-          </div>
-          <div className="border border-neutral-300 p-4">
+          </div>}
+          {showCustomer && <div className="border border-neutral-300 p-4">
             <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">{partyLabel}</p>
             <p className="font-semibold">{form.customer_name}</p>
             <p className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
             {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
-          </div>
+          </div>}
         </div>
         <div className="flex justify-between text-xs text-neutral-500 mt-4">
           <p className="font-medium">{form.number}</p>
@@ -548,7 +606,7 @@ export default function DocView({
       <div className="text-neutral-900">
         <div
           className="-mx-12 -mt-12 px-12 pt-12 pb-10 mb-8"
-          style={{ background: a, color: "#fff" }}
+          style={{ background: a, color: accentText }}
         >
           <div className="flex justify-between items-start">
             <Logo size={100} />
@@ -989,7 +1047,7 @@ export default function DocView({
               <span
                 key={f.key}
                 className="text-[9px] px-2 py-0.5 rounded-full"
-                style={{ background: a, color: "#fff" }}
+                style={{ background: a, color: accentText }}
               >
                 {f.label}
               </span>
@@ -1000,7 +1058,7 @@ export default function DocView({
         {/* Items */}
         <table className="w-full text-[12px] border-collapse mt-4">
           <thead>
-            <tr style={{ background: a, color: "#fff" }}>
+            <tr style={{ background: a, color: accentText }}>
               <th className="text-right py-2 px-2 font-semibold w-8">#</th>
               <th className="text-left py-2 px-2 font-semibold">Description</th>
               <th className="text-right py-2 px-2 font-semibold w-12">Qty</th>
@@ -2035,7 +2093,7 @@ export default function DocView({
 
   // ---- MODERN (default) ----
   return (
-    <div className="text-neutral-900">
+    <div className="text-neutral-900" style={customFont}>
       <div className="flex justify-between items-end">
         <div>
           <p className="text-5xl font-extrabold tracking-tight" style={{ color: a }}>{docTitle}</p>
@@ -2043,21 +2101,23 @@ export default function DocView({
         </div>
         <div className="text-right">
           <Logo />
-          <p className="font-bold mt-2">{form.seller_name}</p>
+          {showSeller && <p className="font-bold mt-2">{form.seller_name}</p>}
         </div>
       </div>
       <div className="h-1 w-full my-6" style={{ background: a }} />
       <div className="grid grid-cols-2 gap-8 text-sm">
-        <div>
+        {showSeller && <div>
           <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
           <p className="font-semibold mt-1">{form.seller_name}</p>
           <p className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
           {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
-        </div>
+        </div>}
         <div>
+          {showCustomer && <>
           <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
           <p className="font-semibold mt-1">{form.customer_name}</p>
           <p className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+          </>}
           <p className="text-xs text-neutral-500 mt-2">
             {issuedLabel} {fmtDate(form.issue_date)} · {dueLabel} {fmtDate(form.due_date)}
           </p>

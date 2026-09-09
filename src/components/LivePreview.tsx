@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument } from "pdf-lib";
 import type { Tool } from "./PdfToolbox";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Live preview for page-visual PDF tools. Rather than re-implementing each
  * effect, it runs the *real* tool on a one-page copy of the uploaded file

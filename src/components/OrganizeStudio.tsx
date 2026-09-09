@@ -11,14 +11,11 @@ import {
   ChevronRight,
   Grid3X3,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { organizePages, splitAtPoints, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Visual page editor for the "techy" page tools. Dual mode:
  * grid → all pages as thumbnails with per-page actions
@@ -160,9 +157,6 @@ export default function OrganizeStudio({
         ];
       }
       onApply(outs);
-      toast.success(
-        `Done - ${outs.length} file${outs.length > 1 ? "s" : ""} downloaded.`
-      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {

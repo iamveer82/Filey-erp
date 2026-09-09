@@ -17,6 +17,7 @@ import OptOutsPanel from "../components/OptOutsPanel";
 import { enrichFromWebsite, type CompanyDetails } from "../lib/scout";
 import { reachReady } from "../lib/reach";
 import { useUI } from "../lib/ui";
+import { useLiveSync } from "../lib/realtime";
 import { aed, errMsg, todayYmd } from "../lib/format";
 import {
   PageHeader,
@@ -60,6 +61,7 @@ export default function Marketing() {
   useEffect(() => {
     load();
   }, []);
+  useLiveSync(load);
 
   const leads = useMemo(
     () => buildLeads(customers, invoices, todayYmd()),
@@ -90,7 +92,7 @@ export default function Marketing() {
             <button
               className="btn-ghost"
               disabled={!leads.length}
-              onClick={() => downloadCsv("leads", leadsToCsvRows(shown))}
+              onClick={() => downloadCsv("leads", leadsToCsvRows(shown)).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))}
             >
               <Download size={15} /> Export CSV
             </button>
@@ -266,7 +268,7 @@ export default function Marketing() {
                 label: "Actions",
                 render: (l) => (
                   <button
-                    className="btn-ghost h-7 px-2 text-[12.5px]"
+                    className="btn-ghost"
                     disabled={!l.domain || !reachReady()}
                     title={
                       !reachReady()
@@ -353,6 +355,7 @@ function EnrichModal({
   const [details, setDetails] = useState<CompanyDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!lead?.domain) return;
@@ -382,29 +385,33 @@ function EnrichModal({
   const fields = Object.keys(patch) as (keyof CrmCustomer)[];
 
   const apply = async () => {
-    const ok = await confirm({
-      title: `Update ${c.name}`,
-      message: `Save ${fields.join(", ")} from ${details?.source}?`,
-      confirmLabel: "Save",
-    });
-    if (!ok) return;
+    if (saving || busy || !fields.length) return;
+    setSaving(true);
     try {
+      const ok = await confirm({
+        title: `Update ${c.name}`,
+        message: `Save ${fields.join(", ")} from ${details?.source}?`,
+        confirmLabel: "Save",
+      });
+      if (!ok) return;
       await crm.updateCustomer(c.id, patch);
       toast.success(`Updated ${c.name}.`);
       onSaved();
     } catch (e) {
       toast.error(errMsg(e) || "Could not save");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <Modal open onClose={onClose} title={`Enrich ${c.name}`}>
+    <Modal open onClose={() => { if (!saving) onClose(); }} title={`Enrich ${c.name}`}>
       <p className="text-[12.5px] text-brand-500">
         Reading {lead.domain} - only what the company publishes on its own site.
       </p>
 
       {busy && <p className="mt-4 text-sm text-brand-500">Reading their website…</p>}
-      {failed && <p className="mt-4 text-sm text-danger">{failed}</p>}
+      {failed && <p role="alert" className="mt-4 text-sm text-danger">{failed}</p>}
 
       {details && (
         <div className="mt-4 space-y-2 text-sm">
@@ -421,13 +428,12 @@ function EnrichModal({
         </div>
       )}
 
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>
+      <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+        <button className="btn-ghost" disabled={saving} onClick={onClose}>
           Close
         </button>
-        <button className="btn-primary" disabled={fields.length === 0} onClick={apply}>
-          Save{" "}
-          {fields.length ? `${fields.length} field${fields.length > 1 ? "s" : ""}` : ""}
+        <button className="btn-primary" disabled={busy || saving || fields.length === 0} onClick={apply}>
+          {saving ? "Saving…" : `Save${fields.length ? ` ${fields.length} field${fields.length > 1 ? "s" : ""}` : ""}`}
         </button>
       </div>
     </Modal>

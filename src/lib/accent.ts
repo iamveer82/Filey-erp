@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from "react";
 
 export const accentPalette = {
-  amber: { hex: "#f59e0b", name: "Amber", soft: "#fbbf24" },
+  amber: { hex: "#faca1a", name: "Filey yellow", soft: "#fdd86a" },
   blue: { hex: "#3b82f6", name: "Blue", soft: "#60a5fa" },
   emerald: { hex: "#10b981", name: "Emerald", soft: "#34d399" },
   rose: { hex: "#f43f5e", name: "Rose", soft: "#fb7185" },
@@ -33,7 +33,6 @@ export function applyAccent(a: AccentKey = getAccent()): void {
 export function setAccent(a: AccentKey): void {
   localStorage.setItem(KEY, a);
   applyAccent(a);
-  window.dispatchEvent(new Event("filey-ui"));
 }
 
 function subscribe(cb: () => void): () => void {
@@ -64,7 +63,7 @@ export function useChartColors() {
       accentSoft: a.soft,
       tertiary: "#71717a",
       grid: "#1f1f1f",
-      axis: "#666",
+      axis: "#a1a1aa",
       tooltipBg: "#0e0e0e",
       tooltipBorder: "#262626",
       tooltipFg: "#ededed",
@@ -73,16 +72,16 @@ export function useChartColors() {
     };
   }
   return {
-    primary: "#111827",
+    primary: "#18181b",
     secondary: a.hex,
     accent: a.hex,
     accentSoft: a.soft,
     tertiary: "#9ca3af",
-    grid: "#f3f4f6",
-    axis: "#9ca3af",
+    grid: "#e4e4e7",
+    axis: "#71717a",
     tooltipBg: "#ffffff",
-    tooltipBorder: "#e5e7eb",
-    tooltipFg: "#111827",
+    tooltipBorder: "#e4e4e7",
+    tooltipFg: "#18181b",
     barGradTop: "#374151",
     barGradBottom: a.soft,
   };

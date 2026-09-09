@@ -1,15 +1,9 @@
-/* Delivery challans — the record shape and where they live.
- *
- * Challans have no database table: they are a JSON blob in localStorage,
- * mirrored to app_settings so they follow the user across devices (the same
- * pattern as declaration letters). All of that used to live inside
- * DeliveryChallan.tsx, which meant anything else wanting to read or write one —
- * the agent, in this case — had to duplicate the storage key and the record
- * shape and then drift from it. This module is the one definition; the page and
- * the agent tools both import it.
- */
+/* Delivery challans share one record shape and persistence boundary for the
+ * editor and AI tools. app_settings belongs to the active local/cloud workspace;
+ * the former shared browser blob is retained only as a legacy device fallback. */
 import { tools } from "./api";
 import { todayYmd } from "./format";
+import { isLocalMode } from "./dataMode";
 
 export type DcItem = { description: string; qty: number };
 
@@ -77,27 +71,24 @@ export const DC_STATUSES: {
   { id: "failed", label: "Failed", tone: "danger" },
 ];
 
-// localStorage cache mirrored to Supabase (app_settings) for cross-device sync.
+// Legacy browser key and the active workspace's app_settings key.
 export const DC_STORAGE_KEY = "filey_delivery_challans";
 export const DC_SETTING_KEY = "delivery_challans";
 
-export function loadChallans(): DcRecord[] {
-  try {
-    return JSON.parse(localStorage.getItem(DC_STORAGE_KEY) || "[]") as DcRecord[];
-  } catch (e) {
-    console.warn("Failed to load delivery challans", e);
-    return [];
-  }
+export async function loadChallans(): Promise<DcRecord[]> {
+  const settings = await tools.settings();
+  const saved = settings.find((row) => row.key === DC_SETTING_KEY)?.value;
+  // Old unscoped browser records belong to the device. Never import them
+  // into cloud mode, or mirror cloud reads over them when switching modes.
+  const value = saved ?? (isLocalMode() ? localStorage.getItem(DC_STORAGE_KEY) : null);
+  if (value == null) return [];
+  const records: unknown = JSON.parse(value);
+  if (!Array.isArray(records)) throw new Error("Delivery challan data could not be read.");
+  return records as DcRecord[];
 }
 
-export function saveChallans(records: DcRecord[]): void {
-  try {
-    localStorage.setItem(DC_STORAGE_KEY, JSON.stringify(records));
-  } catch (e) {
-    console.warn("Failed to save delivery challans", e);
-  }
-  // Write-through so challans follow the user across devices.
-  void tools.setSetting(DC_SETTING_KEY, JSON.stringify(records)).catch(() => {});
+export async function saveChallans(records: DcRecord[]): Promise<void> {
+  await tools.setSetting(DC_SETTING_KEY, JSON.stringify(records));
 }
 
 /** A blank editor payload. The number is passed in rather than generated here:

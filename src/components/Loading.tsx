@@ -2,18 +2,8 @@
  * Context-aware skeletons so users know what is loading and where. */
 import { cn } from "../lib/format";
 
-export function Skeleton({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-xl bg-brand-100 dark:bg-white/8",
-        className
-      )}
-    >
-      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/8" />
-    </div>
-  );
-}
+import { Skeleton } from "./ui";
+export { Skeleton } from "./ui";
 
 export function SkeletonCard({ className }: { className?: string }) {
   return (

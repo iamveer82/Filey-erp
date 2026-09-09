@@ -187,7 +187,7 @@ export default function Customers() {
                     { key: "phone", label: "Phone" },
                     { key: "address", label: "Address" },
                   ]
-                )
+                ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))
               }
             >
               <Download size={15} /> Export
@@ -238,7 +238,7 @@ export default function Customers() {
           change={
             rows.length - withTrn > 0
               ? `${num(rows.length - withTrn)} missing TRN`
-              : "All registered"
+              : rows.length ? "All registered" : "No customers yet"
           }
           changeTone={rows.length - withTrn > 0 ? "warn" : "up"}
         />
@@ -248,7 +248,7 @@ export default function Customers() {
           change={
             rows.length - withEmail > 0
               ? `${num(rows.length - withEmail)} missing email`
-              : "All reachable"
+              : rows.length ? "All reachable" : "No customers yet"
           }
           changeTone={rows.length - withEmail > 0 ? "warn" : "up"}
         />
@@ -262,6 +262,7 @@ export default function Customers() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              aria-label="Search name, company, TRN"
               placeholder="Search name, company, TRN…"
               className="pl-8 pr-3 h-8 rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground text-[13px] w-[300px] outline-none focus:border-muted-foreground"
             />
@@ -654,7 +655,7 @@ function customerQuickView(
       <div className="mt-4 flex justify-end border-t border-border pt-3">
         <button
           onClick={onFullPage}
-          className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+          className="btn-ghost"
         >
           Open full page
         </button>
@@ -752,6 +753,7 @@ function CustomerModal({
   })();
 
   const save = async () => {
+    if (saving) return;
     setTouched(true);
     if (nameErr) return;
     if (customErr) {
@@ -796,15 +798,20 @@ function CustomerModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={edit ? "Edit customer" : "New customer"}>
-      <div className="grid grid-cols-2 gap-3">
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={edit ? "Edit customer" : "New customer"}>
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Contact name *">
           <input
+            required
+            aria-invalid={touched && nameErr}
+            aria-describedby={touched && nameErr ? "customer-name-error" : undefined}
             className={cn("input", touched && nameErr && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
             autoFocus
           />
+          {touched && nameErr && <p id="customer-name-error" className="error-text mt-1">Contact name is required.</p>}
         </Field>
         <Field label="Company">
           <input
@@ -850,7 +857,7 @@ function CustomerModal({
           />
         </Field>
         {/* UAE e-invoice: buyer location (pulled onto invoices). */}
-        <div className="grid grid-cols-3 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
           <Field label="City">
             <input
               className="input"
@@ -884,7 +891,7 @@ function CustomerModal({
           </Field>
         </div>
         {/* Credit & balance (Vyapar parity). Opening balance: + = they owe you. */}
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Credit limit (AED)">
             <input
               className="input"
@@ -914,7 +921,7 @@ function CustomerModal({
       {customDefs.length > 0 && (
         <div className="mt-4 border-t border-brand-200 pt-3">
           <p className="text-[11px] font-medium text-brand-500 mb-2">Custom fields</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {customDefs
               .slice()
               .sort((a, b) => a.position - b.position)
@@ -924,7 +931,7 @@ function CustomerModal({
                 return (
                   <div
                     key={def.id}
-                    className={def.type === "checkbox" ? "col-span-2" : ""}
+                    className={def.type === "checkbox" ? "sm:col-span-2" : ""}
                   >
                     <Field label={`${def.label}${def.required ? " *" : ""}`}>
                       {def.type === "checkbox" ? (
@@ -999,7 +1006,7 @@ function CustomerModal({
           </div>
         </div>
       )}
-      <div className="flex justify-end gap-2 pt-3 border-t border-border">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 pt-4 border-t border-border">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -1008,9 +1015,10 @@ function CustomerModal({
           disabled={saving || (touched && nameErr)}
           onClick={save}
         >
-          {saving ? "Saving…" : edit ? "Save changes" : "Save customer"}
+          {saving ? "Saving…" : edit ? "Save changes" : "Create customer"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }

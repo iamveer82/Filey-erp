@@ -107,7 +107,7 @@ export default function StickyNotes({
     <section className="mb-5">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-bold text-ink">{title}</h2>
-        <button onClick={addNote} className="btn-ghost h-8 text-xs">
+        <button onClick={addNote} className="btn-ghost">
           <Plus size={14} /> Add note
         </button>
       </div>

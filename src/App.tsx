@@ -16,8 +16,8 @@ import { LanguageProvider } from "./lib/i18n";
 import { ModulesProvider, useModules } from "./lib/modules";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
+import PasswordRecovery from "./components/PasswordRecovery";
 import TwoFactorGate from "./components/TwoFactorGate";
-import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
@@ -36,6 +36,7 @@ const PayslipPage = lazy(() => import("./pages/PayslipPage"));
 const EmployeeDetail = lazy(() => import("./pages/EmployeeDetail"));
 const PortalView = lazy(() => import("./pages/PortalView"));
 const ModernOverview = lazy(() => import("./pages/ModernOverview"));
+const KnowledgeCenter = lazy(() => import("./pages/KnowledgeCenter"));
 const IntegrationConnect = lazy(() => import("./pages/IntegrationConnect"));
 
 function Splash() {
@@ -75,6 +76,8 @@ function AppRoutes() {
             />
           );
         })}
+        <Route path="/help" element={<KnowledgeCenter />} />
+        <Route path="/docs" element={<KnowledgeCenter />} />
         <Route path="/my-files" element={<Navigate to="/files" replace />} />
         {/* declared after the module routes so /integrations itself still
             resolves to the directory page */}
@@ -93,6 +96,16 @@ function AppRoutes() {
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+function recoveryLink(): { token: string; email: string } | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.location.hash;
+  if (raw.split("?")[0] !== "#/reset-password") return null;
+  const params = new URLSearchParams(raw.split("?")[1] || "");
+  const token = params.get("token_hash")?.trim() || "";
+  const email = params.get("email")?.trim().toLowerCase() || "";
+  return { token, email };
+}
 
 /** Org hit its cloud device limit and this device was refused a slot —
  *  blocking screen with self-serve release (only when licensing enforced). */
@@ -154,7 +167,7 @@ function ProfileLoadError({ message, onRetry }: { message: string; onRetry: () =
         </p>
         <p className="text-xs text-brand-400 break-words">{message}</p>
         <button
-          className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition"
+          className="btn-primary"
           onClick={onRetry}
         >
           Try again
@@ -176,7 +189,6 @@ function Gate() {
     mfaPending,
     deviceLimitBlocked,
   } = useAuth();
-  const [showLogin, setShowLogin] = useState(false);
   // Desktop app, first sign-in on this device: offer to place a Desktop
   // shortcut (once per device; the helper self-guards and never throws).
   useEffect(() => {
@@ -190,15 +202,9 @@ function Gate() {
   if (!getDataMode() && (hasTauri || !cloudConfigured)) return <SetupNotice />;
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
-  // Signed out. The desktop app is for people who already have an account —
-  // the marketing landing page is web-only noise there; show the login card
-  // straight away. The hosted web build keeps its landing page.
-  if (!user)
-    return showLogin || hasTauri ? (
-      <Login />
-    ) : (
-      <Landing onGetStarted={() => setShowLogin(true)} />
-    );
+  // Marketing lives on the separate website. Every ERP runtime returns to
+  // authentication after sign-out, including browser previews and local mode.
+  if (!user) return <Login />;
   // A correct password yields a real session that still sits at aal1 when the
   // account has an authenticator app. Nothing else may render until the code
   // is accepted — this is the whole enforcement point for 2FA.
@@ -229,6 +235,38 @@ function Gate() {
 }
 
 export default function App() {
+  const [resetLink, setResetLink] = useState(recoveryLink);
+  useEffect(() => {
+    // Retain the one-time token only in memory, outside the app's persisted auth.
+    const captureLink = () => {
+      const next = recoveryLink();
+      if (!next) return;
+      setResetLink(next);
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#/reset-password`);
+    };
+    if (resetLink) window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#/reset-password`);
+    window.addEventListener("hashchange", captureLink);
+    return () => window.removeEventListener("hashchange", captureLink);
+  }, [resetLink]);
+  if (resetLink) {
+    const valid = !!resetLink.token && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetLink.email);
+    return (
+      <LanguageProvider>
+        <UIProvider>
+          <PasswordRecovery
+            initialEmail={resetLink.email}
+            recoveryToken={valid ? resetLink.token : ""}
+            initialError={valid ? "" : "This reset link is incomplete or no longer available. Request a new link to continue."}
+            offline={typeof navigator !== "undefined" && !navigator.onLine}
+            onBack={() => {
+              window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#/`);
+              setResetLink(null);
+            }}
+          />
+        </UIProvider>
+      </LanguageProvider>
+    );
+  }
   // Public customer portal — shared invoice links open here without auth.
   // Still wrap in AuthProvider so any lazy-loaded child can safely call useAuth().
   if (typeof window !== "undefined" && window.location.hash.startsWith("#/portal/")) {
@@ -249,7 +287,7 @@ export default function App() {
       <UIProvider>
         <AuthProvider>
           {/* Router wraps the WHOLE gate, not just the signed-in app. Gate
-              returns SetupNotice / Login / Landing / ProfileSetup before it
+              returns SetupNotice / Login / ProfileSetup before it
               ever reaches the routed shell, and those screens are real pages
               that may use router hooks — ProfileSetup calls useNavigate() at
               the top level, so a brand-new account (needsProfile) crashed on

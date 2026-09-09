@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 
 // Hoisted: vi.mock factories run before module-level consts exist.
 const { create, rows } = vi.hoisted(() => ({
@@ -96,5 +96,22 @@ describe("FollowUps party split", () => {
       customer_id: null,
       customer_name: "ACME",
     });
+  });
+
+  it("locks the reminder draft and ignores repeated Enter while creation is pending", async () => {
+    let finish!: () => void;
+    create.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    render(<FollowUps />);
+    await screen.findByText("Call the customer");
+    const title = screen.getByLabelText("Reminder *");
+    fireEvent.change(title, { target: { value: "Call tomorrow" } });
+    fireEvent.keyDown(title, { key: "Enter" });
+    fireEvent.keyDown(title, { key: "Enter" });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(title).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    await act(async () => { finish(); });
+    expect(title).toHaveValue("");
+    expect(title).toBeEnabled();
   });
 });

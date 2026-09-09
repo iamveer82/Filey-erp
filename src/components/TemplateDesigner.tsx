@@ -16,9 +16,11 @@ import {
   ChevronRight,
   ChevronLeft,
 } from "lucide-react";
-import { cn } from "../lib/format";
-import { tools } from "../lib/api";
-import { SelectMenu } from "./ui-menu";
+import { cn, errMsg } from "../lib/format";
+import { customTemplateScope, saveCustomTemplate } from "../lib/customTemplates";
+export { loadCustomTemplates, syncCustomTemplates, deleteCustomTemplate } from "../lib/customTemplates";
+import { Modal } from "./ui";
+import TemplateBackground from "./TemplateBackground";
 import {
   LetterheadConfig,
   loadLetterhead,
@@ -80,63 +82,6 @@ const FONTS = [
   { label: "IBM Plex Mono", value: "'IBM Plex Mono', monospace" },
 ];
 
-const STORAGE_KEY = "filey.customTemplates";
-/** Key under which the full template list is mirrored to Supabase
- * (app_settings) so it follows the user across devices. */
-const SETTING_KEY = "custom_templates";
-
-export function loadCustomTemplates(): CustomTemplate[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    console.warn("Failed to parse custom templates from localStorage:", e);
-    return [];
-  }
-}
-
-function saveCustomTemplates(templates: CustomTemplate[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
-  // Write-through to Supabase so templates created on one device appear
-  // on every device the user logs in from. Fire-and-forget: offline writes
-  // simply stay local until the next successful save.
-  void tools.setSetting(SETTING_KEY, JSON.stringify(templates)).catch((e) => console.warn("Failed to sync custom templates to server", e));
-}
-
-/** Pull the user's templates saved on other devices into local storage.
- * Remote (Supabase) is treated as the source of truth when present so that
- * deletions propagate correctly; on first run any local-only templates are
- * pushed up. Falls back to the local list when offline / not configured.
- * Call on mount in pages that render the template picker. */
-export async function syncCustomTemplates(): Promise<CustomTemplate[]> {
-  try {
-    const settings = await tools.settings();
-    const row = settings.find((s) => s.key === SETTING_KEY);
-    if (row?.value) {
-      const remote: CustomTemplate[] = JSON.parse(row.value);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-      return remote;
-    }
-    // No remote record yet — seed it from whatever is local.
-    const local = loadCustomTemplates();
-    if (local.length) {
-      void tools.setSetting(SETTING_KEY, JSON.stringify(local)).catch((e) => console.warn("Failed to sync custom templates to server", e));
-    }
-    return local;
-  } catch (e) {
-    console.warn("Failed to sync custom templates:", e);
-    return loadCustomTemplates();
-  }
-}
-
-/** Remove a custom template by id; returns the updated list so callers
- * can sync their local state without a re-read. */
-export function deleteCustomTemplate(id: string): CustomTemplate[] {
-  const next = loadCustomTemplates().filter((t) => t.id !== id);
-  saveCustomTemplates(next);
-  return next;
-}
-
 function blankTemplate(): CustomTemplate {
   return {
     id: `custom-${Date.now()}`,
@@ -158,14 +103,20 @@ function blankTemplate(): CustomTemplate {
 export default function TemplateDesigner({
   onSave,
   onClose,
+  inDialog = false,
 }: {
   onSave: (t: CustomTemplate) => void;
   onClose: () => void;
+  inDialog?: boolean;
 }) {
   const [tab, setTab] = useState<"design" | "upload" | "letterhead">("design");
   const [step, setStep] = useState<"upload" | "position">("upload"); // for file flow
   const [tpl, setTpl] = useState<CustomTemplate>(blankTemplate());
   const [saved, setSaved] = useState(false);
+  const [scope] = useState(customTemplateScope);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [lhSaved, setLhSaved] = useState(false);
   useEffect(() => {
@@ -174,17 +125,22 @@ export default function TemplateDesigner({
       .catch((e) => console.warn("Failed to load letterhead", e));
   }, []);
   const handleSaveLetterhead = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
     try {
+      if (!scope || customTemplateScope() !== scope) throw new Error("Your workspace changed. Reopen the designer before saving.");
       await saveLetterhead(lh);
       setLhSaved(true);
-      setTimeout(() => onClose(), 700);
+      onClose();
     } catch (e) {
-      /* offline writes stay local until the next sync */
-      console.warn("Failed to save letterhead:", e);
-    }
+      setSaveError("Could not save letterhead: " + errMsg(e));
+    } finally { savingRef.current = false; setSaving(false); }
   };
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string>("");
+  const [fileReady, setFileReady] = useState(false);
   const [fileName, setFileName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,19 +154,31 @@ export default function TemplateDesigner({
   const set = (key: keyof CustomTemplate, value: any) =>
     setTpl((prev) => ({ ...prev, [key]: value }));
 
+  const saveTemplate = async (template: CustomTemplate) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (!scope) throw new Error("Sign in to this workspace before saving a template.");
+      await saveCustomTemplate(template, scope);
+      setSaved(true);
+      onSave(template);
+      onClose();
+    } catch (error) {
+      setSaveError("Could not save template: " + errMsg(error));
+    } finally { savingRef.current = false; setSaving(false); }
+  };
+
   const handleSaveBuilder = () => {
     if (!tpl.name.trim()) return;
-    const templates = loadCustomTemplates();
-    templates.push({ ...tpl, type: "builder" as const });
-    saveCustomTemplates(templates);
-    setSaved(true);
-    onSave(tpl);
-    setTimeout(() => onClose(), 600);
+    void saveTemplate({ ...tpl, name: tpl.name.trim(), type: "builder" });
   };
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    setFileReady(false);
     setFile(f);
     setFileName(f.name.replace(/\.[^.]+$/, ""));
     const reader = new FileReader();
@@ -219,7 +187,7 @@ export default function TemplateDesigner({
   };
 
   const goToPosition = () => {
-    if (!filePreview || !fileName.trim()) return;
+    if (!filePreview || !fileName.trim() || !fileReady) return;
     setStep("position");
   };
 
@@ -255,7 +223,7 @@ export default function TemplateDesigner({
   const onDragEnd = () => setDragging(null);
 
   const handleSaveFile = () => {
-    if (!filePreview || !fileName.trim()) return;
+    if (!filePreview || !fileName.trim() || !fileReady) return;
     const isImage = file?.type?.startsWith("image/");
     const template: CustomTemplate = {
       id: `custom-${Date.now()}`,
@@ -275,22 +243,17 @@ export default function TemplateDesigner({
       showTax: true,
       paperSize: tpl.paperSize,
     };
-    const templates = loadCustomTemplates();
-    templates.push(template);
-    saveCustomTemplates(templates);
-    setSaved(true);
-    onSave(template);
-    setTimeout(() => onClose(), 600);
+    void saveTemplate(template);
   };
 
   const paperW = tpl.paperSize === "Letter" ? 816 : 794;
   const paperH = tpl.paperSize === "Letter" ? 1056 : 1122;
   const previewScale = 0.35; // scale down for sidebar display
 
-  return (
-    <div className="card !p-5 space-y-5">
+  const content = (
+    <div className={inDialog ? "space-y-5" : "card !p-5 space-y-5"}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      {!inDialog && <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-medium text-ink">Create Template</p>
           <p className="text-xs text-brand-400 mt-0.5">
@@ -301,12 +264,15 @@ export default function TemplateDesigner({
         </div>
         <button
           onClick={onClose}
-          aria-label="Close"
-          className="rounded-xl p-1.5 text-brand-400 hover:bg-brand-50 hover:text-ink cursor-pointer"
+          disabled={saving}
+          aria-label="Close template designer"
+          className="btn-ghost h-10 w-10 shrink-0 p-0"
         >
           <X size={18} />
         </button>
-      </div>
+      </div>}
+
+      {saveError && <p role="alert" className="text-sm text-danger">{saveError}</p>}
 
       {saved ? (
         <div className="text-center py-8">
@@ -323,7 +289,7 @@ export default function TemplateDesigner({
           {/* Back button */}
           <button
             onClick={() => setStep("upload")}
-            className="text-xs text-brand-500 hover:text-ink flex items-center gap-1 cursor-pointer"
+            className="btn-ghost"
           >
             <ChevronLeft size={14} /> Back to upload
           </button>
@@ -336,18 +302,14 @@ export default function TemplateDesigner({
             onMouseLeave={onDragEnd}
             className="relative rounded-xl border-2 border-dashed border-brand-200 bg-brand-50 overflow-hidden select-none cursor-crosshair mx-auto"
             style={{
-              width: paperW * previewScale,
-              height: paperH * previewScale,
+              width: "100%",
+              maxWidth: paperW * previewScale,
+              aspectRatio: `${paperW} / ${paperH}`,
             }}
           >
             {/* Background image */}
-            {filePreview && file?.type?.startsWith("image/") && (
-              <img
-                src={filePreview}
-                alt=""
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                style={{ opacity: 0.7 }}
-              />
+            {filePreview && (
+              <TemplateBackground data={filePreview} type={file?.type?.startsWith("image/") ? "image" : "pdf"} onReady={setFileReady} />
             )}
 
             {/* Grid lines */}
@@ -437,6 +399,7 @@ export default function TemplateDesigner({
           {/* Save */}
           <button
             onClick={handleSaveFile}
+            disabled={!fileReady || saving}
             className="btn-primary w-full h-10 flex items-center justify-center gap-2"
           >
             <Save size={16} />
@@ -446,14 +409,14 @@ export default function TemplateDesigner({
       ) : (
         <>
           {/* Tab Switcher */}
-          <div className="flex rounded-xl bg-brand-50 p-1 gap-1">
+          <div className="flex flex-wrap rounded-2xl bg-muted p-1 gap-1">
             <button
               onClick={() => {
                 setTab("design");
                 setStep("upload");
               }}
               className={cn(
-                "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
+                "btn-ghost flex-1",
                 tab === "design"
                   ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
@@ -467,7 +430,7 @@ export default function TemplateDesigner({
                 setStep("upload");
               }}
               className={cn(
-                "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
+                "btn-ghost flex-1",
                 tab === "upload"
                   ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
@@ -481,7 +444,7 @@ export default function TemplateDesigner({
                 setStep("upload");
               }}
               className={cn(
-                "flex-1 rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all",
+                "btn-ghost flex-1",
                 tab === "letterhead"
                   ? "bg-white text-ink "
                   : "text-brand-400 hover:text-brand-600"
@@ -532,11 +495,14 @@ export default function TemplateDesigner({
                 <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Type size={13} /> Font Family
                 </label>
-                <SelectMenu
+                <select
+                  aria-label="Font family"
+                  className="input"
                   value={tpl.font}
-                  onChange={(v) => set("font", v)}
-                  options={FONTS.map((f) => ({ value: f.value, label: f.label }))}
-                />
+                  onChange={(event) => set("font", event.target.value)}
+                >
+                  {FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
+                </select>
               </div>
 
               {/* Layout */}
@@ -549,8 +515,9 @@ export default function TemplateDesigner({
                     <button
                       key={l}
                       onClick={() => set("layout", l)}
+                      aria-pressed={tpl.layout === l}
                       className={cn(
-                        "flex-1 rounded-lg border px-3 py-2 text-xs font-semibold capitalize transition-all cursor-pointer",
+                        "btn-ghost flex-1 capitalize",
                         tpl.layout === l
                           ? "border-primary-400 bg-primary-50 text-ink"
                           : "border-brand-200 text-brand-400 hover:border-brand-300"
@@ -584,6 +551,9 @@ export default function TemplateDesigner({
                     >
                       <span className="text-sm text-ink">{label}</span>
                       <button
+                        role="switch"
+                        aria-label={label}
+                        aria-checked={!!tpl[key]}
                         onClick={() => set(key, !tpl[key])}
                         className={cn(
                           "w-9 h-5 rounded-full relative transition-colors cursor-pointer",
@@ -653,7 +623,7 @@ export default function TemplateDesigner({
 
               <button
                 onClick={handleSaveBuilder}
-                disabled={!tpl.name.trim()}
+                disabled={!tpl.name.trim() || saving}
                 className="btn-primary w-full h-10 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Plus size={16} /> Create template
@@ -690,28 +660,19 @@ export default function TemplateDesigner({
                 {filePreview ? (
                   <div className="space-y-2">
                     <div className="relative rounded-xl border-2 border-dashed border-primary-300 bg-primary-50/30 p-3 overflow-hidden">
-                      {file?.type?.startsWith("image/") ? (
-                        <img
-                          src={filePreview}
-                          alt="Template preview"
-                          className="w-full max-h-48 object-contain rounded-xl"
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center gap-3 py-10 text-brand-400">
-                          <FileText size={48} />
-                          <div className="text-left">
-                            <p className="font-medium text-sm text-ink">{file?.name}</p>
-                            <p className="text-xs">PDF - first page used as background</p>
-                          </div>
-                        </div>
-                      )}
+                      <div className="relative mx-auto aspect-[210/297] max-w-[180px] bg-white">
+                        <TemplateBackground data={filePreview} type={file?.type?.startsWith("image/") ? "image" : "pdf"} onReady={setFileReady} />
+                      </div>
+                      {!file?.type?.startsWith("image/") && <p className="mt-2 text-xs text-muted-foreground">PDF · First page used as background</p>}
                       <button
+                        aria-label="Remove uploaded template"
                         onClick={() => {
                           setFile(null);
                           setFilePreview("");
+                          setFileReady(false);
                           if (fileInputRef.current) fileInputRef.current.value = "";
                         }}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/80 text-brand-500 grid place-items-center hover:bg-white cursor-pointer"
+                        className="btn-ghost absolute top-2 right-2 h-10 w-10 p-0"
                       >
                         <X size={12} />
                       </button>
@@ -746,8 +707,9 @@ export default function TemplateDesigner({
                     <button
                       key={s}
                       onClick={() => set("paperSize", s)}
+                      aria-pressed={tpl.paperSize === s}
                       className={cn(
-                        "flex-1 rounded-lg border px-3 py-2 text-xs font-semibold transition-all cursor-pointer",
+                        "btn-ghost flex-1",
                         tpl.paperSize === s
                           ? "border-primary-400 bg-primary-50 text-ink"
                           : "border-brand-200 text-brand-400 hover:border-brand-300"
@@ -762,7 +724,7 @@ export default function TemplateDesigner({
               {/* Next button */}
               <button
                 onClick={goToPosition}
-                disabled={!filePreview || !fileName.trim()}
+                disabled={!filePreview || !fileName.trim() || !fileReady}
                 className="btn-primary w-full h-10 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next: Position Elements <ChevronRight size={14} />
@@ -791,6 +753,7 @@ export default function TemplateDesigner({
                   <LetterheadConfig value={lh} onChange={setLh} />
                   <button
                     onClick={handleSaveLetterhead}
+                    disabled={saving}
                     className="btn-primary w-full h-10 flex items-center justify-center gap-2"
                   >
                     <Save size={16} /> Save Letterhead
@@ -803,4 +766,9 @@ export default function TemplateDesigner({
       )}
     </div>
   );
+  return inDialog ? (
+    <Modal open title="Create template" size="3xl" onClose={() => { if (!savingRef.current) onClose(); }}>
+      {content}
+    </Modal>
+  ) : content;
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Plus, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { log } from "../lib/log";
-import { aed, fmtDate, money, numInput } from "../lib/format";
+import { aed, fmtDate, money, numInput, plural } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -20,7 +20,9 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { fin, tools } from "../lib/api";
+import { fin, tools, getCacheScope } from "../lib/api";
+import { assertWorkspaceCurrent, getDataMode } from "../lib/dataMode";
+import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
 import {
   parseStatementCsv,
@@ -31,6 +33,11 @@ import {
 
 const BANK_KEY = "filey_bank_accounts"; // device-local cache
 const BANK_SETTING_KEY = "bank_accounts"; // app_settings - synced + backed up
+const cacheKey = () => {
+  try { assertWorkspaceCurrent(); } catch { return null; }
+  const scope = getCacheScope();
+  return scope ? `${BANK_KEY}:${encodeURIComponent(`${getDataMode() ?? "cloud"}:${scope}`)}` : null;
+};
 
 interface BankAccount {
   id: number;
@@ -46,15 +53,18 @@ interface BankAccount {
 
 function load(): BankAccount[] {
   try {
-    try { return JSON.parse(localStorage.getItem(BANK_KEY) || "[]"); } catch { return []; }
+    const key = cacheKey();
+    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load bank accounts", e);
     return [];
   }
 }
 function save(a: BankAccount[]) {
+  const key = cacheKey();
+  if (!key) throw new Error("Sign in to this workspace before saving bank accounts.");
   try {
-    localStorage.setItem(BANK_KEY, JSON.stringify(a));
+    localStorage.setItem(key, JSON.stringify(a));
   } catch (e) {
     console.warn("Failed to save bank accounts", e);
   }
@@ -70,12 +80,15 @@ function save(a: BankAccount[]) {
 
 /** Pull accounts saved on the user's other devices; remote wins when present. */
 async function syncBankAccounts(): Promise<BankAccount[]> {
+  const key = cacheKey();
+  if (!key) return [];
   try {
     const settings = await tools.settings();
+    if (cacheKey() !== key) return [];
     const row = settings.find((s) => s.key === BANK_SETTING_KEY);
     if (row?.value) {
       const remote: BankAccount[] = JSON.parse(row.value);
-      localStorage.setItem(BANK_KEY, JSON.stringify(remote));
+      localStorage.setItem(key, JSON.stringify(remote));
       return remote;
     }
   } catch (e) {
@@ -99,6 +112,7 @@ export default function BankAccounts() {
       .then(setAccounts) // …then reconcile with other devices
       .finally(() => setSyncing(false));
   }, []);
+  useLiveSync(() => { void syncBankAccounts().then(setAccounts); });
 
   const del = async (a: BankAccount) => {
     const ok = await confirm({
@@ -158,8 +172,17 @@ export default function BankAccounts() {
       )
     : accounts;
 
-  const total = accounts.reduce((s, a) => s + a.current_balance, 0);
-  const currencies = new Set(accounts.map((a) => a.currency)).size;
+  // Bank records do not store a historical exchange rate. Keep each native
+  // currency separate instead of treating the raw balance as AED.
+  const totalsByCurrency = new Map<string, { balance: number; accounts: number }>();
+  for (const account of accounts) {
+    const currency = account.currency || "AED";
+    const total = totalsByCurrency.get(currency) || { balance: 0, accounts: 0 };
+    total.balance += account.current_balance;
+    total.accounts += 1;
+    totalsByCurrency.set(currency, total);
+  }
+  const currencies = totalsByCurrency.size;
 
   return (
     <div className="">
@@ -190,16 +213,20 @@ export default function BankAccounts() {
           change={accounts.length > 0 ? "Connected" : "None yet"}
           changeTone={accounts.length > 0 ? "up" : "warn"}
         />
-        <MetricCard
-          label="Total Balance"
-          value={aed(total)}
-          change="Across all accounts"
-          changeTone="up"
-        />
+        {currencies === 0 ? (
+          <MetricCard label="Total balance" value="—" change="No accounts yet" />
+        ) : Array.from(totalsByCurrency, ([currency, total]) => (
+          <MetricCard
+            key={currency}
+            label={`Total balance (${currency})`}
+            value={money(total.balance, currency)}
+            change={plural(total.accounts, "account")}
+          />
+        ))}
         <MetricCard
           label="Currencies"
           value={String(currencies)}
-          change={currencies > 1 ? "Multi-currency" : "Single currency"}
+          change={currencies === 0 ? "No accounts yet" : currencies > 1 ? "Multi-currency" : "Single currency"}
           changeTone="up"
         />
       </div>
@@ -262,7 +289,7 @@ export default function BankAccounts() {
             sortValue: (a) => a.current_balance,
             render: (a) => (
               <span className="font-medium text-ink tabular-nums">
-                {aed(a.current_balance)}
+                {money(a.current_balance, a.currency)}
               </span>
             ),
           },
@@ -357,6 +384,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   const [recorded, setRecorded] = useState<Set<number>>(new Set());
 
   const onFile = async (file: File) => {
+    if (busy) return;
     setErr("");
     setBusy(true);
     setResult(null);
@@ -395,7 +423,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const confirmMatches = async () => {
-    if (!result?.matched.length) return;
+    if (busy || !result?.matched.length) return;
     setBusy(true);
     try {
       await fin.markReconciled(result.matched.map((m) => m.txnId));
@@ -412,7 +440,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   const recordExpense = async (i: number) => {
     const line = result?.unmatchedLines[i];
-    if (!line || line.amount >= 0) return;
+    if (busy || recorded.has(i) || !line || line.amount >= 0) return;
     setBusy(true);
     try {
       await fin.createExpense(
@@ -439,10 +467,12 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 
   return (
-    <Modal open={open} onClose={onClose} title="Reconcile bank statement">
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="Reconcile bank statement">
       <input
         type="file"
         accept=".csv,text/csv"
+        aria-label="Bank statement CSV"
+        disabled={busy}
         className="input"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -485,6 +515,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
           )}
           {result.unmatchedLines.length > 0 && (
             <ReconList
+              disabled={busy}
               title="On the statement, not in your books"
               hint="Money out can be recorded as an expense here; money in usually belongs to an invoice payment - record it there."
               rows={result.unmatchedLines.map((l, i) => ({
@@ -521,9 +552,11 @@ function ReconList({
   title,
   hint,
   rows,
+  disabled,
 }: {
   title: string;
   hint: string;
+  disabled?: boolean;
   rows: {
     date: string;
     desc: string;
@@ -539,7 +572,7 @@ function ReconList({
         {rows.map((r, i) => (
           <div
             key={i}
-            className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
+            className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 px-3 py-2 text-sm"
           >
             <span className="text-xs text-brand-500 tabular-nums w-20 shrink-0">
               {r.date}
@@ -549,7 +582,8 @@ function ReconList({
             {r.action &&
               (r.action.onClick ? (
                 <button
-                  className="btn-ghost h-7 shrink-0 text-xs"
+                  className="btn-ghost shrink-0"
+                  disabled={disabled}
                   onClick={r.action.onClick}
                 >
                   {r.action.label}
@@ -594,7 +628,7 @@ function BankModal({
       onClose={onClose}
       title={edit ? "Edit Account" : "Add Bank Account"}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Bank Name *">
           <input
             className="input"
@@ -653,7 +687,7 @@ function BankModal({
           />
         </Field>
       </div>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -662,7 +696,7 @@ function BankModal({
           disabled={!valid}
           onClick={() => onSaved(f as BankAccount)}
         >
-          {edit ? "Update" : "Add account"}
+          {edit ? "Save changes" : "Create account"}
         </button>
       </div>
     </Modal>

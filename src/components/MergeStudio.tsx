@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload, Loader2, GripVertical, X, Combine } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { mergePdfs, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Interactive merge: each PDF shows as a card with a page-1 thumbnail. Drag
  * cards to set the order, remove or add more, then merge — no comma-separated
@@ -104,7 +101,6 @@ export default function MergeStudio({
     try {
       const out = await mergePdfs(items.map((i) => i.file));
       onApply(out);
-      toast.success(`Merged ${items.length} files & downloaded.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {

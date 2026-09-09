@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Check, Trash2 } from "lucide-react";
-import { clearLog, logAsText, logEntries, onLog, type LogEntry, type LogLevel } from "../../lib/log";
+import {
+  clearLog,
+  logAsText,
+  logEntries,
+  onLog,
+  type LogEntry,
+  type LogLevel,
+} from "../../lib/log";
 import { clearJournal, listRuns, type RunNote } from "../../lib/agentJournal";
 import { cn } from "../../lib/format";
 import { SelectMenu } from "../../components/ui-menu";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 /* What the app has been doing, for when it stops doing it.
  *
@@ -38,15 +46,20 @@ function RunJournal() {
   if (!runs.length) return null;
 
   return (
-    <div className="space-y-2">
+    <SettingsSection
+      title="Agent run journal"
+      description="Recent failures the assistant uses to improve its next attempt. This history stays after a restart."
+      stacked
+    >
       <div className="flex items-center gap-2">
-        <h3 className="text-[13.5px] font-semibold text-foreground">
-          Agent run journal
-        </h3>
         <button
           className="btn-ghost ml-auto"
           onClick={() => {
-            if (!window.confirm("Clear the run journal? The agent will forget its recent failures and may repeat them."))
+            if (
+              !window.confirm(
+                "Clear the run journal? The agent will forget its recent failures and may repeat them."
+              )
+            )
               return;
             clearJournal();
             setRuns([]);
@@ -55,11 +68,6 @@ function RunJournal() {
           <Trash2 size={14} /> Clear
         </button>
       </div>
-      <p className="text-[12.5px] text-muted-foreground">
-        Runs that gave up or hit tool errors. The agent reads the most recent
-        few before its next autonomous run so it does not repeat them. Clearing
-        this makes it forget those lessons.
-      </p>
       <div className="max-h-[30vh] overflow-auto rounded-xl border border-border bg-card">
         {runs.map((r, i) => (
           <div
@@ -86,7 +94,7 @@ function RunJournal() {
           </div>
         ))}
       </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -105,109 +113,118 @@ export default function DiagnosticsPanel() {
   const shown = useMemo(
     () =>
       entries
-        .filter((e) => (!scope || e.scope === scope) && (!level || (level === "warn" ? e.level !== "info" : e.level === level)))
+        .filter(
+          (e) =>
+            (!scope || e.scope === scope) &&
+            (!level || (level === "warn" ? e.level !== "info" : e.level === level))
+        )
         .slice()
         .reverse(), // newest first: the thing that just broke is at the top
     [entries, scope, level]
   );
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-[15px] font-semibold text-foreground">Diagnostics</h2>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">
-          What the agent, WhatsApp and sync have been doing since the app
-          started. Kept in memory only - it clears when you close Filey. If
-          something misbehaves, copy this and send it over.
-        </p>
-      </div>
+    <SettingsPanel>
+      <SettingsSection
+        title="Diagnostics"
+        description="Activity from Filey AI, WhatsApp and sync during this session. Copy relevant entries when reporting a problem; these logs clear when Filey closes."
+        stacked
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <SelectMenu
+            className="w-auto"
+            ariaLabel="Filter by area"
+            value={scope}
+            onChange={(v) => setScope(v)}
+            options={[
+              { value: "", label: "All areas" },
+              ...scopes.map((s) => ({ value: s, label: s })),
+            ]}
+          />
+          <SelectMenu
+            className="w-auto"
+            ariaLabel="Filter by level"
+            value={level}
+            onChange={(v) => setLevel(v as LogLevel | "")}
+            options={[
+              { value: "", label: "Everything" },
+              { value: "warn", label: "Warnings and errors" },
+              { value: "error", label: "Errors only" },
+            ]}
+          />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <SelectMenu
-          size="sm"
-          className="w-auto"
-          ariaLabel="Filter by area"
-          value={scope}
-          onChange={(v) => setScope(v)}
-          options={[
-            { value: "", label: "All areas" },
-            ...scopes.map((s) => ({ value: s, label: s })),
-          ]}
-        />
-        <SelectMenu
-          size="sm"
-          className="w-auto"
-          ariaLabel="Filter by level"
-          value={level}
-          onChange={(v) => setLevel(v as LogLevel | "")}
-          options={[
-            { value: "", label: "Everything" },
-            { value: "warn", label: "Warnings and errors" },
-            { value: "error", label: "Errors only" },
-          ]}
-        />
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="btn-ghost"
-            onClick={() => {
-              void navigator.clipboard?.writeText(logAsText(shown)).then(
-                () => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                },
-                () => {
-                  /* clipboard blocked — nothing useful to say */
-                }
-              );
-            }}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-            {copied ? "Copied" : "Copy all"}
-          </button>
-          <button
-            className="btn-ghost"
-            onClick={() => {
-              if (!window.confirm("Clear the diagnostic log? This removes the evidence of any issue you're investigating."))
-                return;
-              clearLog();
-              setEntries([]);
-            }}
-          >
-            <Trash2 size={14} /> Clear
-          </button>
-        </div>
-      </div>
-
-      {shown.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card p-6 text-center text-[12.5px] text-muted-foreground">
-          Nothing recorded yet. Use the agent or WhatsApp and it will show up here.
-        </p>
-      ) : (
-        <div className="max-h-[60vh] overflow-auto rounded-xl border border-border bg-card">
-          {shown.map((e, i) => (
-            <div
-              key={`${e.at}-${i}`}
-              className="flex gap-3 border-b border-border px-3 py-2 text-[12px] last:border-b-0"
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                void navigator.clipboard?.writeText(logAsText(shown)).then(
+                  () => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  },
+                  () => {
+                    /* clipboard blocked — nothing useful to say */
+                  }
+                );
+              }}
             >
-              <span className="shrink-0 font-mono text-muted-foreground">{time(e.at)}</span>
-              <span className="w-20 shrink-0 truncate font-medium text-muted-foreground">
-                {e.scope}
-              </span>
-              <span className={cn("min-w-0 flex-1", TONE[e.level])}>
-                {e.message}
-                {e.detail && (
-                  <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">
-                    {e.detail}
-                  </span>
-                )}
-              </span>
-            </div>
-          ))}
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? "Copied" : "Copy all"}
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Clear the diagnostic log? This removes the evidence of any issue you're investigating."
+                  )
+                )
+                  return;
+                clearLog();
+                setEntries([]);
+              }}
+            >
+              <Trash2 size={14} /> Clear
+            </button>
+          </div>
         </div>
-      )}
 
+        {shown.length === 0 ? (
+          <p className="rounded-xl bg-muted/50 p-6 text-center text-[12.5px] text-muted-foreground">
+            Nothing recorded yet. Use the agent or WhatsApp and it will show up here.
+          </p>
+        ) : (
+          <div className="max-h-[60vh] overflow-auto rounded-xl border border-border bg-card">
+            {shown.map((e, i) => (
+              <div
+                key={`${e.at}-${i}`}
+                className="flex flex-wrap gap-x-3 gap-y-1 border-b border-border px-3 py-3 text-[12px] last:border-b-0"
+              >
+                <span className="shrink-0 font-mono text-muted-foreground">
+                  {time(e.at)}
+                </span>
+                <span className="w-20 shrink-0 truncate font-medium text-muted-foreground">
+                  {e.scope}
+                </span>
+                <span
+                  className={cn(
+                    "min-w-0 basis-full break-words sm:flex-1 sm:basis-0",
+                    TONE[e.level]
+                  )}
+                >
+                  {e.message}
+                  {e.detail && (
+                    <span className="mt-0.5 block break-all font-mono text-[11px] text-muted-foreground">
+                      {e.detail}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </SettingsSection>
       <RunJournal />
-    </div>
+    </SettingsPanel>
   );
 }

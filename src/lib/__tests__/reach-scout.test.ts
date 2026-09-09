@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const aiFetch = vi.fn();
 vi.mock("../ai", () => ({ aiFetch }));
@@ -14,6 +14,8 @@ beforeEach(() => {
   aiFetch.mockReset().mockResolvedValue(textRes("Title: Example\n\nHello world"));
   setReachConfig({ enabled: true, apiKey: "" });
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("readUrl guards", () => {
   it("refuses anything that is not a public http(s) page", async () => {
@@ -40,7 +42,7 @@ describe("readUrl guards", () => {
     expect(aiFetch.mock.calls[0][0]).toBe("https://r.jina.ai/https://example.com/about");
   });
 
-  it("stays off entirely until the user opts in", async () => {
+  it("honours disabled web access", async () => {
     setReachConfig({ enabled: false });
     await expect(readUrl("https://example.com")).rejects.toThrow(/turn it on/i);
     await expect(searchWeb("anything")).rejects.toThrow(/turn it on/i);
@@ -54,6 +56,70 @@ describe("readUrl guards", () => {
     setReachConfig({ apiKey: "jina_abc" });
     await readUrl("https://example.com");
     expect(aiFetch.mock.calls[1][1].headers.authorization).toBe("Bearer jina_abc");
+  });
+});
+
+describe("Jina search access and request lifecycle", () => {
+  it("explains Search's own-key requirement before making a request", async () => {
+    for (const apiKey of ["", "   "]) {
+      setReachConfig({ apiKey });
+      await expect(searchWeb("public steel suppliers")).rejects.toThrow(/Jina API key.*Integrations.*Web research/);
+    }
+    expect(aiFetch).not.toHaveBeenCalled();
+    await expect(readUrl("https://example.com")).resolves.toMatchObject({ title: "Example" });
+    expect(aiFetch.mock.calls[0][1].headers.authorization).toBeUndefined();
+  });
+
+  it("uses the user's key for Search and respects the requested result count", async () => {
+    setReachConfig({ apiKey: "  test-jina-key  " });
+    aiFetch.mockResolvedValue(textRes([
+      "[1] Title: Supplier one", "[1] URL Source: https://example.com/one",
+      "[2] Title: Supplier two", "[2] URL Source: https://example.com/two",
+    ].join("\n")));
+    const result = await searchWeb(" steel & bolts ", { limit: 1 });
+    expect(aiFetch).toHaveBeenCalledWith("https://s.jina.ai/steel%20%26%20bolts", expect.objectContaining({
+      method: "GET", headers: expect.objectContaining({ authorization: "Bearer test-jina-key" }),
+    }));
+    expect(result.hits).toEqual([{ title: "Supplier one", url: "https://example.com/one", snippet: "" }]);
+  });
+
+  it("surfaces provider errors instead of reporting an empty successful search", async () => {
+    setReachConfig({ apiKey: "test-jina-key" });
+    aiFetch.mockRejectedValue(new Error("Jina quota exceeded"));
+    await expect(searchWeb("suppliers")).rejects.toThrow("Jina quota exceeded");
+  });
+
+  it("does not start a request that was already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(readUrl("https://example.com", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(aiFetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards cancellation to a pending search", async () => {
+    setReachConfig({ apiKey: "test-jina-key" });
+    aiFetch.mockImplementation((_url: string, { signal }: RequestInit) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    const controller = new AbortController();
+    const pending = searchWeb("suppliers", { signal: controller.signal });
+    const check = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await check;
+    expect(aiFetch.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+
+  it("times out a stalled response body and clears its timer", async () => {
+    vi.useFakeTimers();
+    aiFetch.mockImplementation(async (_url: string, { signal }: RequestInit) => ({
+      text: () => new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }),
+    }));
+    const pending = expect(readUrl("https://example.com")).rejects.toThrow(/timed out/);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

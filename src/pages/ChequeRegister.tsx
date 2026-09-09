@@ -24,7 +24,9 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
-import { tools } from "../lib/api";
+import { tools, getCacheScope } from "../lib/api";
+import { assertWorkspaceCurrent, getDataMode } from "../lib/dataMode";
+import { useLiveSync } from "../lib/realtime";
 import { saveOutput, listFiles, fileObjectUrl } from "../lib/files";
 import { SelectMenu } from "../components/ui-menu";
 
@@ -34,6 +36,11 @@ import { SelectMenu } from "../components/ui-menu";
 
 const CHEQUE_KEY = "filey_cheques"; // device-local cache
 const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings - synced + backed up
+const cacheKey = () => {
+  try { assertWorkspaceCurrent(); } catch { return null; }
+  const scope = getCacheScope();
+  return scope ? `${CHEQUE_KEY}:${encodeURIComponent(`${getDataMode() ?? "cloud"}:${scope}`)}` : null;
+};
 
 interface Cheque {
   id: number;
@@ -56,15 +63,18 @@ interface Cheque {
 
 function loadCheques(): Cheque[] {
   try {
-    try { return JSON.parse(localStorage.getItem(CHEQUE_KEY) || "[]"); } catch { return []; }
+    const key = cacheKey();
+    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load cheques", e);
     return [];
   }
 }
 function saveCheques(c: Cheque[]) {
+  const key = cacheKey();
+  if (!key) throw new Error("Sign in to this workspace before saving cheques.");
   try {
-    localStorage.setItem(CHEQUE_KEY, JSON.stringify(c));
+    localStorage.setItem(key, JSON.stringify(c));
   } catch (e) {
     console.warn("Failed to save cheques", e);
   }
@@ -80,12 +90,15 @@ function saveCheques(c: Cheque[]) {
 
 /** Pull cheques saved on the user's other devices; remote wins when present. */
 async function syncCheques(): Promise<Cheque[]> {
+  const key = cacheKey();
+  if (!key) return [];
   try {
     const settings = await tools.settings();
+    if (cacheKey() !== key) return [];
     const row = settings.find((s) => s.key === CHEQUE_SETTING_KEY);
     if (row?.value) {
       const remote: Cheque[] = JSON.parse(row.value);
-      localStorage.setItem(CHEQUE_KEY, JSON.stringify(remote));
+      localStorage.setItem(key, JSON.stringify(remote));
       return remote;
     }
   } catch (e) {
@@ -114,6 +127,7 @@ export default function ChequeRegister() {
     setCheques(loadCheques()); // instant paint from the local cache…
     syncCheques().then(setCheques); // …then reconcile with other devices
   }, []);
+  useLiveSync(() => { void syncCheques().then(setCheques); });
 
   const filtered = useMemo(
     () =>
@@ -330,7 +344,7 @@ export default function ChequeRegister() {
                   <button
                     aria-label={`Mark cheque ${c.cheque_no} cleared`}
                     title="Mark cleared"
-                    className="h-7 w-7 grid place-items-center rounded-md text-success hover:bg-success/10 cursor-pointer transition-colors duration-200"
+                    className="btn-ghost w-10 p-0 text-success hover:bg-success/10"
                     onClick={() => markCleared(c)}
                   >
                     <Check size={15} />
@@ -446,7 +460,7 @@ function ChequeModal({
   const valid = f.cheque_no.trim() && f.party.trim() && f.amount > 0;
   return (
     <Modal open={open} onClose={onClose} title={edit ? "Edit Cheque" : "New cheque"}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Cheque Number *">
           <input
             className="input"
@@ -531,7 +545,7 @@ function ChequeModal({
         chequeNo={f.cheque_no}
         onChange={(attachment) => setF({ ...f, attachment })}
       />
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -540,7 +554,7 @@ function ChequeModal({
           disabled={!valid}
           onClick={() => onSaved(f as Cheque)}
         >
-          {edit ? "Update" : "Add Cheque"}
+          {edit ? "Save changes" : "Create cheque"}
         </button>
       </div>
     </Modal>
@@ -606,9 +620,9 @@ function ChequeAttachment({
     <div className="mt-3">
       <span className="label">Cheque scan (image or PDF)</span>
       {value ? (
-        <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
           {preview ? (
-            <a href={preview} target="_blank" rel="noreferrer" className="shrink-0">
+            <a href={preview} target="_blank" rel="noreferrer" aria-label="View cheque scan" className="shrink-0">
               <img
                 src={preview}
                 alt=""
@@ -622,25 +636,26 @@ function ChequeAttachment({
             {value.name}
           </span>
           {preview && (
-            <a href={preview} target="_blank" rel="noreferrer" className="btn-ghost h-8 px-3 text-xs">
+            <a href={preview} target="_blank" rel="noreferrer" className="btn-ghost">
               View
             </a>
           )}
           <button
-            className="h-8 px-3 text-xs font-medium text-danger hover:underline"
+            className="btn-ghost text-danger"
             onClick={() => onChange(undefined)}
           >
             Remove
           </button>
         </div>
       ) : (
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground hover:border-brand-300 hover:text-foreground">
+        <label className="relative flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground hover:border-brand-300 hover:text-foreground focus-within:ring-2 focus-within:ring-ring">
           <Paperclip size={15} />
           {busy ? "Uploading…" : "Attach a photo or PDF of the cheque"}
           <input
             type="file"
             accept="image/*,application/pdf"
-            className="hidden"
+            className="sr-only"
+            aria-label="Attach cheque scan"
             disabled={busy}
             onChange={(e) => {
               const file = e.target.files?.[0];

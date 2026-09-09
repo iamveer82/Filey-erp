@@ -1,5 +1,6 @@
-import { fmtDate } from "../../lib/format";
-import { DataTable, Badge } from "../../components/ui";
+import { errMsg, fmtDate } from "../../lib/format";
+import { DataTable, Badge, ErrorBanner } from "../../components/ui";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { tools, AuditEntry } from "../../lib/api";
@@ -32,7 +33,7 @@ function FilterMenu({
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] text-foreground transition-colors hover:bg-hover"
+        className="btn-ghost"
       >
         {current?.label ?? value}
         <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
@@ -89,21 +90,22 @@ function summarizeChanges(changes: AuditEntry["changes"]): string {
 export default function ActivityLog() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState("all");
   const [entity, setEntity] = useState("all");
   const [q, setQ] = useState("");
 
   const load = () => {
+    setLoading(true);
+    setError(null);
     tools
       .auditLog(200)
       .then(setAudit)
-      .catch(console.error)
+      .catch((error) => setError(errMsg(error)))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
-  // LiveSync removed: audit_log grows forever and a full refetch on every
-  // realtime blip is the heaviest query in the app. The user refreshes by
-  // navigating to the panel.
+  // Refresh explicitly: visited settings tabs stay mounted to preserve drafts.
 
   const entities = useMemo(
     () => Array.from(new Set(audit.map((a) => a.entity))).sort(),
@@ -123,100 +125,114 @@ export default function ActivityLog() {
   );
 
   return (
-    <div className="space-y-3">
-      <div className="card flex flex-wrap items-center gap-2">
-        <input
-          className="input flex-1 min-w-[160px]"
-          placeholder="Search actor or details…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <FilterMenu
-          label="Filter by action"
-          value={action}
-          onChange={setAction}
-          options={[
-            { value: "all", label: "All actions" },
-            { value: "insert", label: "Created" },
-            { value: "update", label: "Updated" },
-            { value: "delete", label: "Deleted" },
-          ]}
-        />
-        <FilterMenu
-          label="Filter by type"
-          value={entity}
-          onChange={setEntity}
-          options={[
-            { value: "all", label: "All types" },
-            ...entities.map((e) => ({ value: e, label: prettyEntity(e) })),
-          ]}
-        />
-      </div>
-      <DataTable<AuditEntry>
-        rows={filtered}
-        pageSize={10}
-        loading={loading}
-        empty="No activity recorded yet"
-        columns={[
-          {
-            key: "t",
-            label: "When",
-            sortValue: (a) => a.created_at ?? "",
-            render: (a) => fmtDate(a.created_at),
-          },
-          {
-            key: "actor",
-            label: "Actor",
-            sortValue: (a) => a.actor,
-            render: (a) => <span className="font-medium text-ink">{a.actor}</span>,
-          },
-          {
-            key: "act",
-            label: "Action",
-            sortValue: (a) => a.action,
-            render: (a) => (
-              <Badge tone={ACTION_TONE[a.action] ?? "info"}>
-                {a.action === "insert"
-                  ? "created"
-                  : a.action === "delete"
-                    ? "deleted"
-                    : a.action}
-              </Badge>
-            ),
-          },
-          {
-            key: "ent",
-            label: "Type",
-            sortValue: (a) => a.entity,
-            render: (a) => prettyEntity(a.entity),
-          },
-          {
-            key: "d",
-            label: "Details",
-            sortValue: (a) => a.details ?? "",
-            render: (a) => a.details ?? "—",
-          },
-          {
-            key: "chg",
-            label: "Changes",
-            sortValue: () => "",
-            render: (a) => {
-              const s = summarizeChanges(a.changes);
-              return s ? (
-                <span
-                  className="text-xs text-muted block max-w-[280px] truncate"
-                  title={s}
-                >
-                  {s}
-                </span>
-              ) : (
-                "—"
-              );
-            },
-          },
-        ]}
-      />
-    </div>
+    <SettingsPanel>
+      <SettingsSection
+        title="Activity log"
+        description="Recent changes to your workspace. Filter by person, action or record type."
+        stacked
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="input flex-1 min-w-[160px]"
+            aria-label="Search actor or details"
+            placeholder="Search actor or details…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <FilterMenu
+            label="Filter by action"
+            value={action}
+            onChange={setAction}
+            options={[
+              { value: "all", label: "All actions" },
+              { value: "insert", label: "Created" },
+              { value: "update", label: "Updated" },
+              { value: "delete", label: "Deleted" },
+            ]}
+          />
+          <FilterMenu
+            label="Filter by type"
+            value={entity}
+            onChange={setEntity}
+            options={[
+              { value: "all", label: "All types" },
+              ...entities.map((e) => ({ value: e, label: prettyEntity(e) })),
+            ]}
+          />
+          <button className="btn-ghost" onClick={load} disabled={loading}>
+            {loading ? "Refreshing…" : error ? "Retry" : "Refresh activity"}
+          </button>
+        </div>
+        {error ? (
+          <ErrorBanner message={`Could not load activity: ${error}`} />
+        ) : (
+          <DataTable<AuditEntry>
+            rows={filtered}
+            pageSize={10}
+            loading={loading}
+            empty="No activity recorded yet"
+            columns={[
+              {
+                key: "t",
+                label: "When",
+                sortValue: (a) => a.created_at ?? "",
+                render: (a) => fmtDate(a.created_at),
+              },
+              {
+                key: "actor",
+                label: "Actor",
+                sortValue: (a) => a.actor,
+                render: (a) => <span className="font-medium text-ink">{a.actor}</span>,
+              },
+              {
+                key: "act",
+                label: "Action",
+                sortValue: (a) => a.action,
+                render: (a) => (
+                  <Badge tone={ACTION_TONE[a.action] ?? "info"}>
+                    {a.action === "insert"
+                      ? "created"
+                      : a.action === "delete"
+                        ? "deleted"
+                        : a.action}
+                  </Badge>
+                ),
+              },
+              {
+                key: "ent",
+                label: "Type",
+                sortValue: (a) => a.entity,
+                render: (a) => prettyEntity(a.entity),
+              },
+              {
+                key: "d",
+                label: "Details",
+                sortValue: (a) => a.details ?? "",
+                render: (a) => a.details ?? "—",
+              },
+              {
+                key: "chg",
+                label: "Changes",
+                sortValue: () => "",
+                render: (a) => {
+                  const s = summarizeChanges(a.changes);
+                  return s ? (
+                    <span
+                      className="text-xs text-muted-foreground block max-w-[280px] truncate"
+                      title={s}
+                    >
+                      {s}
+                    </span>
+                  ) : (
+                    "—"
+                  );
+                },
+              },
+            ]}
+          />
+        )}
+      </SettingsSection>
+    </SettingsPanel>
   );
 }
 

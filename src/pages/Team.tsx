@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Hash, Plus, Loader2, MessageSquare } from "lucide-react";
+import { Hash, Plus, Loader2 } from "lucide-react";
 
 import { channels, type OrgChannel } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { errMsg, cn } from "../lib/format";
+import { PageHeader } from "../components/ui";
 import CompanyMessages from "../components/CompanyMessages";
 
 /* Team chat.
@@ -32,15 +33,7 @@ export default function Team() {
   const load = async () => {
     try {
       const rows = await channels.list();
-      // #general is created on first visit rather than seeded by the
-      // migration: the migration runs without a signed-in user, so the row
-      // would have no owner.
-      if (!rows.some((c) => c.name === GENERAL)) {
-        await channels.create(GENERAL, "Everything, by default").catch(() => {});
-        setList(await channels.list());
-      } else {
-        setList(rows);
-      }
+      setList(rows);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -59,13 +52,13 @@ export default function Team() {
   });
 
   const add = async () => {
-    if (!name.trim()) return;
+    if (busy || !name.trim()) return;
     setBusy(true);
     try {
       await channels.create(name);
       const rows = await channels.list();
       setList(rows);
-      const created = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-");
+      const created = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
       setActive(created);
       setName("");
       setCreating(false);
@@ -78,7 +71,9 @@ export default function Team() {
 
   const sorted = useMemo(
     () =>
-      [...list].sort((a, b) =>
+      // Messages address channels by name. Show legacy duplicates once without
+      // deleting records, and offer the default room without a write on mount.
+      [...new Map([{ id: 0, name: GENERAL, purpose: "Everything, by default", created_at: "" }, ...list].map((c) => [c.name, c])).values()].sort((a, b) =>
         // general first, then alphabetical — the default room shouldn't drift
         // down the list as channels are added.
         a.name === GENERAL ? -1 : b.name === GENERAL ? 1 : a.name.localeCompare(b.name)
@@ -89,52 +84,53 @@ export default function Team() {
   const activeChannel = sorted.find((c) => c.name === active);
 
   return (
-    <div className="mx-auto max-w-[1320px] px-4 py-4 sm:px-6">
-      <header className="mb-5">
-        <h1 className="flex items-center gap-2 text-xl font-semibold text-ink">
-          <MessageSquare size={19} className="text-brand-400" />
-          Team
-        </h1>
-        <p className="mt-1 text-[12.5px] text-brand-500">
-          Talk to your workspace. Mention a teammate with @ and reply to keep a
-          thread together.
-        </p>
-      </header>
+    <div className="mx-auto max-w-[1320px]">
+      <PageHeader
+        title="Team"
+        subtitle="Talk to your workspace. Mention a teammate with @ and reply to keep a thread together."
+      />
 
       <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
         {/* Channel rail */}
         <aside>
           <div className="card p-3">
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-brand-400">
+              <p className="text-sm font-semibold text-foreground">
                 Channels
               </p>
               <button
-                className="btn-ghost h-6 px-1.5 text-[11px]"
+                className="btn-ghost w-10 p-0"
+                disabled={busy}
+                aria-label={creating ? "Cancel new channel" : "New channel"}
+                aria-expanded={creating}
                 onClick={() => setCreating((v) => !v)}
                 title="New channel"
               >
-                <Plus size={12} />
+                <Plus size={16} />
               </button>
             </div>
 
             {creating && (
-              <div className="mb-2 flex gap-1.5">
+              <form className="mb-3 space-y-2" onSubmit={(e) => { e.preventDefault(); void add(); }}>
                 <input
                   autoFocus
-                  className="input h-8 min-w-0 flex-1 text-[12.5px]"
+                  className="input"
+                  aria-label="Channel name"
+                  disabled={busy}
                   placeholder="sales"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") add();
-                    if (e.key === "Escape") setCreating(false);
+                    if (e.key === "Escape" && !busy) setCreating(false);
                   }}
                 />
-                <button className="btn-primary h-8 px-2 text-[12px]" disabled={busy} onClick={add}>
-                  {busy ? <Loader2 size={12} className="animate-spin" /> : "Add"}
-                </button>
-              </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => setCreating(false)}>Cancel</button>
+                  <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
+                    {busy ? "Creating…" : "Create"}
+                  </button>
+                </div>
+              </form>
             )}
 
             {loading ? (
@@ -147,8 +143,9 @@ export default function Team() {
                   <button
                     key={c.id}
                     onClick={() => setActive(c.name)}
+                    aria-current={c.name === active ? "page" : undefined}
                     className={cn(
-                      "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
+                      "flex min-h-10 w-full items-center gap-2 rounded-full px-3 py-2 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       c.name === active
                         ? "bg-primary-100 font-medium text-ink"
                         : "text-brand-500 hover:bg-muted hover:text-ink"

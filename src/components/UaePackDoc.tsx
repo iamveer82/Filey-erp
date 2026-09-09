@@ -1,14 +1,11 @@
 /**
- * UAE reference-pack document templates (17 ids, "uae-*") — ported from the
- * standalone "Invoice Templates.html" pack (clean A4 layout: dochead with
- * seller block + accent title + Arabic subtitle + meta table, .box panels,
- * dark-accent items table, right-aligned 320px totals, dashed amount-in-words
- * box, two signature boxes, small legal note). One parameterized renderer
- * driven by the UAE_PACK config table below. Registered in DocTemplates.ts
- * and delegated to from DocView.tsx (templateId.startsWith("uae-")).
+ * Tax-aware document content for the saved "uae-*" IDs. InvoiceLayoutFrame
+ * supplies distinct page compositions; the config below keeps each document's
+ * title, columns, tax presentation, references and legal notes intact.
+ * Registered in DocTemplates.ts and delegated to by DocView.tsx.
  *
  * White print surface — not the app's dark theme. Accent comes from
- * form.accent (the pack's --acc), defaulting to the pack's #1b3a5b.
+ * form.accent, defaulting to the pack's #1b3a5b.
  */
 import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
@@ -23,6 +20,7 @@ import {
   type Code,
 } from "../lib/einvoice";
 import type { DocViewForm, DocViewItem, DocViewLabels } from "./DocView";
+import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
 
 /** Map a code to its human label (falls back to the raw code) — DocView pattern. */
 const codeLabel = (list: Code[], code?: string | null): string =>
@@ -594,11 +592,11 @@ export default function UaePackDoc({
     meta.push(["Exchange Rate", `1 ${ccy} = ${fxRate} AED`]);
 
   const BoxTitle = ({ children }: { children: React.ReactNode }) => (
-    <p className="text-[10.5px] uppercase tracking-[0.7px] font-semibold text-[#5a7189] mb-1.5">
+    <p className="invoice-label">
       {children}
     </p>
   );
-  const boxCls = "border border-[#d6dee7] rounded px-3.5 py-2.5 text-[13px]";
+  const boxCls = "invoice-party";
 
   const billToBox = (
     <div className={boxCls}>
@@ -744,18 +742,22 @@ export default function UaePackDoc({
   };
 
   const itemsTable = (
-    <table className="w-full border-collapse text-[12.8px] mt-3 mb-2">
+    <table className="invoice-items w-full border-collapse text-[12.8px] mt-3 mb-2">
       <thead>
-        <tr style={{ background: acc, color: "#fff" }}>
+        <tr>
           {cols.map((k) => (
             <th
               key={k}
+              data-column={k}
               className={`py-1.5 px-2 font-semibold text-[11.5px] whitespace-nowrap ${colAlign(k)}${
                 k === "idx" ? " w-8" : ""
               }`}
             >
               {colLabel(k)}
             </th>
+          ))}
+          {(form.customColumns || []).map((column) => (
+            <th key={column.key} scope="col" className="text-left">{column.label}</th>
           ))}
         </tr>
       </thead>
@@ -767,9 +769,12 @@ export default function UaePackDoc({
           return (
             <tr key={i}>
               {cols.map((k) => (
-                <td key={k} className={tdClass(k)}>
+                <td key={k} data-column={k} className={tdClass(k)}>
                   {colValue(k, it, i, taxable, rate, lineVat)}
                 </td>
+              ))}
+              {(form.customColumns || []).map((column) => (
+                <td key={column.key} className="text-left">{it.custom?.[column.key] || "—"}</td>
               ))}
             </tr>
           );
@@ -842,9 +847,9 @@ export default function UaePackDoc({
 
   const totalsBlock = showTotals && cfg.table !== "voucher" && (
     <>
-      <div className="flex justify-between gap-6 mt-6">
+      <div className="invoice-summary">
         {!noVat && (
-          <div className="text-[11px]">
+          <div className="invoice-tax-breakdown">
             <BoxTitle>VAT Breakdown</BoxTitle>
             <table className="border-collapse">
               <thead>
@@ -870,7 +875,7 @@ export default function UaePackDoc({
             </table>
           </div>
         )}
-        <table className="border-collapse text-[13px] self-start ml-auto" style={{ width: 320 }}>
+        <table className="invoice-totals border-collapse">
           <tbody>
             {isCredit && !isDebit ? (
               <>
@@ -908,7 +913,7 @@ export default function UaePackDoc({
                 v={`${roundOffAmt > 0 ? "+" : ""}${m(roundOffAmt)}`}
               />
             )}
-            <tr style={{ background: acc, color: "#fff" }}>
+            <tr className="invoice-grand-total">
               <td className="py-[5px] px-2.5 font-bold">
                 {grandLabel} ({ccy})
               </td>
@@ -925,7 +930,7 @@ export default function UaePackDoc({
           </tbody>
         </table>
       </div>
-      <p className="text-[12.5px] italic my-2.5 border border-dashed border-[#c3cfdb] rounded py-1.5 px-3 text-[#334c63]">
+      <p className="invoice-words">
         Amount in words: {amountInWords(grandTotal, ccy)}
       </p>
     </>
@@ -934,21 +939,16 @@ export default function UaePackDoc({
   const sigLabels = cfg.sig || ["Authorised Signatory & Stamp", "Received By"];
 
   return (
-    <div
-      className="text-[#1c2733]"
-      style={{ fontFamily: "'Segoe UI', Arial, sans-serif", background: "#fff" }}
-    >
-      {/* dochead: seller block left, title + Arabic subtitle + meta right */}
-      <div
-        className="flex justify-between gap-6 pb-3.5 mb-4 border-b-[3px]"
-        style={{ borderColor: acc }}
-      >
-        <div className="flex gap-3.5 text-[13px]">
+    <InvoiceLayoutFrame
+      templateId={(form.template || "uae-full").toLowerCase()}
+      accent={acc}
+      brand={
+        <div>
           {logoSrc && (
             <img src={logoSrc} alt="logo" className="object-contain" style={{ height: 70 }} />
           )}
           <div>
-            <p className="font-bold">{form.seller_name}</p>
+            <p className="invoice-seller-name">{form.seller_name}</p>
             {form.seller_address && (
               <p className="whitespace-pre-line">{form.seller_address}</p>
             )}
@@ -964,11 +964,16 @@ export default function UaePackDoc({
             {form.seller_phone && <p>{form.seller_phone}</p>}
           </div>
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-[23px] font-bold tracking-[0.5px]" style={{ color: acc }}>
+      }
+      title={
+        <>
+          <p className="invoice-title">
             {cfg.titleEn}
           </p>
-          <p className="text-[15px] text-[#5a7189] mb-2">{cfg.titleAr}</p>
+          <p className="invoice-subtitle" lang="ar" dir="rtl">{cfg.titleAr}</p>
+        </>
+      }
+      meta={
           <table className="ml-auto border-collapse text-[12.5px]">
             <tbody>
               {meta.map(([k, v]) => (
@@ -979,23 +984,20 @@ export default function UaePackDoc({
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* party boxes (vouchers carry the party in the definition table) */}
-      {cfg.table !== "voucher" && (
-        <div className={`grid ${box2 ? "grid-cols-2" : "grid-cols-1"} gap-3.5 my-3.5`}>
+      }
+      parties={cfg.table !== "voucher" && (
+        <>
           {billToBox}
           {box2}
-        </div>
+        </>
       )}
-
+    >
       {cfg.table === "voucher" ? voucherTable : itemsTable}
       {totalsBlock}
 
       {showFooter && (
         <>
-          <div className="grid grid-cols-2 gap-[60px] mt-11">
+          <div className="invoice-signatures grid grid-cols-2">
             {sigLabels.map((s) => (
               <div
                 key={s}
@@ -1005,7 +1007,7 @@ export default function UaePackDoc({
               </div>
             ))}
           </div>
-          <div className="mt-5 pt-2 border-t border-[#e3e9f0]">
+          <div className="invoice-legal pt-2 border-t border-[#e3e9f0]">
             {!notesInSlot && form.notes && (
               <p className="text-xs text-neutral-500 mb-1">{form.notes}</p>
             )}
@@ -1017,6 +1019,6 @@ export default function UaePackDoc({
           </div>
         </>
       )}
-    </div>
+    </InvoiceLayoutFrame>
   );
 }

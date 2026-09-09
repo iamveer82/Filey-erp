@@ -26,7 +26,7 @@ export default function AnimatedThemeToggler(_: AnimatedThemeTogglerProps = {}) 
       onClick={toggle}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Light mode" : "Dark mode"}
-      className="grid h-8 w-8 place-items-center rounded-md border border-border text-foreground hover:bg-hover transition-colors cursor-pointer outline-none"
+      className="grid h-8 w-8 place-items-center rounded-full border border-border text-foreground hover:bg-hover transition-colors cursor-pointer outline-none"
     >
       {isDark ? (
         // Sun — show in dark mode to mean "click to brighten"

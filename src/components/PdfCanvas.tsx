@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, X, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
+import type { pdfjs } from "../lib/pdfjsSafe";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { fileBytes, type SavedFile } from "../lib/files";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;

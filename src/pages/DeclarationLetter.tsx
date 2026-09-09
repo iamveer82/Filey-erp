@@ -3,9 +3,6 @@ import {
   Download,
   Save,
   FileText,
-  Monitor,
-  Smartphone,
-  Minus,
   Plus,
   RotateCcw,
   ArrowLeft,
@@ -30,7 +27,8 @@ import {
   type DocFormats,
 } from "../lib/numberFormat";
 import { errMsg, fmtDate, todayYmd } from "../lib/format";
-import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput } from "../components/ui";
+import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput, ErrorBanner } from "../components/ui";
+import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import {
   RowActions,
   QuickViewModal,
@@ -135,16 +133,14 @@ function blankDecl(company?: CompanyProfile | null): DeclForm {
 const STORE_KEY = "declaration_letters";
 
 async function listDeclarations(): Promise<SavedDecl[]> {
-  try {
-    const rows = await tools.settings();
-    const row = rows.find((r) => r.key === STORE_KEY);
-    if (!row?.value) return [];
-    const arr = JSON.parse(row.value);
-    return Array.isArray(arr) ? (arr as SavedDecl[]) : [];
-  } catch (e) {
-    console.warn("Failed to load declaration letters", e);
-    return [];
+  const rows = await tools.settings();
+  const row = rows.find((r) => r.key === STORE_KEY);
+  if (!row) return [];
+  const arr: unknown = JSON.parse(row.value);
+  if (!Array.isArray(arr) || !arr.every((d) => d && typeof d === "object" && typeof d.id === "string" && typeof d.body === "string")) {
+    throw new Error("Saved declaration letters could not be read. Restore a valid backup before making changes.");
   }
+  return arr as SavedDecl[];
 }
 
 async function upsertDeclaration(doc: SavedDecl): Promise<SavedDecl[]> {
@@ -222,11 +218,20 @@ export default function DeclarationLetter() {
   const [editing, setEditing] = useState<SavedDecl | null>(null);
   const [search, setSearch] = useState("");
   const [quickView, setQuickView] = useState<SavedDecl | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  const loadDocs = () =>
-    listDeclarations()
-      .then(setDocs)
-      .catch(() => {});
+  const loadDocs = async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      setDocs(await listDeclarations());
+    } catch (e) {
+      setLoadError(errMsg(e));
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     loadDocs();
   }, []);
@@ -316,6 +321,7 @@ export default function DeclarationLetter() {
         action={
           <button
             className="btn-primary"
+            disabled={loading || !!loadError}
             onClick={() =>
               setEditing({
                 ...blankDecl(),
@@ -360,7 +366,9 @@ export default function DeclarationLetter() {
         />
       </div>
 
+      {loadError && <div className="mb-4 space-y-2"><ErrorBanner message={loadError} /><button className="btn-ghost" disabled={loading} onClick={() => void loadDocs()}>Retry</button></div>}
       <DataTable<SavedDecl>
+        loading={loading}
         pageSize={10}
         rows={filtered}
         empty={
@@ -522,7 +530,7 @@ function DeclarationEditor({
   onBack: () => void;
   onSaved: (list: SavedDecl[]) => void;
 }) {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [supplierList, setSupplierList] = useState<Supplier[]>([]);
   const [customerList, setCustomerList] = useState<CrmCustomer[]>([]);
@@ -541,6 +549,7 @@ function DeclarationEditor({
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const isNew = !doc.updated_at;
   const declRef = useRef<HTMLDivElement>(null);
@@ -615,15 +624,23 @@ function DeclarationEditor({
       .replace(/[^\w.-]+/g, "_")
       .slice(0, 40)}`;
 
-  const downloadPdf = () => {
-    const el = sheetEl();
-    if (el) void downloadElementAsPdf(el, baseName());
-    else window.print();
+  const downloadPdf = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const el = sheetEl();
+      if (!el) throw new Error("The letter preview is not ready. Please try again.");
+      await downloadElementAsPdf(el, baseName());
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const el = sheetEl();
-    if (!el) return;
     setSaving(true);
     try {
       // Persist the letter to the list (reopenable, cross-device)…
@@ -638,7 +655,7 @@ function DeclarationEditor({
       onSaved(list);
       // …and archive a PDF copy to My Files (best-effort).
       const base = baseName();
-      await autoSaveDocument(`${base}.pdf`, "declaration", () =>
+      if (el) await autoSaveDocument(`${base}.pdf`, "declaration", () =>
         elementToPdfBytes(el, base)
       );
       toast.success("Saved.");
@@ -657,19 +674,23 @@ function DeclarationEditor({
     <div className="">
       <PageHeader
         title={isNew ? "New Declaration Letter" : "Edit Declaration Letter"}
-        subtitle="VAT supply declaration in the standard UAE format. Print or email to your supplier"
+        subtitle="Prepare your VAT supply declaration and download a PDF for your supplier"
         action={
-          <div className="flex items-center gap-2">
-            <button className="btn-ghost" onClick={onBack}>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn-ghost" disabled={saving} onClick={onBack}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-ghost" onClick={() => setForm(blankDecl(company))}>
+            <button className="btn-ghost" disabled={saving} onClick={async () => {
+              if (await confirm({ title: "Reset this letter?", message: "This clears your unsaved edits. The saved letter stays unchanged until you save again.", confirmLabel: "Reset" })) {
+                setForm({ ...blankDecl(company), ref: form.ref });
+              }
+            }}>
               <RotateCcw size={15} /> Reset
             </button>
-            <button className="btn-ghost" onClick={downloadPdf}>
-              <Download size={15} /> PDF
+            <button className="btn-ghost" onClick={downloadPdf} disabled={downloading || saving}>
+              <Download size={15} /> {downloading ? "Exporting…" : "PDF"}
             </button>
-            <button className="btn-ghost" onClick={handleSave} disabled={saving}>
+            <button className="btn-primary" onClick={handleSave} disabled={saving}>
               <Save size={15} /> {saving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -839,6 +860,9 @@ function DeclarationEditor({
               </span>
               <button
                 type="button"
+                role="switch"
+                aria-label="Use letterhead"
+                aria-checked={useLetterhead}
                 disabled={!hasLetterhead(lh)}
                 onClick={() => setUseLetterhead((v) => !v)}
                 className={`w-9 h-5 rounded-full relative transition-colors ${
@@ -1027,52 +1051,7 @@ function DeclarationEditor({
               </div>
             </FitPreview>
 
-            {/* preview controls */}
-            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-                <button
-                  className={`rounded p-1.5 cursor-pointer transition-colors ${
-                    device === "desktop"
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:bg-hover"
-                  }`}
-                  onClick={() => setDevice("desktop")}
-                  aria-label="Desktop preview"
-                >
-                  <Monitor size={15} />
-                </button>
-                <button
-                  className={`rounded p-1.5 cursor-pointer transition-colors ${
-                    device === "mobile"
-                      ? "bg-foreground text-background"
-                      : "text-muted-foreground hover:bg-hover"
-                  }`}
-                  onClick={() => setDevice("mobile")}
-                  aria-label="Mobile preview"
-                >
-                  <Smartphone size={15} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="rounded-md border border-border p-1.5 text-muted-foreground cursor-pointer hover:bg-hover"
-                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
-                  aria-label="Zoom out"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="text-xs font-semibold text-brand-500 w-10 text-center">
-                  {zoom}%
-                </span>
-                <button
-                  className="rounded-md border border-border p-1.5 text-muted-foreground cursor-pointer hover:bg-hover"
-                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
-                  aria-label="Zoom in"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-          </div>
+            <DocumentPreviewControls device={device} onDeviceChange={setDevice} zoom={zoom} onZoomChange={setZoom} />
           </Card>
           </div>
         }
@@ -1103,7 +1082,7 @@ function RecipientFillMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 w-full items-center justify-between gap-1.5 rounded-md border border-border bg-background px-3 text-[13px] text-foreground transition-colors hover:bg-hover"
+        className="input inline-flex items-center justify-between gap-1.5 text-left hover:bg-hover cursor-pointer"
       >
         <span className="min-w-0 flex-1 truncate text-left">
           Select to auto-fill…

@@ -13,15 +13,12 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Inline PDF editor — same engine as PdfEditorModal but laid out as a
  * horizontal toolbar above the live preview, editing the page in place.

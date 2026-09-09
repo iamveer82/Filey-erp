@@ -5,7 +5,7 @@ import { emailLog, callLog, type EmailMessage, type CallLog } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { fmtDate, errMsg, cn } from "../lib/format";
-import { Badge, Modal, Field } from "../components/ui";
+import { Badge, Modal, Field, ErrorBanner, PageHeader } from "../components/ui";
 import { SelectMenu } from "../components/ui-menu";
 
 /* Correspondence: what was emailed, and what was said on the phone.
@@ -33,12 +33,15 @@ export default function Comms() {
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [logging, setLogging] = useState(false);
+  const [error, setError] = useState("");
 
   const load = () =>
     Promise.all([
-      emailLog.list().then(setEmails).catch(() => {}),
-      callLog.list().then(setCalls).catch(() => {}),
-    ]).finally(() => setLoading(false));
+      emailLog.list(),
+      callLog.list(),
+    ]).then(([e, c]) => { setEmails(e); setCalls(c); setError(""); })
+      .catch((e) => setError(errMsg(e)))
+      .finally(() => setLoading(false));
 
   useEffect(() => {
     load();
@@ -62,32 +65,26 @@ export default function Comms() {
   };
 
   return (
-    <div className="mx-auto max-w-[1320px] px-4 py-4 sm:px-6">
-      <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-ink">Comms log</h1>
-          <p className="mt-1 text-[12.5px] text-brand-500">
-            Every email this workspace sent, and every call you record against a
-            customer.
-          </p>
-        </div>
-        {tab === "calls" && (
+    <div className="mx-auto max-w-[1320px]">
+      <PageHeader
+        title="Comms log"
+        subtitle="Every email this workspace sent, and every call you record against a customer."
+        action={tab === "calls" && (
           <button className="btn-primary" onClick={() => setLogging(true)}>
             <Plus size={15} /> Log a call
           </button>
         )}
-      </header>
+      />
 
       <div className="mb-4 flex gap-1">
         {(["email", "calls"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
+            aria-pressed={tab === t}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              tab === t
-                ? "bg-primary-100 text-ink"
-                : "text-brand-500 hover:bg-muted hover:text-ink"
+              "chip",
+              tab === t && "chip-active"
             )}
           >
             {t === "email" ? <Mail size={13} /> : <Phone size={13} />}
@@ -96,6 +93,7 @@ export default function Comms() {
         ))}
       </div>
 
+      {error && <div className="mb-4"><ErrorBanner message={`Could not load communication history: ${error}`} /><button className="btn-ghost mt-2" onClick={() => void load()}>Retry</button></div>}
       {loading ? (
         <p className="flex items-center gap-2 py-6 text-[12.5px] text-brand-400">
           <Loader2 size={14} className="animate-spin" /> Loading…
@@ -160,7 +158,7 @@ export default function Comms() {
                 </p>
               </div>
               <button
-                className="shrink-0 text-brand-300 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                className="btn-ghost w-10 shrink-0 p-0 text-muted-foreground hover:text-danger"
                 onClick={() => removeCall(c)}
                 aria-label="Delete call record"
               >
@@ -195,8 +193,13 @@ function LogCallModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
+    if (busy) return;
     if (!name.trim() && !phone.trim()) {
       toast.error("Add a name or a number so the call is findable.");
+      return;
+    }
+    if (!Number.isFinite(Number(minutes)) || Number(minutes) < 0) {
+      toast.error("Enter a duration of zero minutes or more.");
       return;
     }
     setBusy(true);
@@ -220,8 +223,8 @@ function LogCallModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   };
 
   return (
-    <Modal open title="Log a call" onClose={onClose}>
-      <div className="space-y-3">
+    <Modal open title="Log a call" onClose={() => { if (!busy) onClose(); }}>
+      <fieldset disabled={busy} className="space-y-3">
         <Field label="Direction">
           <SelectMenu
             value={direction}
@@ -244,6 +247,7 @@ function LogCallModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         <Field label="Phone">
           <input
             className="input"
+            type="tel"
             placeholder="+971…"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
@@ -253,6 +257,9 @@ function LogCallModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           <input
             className="input"
             inputMode="decimal"
+            type="number"
+            min="0"
+            step="any"
             placeholder="5"
             value={minutes}
             onChange={(e) => setMinutes(e.target.value)}
@@ -268,21 +275,21 @@ function LogCallModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         </Field>
         <Field label="Notes">
           <textarea
-            className="input min-h-[80px]"
+            className="textarea"
             placeholder="What was discussed"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
         </Field>
-        <div className="flex justify-end gap-2 pt-1">
-          <button className="btn-secondary" onClick={onClose}>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+          <button className="btn-ghost" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button className="btn-primary" disabled={busy} onClick={save}>
-            {busy ? <Loader2 size={15} className="animate-spin" /> : "Save call"}
+            {busy ? "Saving…" : "Save call"}
           </button>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }

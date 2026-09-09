@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, RotateCcw, RotateCw, Check } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { rotatePdf, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Dead-simple rotate: tap the round arrows to spin every page, see it live,
  * then apply & download. No degree dropdowns. */
@@ -68,7 +65,6 @@ export default function RotateStudio({
     try {
       const out = await rotatePdf(file, angle);
       onApply(out);
-      toast.success(`Rotated ${angle}° & downloaded.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {

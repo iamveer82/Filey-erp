@@ -1,230 +1,149 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Check } from "lucide-react";
-import { templateCategories, type DocType } from "./DocTemplates";
+import { Plus, Trash2, Check, Maximize2 } from "lucide-react";
+import { DOC_TEMPLATES, resolveTemplateId, type DocType } from "./DocTemplates";
 import TemplateTilePreview from "./TemplateTilePreview";
-import {
-  loadCustomTemplates,
-  deleteCustomTemplate,
-  syncCustomTemplates,
-  type CustomTemplate,
-} from "./TemplateDesigner";
+import { Modal, FilterChip, SearchInput } from "./ui";
+import { useUI } from "../lib/ui";
+import { cn, errMsg } from "../lib/format";
+import { type CustomTemplate } from "./TemplateDesigner";
+import { deleteCustomTemplate, hasUnscopedCustomTemplates, useCustomTemplates } from "../lib/customTemplates";
 
 export interface DocTemplateGalleryProps {
   value: string;
   onChange: (id: string) => void;
   onDesign: () => void;
-  /** Filter templates by document type — only relevant templates shown. */
   docType?: DocType;
   viewAll?: boolean;
   onViewAllToggle?: (v: boolean) => void;
   className?: string;
+  hideHeader?: boolean;
 }
 
+type TemplateOption = { id: string; name: string; category: string; custom?: CustomTemplate };
+const DOCUMENT_NAMES: Record<DocType, string> = {
+  invoice: "invoices", quote: "quotations", po: "purchase orders", receipt: "payment receipts",
+};
+// Size columns from the picker itself, including when it sits in a split panel.
+const gridColumns = { gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 160px), 1fr))" };
+
 export default function DocTemplateGallery({
-  value,
-  onChange,
-  onDesign,
-  docType,
-  viewAll: viewAllProp,
-  onViewAllToggle,
-  className,
+  value, onChange, onDesign, docType, viewAll: viewAllProp, onViewAllToggle, className, hideHeader = false,
 }: DocTemplateGalleryProps) {
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates);
+  const { confirm, toast } = useUI();
+  const { templates: customTemplates, loading, error: loadError, reload } = useCustomTemplates();
   const [viewAll, setViewAll] = useState(viewAllProp ?? false);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
-  useEffect(() => {
-    syncCustomTemplates()
-      .then(setCustomTemplates)
-      .catch(() => {});
-  }, []);
+  useEffect(() => { if (viewAllProp !== undefined) setViewAll(viewAllProp); }, [viewAllProp]);
 
-  useEffect(() => {
-    if (viewAllProp !== undefined) setViewAll(viewAllProp);
-  }, [viewAllProp]);
-
-  // Build categorized list, filtered by docType when provided.
-  const categories = docType
-    ? templateCategories(docType)
-    : [{ category: "All", templates: [] as { id: string; name: string; category: string; docTypes: DocType[] }[] }];
-
-  // If no docType filter, fall back to flat list from all categories.
-  const allCategorized = docType
-    ? categories
-    : (() => {
-        const all = customTemplates.map((t) => ({ id: t.id, name: t.name, category: "Custom", docTypes: [] as DocType[] }));
-        // Use templateCategories with a wildcard: just merge all
-        const cats = templateCategories("invoice");
-        const otherCats = templateCategories("quote")
-          .concat(templateCategories("po"))
-          .concat(templateCategories("receipt"));
-        const seen = new Set<string>();
-        const merged: { category: string; templates: { id: string; name: string; category: string; docTypes: DocType[] }[] }[] = [];
-        for (const c of [...cats, ...otherCats]) {
-          if (seen.has(c.category)) {
-            const existing = merged.find((m) => m.category === c.category)!;
-            for (const t of c.templates) {
-              if (!existing.templates.find((et) => et.id === t.id)) existing.templates.push(t);
-            }
-          } else {
-            seen.add(c.category);
-            merged.push({ category: c.category, templates: [...c.templates] });
-          }
-        }
-        if (all.length) merged.push({ category: "Custom", templates: all });
-        return merged;
-      })();
-
-  // Flatten for the collapsed (non-viewAll) view — first 5 across all categories.
-  const flatShown: { id: string; name: string }[] = [];
-  for (const cat of allCategorized) {
-    for (const t of cat.templates) {
-      flatShown.push({ id: t.id, name: t.name });
-      if (flatShown.length >= 5) break;
-    }
-    if (flatShown.length >= 5) break;
+  const options: TemplateOption[] = [
+    ...DOC_TEMPLATES.filter((template) => !docType || template.docTypes.includes(docType)),
+    ...customTemplates.map((custom) => ({ id: custom.id, name: custom.name, category: "My templates", custom })),
+  ];
+  // Keep older documents' selected layouts visible without changing them.
+  if (value && !options.some((template) => template.id === value)) {
+    const legacy = DOC_TEMPLATES.find((template) => template.id === resolveTemplateId(value));
+    options.unshift({ id: value, name: value.startsWith("custom-") ? "Saved custom template" : legacy?.name || "Saved template", category: "Current template" });
   }
-  // Add custom templates to flat view
-  for (const t of customTemplates) {
-    if (!flatShown.find((f) => f.id === t.id)) flatShown.push({ id: t.id, name: t.name });
-  }
+  const selected = options.find((template) => template.id === value);
+  const compact = options.slice(0, 4);
+  if (selected && !compact.some((template) => template.id === value)) compact[compact.length - 1] = selected;
+  const categories = ["All", ...new Set(options.map((template) => template.category))];
+  const query = search.trim().toLowerCase();
+  const filtered = options.filter((template) => (category === "All" || template.category === category) && (template.name + " " + template.category).toLowerCase().includes(query));
+  const preview = options.find((template) => template.id === previewId);
 
-  const shown = viewAll ? null : flatShown.slice(0, 5);
-
-  const removeTpl = (id: string) => {
-    setCustomTemplates(deleteCustomTemplate(id));
-    if (value === id) onChange("minimal");
+  const setView = (open: boolean) => { setViewAll(open); onViewAllToggle?.(open); };
+  const choose = (id: string) => { onChange(id); setPreviewId(null); setView(false); };
+  const design = () => { setView(false); onDesign(); };
+  const remove = async (template: TemplateOption) => {
+    if (!(await confirm({ title: "Delete template", message: 'Delete custom template "' + template.name + '"? This cannot be undone.', confirmLabel: "Delete", danger: true }))) return;
+    try {
+      await deleteCustomTemplate(template.id);
+      if (value === template.id) onChange(DOC_TEMPLATES.find((item) => !docType || item.docTypes.includes(docType))!.id);
+      if (previewId === template.id) setPreviewId(null);
+      toast.success("Template deleted.");
+    } catch (error) { toast.error("Could not delete template: " + errMsg(error)); }
   };
-
-  const setView = (v: boolean) => {
-    setViewAll(v);
-    onViewAllToggle?.(v);
-  };
+  const tile = (template: TemplateOption) => (
+    <TemplateTile key={template.id} template={template} active={value === template.id} customTemplates={customTemplates} docType={docType}
+      onChoose={() => choose(template.id)} onPreview={() => setPreviewId(template.id)} onDelete={() => { void remove(template); }} />
+  );
 
   return (
-    <div className={className}>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-brand-500">Choose a template</p>
-        <div className="flex items-center gap-2">
-          <button
-            className="btn-ghost text-xs"
-            onClick={() => setView(!viewAll)}
-          >
-            {viewAll ? "Show less" : "View all templates"}
-          </button>
-          <button
-            className="btn-ghost text-xs flex items-center gap-1"
-            onClick={onDesign}
-          >
-            <Plus size={13} /> Create template
-          </button>
+    <div className={cn("min-w-0", className)}>
+      {!hideHeader && <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-foreground">Choose a template</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" onClick={() => setView(true)}>Browse templates</button>
+          <button type="button" className="btn-ghost" onClick={design}><Plus size={15} /> Create template</button>
         </div>
+      </div>}
+      {loading && <p role="status" className="mb-3 text-xs text-muted-foreground">Loading this workspace’s saved templates…</p>}
+      {loadError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger"><span>Could not load saved templates: {loadError}</span><button type="button" className="btn-ghost" onClick={reload}>Retry</button></div>}
+      {!loading && !loadError && !customTemplates.length && hasUnscopedCustomTemplates() && <p className="mb-3 text-xs text-muted-foreground">An older template cache is preserved on this device. It is not loaded automatically because its workspace owner cannot be verified.</p>}
+      <div className="grid min-w-0 gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))" }}>
+        {compact.map(tile)}
       </div>
+      <p className="mt-3 text-xs text-muted-foreground">{selected ? "Selected: " + selected.name : "Select a layout for this document"} · {options.length} templates available</p>
 
-      {/* Collapsed: flat row of first 5 */}
-      {!viewAll && (
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {shown!.map((tpl) => (
-            <TemplateTile
-              key={tpl.id}
-              id={tpl.id}
-              name={tpl.name}
-              active={value === tpl.id}
-              customTemplates={customTemplates}
-              onClick={() => onChange(tpl.id)}
-              onDelete={removeTpl}
-            />
-          ))}
+      <Modal open={viewAll} onClose={() => setView(false)} title="Choose a template" size="3xl">
+        <div className="mb-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="max-w-lg text-sm text-muted-foreground">{docType ? "Layouts for " + DOCUMENT_NAMES[docType] + "." : "Document layouts."} Preview a design, then choose it for your document.</p>
+            <button type="button" className="btn-ghost shrink-0" onClick={design}><Plus size={15} /> Create template</button>
+          </div>
+          <SearchInput value={search} onChange={setSearch} placeholder="Search templates…" className="w-full" />
+          <div className="flex flex-wrap gap-2" aria-label="Template categories">
+            {categories.map((name) => <FilterChip key={name} active={category === name} onClick={() => setCategory(name)}>{name}</FilterChip>)}
+          </div>
+          <p className="text-xs text-muted-foreground" aria-live="polite">{filtered.length} {filtered.length === 1 ? "template" : "templates"}{selected ? " · Selected: " + selected.name : ""}</p>
         </div>
-      )}
+        {filtered.length ? <div className="grid min-w-0 gap-4" style={gridColumns}>{filtered.map(tile)}</div> : (
+          <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center">
+            <p className="font-medium text-foreground">No matching templates</p>
+            <p className="mt-1 text-sm text-muted-foreground">Try a different name or category.</p>
+            <button type="button" className="btn-ghost mt-4" onClick={() => { setSearch(""); setCategory("All"); }}>Clear filters</button>
+          </div>
+        )}
+      </Modal>
 
-      {/* Expanded: grouped by category */}
-      {viewAll && (
-        <div className="space-y-4 max-h-[500px] overflow-y-auto">
-          {allCategorized.map((cat) => (
-            <div key={cat.category}>
-              <p className="text-[11px] font-semibold text-brand-400 uppercase tracking-wide mb-2">
-                {cat.category}
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {cat.templates.map((tpl) => (
-                  <TemplateTile
-                    key={tpl.id}
-                    id={tpl.id}
-                    name={tpl.name}
-                    active={value === tpl.id}
-                    customTemplates={customTemplates}
-                    onClick={() => onChange(tpl.id)}
-                    onDelete={removeTpl}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <Modal open={!!preview} onClose={() => setPreviewId(null)} title={preview?.name || "Template preview"} size="3xl">
+        {preview && <>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Example content · Your document details stay unchanged.</p>
+            <button type="button" className="btn-primary" onClick={() => choose(preview.id)}><Check size={15} /> Use this template</button>
+          </div>
+          <div className="mx-auto max-w-[720px] rounded-xl bg-muted p-3 sm:p-6">
+            <TemplateTilePreview templateId={preview.id} customTemplates={customTemplates} docType={docType} />
+          </div>
+        </>}
+      </Modal>
     </div>
   );
 }
 
-function TemplateTile({
-  id,
-  name,
-  active,
-  customTemplates,
-  onClick,
-  onDelete,
-}: {
-  id: string;
-  name: string;
-  active: boolean;
-  customTemplates: CustomTemplate[];
-  onClick: () => void;
-  onDelete: (id: string) => void;
+function TemplateTile({ template, active, customTemplates, docType, onChoose, onPreview, onDelete }: {
+  template: TemplateOption; active: boolean; customTemplates: CustomTemplate[]; docType?: DocType;
+  onChoose: () => void; onPreview: () => void; onDelete: () => void;
 }) {
-  const isCustom = id.startsWith("custom-");
-  const ct = isCustom ? customTemplates.find((c) => c.id === id) : null;
-  const isFile = ct?.type === "file";
   return (
-    <button
-      onClick={onClick}
-      className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
-        active
-          ? "border-primary-400 bg-primary-50"
-          : "border-brand-100 bg-white hover:border-primary-300"
-      }`}
-    >
-      {active && (
-        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
-          <Check size={11} strokeWidth={3} />
-        </span>
-      )}
-      {isCustom && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-label={`Delete template ${name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(id);
-          }}
-          className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer shadow-sm border border-brand-100"
-        >
-          <Trash2 size={11} />
-        </span>
-      )}
-      <TemplateTilePreview templateId={id} customTemplates={customTemplates} />
-      <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
-        {name}
-        {isFile ? (
-          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-amber-100 text-amber-700 font-medium">
-            Uploaded
-          </span>
-        ) : isCustom ? (
-          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-primary-100 text-primary-700 font-medium">
-            Custom
-          </span>
-        ) : null}
-      </p>
-    </button>
+    <div className={cn("relative min-w-0 overflow-hidden rounded-xl border bg-card transition-colors", active ? "border-foreground ring-1 ring-foreground" : "border-border hover:border-muted-foreground/50")}>
+      <button type="button" aria-label={"Use " + template.name + " template"} aria-pressed={active} onClick={onChoose}
+        className="block w-full min-w-0 cursor-pointer p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+        <TemplateTilePreview templateId={template.id} customTemplates={customTemplates} docType={docType} />
+        <span className="mt-3 block min-h-10 break-words text-[13px] font-medium leading-5 text-foreground">{template.name}</span>
+      </button>
+      {active && <span aria-hidden="true" className="pointer-events-none absolute right-4 top-4 grid h-6 w-6 place-items-center rounded-full bg-foreground text-background"><Check size={13} strokeWidth={2.5} /></span>}
+      <div className="flex min-w-0 items-center justify-between gap-1 border-t border-border px-2.5 py-1.5">
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground">{template.custom?.type === "file" ? "Uploaded" : template.custom ? "Custom" : active ? "Selected" : "Built-in"}</span>
+        <div className="flex shrink-0 items-center">
+          <button type="button" className="btn-ghost h-10 w-10 p-0" aria-label={"Preview " + template.name + " template"} onClick={onPreview}><Maximize2 size={14} /></button>
+          {template.custom && <button type="button" className="btn-ghost h-10 w-10 p-0 hover:text-danger" aria-label={"Delete template " + template.name} onClick={onDelete}><Trash2 size={14} /></button>}
+        </div>
+      </div>
+    </div>
   );
 }

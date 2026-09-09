@@ -12,15 +12,12 @@ import {
   PenLine,
   Eraser,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { placeStamp, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 import { useAssets } from "../lib/assets";
 import { SelectMenu } from "./ui-menu";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Interactive stamp / signature placer. Renders the page, lets the user drop
  * a stamp of any raster format (normalised to PNG so transparency survives),
@@ -420,9 +417,6 @@ export default function StampStudio({
         behind: isBackground,
       });
       onApply(out);
-      toastRef.current.success(
-        allPages ? "Stamp applied to all pages." : `Stamp applied to page ${page + 1}.`
-      );
     } catch (e) {
       toastRef.current.error(e instanceof Error ? e.message : String(e));
     } finally {

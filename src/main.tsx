@@ -1,8 +1,9 @@
 import React from "react";
+import { MotionConfig } from "framer-motion";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { applyTheme } from "./lib/theme";
+import { applyTheme, watchAppearance } from "./lib/theme";
 import { applyAccent } from "./lib/accent";
 import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
@@ -26,8 +27,11 @@ import { seedDefaultSkills } from "./lib/defaultSkills";
 
 applyTheme();
 applyAccent();
-initMonitoring();
+const stopAppearanceSync = watchAppearance();
+import.meta.hot?.dispose(stopAppearanceSync);
 installExtensionBannerGuard();
+// Recovery links contain a credential; do not initialize telemetry on this page.
+if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
 startAutoSync();
 // WhatsApp comes up with the app when the owner has asked for it, so the
 // channel is simply live after launch rather than something to go and start.
@@ -43,7 +47,9 @@ seedDefaultSkills();
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
     </ErrorBoundary>
   </React.StrictMode>
 );

@@ -111,7 +111,7 @@ export function DatePicker({
             type="button"
             disabled={disabled}
             aria-label="Open calendar"
-            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-brand-400 transition-colors hover:bg-brand-100 hover:text-ink disabled:opacity-50 dark:hover:bg-white/10"
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-brand-400 transition-colors hover:bg-brand-100 hover:text-ink disabled:opacity-50 dark:hover:bg-white/10"
           >
             <CalendarIcon size={15} />
           </button>
@@ -132,7 +132,7 @@ export function DatePicker({
           {clearable && value && (
             <button
               type="button"
-              className="mt-1.5 w-full rounded-lg py-1.5 text-center text-xs font-medium text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10"
+              className="mt-1.5 w-full rounded-full py-1.5 text-center text-xs font-medium text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10"
               onClick={() => {
                 onChange(undefined);
                 setOpen(false);

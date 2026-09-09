@@ -67,7 +67,7 @@ export function RowActions({
   const moreBtn = useRef<HTMLButtonElement>(null);
 
   const btn =
-    "h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
+    "h-7 w-7 grid place-items-center rounded-full text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
 
   return (
     <div
@@ -312,7 +312,7 @@ export function QuickViewModal({
             {onPrint && (
               <button
                 onClick={onPrint}
-                className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+                className="btn-ghost text-[12.5px]"
               >
                 <Printer className="h-3.5 w-3.5" /> Print
               </button>
@@ -320,7 +320,7 @@ export function QuickViewModal({
             {onEdit && (
               <button
                 onClick={onEdit}
-                className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+                className="btn-ghost text-[12.5px]"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </button>
@@ -328,7 +328,7 @@ export function QuickViewModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-muted-foreground"
+              className="btn-ghost h-10 w-10 p-0"
             >
               <X className="h-4 w-4" />
             </button>

@@ -34,7 +34,8 @@ export default function FileyLoader() {
           <path
             d="M8 2 a6 6 0 0 1 6 6"
             fill="none"
-            stroke="#2563EB"
+            stroke="currentColor"
+            className="text-primary-600 dark:text-primary-300"
             strokeWidth="2"
             strokeLinecap="round"
           />
