@@ -1,5 +1,6 @@
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::State;
 
@@ -13,14 +14,15 @@ pub struct OutboxEntry {
 #[tauri::command]
 pub async fn cache_get(db: State<'_, Db>, key: String) -> AppResult<Option<String>> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
-    let val = conn
-        .query_row(
-            "SELECT value FROM kv_cache WHERE key = ?1",
-            [key],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    Ok(val)
+    read_cache_value(&conn, &key)
+}
+
+fn read_cache_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM kv_cache WHERE key = ?1", [key], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()?)
 }
 
 #[tauri::command]
@@ -45,8 +47,7 @@ pub async fn outbox_add(db: State<'_, Db>, op: String) -> AppResult<i64> {
 #[tauri::command]
 pub async fn outbox_list(db: State<'_, Db>) -> AppResult<Vec<OutboxEntry>> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
-    let mut stmt =
-        conn.prepare("SELECT id, op, created_at FROM outbox ORDER BY id ASC")?;
+    let mut stmt = conn.prepare("SELECT id, op, created_at FROM outbox ORDER BY id ASC")?;
     let rows = stmt
         .query_map([], |r| {
             Ok(OutboxEntry {
@@ -71,4 +72,29 @@ pub async fn outbox_clear(db: State<'_, Db>) -> AppResult<()> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
     conn.execute("DELETE FROM outbox", [])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_cache_keys_are_optional_but_database_errors_are_not() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE kv_cache (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO kv_cache VALUES ('records', '[{\"id\":1}]');",
+        )
+        .unwrap();
+        assert_eq!(read_cache_value(&conn, "missing").unwrap(), None);
+        assert_eq!(
+            read_cache_value(&conn, "records").unwrap().as_deref(),
+            Some("[{\"id\":1}]")
+        );
+        conn.execute_batch("DROP TABLE kv_cache;").unwrap();
+        assert!(matches!(
+            read_cache_value(&conn, "records"),
+            Err(AppError::Db(_))
+        ));
+    }
 }

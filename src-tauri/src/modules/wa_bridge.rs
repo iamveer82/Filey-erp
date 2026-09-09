@@ -17,9 +17,11 @@
 //! the frontend as the `wa-message` event; the frontend runs the app's own
 //! agent and answers with `wa_bridge_reply`, which writes the reply back to the
 //! sidecar's stdin. The brain, memory and tools all live in the app — no server.
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -43,16 +45,22 @@ pub struct BridgeState {
 }
 
 struct Supervisor {
+    pid: u32,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     state: BridgeState,
+    deliveries: HashMap<String, mpsc::Sender<Result<(), String>>>,
 }
 
 static BRIDGE: Mutex<Option<Supervisor>> = Mutex::new(None);
+static LIFECYCLE: Mutex<()> = Mutex::new(());
 
-fn set_state(app: &AppHandle, mutate: impl FnOnce(&mut BridgeState)) {
+fn set_state(app: &AppHandle, pid: u32, mutate: impl FnOnce(&mut BridgeState)) {
     let mut guard = BRIDGE.lock().unwrap();
     if let Some(sup) = guard.as_mut() {
+        if sup.pid != pid {
+            return;
+        } // a stopped reader must not overwrite its replacement
         mutate(&mut sup.state);
         let snapshot = sup.state.clone();
         drop(guard);
@@ -126,7 +134,9 @@ fn kill_stale_sidecars() {
     }
     #[cfg(not(windows))]
     {
-        let _ = Command::new("pkill").args(["-f", "filey-wa-bridge"]).output();
+        let _ = Command::new("pkill")
+            .args(["-f", "filey-wa-bridge"])
+            .output();
     }
 }
 
@@ -139,9 +149,12 @@ fn kill_stale_sidecars() {
 /// die is a window that never comes back.
 #[tauri::command]
 pub async fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
-    tauri::async_runtime::spawn_blocking(move || wa_bridge_start_blocking(app))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = LIFECYCLE.lock().unwrap();
+        wa_bridge_start_blocking(app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
@@ -166,13 +179,18 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW); // no console window on launch
 
-    let mut child = cmd.spawn().map_err(|e| format!("could not start bridge: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("could not start bridge: {e}"))?;
+    let pid = child.id();
     let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
     let stdin = child.stdin.take();
 
     {
         let mut guard = BRIDGE.lock().unwrap();
         *guard = Some(Supervisor {
+            pid,
             child: Some(child),
             stdin,
             state: BridgeState {
@@ -181,6 +199,17 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
                 error: None,
                 me: None,
             },
+            deliveries: HashMap::new(),
+        });
+    }
+
+    // Baileys writes diagnostics to stderr. An unread pipe eventually fills and
+    // freezes the sidecar even though the UI still says it is connected.
+    if let Some(stderr) = stderr {
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                eprintln!("[wa-bridge] {line}");
+            }
         });
     }
 
@@ -203,46 +232,97 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
                 };
                 match v.get("type").and_then(|t| t.as_str()) {
                     Some("qr") => {
-                        let url = v.get("dataUrl").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                        set_state(&app2, |s| {
+                        let url = v
+                            .get("dataUrl")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        set_state(&app2, pid, |s| {
                             s.qr = Some(url);
                             s.state = "connecting".into();
                         });
                     }
                     Some("status") => {
-                        let st = v.get("state").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let st = v
+                            .get("state")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let me = v.get("me").and_then(|m| m.as_str()).map(String::from);
-                        set_state(&app2, |s| {
+                        set_state(&app2, pid, |s| {
                             // A scanned code is spent — drop it so the UI stops
                             // showing a QR nobody can use.
-                            if st == "connected" || st == "logged_out" {
+                            if st != "connecting" {
                                 s.qr = None;
                             }
                             s.state = st.clone();
+                            s.error = v.get("error").and_then(|e| e.as_str()).map(String::from);
+                            if st == "logged_out" {
+                                s.me = None;
+                            }
                             if let Some(m) = me {
                                 s.me = Some(m);
                             }
                         });
                     }
+                    Some("delivery") => {
+                        let mut guard = BRIDGE.lock().unwrap();
+                        if let Some(sup) = guard.as_mut().filter(|sup| sup.pid == pid) {
+                            if let Some(id) = v.get("requestId").and_then(|id| id.as_str()) {
+                                if let Some(sender) = sup.deliveries.remove(id) {
+                                    let result = if v.get("ok").and_then(|ok| ok.as_bool())
+                                        == Some(true)
+                                    {
+                                        Ok(())
+                                    } else {
+                                        Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("WhatsApp did not confirm delivery. Check the conversation before retrying.").to_string())
+                                    };
+                                    let _ = sender.send(result);
+                                }
+                            }
+                        }
+                    }
                     Some("message") => {
                         // Route to the local agent in the frontend.
-                        let _ = app2.emit("wa-message", v.clone());
+                        if BRIDGE
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .is_some_and(|sup| sup.pid == pid)
+                        {
+                            let _ = app2.emit("wa-message", v.clone());
+                        }
                     }
                     Some("voice_note") => {
                         // A voice note the owner sent — the app transcribes it
                         // (Whisper via the configured provider) and answers.
-                        let _ = app2.emit("wa-voice", v.clone());
+                        if BRIDGE
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .is_some_and(|sup| sup.pid == pid)
+                        {
+                            let _ = app2.emit("wa-voice", v.clone());
+                        }
                     }
                     _ => {}
                 }
             }
             // stdout closed: the process is gone.
-            set_state(&app2, |s| {
-                if s.state != "logged_out" {
+            set_state(&app2, pid, |s| {
+                if s.state != "logged_out" && s.state != "error" {
                     s.state = "stopped".into();
                 }
                 s.qr = None;
+                s.me = None;
             });
+            let mut guard = BRIDGE.lock().unwrap();
+            if let Some(sup) = guard.as_mut().filter(|sup| sup.pid == pid) {
+                sup.stdin = None;
+                for (_, sender) in sup.deliveries.drain() {
+                    let _ = sender.send(Err("WhatsApp bridge stopped before confirming delivery. Check the conversation before retrying.".into()));
+                }
+            }
         });
     }
 
@@ -256,46 +336,22 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
 /// reply that was written nowhere. Failing loudly is what lets the UI say
 /// "the bridge dropped" instead of "the agent is broken".
 #[tauri::command]
-pub fn wa_bridge_reply(id: String, text: String) -> Result<(), String> {
-    let mut guard = BRIDGE.lock().unwrap();
-    let stdin = guard
-        .as_mut()
-        .and_then(|sup| sup.stdin.as_mut())
-        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
-    let line = format!(
-        "FILEY {}\n",
-        serde_json::json!({ "type": "reply", "id": id, "text": text })
-    );
-    stdin
-        .write_all(line.as_bytes())
-        .and_then(|_| stdin.flush())
-        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
+pub async fn wa_bridge_reply(id: String, text: String) -> Result<(), String> {
+    send_command(serde_json::json!({ "type": "reply", "id": id, "text": text })).await
 }
 
 /// Send a proactive WhatsApp message to a specific JID (owner notifications —
 /// daily summary, low-stock and overdue alerts).
 #[tauri::command]
-pub fn wa_bridge_send(to: String, text: String) -> Result<(), String> {
-    let mut guard = BRIDGE.lock().unwrap();
-    let stdin = guard
-        .as_mut()
-        .and_then(|sup| sup.stdin.as_mut())
-        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
-    let line = format!(
-        "FILEY {}\n",
-        serde_json::json!({ "type": "send", "to": to, "text": text })
-    );
-    stdin
-        .write_all(line.as_bytes())
-        .and_then(|_| stdin.flush())
-        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
+pub async fn wa_bridge_send(to: String, text: String) -> Result<(), String> {
+    send_command(serde_json::json!({ "type": "send", "to": to, "text": text })).await
 }
 
 /// Send a FILE (PDF, photo, document) to a JID. The sidecar reads the file off
 /// the same disk and uploads it — a document for most types, a photo for
 /// images — so a merged PDF or a payslip lands straight in the owner's chat.
 #[tauri::command]
-pub fn wa_bridge_send_file(
+pub async fn wa_bridge_send_file(
     to: String,
     path: String,
     filename: String,
@@ -307,35 +363,55 @@ pub fn wa_bridge_send_file(
     if !std::path::Path::new(&path).exists() {
         return Err(format!("file not found: {path}"));
     }
-    let mut guard = BRIDGE.lock().unwrap();
-    let stdin = guard
-        .as_mut()
-        .and_then(|sup| sup.stdin.as_mut())
-        .ok_or_else(|| "WhatsApp bridge is not running".to_string())?;
-    let line = format!(
-        "FILEY {}\n",
-        serde_json::json!({
-            "type": "send_file",
-            "to": to,
-            "path": path,
-            "filename": filename,
-            "mimetype": mimetype,
-            "caption": caption,
-        })
-    );
-    stdin
-        .write_all(line.as_bytes())
-        .and_then(|_| stdin.flush())
-        .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))
+    send_command(serde_json::json!({
+        "type": "send_file",
+        "to": to,
+        "path": path,
+        "filename": filename,
+        "mimetype": mimetype,
+        "caption": caption,
+    }))
+    .await
+}
+
+/// Wait for provider acceptance, not just a successful write into the pipe.
+async fn send_command(mut payload: serde_json::Value) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = uuid::Uuid::new_v4().to_string();
+        payload["requestId"] = serde_json::Value::String(id.clone());
+        let (sender, receiver) = mpsc::channel();
+        {
+            let mut guard = BRIDGE.lock().unwrap();
+            let sup = guard.as_mut().ok_or("WhatsApp bridge is not running")?;
+            if sup.state.state != "connected" {
+                return Err("WhatsApp is disconnected. Reconnect before sending.".into());
+            }
+            let stdin = sup.stdin.as_mut().ok_or("WhatsApp bridge is not running")?;
+            let line = format!("FILEY {payload}\n");
+            stdin.write_all(line.as_bytes()).and_then(|_| stdin.flush())
+                .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))?;
+            sup.deliveries.insert(id.clone(), sender);
+        }
+        let result = receiver.recv_timeout(Duration::from_secs(90))
+            .unwrap_or_else(|_| Err("WhatsApp did not confirm delivery in time. Check the chat before retrying; the message may have been accepted.".into()));
+        if let Some(sup) = BRIDGE.lock().unwrap().as_mut() {
+            sup.deliveries.remove(&id);
+        }
+        result
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// Async for the same reason as start: `child.wait()` has no timeout, so a
 /// sidecar that ignores the kill would otherwise hang the window for good.
 #[tauri::command]
-pub async fn wa_bridge_stop(_app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(wa_bridge_stop_blocking)
-        .await
-        .map_err(|e| e.to_string())
+pub async fn wa_bridge_stop(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = LIFECYCLE.lock().unwrap();
+        wa_bridge_stop_blocking();
+        let _ = app.emit("wa-bridge", wa_bridge_state());
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn wa_bridge_stop_blocking() {
@@ -347,6 +423,9 @@ fn wa_bridge_stop_blocking() {
         }
         sup.child = None;
         sup.stdin = None;
+        for (_, sender) in sup.deliveries.drain() {
+            let _ = sender.send(Err("WhatsApp bridge stopped before confirming delivery. Check the conversation before retrying.".into()));
+        }
         sup.state = BridgeState {
             state: "stopped".into(),
             qr: None,
@@ -367,6 +446,7 @@ fn wa_bridge_stop_blocking() {
 #[tauri::command]
 pub async fn wa_bridge_reset(app: AppHandle) -> Result<BridgeState, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _lifecycle = LIFECYCLE.lock().unwrap();
         wa_bridge_stop_blocking();
         let dir = app
             .path()
@@ -389,5 +469,8 @@ pub fn wa_bridge_state() -> BridgeState {
         .unwrap()
         .as_ref()
         .map(|s| s.state.clone())
-        .unwrap_or_default()
+        .unwrap_or_else(|| BridgeState {
+            state: "stopped".into(),
+            ..BridgeState::default()
+        })
 }
