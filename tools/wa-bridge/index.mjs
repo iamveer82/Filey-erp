@@ -25,8 +25,8 @@
  */
 import path from "node:path";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import readline from "node:readline";
+import { sendConfirmed } from "./delivery.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -72,6 +72,7 @@ const HEADER = `*${underline("Filey Agent")}*`;
 /** The live socket (set in start()); the stdin `send` handler uses it for
  *  proactive owner notifications. */
 let activeSock = null;
+let connected = false;
 
 /** Message ids this bridge sent itself. In self-chat every outgoing message
  *  comes straight back through messages.upsert as fromMe on our own JID, so
@@ -79,6 +80,8 @@ let activeSock = null;
  *  ponytail: bounded Set, oldest evicted — ids only need to survive the round
  *  trip (milliseconds). */
 const sentIds = new Set();
+// Bounded replay window across reconnects; provider re-delivery must not repeat a tool.
+const receivedIds = new Set();
 function remember(id) {
   if (!id) return;
   sentIds.add(id);
@@ -92,14 +95,40 @@ const digitsOf = (s) => (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "")
 async function sendTo(jid, text) {
   if (!jid || !text || !activeSock) return;
   try {
-    remember((await activeSock.sendMessage(jid, { text }))?.key?.id);
+    await sendConfirmed(connected ? activeSock : null, { to: jid, text }, remember);
   } catch (e) {
     console.error("send failed:", e?.message);
   }
 }
 
+/** Acknowledgment flows back through Rust; writing stdin alone is not delivery. */
+async function deliver(command) {
+  try {
+    // Empty replies deliberately release non-owner chats without sending anything.
+    if (command.type !== "reply" || command.text)
+      await sendConfirmed(connected ? activeSock : null, command, remember);
+    if (command.requestId)
+      emit({ type: "delivery", requestId: command.requestId, ok: true });
+  } catch (e) {
+    if (command.requestId)
+      emit({
+        type: "delivery",
+        requestId: command.requestId,
+        ok: false,
+        error: e?.message || "WhatsApp did not confirm delivery.",
+      });
+    else console.error("send failed:", e?.message);
+  }
+}
+
 function startStdinLoop() {
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  // Parent exit closes stdin. Do not leave a socket without the owner gate.
+  rl.on("close", () => {
+    connected = false;
+    try { activeSock?.end?.(undefined); } catch { /* already closed */ }
+    process.exit(0);
+  });
   rl.on("line", (line) => {
     const prefix = "FILEY ";
     if (!line.startsWith(prefix)) return;
@@ -117,40 +146,29 @@ function startStdinLoop() {
         clearTimeout(r.ackTimer);
         // A late answer is still the answer: deliver it as its own message
         // instead of dropping it because a timer fired first.
-        if (r.timedOut) void sendTo(r.jid, v.text ?? "");
-        else r.resolve(v.text ?? "");
+        const reply = { ...v, to: r.jid, text: v.text ?? "" };
+        if (r.timedOut) void deliver(reply);
+        else r.resolve(reply);
+      } else if (v.requestId) {
+        emit({
+          type: "delivery",
+          requestId: v.requestId,
+          ok: false,
+          error:
+            "This WhatsApp request expired. Check the conversation before trying again.",
+        });
       }
     }
     if (v.type === "send") {
       // Proactive message to a specific JID (owner notifications). The desktop
       // app drives these after pairing; before that activeSock is null.
-      void sendTo(v.to, v.text);
+      void deliver(v);
     }
     if (v.type === "send_file") {
       // A PDF, photo or document the agent produced, delivered into the chat.
       // The app passes an absolute path; the file is read here so multi-MB
       // payloads never cross the stdin pipe.
-      void (async () => {
-        try {
-          const jid = v.to.includes("@") ? v.to : `${v.to}@s.whatsapp.net`;
-          const buf = fs.readFileSync(v.path);
-          const mime = v.mimetype || "application/octet-stream";
-          const opts = mime.startsWith("image/")
-            ? { image: buf, caption: v.caption || undefined }
-            : mime.startsWith("audio/")
-              ? { audio: buf, mimetype: mime, ptt: mime.includes("ogg") }
-              : {
-                  document: buf,
-                  mimetype: mime,
-                  fileName: v.filename || path.basename(v.path),
-                  caption: v.caption || undefined,
-                };
-          console.log(`→ file ${v.filename || path.basename(v.path)} (${buf.length}B) to ${jid}`);
-          remember((await activeSock?.sendMessage(jid, opts))?.key?.id);
-        } catch (e) {
-          console.error("send_file failed:", e?.message);
-        }
-      })();
+      void deliver(v);
     }
   });
 }
@@ -169,9 +187,10 @@ function askAgent(jid, from, text, fromName) {
       // Stop holding this chat's turn, but keep the entry around a while: if
       // the app answers late, the reply handler sends it as its own message.
       setTimeout(() => pending.delete(id), 120_000).unref?.();
-      resolve(
-        `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected. I'll send the answer if it still lands.`
-      );
+      resolve({
+        to: jid,
+        text: `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected. I'll send the answer if it still lands.`,
+      });
     }, REPLY_TIMEOUT_MS);
     pending.set(id, entry);
     emit({ type: "message", id, from, text, fromName });
@@ -207,12 +226,20 @@ function reconnect(dead) {
     // already gone
   }
   if (activeSock === dead) activeSock = null;
+  connected = false;
   if (reconnecting) return;
   reconnecting = true;
   const wait = Math.min(30_000, 2_000 * 2 ** backoffStep++);
   setTimeout(() => {
     reconnecting = false;
-    start().catch((e) => console.error("reconnect failed:", e?.message));
+    start().catch((e) => {
+      emit({
+        type: "status",
+        state: "error",
+        error: "WhatsApp could not reconnect. Restart the bridge in Integrations.",
+      });
+      console.error("reconnect failed:", e?.message);
+    });
   }, wait);
 }
 
@@ -238,6 +265,7 @@ async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const sock = makeWASocket({ auth: state, printQRInTerminal: false });
   activeSock = sock;
+  connected = false;
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -251,17 +279,23 @@ async function start() {
         .catch((e) => console.error("qr encode failed:", e.message));
     }
     if (connection === "open") {
+      connected = true;
       backoffStep = 0;
-      console.log("\n✅ Paired. Message this number from your own WhatsApp and the agent answers.\n");
+      console.log(
+        "\n✅ Paired. Message this number from your own WhatsApp and the agent answers.\n"
+      );
       emit({ type: "status", state: "connected", me: sock.user?.id ?? null });
     }
     if (connection === "connecting") emit({ type: "status", state: "connecting" });
     if (connection === "close") {
+      connected = false;
       // 401 (loggedOut) means the phone unlinked us — reconnecting would spin
       // forever, so stop and make the human re-scan.
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
-        console.error("Logged out on the phone. Delete the session dir and run again to re-pair.");
+        console.error(
+          "Logged out on the phone. Delete the session dir and run again to re-pair."
+        );
         emit({ type: "status", state: "logged_out" });
         process.exit(1);
       }
@@ -279,11 +313,20 @@ async function start() {
       if (sentIds.has(m.key.id)) continue; // our own reply echoing back
 
       const jid = m.key.remoteJid;
+      if (!jid || (!jid.endsWith("@s.whatsapp.net") && !jid.endsWith("@lid"))) continue;
       // fromMe is only for the agent in self-chat (your own Saved Messages
       // thread). Any other fromMe message is the owner typing to a real
       // contact — answering there would butt into their conversation.
       const selfChat = !!meDigits && digitsOf(jid) === meDigits;
       if (m.key.fromMe && !selfChat) continue;
+
+      const receivedId = `${jid}:${m.key.id}`;
+      if (!m.key.id || receivedIds.has(receivedId)) continue;
+      receivedIds.add(receivedId);
+      if (receivedIds.size > 1000) receivedIds.delete(receivedIds.values().next().value);
+
+      const phone = (jid ?? "").split("@")[0];
+      const name = m.pushName ?? phone;
 
       const text = textOf(m);
       if (!text) {
@@ -293,27 +336,26 @@ async function start() {
         // id, and without that entry the reply was written to nobody and the
         // owner sat staring at a read bubble that never answered. Capped: a
         // 40-minute voice memo is not a prompt.
-        const audio =
-          m.message?.audioMessage || m.message?.pttMessage || null;
+        const audio = m.message?.audioMessage || m.message?.pttMessage || null;
         if (audio) {
           try {
-            const buf = await downloadMediaMessage(m, {
-              reuploadRequest: sock.updateMediaMessage,
-            });
+            const buf = await downloadMediaMessage(m, "buffer", {});
             if (buf && buf.length <= 8 * 1024 * 1024) {
               console.log(`← ${name}: [voice note ${buf.length}B]`);
               const id = crypto.randomUUID();
               void new Promise((resolve) => {
                 const entry = { resolve, jid, timedOut: false };
                 entry.ackTimer = setTimeout(() => {
-                  if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
+                  if (pending.has(id))
+                    void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
                 }, ACK_AFTER_MS);
                 entry.timer = setTimeout(() => {
                   entry.timedOut = true;
                   setTimeout(() => pending.delete(id), 120_000).unref?.();
-                  resolve(
-                    `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected.`
-                  );
+                  resolve({
+                    to: jid,
+                    text: `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected.`,
+                  });
                 }, REPLY_TIMEOUT_MS);
                 pending.set(id, entry);
                 emit({
@@ -325,7 +367,7 @@ async function start() {
                   mimetype: audio.mimetype || "audio/ogg; codecs=opus",
                 });
               }).then((reply) => {
-                if (reply) void sendTo(jid, reply);
+                void deliver(reply);
               });
             } else {
               console.error("voice note too large, skipped");
@@ -337,23 +379,24 @@ async function start() {
         continue;
       }
 
-      const phone = (jid ?? "").split("@")[0];
-      const name = m.pushName ?? phone;
       console.log(`← ${name}: ${text}`);
 
       const reply = await askAgent(jid, phone, text, name);
-      if (!reply) continue;
       // Sent on the CURRENT socket, not the one this message arrived on: a
       // reconnect during a long agent run would otherwise send on a dead
       // session, which the phone shows as "Waiting for this message".
-      await sendTo(jid, reply);
-      console.log(`→ ${reply.slice(0, 120)}${reply.length > 120 ? "…" : ""}`);
+      await deliver(reply);
     }
   });
 }
 
 startStdinLoop();
 start().catch((e) => {
+  emit({
+    type: "status",
+    state: "error",
+    error: "WhatsApp bridge could not start. Review the desktop logs and reconnect.",
+  });
   console.error("bridge failed to start:", e);
   process.exit(1);
 });

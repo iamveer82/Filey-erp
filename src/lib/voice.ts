@@ -50,6 +50,7 @@ export async function transcribeAudio(
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -61,7 +62,7 @@ export async function transcribeAudio(
 
 /** TTS is OpenAI-only for now (Groq ships no speech endpoint). */
 export function ttsAvailable(): boolean {
-  return getAiConfig().provider === "openai";
+  return sttEngine() === "openai";
 }
 
 /** Render text to mp3 bytes for a WhatsApp voice note. */
@@ -70,7 +71,7 @@ export async function textToSpeech(
   opts: { voice?: string } = {}
 ): Promise<Uint8Array> {
   const { baseUrl, apiKey } = getAiConfig();
-  if (getAiConfig().provider !== "openai")
+  if (!ttsAvailable())
     throw new Error("no-tts-provider");
   const res = await fetch(
     `${(baseUrl || "https://api.openai.com/v1").replace(/\/$/, "")}/audio/speech`,
@@ -86,6 +87,7 @@ export async function textToSpeech(
         input: text.slice(0, 4000),
         response_format: "mp3",
       }),
+      signal: AbortSignal.timeout(60_000),
     }
   );
   if (!res.ok) {

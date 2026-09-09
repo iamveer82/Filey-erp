@@ -22,6 +22,7 @@ import {
 } from "./waBridge";
 import { billing } from "./api";
 import { waLogAdd } from "./waLog";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval: if a tool needs approval and is refused, tell the user exactly what you need approved and ask them to reply YES to proceed. Never invent data — look it up. Be concise and practical.";
@@ -115,7 +116,8 @@ const APPROVAL_TTL_MS = 15 * 60_000;
 const callSig = (name: string, args: Record<string, unknown>) =>
   `${name}:${JSON.stringify(args ?? {})}`;
 
-const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sure|agreed)$/i;
+const AFFIRMATIVE =
+  /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sure|agreed)$/i;
 
 /** A run that never finishes used to wedge the queue forever: the message that
  *  hung was never answered, and every message after it — hours of them — was
@@ -125,14 +127,25 @@ const AFFIRMATIVE = /^(yes|yep|y|ya|ok|okay|approve|confirm|go|do it|proceed|sur
  *  timeout so the owner gets this line rather than the sidecar's. */
 const RUN_TIMEOUT_MS = 200_000;
 
-function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return new Promise<T>((resolve) => {
-    const t = setTimeout(() => resolve(fallback), ms);
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  fallback: T,
+  abort: () => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => {
+      abort();
+      resolve(fallback);
+    }, ms);
     const done = (v: T) => {
       clearTimeout(t);
       resolve(v);
     };
-    p.then(done, () => done(fallback));
+    p.then(done, (e) => {
+      clearTimeout(t);
+      reject(e);
+    });
   });
 }
 
@@ -159,9 +172,12 @@ export function isOwnerNumber(
 
 async function isOwnerSender(from: string): Promise<boolean> {
   try {
+    if (!agentStorageScope()) return false;
     const me = (await bridgeState()).me;
     const { ownerNumber } = getBridgeConfig();
-    return isOwnerNumber(me, (await billing.getCompany())?.whatsapp, from, ownerNumber);
+    if (isOwnerNumber(me, null, from, ownerNumber)) return true;
+    const company = await withTimeout(billing.getCompany(), 8000, null, () => {});
+    return isOwnerNumber(null, company?.whatsapp, from);
   } catch {
     // offline / no profile — deny (the agent stays owner-only)
     return false;
@@ -174,16 +190,32 @@ export function startWaAgent(): void {
   started = true;
 
   onWaMessage((m) => {
-    queue = queue.then(() => handle(m)).catch(() => {});
+    void enqueueOwner(m, () => handle(m));
   });
 
   // Voice notes: transcribe with the configured provider's Whisper endpoint,
   // then run the exact same handler the words would have taken as text.
   onWaVoice((v) => {
-    queue = queue
-      .then(() => handleVoice(v))
-      .catch(() => {});
+    void enqueueOwner(v, () => handleVoice(v));
   });
+}
+
+/** Clear non-owner requests before they can wait behind a long owner run. */
+async function enqueueOwner(m: Pick<WaMessage, "id" | "from">, run: () => Promise<void>) {
+  const scope = agentStorageScope();
+  if (!scope || !(await isOwnerSender(m.from)) || scope !== agentStorageScope()) {
+    await replyWa(m.id, "").catch(() => {});
+    return;
+  }
+  queue = queue
+    .then(async () => {
+      if (scope !== agentStorageScope()) {
+        await replyWa(m.id, "");
+        return;
+      }
+      await run();
+    })
+    .catch((e) => log.warn("whatsapp", "owner request failed", e));
 }
 
 /** Transcribe one voice note and answer it. Falls back to a clear, honest
@@ -195,6 +227,11 @@ async function handleVoice(v: {
   b64: string;
   mimetype?: string;
 }): Promise<void> {
+  const scope = agentStorageScope();
+  if (!scope || !(await isOwnerSender(v.from)) || scope !== agentStorageScope()) {
+    await replyWa(v.id, "");
+    return;
+  }
   waLogAdd({
     dir: "in",
     from: v.from,
@@ -218,6 +255,10 @@ async function handleVoice(v: {
       mimetype: v.mimetype,
       filename: "note.ogg",
     });
+    if (scope !== agentStorageScope()) {
+      await replyWa(v.id, "");
+      return;
+    }
   } catch (e) {
     log.warn("whatsapp", "voice transcription failed", e);
     await replyWa(
@@ -232,7 +273,6 @@ async function handleVoice(v: {
     await replyWa(v.id, waFormat("That one came through silent — say it again?"));
     return;
   }
-  waLogAdd({ dir: "in", from: v.from, name: v.fromName, text: transcript });
   log.info("whatsapp", `voice from ${v.from} →`, transcript.slice(0, 120));
   // The spoken words are treated exactly like typed ones; `voice` flags the
   // reply path to also send a spoken version back.
@@ -246,6 +286,7 @@ async function handleVoice(v: {
  *  `voice` is set (a voice note came in), the reply also goes back as a
  *  spoken voice note where TTS is available — talk in, talk out. */
 async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<void> {
+  const scope = agentStorageScope();
   // Everything the bridge sees goes in the log, owner or customer: it is the
   // only record of the WhatsApp thread the in-app agent can read back (see
   // list_whatsapp_messages). WhatsApp itself offers no history to fetch.
@@ -255,9 +296,13 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
     // Empty stays empty: that is the deliberate silence for a non-owner, and it
     // is what releases the sidecar's pending promise.
     const out = waFormat(text);
-    if (out) waLogAdd({ dir: "out", from: m.from, name: m.fromName, text: out });
     try {
       await replyWa(m.id, out);
+      if (out && scope === agentStorageScope())
+        waLogAdd(
+          { dir: "out", from: m.from, name: m.fromName, text: out },
+          scope ?? undefined
+        );
     } catch (e) {
       // The bridge died between receiving the question and the answer. The
       // sidecar's pending entry will time out with its own line to the owner;
@@ -281,11 +326,13 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
   // no-confirm tool set before it can be turned on.
   // The empty reply matters: it releases the sidecar's pending promise, which
   // would otherwise time out and send the customer a "didn't answer" line.
-  if (!(await isOwnerSender(m.from))) {
+  if (!scope || !(await isOwnerSender(m.from))) {
     // Silent to the sender, but never silent to the log: a wrong owner match is
     // indistinguishable from a broken bridge from the outside, and that cost a
     // long evening once.
-    const me = await bridgeState().then((s) => s.me).catch(() => null);
+    const me = await bridgeState()
+      .then((s) => s.me)
+      .catch(() => null);
     log.warn(
       "whatsapp",
       `ignored ${m.from} — not recognised as the owner`,
@@ -298,12 +345,14 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
   }
 
   if (!aiReady()) {
-    await answer("Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first.");
+    await answer(
+      "Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first."
+    );
     return;
   }
 
   try {
-    const key = m.from || "unknown";
+    const key = `${scope}:${m.from}`;
     // A "yes" approves the ONE call that was proposed last turn, not sensitive
     // tools in general — and only while that proposal is fresh. Anything else
     // the run tries is refused and re-proposed.
@@ -313,13 +362,19 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
     const approvedSig =
       pending && Date.now() - pending.at <= APPROVAL_TTL_MS ? pending.sig : undefined;
     const allowSensitive = !!approvedSig;
+    pendingApproval.delete(key); // approvals are consumed, including failed or timed-out turns
+    let approvalUsed = false;
 
     // The first refused call becomes the new pending proposal, so the reply the
     // owner reads and the call a later "yes" authorises are the same thing.
     let proposedSig: string | null = null;
     const confirm = (name: string, args: Record<string, unknown>) => {
       const sig = callSig(name, args);
-      if (approvedSig && sig === approvedSig) return true;
+      if (scope !== agentStorageScope()) return false;
+      if (approvedSig && sig === approvedSig && !approvalUsed) {
+        approvalUsed = true;
+        return true;
+      }
       if (!proposedSig) proposedSig = sig;
       return false;
     };
@@ -327,32 +382,56 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
     const baseSystem = buildSystemPrompt(
       `${SYSTEM}\n\n${FORMAT}`,
       getPersona(),
-      [memoryDigest(), skillsIndex(), await businessBrief()].filter(Boolean).join("\n\n")
+      [
+        memoryDigest(12, m.text),
+        skillsIndex(),
+        await withTimeout(businessBrief(), 12_000, "", () => {}),
+      ]
+        .filter(Boolean)
+        .join("\n\n")
     );
     const system: AiMessage = {
       role: "system",
       text: allowSensitive
-        ? baseSystem + "\n\nAPPROVAL GRANTED: the user just approved your pending request. Execute it now with the tools — do not ask again."
+        ? baseSystem +
+          "\n\nAPPROVAL GRANTED: the user just approved your pending request. Execute it now with the tools — do not ask again."
         : baseSystem,
     };
 
     const prev = history.get(key) ?? [];
     const userMsg: AiMessage = { role: "user", text: m.text };
     // null is the timeout marker — the agent itself always returns a string.
-    const reply = await withTimeout<string | null>(
-      aiAgent([system, ...prev, userMsg], {
-        maxTokens: 2048,
-        confirm,
-        isOwner: true, // gated above — only the owner reaches this point
-      }),
-      RUN_TIMEOUT_MS,
-      null
-    );
+    const controller = new AbortController();
+    const onScopeChange = () => {
+      if (scope !== agentStorageScope()) controller.abort();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, onScopeChange);
+    let reply: string | null;
+    try {
+      onScopeChange();
+      reply = await withTimeout<string | null>(
+        aiAgent([system, ...prev, userMsg], {
+          maxTokens: 2048,
+          confirm,
+          isOwner: true, // gated above — only the owner reaches this point
+          signal: controller.signal,
+        }),
+        RUN_TIMEOUT_MS,
+        null,
+        () => controller.abort()
+      );
+    } finally {
+      window.removeEventListener(AGENT_STORAGE_EVENT, onScopeChange);
+    }
+    if (scope !== agentStorageScope()) {
+      await replyWa(m.id, "");
+      return;
+    }
     if (reply === null) {
       // Say so and drop the turn rather than holding the queue: the next
       // message must still get answered.
       await answer(
-        "That one is taking longer than I can hold the line for — it may still be running in the app. Send it again, or ask me to check what got created."
+        "That request took too long, so I stopped the agent. A tool already in progress may have finished; check the app before repeating an action."
       );
       return;
     }
@@ -368,11 +447,12 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
 
     // Spoken reply for spoken input: TTS → mp3 on disk → audio message.
     // Best-effort — the text answer above already stands on its own.
-    if (opts.voice) {
+    if (opts.voice && scope === agentStorageScope()) {
       try {
         const { ttsAvailable, textToSpeech } = await import("./voice");
         if (ttsAvailable()) {
           const mp3 = await textToSpeech(text);
+          if (scope !== agentStorageScope()) return;
           const { outputDir } = await import("./agentFiles");
           const target = await outputDir();
           if (target) {
@@ -388,12 +468,15 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
               mimetype: "audio/mpeg",
               caption: undefined,
             });
-            waLogAdd({
-              dir: "out",
-              from: m.from,
-              name: m.fromName,
-              text: "[voice reply]",
-            });
+            waLogAdd(
+              {
+                dir: "out",
+                from: m.from,
+                name: m.fromName,
+                text: "[voice reply]",
+              },
+              scope
+            );
           }
         }
       } catch (e) {
@@ -401,6 +484,10 @@ async function handle(m: WaMessage, opts: { voice?: boolean } = {}): Promise<voi
       }
     }
   } catch (e) {
+    if (scope !== agentStorageScope()) {
+      await replyWa(m.id, "").catch(() => {});
+      return;
+    }
     // The reason matters over WhatsApp — there is no console to check.
     const why = e instanceof Error ? e.message : String(e);
     await answer(`Sorry — that failed on my side: ${why.slice(0, 300)}`);

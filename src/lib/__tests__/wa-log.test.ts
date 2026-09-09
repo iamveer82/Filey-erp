@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { waLogAdd, waLogClear, waLogList } from "../waLog";
 import { WA_HEADER, waFormat } from "../waAgent";
@@ -5,7 +6,7 @@ import { WA_HEADER, waFormat } from "../waAgent";
 /* The WhatsApp thread is the only record the in-app agent can read back — the
  * platform hands us no history — so the log has to keep the right end of it. */
 
-beforeEach(() => waLogClear());
+beforeEach(() => { localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); waLogClear(); });
 
 describe("waLogList", () => {
   it("returns newest last and honours the limit", () => {
