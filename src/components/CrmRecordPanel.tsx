@@ -1,219 +1,243 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckSquare, Loader2, Plus, Square, StickyNote, Trash2 } from "lucide-react";
 import {
-  CheckSquare,
-  Loader2,
-  Plus,
-  Square,
-  StickyNote,
-  Trash2,
-} from "lucide-react";
-import {
-  crm,
-  type CrmNote,
+  persistCrmRecord,
+  removeCrmRecord,
   type CrmTargetType,
   type CrmTask,
 } from "../lib/api";
+import { loadCrmRecordContext } from "../lib/crmWorkspace";
+import { useLiveSync } from "../lib/realtime";
 import { cn, errMsg, fmtDate, localYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
-
-/* Notes + tasks for ANY record.
- *
- * Both are stored against (target_type, target_id), so this one component
- * serves a company, a person, a deal or a lead without knowing anything about
- * the record it is attached to. That polymorphic link is what lets a task live
- * on the thing it is actually about instead of being matched back by name —
- * see supabase/2026-07-26-crm-objects.sql.
- */
+import { ErrorBanner } from "./ui";
 
 type Tab = "notes" | "tasks";
+type Props = { targetType: CrmTargetType; targetId: number; className?: string };
+const isClosed = (task: CrmTask) => ["done", "cancelled"].includes(task.status);
+const isOverdue = (task: CrmTask) =>
+  !isClosed(task) && !!task.due_date && task.due_date < localYmd(new Date());
 
-const isOverdue = (t: CrmTask) =>
-  t.status !== "done" && !!t.due_date && t.due_date < localYmd(new Date());
+/** Changing records also discards the old draft and pending view state. */
+export default function CrmRecordPanel(props: Props) {
+  return <RecordContext key={props.targetType + ":" + props.targetId} {...props} />;
+}
 
-export default function CrmRecordPanel({
-  targetType,
-  targetId,
-  className,
-}: {
-  targetType: CrmTargetType;
-  targetId: number;
-  className?: string;
-}) {
+function RecordContext({ targetType, targetId, className }: Props) {
   const { toast, confirm } = useUI();
   const [tab, setTab] = useState<Tab>("notes");
-  const [notes, setNotes] = useState<CrmNote[]>([]);
-  const [tasks, setTasks] = useState<CrmTask[]>([]);
+  const [context, setContext] = useState<
+    Awaited<ReturnType<typeof loadCrmRecordContext>>
+  >({ notes: [], tasks: [] });
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState("");
-  const [due, setDue] = useState("");
+  const [error, setError] = useState("");
+  const [drafts, setDrafts] = useState({ notes: "", tasks: "" });
   const [busy, setBusy] = useState(false);
-
-  const mine = useCallback(
-    <T extends { target_type?: unknown; target_id?: unknown }>(rows: T[]) =>
-      rows.filter(
-        (r) => r.target_type === targetType && Number(r.target_id) === targetId
-      ),
-    [targetType, targetId]
-  );
+  const request = useRef(0);
+  const active = useRef(false);
+  const inFlight = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
 
   const reload = useCallback(async () => {
+    const version = ++request.current;
+    setLoading(true);
     try {
-      const [allNotes, allTasks] = await Promise.all([crm.notes(), crm.tasks()]);
-      setNotes(mine(allNotes));
-      setTasks(mine(allTasks));
+      const next = await loadCrmRecordContext(targetType, targetId);
+      if (active.current && version === request.current) {
+        setContext(next);
+        setError("");
+      }
     } catch (e) {
-      toast.error(errMsg(e));
+      if (active.current && version === request.current) setError(errMsg(e));
     } finally {
-      setLoading(false);
+      if (active.current && version === request.current) setLoading(false);
     }
-    // toast is recreated every render — depending on it would loop forever.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mine]);
+  }, [targetType, targetId]);
 
   useEffect(() => {
-    setLoading(true);
-    reload();
+    active.current = true;
+    void reload();
+    return () => {
+      active.current = false;
+    };
   }, [reload]);
+  useLiveSync(reload);
 
   const sortedNotes = useMemo(
     () =>
-      [...notes].sort(
+      [...context.notes].sort(
         (a, b) =>
           Number(b.pinned ?? false) - Number(a.pinned ?? false) ||
-          +new Date(b.created_at) - +new Date(a.created_at)
+          b.created_at.localeCompare(a.created_at)
       ),
-    [notes]
+    [context.notes]
   );
-
-  // Open tasks first, soonest due at the top; undated sink below dated ones.
   const sortedTasks = useMemo(
     () =>
-      [...tasks].sort((a, b) => {
-        const done = Number(a.status === "done") - Number(b.status === "done");
-        if (done) return done;
-        if (a.due_date && b.due_date) return a.due_date < b.due_date ? -1 : 1;
-        if (a.due_date) return -1;
-        if (b.due_date) return 1;
-        return +new Date(b.created_at) - +new Date(a.created_at);
-      }),
-    [tasks]
+      [...context.tasks].sort(
+        (a, b) =>
+          Number(isClosed(a)) - Number(isClosed(b)) ||
+          (a.due_date || "9999").localeCompare(b.due_date || "9999") ||
+          b.created_at.localeCompare(a.created_at)
+      ),
+    [context.tasks]
   );
+  const openCount = context.tasks.filter((task) => !isClosed(task)).length;
+  const disabled = loading || busy || !!error;
 
-  const openCount = tasks.filter((t) => t.status !== "done").length;
-
-  const add = async () => {
-    const text = draft.trim();
-    if (!text || busy) return;
+  const run = async (mutation: () => Promise<void>, clearDraft = false) => {
+    if (inFlight.current || loading || error) return;
+    inFlight.current = true;
     setBusy(true);
     try {
-      if (tab === "notes") {
-        await crm.addNote({ target_type: targetType, target_id: targetId, body: text });
-      } else {
-        await crm.addTask({
-          target_type: targetType,
-          target_id: targetId,
-          title: text,
-          due_date: due || undefined,
-        });
+      await mutation();
+      if (!active.current) return;
+      if (clearDraft) {
+        setDrafts((previous) => ({ ...previous, [tab]: "" }));
+        form.current?.reset();
       }
-      setDraft("");
-      setDue("");
       await reload();
     } catch (e) {
-      toast.error(errMsg(e));
+      if (active.current) toast.error(errMsg(e));
     } finally {
-      setBusy(false);
+      inFlight.current = false;
+      if (active.current) setBusy(false);
     }
   };
 
-  const toggle = async (t: CrmTask) => {
-    try {
-      await crm.setTaskDone(t.id, t.status !== "done");
-      await reload();
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  };
-
-  const remove = async (kind: Tab, id: number) => {
-    const what = kind === "notes" ? "note" : "task";
-    const ok = await confirm({
-      title: `Delete this ${what}?`,
-      confirmLabel: "Delete",
-      danger: true,
+  const toggle = (task: CrmTask) =>
+    run(async () => {
+      const done = !isClosed(task);
+      await persistCrmRecord(
+        "crm_tasks",
+        {
+          status: done ? "done" : "open",
+          completed_at: done ? new Date().toISOString() : null,
+        },
+        task.id
+      );
     });
-    if (!ok) return;
-    try {
-      if (kind === "notes") await crm.deleteNote(id);
-      else await crm.deleteTask(id);
-      await reload();
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  };
+  const remove = (kind: Tab, id: number) =>
+    run(async () => {
+      const ok = await confirm({
+        title: "Delete this " + (kind === "notes" ? "note" : "task") + "?",
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (ok && active.current)
+        await removeCrmRecord(kind === "notes" ? "crm_notes" : "crm_tasks", id);
+    });
 
   return (
-    <div className={cn("rounded-xl border border-line bg-card", className)}>
-      <div className="flex items-center gap-1 border-b border-line px-2">
-        {(["notes", "tasks"] as Tab[]).map((t) => (
+    <div
+      className={cn("rounded-xl border border-border bg-card", className)}
+      aria-busy={loading || busy}
+    >
+      <div
+        className="flex items-center gap-1 border-b border-border p-2"
+        role="group"
+        aria-label="Record context"
+      >
+        {(["notes", "tasks"] as Tab[]).map((item) => (
           <button
-            key={t}
+            key={item}
             type="button"
-            onClick={() => setTab(t)}
+            disabled={busy}
+            aria-pressed={tab === item}
+            onClick={() => setTab(item)}
             className={cn(
-              "px-3 py-2 text-sm capitalize transition-colors active:scale-[0.97]",
-              tab === t
-                ? "border-b-2 border-ink font-medium text-ink"
-                : "text-muted-foreground hover:text-ink"
+              "min-h-10 rounded-full px-3 py-2 text-[13px] capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              tab === item
+                ? "bg-hover font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
-            {t}
-            {t === "tasks" && openCount > 0 && (
-              <span className="ml-1.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-600 dark:text-amber-400">
+            {item}
+            {item === "tasks" && !error && openCount > 0 && (
+              <span className="ml-1.5 rounded-full bg-primary-400/15 px-1.5 py-0.5 text-[11px] text-foreground">
                 {openCount}
               </span>
             )}
           </button>
         ))}
       </div>
-
-      <div className="flex flex-col gap-2 border-b border-line p-3 sm:flex-row">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder={tab === "notes" ? "Write a note…" : "What needs doing?"}
-          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm"
-        />
-        {tab === "tasks" && (
-          <input
-            type="date"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            className="rounded-lg border border-line bg-bg px-3 py-2 text-sm"
-            aria-label="Due date"
-          />
-        )}
-        <button
-          type="button"
-          onClick={add}
-          disabled={!draft.trim() || busy}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm text-bg transition-transform active:scale-[0.97] disabled:opacity-40"
+      <form
+        ref={form}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!event.currentTarget.checkValidity()) return;
+          const fields = new FormData(event.currentTarget);
+          const body = String(fields.get("draft") || "").trim();
+          if (!body) return;
+          const due = String(fields.get("due") || "");
+          void run(async () => {
+            await persistCrmRecord(tab === "notes" ? "crm_notes" : "crm_tasks", {
+              target_type: targetType,
+              target_id: targetId,
+              ...(tab === "notes"
+                ? { body }
+                : {
+                    title: body,
+                    due_date: due || null,
+                    status: "open",
+                    priority: "normal",
+                  }),
+            });
+          }, true);
+        }}
+      >
+        <fieldset
+          disabled={disabled}
+          className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          Add
-        </button>
-      </div>
-
+          <input
+            name="draft"
+            value={drafts[tab]}
+            onChange={(e) =>
+              setDrafts((previous) => ({ ...previous, [tab]: e.target.value }))
+            }
+            required
+            maxLength={tab === "notes" ? 20000 : 500}
+            aria-label={tab === "notes" ? "New note" : "New task"}
+            placeholder={tab === "notes" ? "Write a note…" : "What needs doing?"}
+            className="input min-w-0 flex-1"
+          />
+          {tab === "tasks" && (
+            <input
+              type="date"
+              name="due"
+              className="input sm:w-40"
+              aria-label="Due date"
+            />
+          )}
+          <button
+            type="submit"
+            disabled={!drafts[tab].trim() || disabled}
+            className="btn-primary"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}{" "}
+            Add {tab === "notes" ? "note" : "task"}
+          </button>
+        </fieldset>
+      </form>
       <div className="max-h-80 overflow-y-auto p-3">
         {loading ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          <div
+            role="status"
+            className="flex items-center gap-2 py-6 text-sm text-muted-foreground"
+          >
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading record context…
+          </div>
+        ) : error ? (
+          <div className="space-y-3">
+            <ErrorBanner message={"Could not load notes and tasks: " + error} />
+            <button className="btn-ghost" onClick={() => void reload()}>
+              Retry
+            </button>
           </div>
         ) : tab === "notes" ? (
           sortedNotes.length === 0 ? (
@@ -222,84 +246,91 @@ export default function CrmRecordPanel({
             </p>
           ) : (
             <ul className="space-y-2">
-              {sortedNotes.map((n) => (
+              {sortedNotes.map((note) => (
                 <li
-                  key={n.id}
-                  className="group flex gap-2 rounded-lg border border-line p-2.5"
+                  key={note.id}
+                  className="flex gap-2 rounded-lg border border-border p-2.5"
                 >
                   <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <p className="whitespace-pre-wrap break-words text-sm text-ink">
-                      {n.body}
+                    <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+                      {note.body}
                     </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {fmtDate(n.created_at)}
-                      {n.author ? ` · ${n.author}` : ""}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {fmtDate(note.created_at)}
+                      {note.author ? " · " + note.author : ""}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => remove("notes", n.id)}
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
+                    disabled={disabled}
+                    onClick={() => void remove("notes", note.id)}
+                    className="btn-ghost w-10 p-0 shrink-0"
                     aria-label="Delete note"
                   >
-                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
                   </button>
                 </li>
               ))}
             </ul>
           )
         ) : sortedTasks.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Nothing to do here yet.
-          </p>
+          <p className="py-6 text-center text-sm text-muted-foreground">No tasks yet.</p>
         ) : (
           <ul className="space-y-1">
-            {sortedTasks.map((t) => (
+            {sortedTasks.map((task) => (
               <li
-                key={t.id}
-                className="group flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-bg"
+                key={task.id}
+                className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-hover"
               >
                 <button
                   type="button"
-                  onClick={() => toggle(t)}
-                  aria-label={t.status === "done" ? "Reopen task" : "Complete task"}
+                  disabled={disabled}
+                  className="btn-ghost w-10 p-0 shrink-0"
+                  onClick={() => void toggle(task)}
+                  aria-label={
+                    (isClosed(task) ? "Reopen" : "Complete") + " task: " + task.title
+                  }
                 >
-                  {t.status === "done" ? (
-                    <CheckSquare className="h-4 w-4 text-emerald-600" />
+                  {task.status === "done" ? (
+                    <CheckSquare className="h-4 w-4 text-success" />
                   ) : (
                     <Square className="h-4 w-4 text-muted-foreground" />
                   )}
                 </button>
                 <span
                   className={cn(
-                    "min-w-0 flex-1 truncate text-sm",
-                    t.status === "done"
+                    "min-w-0 flex-1 text-sm break-words",
+                    isClosed(task)
                       ? "text-muted-foreground line-through"
-                      : "text-ink"
+                      : "text-foreground"
                   )}
                 >
-                  {t.title}
+                  {task.title}
+                  {task.status === "cancelled" && (
+                    <span className="ml-2 text-xs no-underline">Cancelled</span>
+                  )}
                 </span>
-                {t.due_date && (
+                {task.due_date && (
                   <span
                     className={cn(
-                      "shrink-0 text-[11px]",
-                      isOverdue(t)
-                        ? "font-medium text-red-500"
+                      "shrink-0 text-xs",
+                      isOverdue(task)
+                        ? "font-medium text-danger"
                         : "text-muted-foreground"
                     )}
                   >
-                    {fmtDate(t.due_date)}
+                    {fmtDate(task.due_date)}
                   </span>
                 )}
                 <button
                   type="button"
-                  onClick={() => remove("tasks", t.id)}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  aria-label="Delete task"
+                  disabled={disabled}
+                  className="btn-ghost w-10 p-0 shrink-0"
+                  onClick={() => void remove("tasks", task.id)}
+                  aria-label={"Delete task: " + task.title}
                 >
-                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                  <Trash2 className="h-4 w-4 text-muted-foreground" />
                 </button>
               </li>
             ))}

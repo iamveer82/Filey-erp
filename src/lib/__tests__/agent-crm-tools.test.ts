@@ -7,9 +7,11 @@ import { crm } from "../api";
 // that matter are: a deal's stage carries its probability, closed deals stay
 // out of the open list, and a logged call actually attaches to the deal it was
 // about (target_type "deal" — the string the neglect detector reads).
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
   setDataMode("local");
+  for (const company of ["Acme", "Globex", "Y", "Initech", "Umbrella", "Nobody"])
+    await crm.createCustomer({ name: company, company });
 });
 
 const tool = (name: string) => {
@@ -19,6 +21,45 @@ const tool = (name: string) => {
 };
 
 describe("deals", () => {
+  it("links the resolved company and refuses missing, ambiguous or invalid deal input", async () => {
+    const acme = (await crm.customers()).find((company) => company.company === "Acme")!;
+    const made = (await tool("create_deal").run({
+      title: "Linked deal",
+      customer_name: " acme ",
+      stage: "won",
+      value: 500,
+    })) as { id: number };
+    const saved = (await crm.opportunities()).find((row) => row.id === made.id)!;
+    expect(saved).toMatchObject({
+      customer_id: acme.id,
+      customer_name: "Acme",
+      probability: 100,
+    });
+    expect(saved.closed_at).toBeTruthy();
+    for (const args of [
+      { customer_name: "" },
+      { customer_name: "Missing company" },
+      { stage: "maybe" },
+      { value: -100 },
+      { value: "not money" },
+      { expected_close: "2026-02-31" },
+      { title: "" },
+    ]) {
+      await expect(
+        tool("create_deal").run({ title: "Invalid deal", customer_name: "Acme", ...args })
+      ).rejects.toThrow();
+    }
+    await crm.createCustomer({ name: "Acme", company: "Acme" });
+    await expect(
+      tool("create_deal").run({ title: "Ambiguous", customer_name: "Acme" })
+    ).rejects.toThrow(/More than one/);
+    await tool("create_deal").run({
+      title: "Explicit company",
+      customer_name: `company:${acme.id}`,
+    });
+    expect(await crm.opportunities()).toHaveLength(2);
+  });
+
   it("opens a deal with the probability its stage implies", async () => {
     await tool("create_deal").run({
       title: "Fit-out for Acme",
@@ -73,6 +114,39 @@ describe("deals", () => {
 });
 
 describe("activity", () => {
+  it("resolves a related company and refuses nonexistent links or invalid activity fields", async () => {
+    const acme = (await crm.customers()).find((company) => company.company === "Acme")!;
+    await tool("log_activity").run({
+      kind: "call",
+      subject: "Discussed requirements",
+      related_to: "Acme",
+    });
+    expect(await crm.activities()).toEqual([
+      expect.objectContaining({
+        target_type: "company",
+        target_id: acme.id,
+        subject: "Discussed requirements",
+      }),
+    ]);
+    for (const args of [
+      { deal_id: 9999 },
+      { related_to: "Missing company" },
+      { related_to: "company:9999" },
+      { kind: "unsupported" },
+      { subject: "" },
+      { due_date: "2026-02-31" },
+    ]) {
+      await expect(
+        tool("log_activity").run({ kind: "call", subject: "Invalid entry", ...args })
+      ).rejects.toThrow();
+    }
+    await crm.createCustomer({ name: "Acme", company: "Acme" });
+    await expect(
+      tool("log_activity").run({ kind: "call", subject: "Ambiguous", related_to: "Acme" })
+    ).rejects.toThrow(/More than one/);
+    expect(await crm.activities()).toHaveLength(1);
+  });
+
   it("attaches a logged call to the deal it was about", async () => {
     const made = (await tool("create_deal").run({
       title: "Renewal",
@@ -110,7 +184,9 @@ describe("closing a deal captures why", () => {
     const closed = (await tool("list_deals").run({
       include_closed: true,
       stage: "lost",
-    })) as { deals: { id: number; close_reason: string | null; closed_at: string | null }[] };
+    })) as {
+      deals: { id: number; close_reason: string | null; closed_at: string | null }[];
+    };
     const row = closed.deals.find((d) => d.id === made.id)!;
     expect(row.close_reason).toBe("Price too high");
     expect(row.closed_at).toBeTruthy();
