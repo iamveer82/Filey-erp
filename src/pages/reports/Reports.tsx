@@ -1,16 +1,11 @@
-import { useState } from "react";
-import {
-  LayoutDashboard,
-  TrendingUp,
-  Boxes,
-  Wallet,
-  Users,
-  Truck,
-  Download,
-} from "lucide-react";
+import { toast } from "../../components/Toaster";
+import { useSearchParams } from "react-router-dom";
+import { LayoutDashboard, TrendingUp, Boxes, Wallet, Users, Truck, Download, ChartNoAxesCombined, RefreshCw } from "lucide-react";
 import { PageHeader, Spinner, ErrorBanner } from "../../components/ui";
 import { downloadCsv } from "../../lib/csv";
 import { cn, todayYmd } from "../../lib/format";
+import { isPostedStatus } from "../../lib/api";
+import { useDisplayCurrency } from "../../lib/displayCurrency";
 import { useReportsData } from "./useReportsData";
 import DashboardTab from "./DashboardTab";
 import SalesTab from "./SalesTab";
@@ -18,6 +13,7 @@ import InventoryTab from "./InventoryTab";
 import FinancialTab from "./FinancialTab";
 import CustomersTab from "./CustomersTab";
 import SuppliersTab from "./SuppliersTab";
+import InsightsTab from "./InsightsTab";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -26,18 +22,19 @@ const TABS = [
   { id: "financial", label: "Financial", icon: Wallet },
   { id: "customers", label: "Customers", icon: Users },
   { id: "suppliers", label: "Suppliers", icon: Truck },
+  { id: "insights", label: "Insights", icon: ChartNoAxesCombined },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
-export default function Reports() {
-  const [tab, setTab] = useState<TabId>("dashboard");
+function FinancialReports({ tab }: { tab: Exclude<TabId, "insights"> }) {
   const data = useReportsData();
-
+  const { currency } = useDisplayCurrency();
   const exportCsv = () => {
     const rows = [
-      { metric: "Revenue", amount: data.invoices.filter((i) => i.status !== "draft").reduce((s, i) => s + (i.total || 0), 0) },
-      { metric: "Cash received", amount: data.receiptList.reduce((s, r) => s + (Number(r.amount) || 0), 0) },
+      { metric: "Invoiced revenue (AED)", amount: data.invoices.filter(i => isPostedStatus(i.status)).reduce((s, i) => s + (i.total || 0), 0) },
+      { metric: "Invoice payments (AED)", amount: data.invoicePayments.reduce((s, payment) => s + payment.amount, 0) },
+      { metric: "Receipt documents (AED)", amount: data.receiptList.reduce((s, r) => s + (Number(r.amount) || 0), 0) },
       { metric: "Customers", amount: data.customers.length },
       { metric: "Orders", amount: data.orders.length },
       { metric: "Products", amount: data.products.length },
@@ -46,65 +43,44 @@ export default function Reports() {
     downloadCsv(`filey-report-${todayYmd()}`, rows, [
       { key: "metric", label: "Metric" },
       { key: "amount", label: "Amount" },
-    ]);
+    ]).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
   };
-
-  return (
-    <div className="">
-      <PageHeader
-        title="Reports"
-        subtitle="Live analytics driven by your invoices, receipts, orders and inventory."
-        action={
-          <button className="btn-ghost" onClick={exportCsv}>
-            <Download size={15} /> Export CSV
-          </button>
-        }
-      />
-
-      {data.error && (
-        <div className="mb-4">
-          <ErrorBanner message={data.error} />
-        </div>
-      )}
-      {data.loading &&
-        data.products.length === 0 &&
-        data.invoices.length === 0 &&
-        !data.error && (
-          <div className="card mb-4">
-            <Spinner label="Loading reports…" />
-          </div>
-        )}
-
-      {/* Tab navigation */}
-      <div className="flex items-center gap-1 border-b border-border mb-5 overflow-x-auto">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap",
-                active
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-              {t.label}
-            </button>
-          );
-        })}
+  return <>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <p className="max-w-3xl text-xs text-muted-foreground">Amounts are displayed in {currency} from totals normalized to AED using saved document rates where available. CSV exports use AED. Invoice payments and independently recorded receipt documents are shown separately; adding them can double-count the same payment. Receipt documents include confirmed receipts only.</p>
+      <div className="flex shrink-0 gap-2">
+        <button className="btn-ghost" disabled={data.loading} onClick={data.reload}><RefreshCw size={14} /> Refresh</button>
+        <button className="btn-ghost" disabled={data.loading || !!data.error} onClick={exportCsv}><Download size={14} /> Export CSV</button>
       </div>
-
-      {/* Tab content */}
+    </div>
+    {data.error && <div className="mb-4"><ErrorBanner message={data.error} /></div>}
+    {data.loading ? <div className="py-10"><Spinner label="Loading reports…" /></div> : data.error ? null : <>
       {tab === "dashboard" && <DashboardTab data={data} />}
       {tab === "sales" && <SalesTab data={data} />}
       {tab === "inventory" && <InventoryTab data={data} />}
       {tab === "financial" && <FinancialTab data={data} />}
       {tab === "customers" && <CustomersTab data={data} />}
       {tab === "suppliers" && <SuppliersTab data={data} />}
-    </div>
-  );
+    </>}
+  </>;
+}
+
+export default function Reports() {
+  const [params, setParams] = useSearchParams();
+  const tab: TabId = TABS.find(item => item.id === params.get("tab"))?.id || "dashboard";
+  return <div>
+    <PageHeader title="Reports" subtitle="Business reports and section insights, connected to your active workspace." />
+    <nav aria-label="Report sections" className="mb-5 flex flex-wrap gap-2">
+      {TABS.map(item => {
+        const Icon = item.icon;
+        return <button key={item.id} aria-pressed={tab === item.id} className={cn("chip", tab === item.id && "chip-active")} onClick={() => {
+          const next = new URLSearchParams(params);
+          next.set("tab", item.id);
+          if (item.id !== "insights") next.delete("section");
+          setParams(next);
+        }}><Icon size={14} /> {item.label}</button>;
+      })}
+    </nav>
+    {tab === "insights" ? <InsightsTab /> : <FinancialReports tab={tab} />}
+  </div>;
 }

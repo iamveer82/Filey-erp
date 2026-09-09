@@ -1,12 +1,13 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ChartFrame } from "../../components/charts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { TrendingUp, TrendingDown } from "lucide-react";
-import { aed, num, cn } from "../../lib/format";
+import { aed, chartAmount, num, cn } from "../../lib/format";
+import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
   ReportsData,
   useRevenueTotal,
-  useCashReceived,
   useDeltas,
   useTrend,
 } from "./useReportsData";
@@ -22,22 +23,22 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
   const revenueTotal = useRevenueTotal(data.invoices);
-  const cashReceived = useCashReceived(data.receiptList);
+  const invoicePaymentsTotal = data.invoicePayments.reduce((sum, payment) => sum + payment.amount, 0);
   const deltas = useDeltas(data.invoices, data.receiptList, data.customers, data.orders);
-  const trend = useTrend(data.invoices, data.receiptList);
+  const trend = useTrend(data.invoices, data.receiptList, data.invoicePayments);
 
   const kpis: Kpi[] = [
     {
-      label: "Revenue",
+      label: "Invoiced sales",
       value: aed(revenueTotal),
       delta: deltas.revenue,
-      hint: `${num(data.invoices.length)} invoices`,
+      hint: `${num(data.invoices.filter(i => isPostedStatus(i.status)).length)} posted invoices`,
     },
     {
-      label: "Cash received",
-      value: aed(cashReceived),
-      delta: deltas.cash,
-      hint: `${num(data.receiptList.length)} receipts`,
+      label: "Invoice payments",
+      value: aed(invoicePaymentsTotal),
+      delta: null,
+      hint: `${num(data.invoicePayments.length)} recorded payments`,
     },
     {
       label: "Customers",
@@ -99,18 +100,18 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
       <div className="border border-border rounded-xl overflow-hidden bg-card">
         <div className="p-5 pb-0">
           <div className="text-[14px] font-semibold text-foreground">
-            Revenue trend
+            Sales and payments
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Invoiced vs received, last 8 days
+            Last 7 days · invoices by issue date; payments and receipt documents by payment date
           </div>
         </div>
         <div className="p-5">
           <div className="h-[280px]">
-            {allZero(trend, "invoiced", "received") ? (
-              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+            {allZero(trend, "invoiced", "invoicePayments", "received") ? (
+              <ChartEmpty hint="Post an invoice, record an invoice payment or confirm a receipt document to see activity here." />
             ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={280}>
               <BarChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dashInvoiced" x1="0" y1="0" x2="0" y2="1">
@@ -126,7 +127,7 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
                 <XAxis dataKey="d" {...cs.axisProps} />
                 <YAxis
                   {...cs.axisProps}
-                  tickFormatter={(v) => `AED ${num(v)}`}
+                  tickFormatter={(v) => chartAmount(Number(v))}
                 />
                 <Tooltip
                   contentStyle={cs.tooltipStyle}
@@ -146,14 +147,21 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
                   maxBarSize={28}
                 />
                 <Bar
+                  dataKey="invoicePayments"
+                  name="Invoice payments"
+                  fill={c.tertiary}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
                   dataKey="received"
-                  name="Received"
+                  name="Receipt documents"
                   fill="url(#dashReceived)"
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
             )}
           </div>
         </div>

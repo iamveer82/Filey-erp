@@ -1,3 +1,4 @@
+import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
   BarChart,
@@ -5,10 +6,10 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { aed, num, cn } from "../../lib/format";
+import { aed, chartAmount, num, cn } from "../../lib/format";
+import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 import {
@@ -58,7 +59,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
     () =>
       new Set(
         data.invoices
-          .filter((i) => i.status !== "draft")
+          .filter((i) => isPostedStatus(i.status))
           .map((i) => i.customer_name)
       ).size,
     [data.invoices]
@@ -120,7 +121,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
               {allZero(topCustomers, "total") ? (
                 <ChartEmpty hint="Your highest-spending customers rank here once invoices exist." />
               ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartFrame height={280}>
                 <BarChart
                   data={topCustomers}
                   layout="vertical"
@@ -136,7 +137,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                   <XAxis
                     type="number"
                     {...cs.axisProps}
-                    tickFormatter={(v) => `AED ${num(v)}`}
+                    tickFormatter={(v) => chartAmount(Number(v))}
                   />
                   <YAxis
                     type="category"
@@ -155,7 +156,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                     radius={[0, 4, 4, 0]}
                    maxBarSize={32} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartFrame>
               )}
             </div>
           )}
@@ -173,7 +174,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
             {allZero(agingData, "value") ? (
               <ChartEmpty hint="Unpaid invoices land in these buckets as they age." />
             ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={280}>
               <BarChart
                 data={agingData}
                 margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
@@ -191,6 +192,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                 />
                 <YAxis
                   {...cs.axisProps}
+                  tickFormatter={(v) => chartAmount(Number(v))}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
@@ -203,7 +205,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                   radius={[6, 6, 0, 0]}
                  maxBarSize={32} />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
             )}
           </div>
         </div>

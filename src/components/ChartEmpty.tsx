@@ -20,5 +20,7 @@ export function allZero<T extends Record<string, unknown>>(
   ...keys: (keyof T)[]
 ): boolean {
   if (!rows || rows.length === 0) return true;
-  return !rows.some((r) => keys.some((k) => Number(r[k]) > 0));
+  return !rows.some((r) =>
+    keys.some((k) => Number.isFinite(Number(r[k])) && Number(r[k]) !== 0)
+  );
 }

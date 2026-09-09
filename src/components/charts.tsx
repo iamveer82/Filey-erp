@@ -1,4 +1,5 @@
-import { type ReactNode } from "react";
+import { ResponsiveContainer } from "recharts";
+import { type ReactNode, type ReactElement } from "react";
 import { cn } from "../lib/format";
 import { useChartColors } from "../lib/accent";
 
@@ -82,7 +83,7 @@ export function ChartPanel({
   bodyClassName?: string;
 }) {
   return (
-    <div className={cn("p-5 flex flex-col", className)}>
+    <div className={cn("p-5 min-w-0 flex flex-col", className)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -96,14 +97,32 @@ export function ChartPanel({
             )}
           </div>
           {subtitle && (
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              {subtitle}
-            </div>
+            <div className="text-[12.5px] text-muted-foreground mt-0.5">{subtitle}</div>
           )}
         </div>
         {action}
       </div>
-      <div className={cn("flex-1 min-h-0", bodyClassName)}>{children}</div>
+      <div className={cn("min-w-0", bodyClassName)}>{children}</div>
     </div>
+  );
+}
+
+/** Concrete heights avoid percentage-height/flex loops that leave charts blank. */
+export function ChartFrame({
+  children,
+  height = 256,
+}: {
+  children: ReactElement;
+  height?: number;
+}) {
+  return (
+    <ResponsiveContainer
+      width="100%"
+      height={height}
+      minWidth={0}
+      initialDimension={{ width: 320, height }}
+    >
+      {children}
+    </ResponsiveContainer>
   );
 }

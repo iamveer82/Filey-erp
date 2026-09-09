@@ -1,3 +1,4 @@
+import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
   LineChart,
@@ -11,10 +12,10 @@ import {
   YAxis,
   Tooltip,
   Legend,
-  ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { aed, num, cn } from "../../lib/format";
+import { aed, chartAmount, num, cn, localYmd } from "../../lib/format";
+import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
@@ -24,13 +25,13 @@ const CLOSED = ["paid", "draft", "cancelled"];
 export default function SalesTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
-  const trend = useTrend(data.invoices, data.receiptList);
+  const trend = useTrend(data.invoices, data.receiptList, data.invoicePayments);
   const pie = useStatusPie(data.invoices, c.accent, c.primary, c.tertiary);
 
   const totalInvoiced = useMemo(
     () =>
       data.invoices
-        .filter((i) => i.status !== "draft")
+        .filter((i) => isPostedStatus(i.status))
         .reduce((s, i) => s + (i.total || 0), 0),
     [data.invoices]
   );
@@ -44,7 +45,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
   );
 
   const paidAmount = useMemo(
-    () => data.invoices.reduce((s, i) => s + (i.paid || 0), 0),
+    () => data.invoices.filter(i => isPostedStatus(i.status)).reduce((s, i) => s + (i.paid || 0), 0),
     [data.invoices]
   );
 
@@ -62,12 +63,12 @@ export default function SalesTab({ data }: { data: ReportsData }) {
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = d.toISOString().slice(0, 7);
+      const key = localYmd(d).slice(0, 7);
       const label = d.toLocaleDateString(undefined, { month: "short" });
       byMonth.set(key, { m: label, total: 0 });
     }
     for (const inv of data.invoices) {
-      if (inv.status === "draft" || !inv.issue_date) continue;
+      if (!isPostedStatus(inv.status) || !inv.issue_date) continue;
       const key = inv.issue_date.slice(0, 7);
       const row = byMonth.get(key);
       if (row) row.total += inv.total || 0;
@@ -109,16 +110,16 @@ export default function SalesTab({ data }: { data: ReportsData }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 border border-border rounded-xl overflow-hidden bg-card">
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
           <div className="text-[14px] font-semibold text-foreground">
-            Revenue trend
+            Sales and payments
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Invoiced vs received - last 8 days
+            Last 7 days · invoices by issue date; payments and receipt documents by payment date
           </div>
           <div className="h-[280px] mt-3">
-            {allZero(trend, "invoiced", "received") ? (
-              <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+            {allZero(trend, "invoiced", "invoicePayments", "received") ? (
+              <ChartEmpty hint="Post an invoice, record an invoice payment or confirm a receipt document to see activity here." />
             ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={280}>
               <LineChart
                 data={trend}
                 margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
@@ -130,7 +131,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
                 <YAxis
                   {...cs.axisProps}
-                  tickFormatter={(v) => `AED ${num(v)}`}
+                  tickFormatter={(v) => chartAmount(Number(v))}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
@@ -151,14 +152,23 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
                 <Line
                   type="monotone"
+                  dataKey="invoicePayments"
+                  name="Invoice payments"
+                  stroke={c.tertiary}
+                  strokeWidth={2.5}
+                  strokeDasharray="5 3"
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
                   dataKey="received"
-                  name="Received"
+                  name="Receipt documents"
                   stroke={c.primary}
                   strokeWidth={2.5}
                   dot={false}
                 />
               </LineChart>
-            </ResponsiveContainer>
+            </ChartFrame>
             )}
           </div>
         </div>
@@ -174,7 +184,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             {allZero(monthlySales, "total") ? (
               <ChartEmpty hint="Monthly totals build up as you invoice through the year." />
             ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={280}>
               <BarChart
                 data={monthlySales}
                 margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
@@ -192,7 +202,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                 />
                 <YAxis
                   {...cs.axisProps}
-                  tickFormatter={(v) => `AED ${num(v)}`}
+                  tickFormatter={(v) => chartAmount(Number(v))}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
@@ -205,7 +215,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                   radius={[6, 6, 0, 0]}
                  maxBarSize={32} />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
             )}
           </div>
         </div>
@@ -224,7 +234,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             {allZero(pie, "value") ? (
               <ChartEmpty hint="Invoice statuses appear here once you have invoices." />
             ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={280}>
               <PieChart>
                 <Pie
                   data={pie}
@@ -244,7 +254,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                   formatter={(v) => num(Number(v) || 0)}
                 />
               </PieChart>
-            </ResponsiveContainer>
+            </ChartFrame>
             )}
           </div>
         </div>

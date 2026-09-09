@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { localYmd } from "../../lib/format";
+import { reportMoney } from "../../lib/reportMoney";
+import { getExchangeRates } from "../../lib/exchange-rates";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoicePaymentsInAed, overviewDeltas, overviewTrend } from "../overviewData";
 import {
   erp,
   fin,
@@ -14,6 +16,7 @@ import {
   Txn,
   Expense,
   InvoiceDocSummary,
+  InvoicePayment,
   CrmCustomer,
   ReceiptSummary,
   Supplier,
@@ -26,6 +29,7 @@ import {
   BalanceSheet,
   VatReturn,
   CashSummary,
+  isPostedStatus,
 } from "../../lib/api";
 import { useLiveSync } from "../../lib/realtime";
 
@@ -36,6 +40,8 @@ export interface ReportsData {
   txns: Txn[];
   expenses: Expense[];
   invoices: InvoiceDocSummary[];
+  /** Dated customer invoice payments in AED, separate from receipt documents. */
+  invoicePayments: InvoicePayment[];
   customers: CrmCustomer[];
   receiptList: ReceiptSummary[];
   supplierList: Supplier[];
@@ -56,6 +62,7 @@ export function useReportsData(): ReportsData {
   const [txns, setTxns] = useState<Txn[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [invoicePayments, setInvoicePayments] = useState<InvoicePayment[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [receiptList, setReceiptList] = useState<ReceiptSummary[]>([]);
   const [supplierList, setSupplierList] = useState<Supplier[]>([]);
@@ -63,31 +70,73 @@ export function useReportsData(): ReportsData {
   const [poPayments, setPoPayments] = useState<{ po_id: number; amount: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const request = useRef(0);
 
-  const load = () => {
+  const load = useCallback(async () => {
+    const version = ++request.current;
     setError("");
-    return Promise.all([
-      erp.products().then(setProducts),
-      erp.orders().then(setOrders),
-      fin.accounts().then(setAccounts),
-      fin.transactions().then(setTxns),
-      fin.expenses().then(setExpenses),
-      billing.listDocs().then(setInvoices),
-      crm.customers().then(setCustomers),
-      receipts.list().then(setReceiptList),
-      suppliers.list().then(setSupplierList),
-      pos.list().then(setPoList),
-      pos.allPayments().then(setPoPayments),
-    ])
-      .catch((e) =>
-        setError(`Could not load reports: ${e instanceof Error ? e.message : e}`)
-      )
-      .finally(() => setLoading(false));
-  };
+    setLoading(true);
+    try {
+      const [p, o, a, t, e, i, c, r, su, po, pay, invoicePay, rates] = await Promise.all([
+        erp.products(),
+        erp.orders(),
+        fin.accounts(),
+        fin.transactions(),
+        fin.expenses(),
+        billing.listDocs(),
+        crm.customers(),
+        receipts.list(),
+        suppliers.list(),
+        pos.list(),
+        pos.allPayments(),
+        billing.allPayments(),
+        getExchangeRates(),
+      ]);
+      const invoices = i.map((row) =>
+        reportMoney(row, ["total", "paid", "balance"], rates)
+      );
+      const receiptRows = r.filter(row => row.status === "paid").map((row) => reportMoney(row, ["amount"], rates));
+      const invoicePaymentRows = invoicePaymentsInAed(invoicePay, i, rates);
+      const purchaseRows = po.map((row) => reportMoney(row, ["total"], rates));
+      const payments = pay.map((row) => {
+        const parent = po.find((doc) => doc.id === row.po_id);
+        return {
+          ...row,
+          amount: reportMoney(
+            { amount: row.amount, currency: parent?.currency, fx_rate: parent?.fx_rate },
+            ["amount"],
+            rates
+          ).amount,
+        };
+      });
+      // Commit one coherent snapshot, rather than mixing successful and failed reads.
+      if (version !== request.current) return;
+      setProducts(p);
+      setOrders(o);
+      setAccounts(a);
+      setTxns(t);
+      setExpenses(e);
+      setInvoices(invoices);
+      setInvoicePayments(invoicePaymentRows);
+      setCustomers(c);
+      setReceiptList(receiptRows);
+      setSupplierList(su);
+      setPoList(purchaseRows);
+      setPoPayments(payments);
+    } catch (error) {
+      if (version !== request.current) return;
+      setError(
+        `Could not load reports: ${error instanceof Error ? error.message : (error as { message?: string })?.message || String(error)}`
+      );
+    } finally {
+      if (version === request.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+    return () => { request.current++; };
+  }, [load]);
   useLiveSync(load);
 
   return {
@@ -97,6 +146,7 @@ export function useReportsData(): ReportsData {
     txns,
     expenses,
     invoices,
+    invoicePayments,
     customers,
     receiptList,
     supplierList,
@@ -114,7 +164,7 @@ export function useRevenueTotal(invoices: InvoiceDocSummary[]): number {
   return useMemo(
     () =>
       invoices
-        .filter((i) => i.status !== "draft")
+        .filter((i) => isPostedStatus(i.status))
         .reduce((s, i) => s + (i.total || 0), 0),
     [invoices]
   );
@@ -133,104 +183,15 @@ export function useDeltas(
   customers: CrmCustomer[],
   orders: Order[]
 ) {
-  return useMemo(() => {
-    const DAY = 86400000;
-    const now = Date.now();
-    const curStart = now - 30 * DAY;
-    const prevStart = now - 60 * DAY;
-    const pct = (cur: number, prev: number): number | null =>
-      prev > 0 ? ((cur - prev) / prev) * 100 : null;
-
-    let revCur = 0;
-    let revPrev = 0;
-    for (const i of invoices) {
-      if (i.status === "draft" || !i.issue_date) continue;
-      const t = +new Date(i.issue_date);
-      if (t >= curStart) revCur += i.total || 0;
-      else if (t >= prevStart) revPrev += i.total || 0;
-    }
-
-    let cashCur = 0;
-    let cashPrev = 0;
-    for (const r of receiptList) {
-      if (!r.payment_date) continue;
-      const t = +new Date(r.payment_date);
-      const amt = Number(r.amount) || 0;
-      if (t >= curStart) cashCur += amt;
-      else if (t >= prevStart) cashPrev += amt;
-    }
-
-    let custCur = 0;
-    let custPrev = 0;
-    for (const cu of customers) {
-      if (!cu.created_at) continue;
-      const t = +new Date(cu.created_at);
-      if (t >= curStart) custCur += 1;
-      else if (t >= prevStart) custPrev += 1;
-    }
-
-    let ordCur = 0;
-    let ordPrev = 0;
-    for (const o of orders) {
-      if (!o.created_at) continue;
-      const t = +new Date(o.created_at);
-      if (t >= curStart) ordCur += 1;
-      else if (t >= prevStart) ordPrev += 1;
-    }
-
-    return {
-      revenue: pct(revCur, revPrev),
-      cash: pct(cashCur, cashPrev),
-      customers: pct(custCur, custPrev),
-      orders: pct(ordCur, ordPrev),
-    };
-  }, [invoices, receiptList, customers, orders]);
+  return useMemo(() => overviewDeltas(invoices, receiptList, customers, orders), [invoices, receiptList, customers, orders]);
 }
 
-/** Last 8 days invoiced vs received — real data only, no filler. */
-export function useTrend(
-  invoices: InvoiceDocSummary[],
-  receiptList: ReceiptSummary[]
-) {
-  return useMemo(() => {
-    const byDay = new Map<string, { invoiced: number; received: number }>();
-    for (const i of invoices) {
-      if (i.status === "draft" || !i.issue_date) continue;
-      const key = i.issue_date.slice(0, 10);
-      const row = byDay.get(key) || { invoiced: 0, received: 0 };
-      row.invoiced += i.total || 0;
-      byDay.set(key, row);
-    }
-    for (const r of receiptList) {
-      if (!r.payment_date) continue;
-      const key = r.payment_date.slice(0, 10);
-      const row = byDay.get(key) || { invoiced: 0, received: 0 };
-      row.received += Number(r.amount) || 0;
-      byDay.set(key, row);
-    }
-    const series: { d: string; invoiced: number; received: number }[] = [];
-    const now = new Date();
-    for (let i = 7; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      // Local key: byDay is built from issue_date/payment_date calendar days.
-      const key = localYmd(d);
-      const label = d.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      });
-      const row = byDay.get(key);
-      series.push({
-        d: label,
-        invoiced: row?.invoiced || 0,
-        received: row?.received || 0,
-      });
-    }
-    return series;
-  }, [invoices, receiptList]);
+/** Same seven-day invoice/payment/receipt series as the Overview. */
+export function useTrend(invoices: InvoiceDocSummary[], receiptList: ReceiptSummary[], invoicePayments: InvoicePayment[] = []) {
+  return useMemo(() => overviewTrend(invoices, receiptList, [], 7, new Date(), invoicePayments), [invoices, receiptList, invoicePayments]);
 }
 
-/** Inventory value by category: stock × unit price. */
+/** Inventory value by category uses acquisition cost. */
 export function useCategoryBars(products: Product[]) {
   return useMemo(() => {
     const g = new Map<string, number>();
@@ -238,8 +199,7 @@ export function useCategoryBars(products: Product[]) {
       const key = p.category || "Other";
       g.set(
         key,
-        (g.get(key) ?? 0) +
-          (Number(p.unit_price) || 0) * (Number(p.quantity) || 0)
+        (g.get(key) ?? 0) + (Number(p.cost_price) || 0) * (Number(p.quantity) || 0)
       );
     }
     return Array.from(g.entries())
@@ -309,19 +269,24 @@ export function useFinancials(
       .filter((a) => a.account_type === "expense")
       .reduce((s, a) => s + (Number(a.balance) || 0), 0);
     const netProfit = revenue - expensesTotal;
-    return { trialBalance, balanceSheet, vatReturn, cashSummary, revenue, expensesTotal, netProfit };
+    return {
+      trialBalance,
+      balanceSheet,
+      vatReturn,
+      cashSummary,
+      revenue,
+      expensesTotal,
+      netProfit,
+    };
   }, [accounts, txns, invoices]);
 }
 
 /** Top customers by invoice revenue. */
-export function useTopCustomers(
-  invoices: InvoiceDocSummary[],
-  customers: CrmCustomer[]
-) {
+export function useTopCustomers(invoices: InvoiceDocSummary[], customers: CrmCustomer[]) {
   return useMemo(() => {
     const g = new Map<string, { name: string; total: number; count: number }>();
     for (const i of invoices) {
-      if (i.status === "draft") continue;
+      if (!isPostedStatus(i.status)) continue;
       const name = i.customer_name || "—";
       const row = g.get(name) || { name, total: 0, count: 0 };
       row.total += i.total || 0;
@@ -341,7 +306,8 @@ export function useReceivablesAging(invoices: InvoiceDocSummary[]) {
     const DAY = 86400000;
     const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
     for (const i of invoices) {
-      if (i.status === "paid" || i.status === "draft" || i.status === "cancelled") continue;
+      if (i.status === "paid" || i.status === "draft" || i.status === "cancelled")
+        continue;
       const balance = i.balance ?? i.total ?? 0;
       if (balance <= 0) continue;
       const due = i.due_date ? +new Date(i.due_date) : 0;
@@ -401,7 +367,8 @@ export function usePayablesAging(
     const paid = paidByPo(poPayments);
     const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
     for (const p of poList) {
-      if (p.status === "paid" || p.status === "cancelled" || p.status === "draft") continue;
+      if (p.status === "paid" || p.status === "cancelled" || p.status === "draft")
+        continue;
       const open = (p.total || 0) - (paid.get(p.id) ?? 0);
       if (open <= 0) continue;
       const due = p.expected_date ? +new Date(p.expected_date) : 0;
