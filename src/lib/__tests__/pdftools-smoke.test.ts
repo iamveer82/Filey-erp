@@ -99,7 +99,6 @@ test("PDF toolkit: every headless tool runs and produces valid output", async ()
     ["addHeaderFooter", () => T.addHeaderFooter(pdf, "Head", "Foot"), isPdf],
     ["addStamp", () => T.addStamp(pdf, "paid"), isPdf],
     ["removeMetadata", () => T.removeMetadata(pdf), isPdf],
-    ["sanitizePdf", () => T.sanitizePdf(pdf), isPdf],
     ["fixPageSizeA4", () => T.fixPageSizeA4(pdf), isPdf],
     ["signPdf", () => T.signPdf(pdf, pngDataUrl), isPdf],
     ["signPdfAt", () => T.signPdfAt(pdf, pngDataUrl, 0, 40, 40, 80), isPdf],
@@ -136,4 +135,4 @@ test("PDF toolkit: every headless tool runs and produces valid output", async ()
     throw new Error("Failing tools:\n" + failures.map((f) => `  ${f.name}: ${f.err}`).join("\n"));
   }
   expect(failures).toEqual([]);
-});
+}, 15_000); // Runs over 40 real operations, including crypto initialization under parallel load.

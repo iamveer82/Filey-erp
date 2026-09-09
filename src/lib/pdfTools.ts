@@ -21,13 +21,11 @@ import {
 } from "pdf-lib";
 import initVtracer, { to_svg as vtracerToSvg } from "vtracer-wasm";
 import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "./pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { pdfjs } from "./pdfjsSafe";
 import { parseRanges } from "./ranges";
 import { hasTauri, saveBytes } from "./localPaths";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export { parseRanges };
 
@@ -76,11 +74,14 @@ function anchorXY(
   return { x, y };
 }
 
-// Many real-world PDFs carry an empty-owner-password encryption dict.
-// Loading with ignoreEncryption lets the toolkit handle them instead of
-// hard-failing on otherwise-readable files.
-const loadDoc = async (f: File) =>
-  PDFDocument.load(await readBuf(f), { ignoreEncryption: true });
+// pdf-lib's ignoreEncryption skips a guard; it does not decrypt page contents.
+// Normal tools must reject locked input instead of writing a corrupted PDF.
+const loadDoc = async (f: File) => {
+  const doc = await PDFDocument.load(await readBuf(f), { ignoreEncryption: true });
+  if (doc.isEncrypted)
+    throw new Error("This PDF is encrypted. Use Decrypt PDF with its password first.");
+  return doc;
+};
 
 export async function pageCount(file: File): Promise<number> {
   const doc = await loadDoc(file);
@@ -88,6 +89,7 @@ export async function pageCount(file: File): Promise<number> {
 }
 
 export async function mergePdfs(files: File[]): Promise<OutFile> {
+  if (!files.length) throw new Error("Add at least one PDF.");
   const merged = await PDFDocument.create();
   for (const f of files) {
     const src = await loadDoc(f);
@@ -199,8 +201,8 @@ export async function pdfToImages(
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("pdfToImages: failed to get 2d canvas context");
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    const blob: Blob = await new Promise((res) =>
-      canvas.toBlob((b) => { if (!b) throw new Error("pdfToImages: toBlob callback received null"); res(b); }, "image/png")
+    const blob: Blob = await new Promise((resolve, reject) =>
+      canvas.toBlob((value) => value ? resolve(value) : reject(new Error(`Could not encode PDF page ${n} as PNG.`)), "image/png")
     );
     out.push({
       name: `${base(file.name)}-p${n}.png`,
@@ -660,10 +662,18 @@ export async function pdfToText(file: File): Promise<OutFile> {
 export async function flattenPdf(
   file: File,
   scale = 2,
-  grayscale = false
+  grayscale = false,
+  redactions: RedactBox[] = []
 ): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
   const pdf = await safePdf.getDocument({ data }).promise;
+  for (const box of redactions) {
+    if (!Number.isInteger(box.page) || box.page < 0 || box.page >= pdf.numPages ||
+      ![box.xFrac, box.yFrac, box.wFrac, box.hFrac].every(Number.isFinite) ||
+      box.xFrac < 0 || box.yFrac < 0 || box.wFrac <= 0 || box.hFrac <= 0 ||
+      box.xFrac + box.wFrac > 1.000001 || box.yFrac + box.hFrac > 1.000001)
+      throw new Error("A redaction area is outside the document. Draw it again.");
+  }
   const out = await PDFDocument.create();
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -673,8 +683,17 @@ export async function flattenPdf(
     canvas.width = vp.width;
     canvas.height = vp.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error(`Cannot render PDF page ${n}: canvas is unavailable.`);
     await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
+    ctx.fillStyle = "#000000";
+    for (const box of redactions.filter((box) => box.page === n - 1)) {
+      // Round outward so even the boundary pixels under a box are removed.
+      const x = Math.floor(box.xFrac * canvas.width);
+      const y = Math.floor(box.yFrac * canvas.height);
+      ctx.fillRect(x, y,
+        Math.ceil((box.xFrac + box.wFrac) * canvas.width) - x,
+        Math.ceil((box.yFrac + box.hFrac) * canvas.height) - y);
+    }
     if (grayscale) {
       const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = id.data;
@@ -1281,27 +1300,28 @@ export async function signPdf(
 /** Strip Title/Author/Subject/Keywords/Producer/Creator metadata. */
 export async function removeMetadata(file: File): Promise<OutFile> {
   const doc = await loadDoc(file);
-  doc.setTitle("");
-  doc.setAuthor("");
-  doc.setSubject("");
-  doc.setKeywords([]);
-  doc.setProducer("");
-  doc.setCreator("");
-  doc.setCreationDate(new Date(0));
-  doc.setModificationDate(new Date());
+  const info = doc.context.trailerInfo.Info;
+  if (info instanceof PDFRef) doc.context.delete(info);
+  doc.context.trailerInfo.Info = undefined;
+  for (const node of [doc.catalog, ...doc.getPages().map((page) => page.node)]) {
+    const metadata = node.get(PDFName.of("Metadata"));
+    if (metadata instanceof PDFRef) doc.context.delete(metadata);
+    node.delete(PDFName.of("Metadata"));
+  }
   return {
     name: `${base(file.name)}-nometa.pdf`,
     bytes: await doc.save(),
   };
 }
 
-/** Sanitize: strip metadata + annotations + clear document outline. */
+/** Rebuild visible pages only, dropping actions, attachments, hidden text and metadata. */
 export async function sanitizePdf(file: File): Promise<OutFile> {
-  const cleaned = await removeAnnotations(file);
+  const cleaned = await flattenPdf(file);
   const noMetaFile = new File([cleaned.bytes.slice()], file.name, {
     type: "application/pdf",
   });
-  return removeMetadata(noMetaFile);
+  const result = await removeMetadata(noMetaFile);
+  return { ...result, name: `${base(file.name)}-sanitized.pdf` };
 }
 
 /** Resize every page to A4 portrait (or landscape if originally landscape). */
@@ -1331,11 +1351,11 @@ export async function fixPageSizeA4(file: File): Promise<OutFile> {
   };
 }
 
-/** Re-save without object streams — closer to legacy "linearized" output. */
+/** Re-save without object streams for compatibility with older PDF readers. */
 export async function linearizePdf(file: File): Promise<OutFile> {
   const doc = await loadDoc(file);
   return {
-    name: `${base(file.name)}-linear.pdf`,
+    name: `${base(file.name)}-compatible.pdf`,
     bytes: await doc.save({ useObjectStreams: false }),
   };
 }
@@ -1394,6 +1414,34 @@ export async function pdfToJsonText(file: File): Promise<OutFile> {
   };
 }
 
+/** BMP is not a browser canvas encoder; write its standard 24-bit pixel format. */
+function canvasBmp(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): Uint8Array {
+  const { width, height } = canvas;
+  const stride = Math.ceil(width * 3 / 4) * 4;
+  const bytes = new Uint8Array(54 + stride * height);
+  const header = new DataView(bytes.buffer);
+  header.setUint16(0, 0x4d42, true);
+  header.setUint32(2, bytes.length, true);
+  header.setUint32(10, 54, true);
+  header.setUint32(14, 40, true);
+  header.setInt32(18, width, true);
+  header.setInt32(22, height, true);
+  header.setUint16(26, 1, true);
+  header.setUint16(28, 24, true);
+  header.setUint32(34, stride * height, true);
+  const { data } = ctx.getImageData(0, 0, width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const source = (y * width + x) * 4;
+      const target = 54 + (height - 1 - y) * stride + x * 3;
+      bytes[target] = data[source + 2];
+      bytes[target + 1] = data[source + 1];
+      bytes[target + 2] = data[source];
+    }
+  }
+  return bytes;
+}
+
 /** Render each page to an image format (JPG/PNG/WebP/BMP). */
 export async function pdfToImageFormat(
   file: File,
@@ -1414,16 +1462,20 @@ export async function pdfToImageFormat(
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error(`Cannot render PDF page ${n}: canvas is unavailable.`);
     if (format === "jpeg" || format === "bmp") {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    if (format === "bmp") {
+      out.push({ name: `${base(file.name)}-p${n}.bmp`, bytes: canvasBmp(canvas, ctx) });
+      continue;
+    }
     const blob: Blob | null = await new Promise((res) =>
       canvas.toBlob((b) => res(b), mime, format === "jpeg" ? 0.92 : undefined)
     );
-    if (!blob) throw new Error(`Browser cannot encode ${format}.`);
+    if (!blob || blob.type !== mime) throw new Error(`Browser cannot encode ${format}.`);
     out.push({
       name: `${base(file.name)}-p${n}.${ext}`,
       bytes: new Uint8Array(await blob.arrayBuffer()),
@@ -1448,7 +1500,7 @@ async function rasterTransform(
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
@@ -1507,7 +1559,7 @@ export async function removeBlankPages(file: File): Promise<OutFile> {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
@@ -1694,18 +1746,27 @@ export async function placeStamp(
     : await doc.embedJpg(raw);
   const opacity = clamp(opts.opacity ?? 1, 0.02, 1);
   const wFrac = clamp(opts.wFrac ?? 0.3, 0.02, 1);
-  const isTarget = (i: number, n: number) =>
-    opts.pageIndex == null || Math.min(Math.max(0, opts.pageIndex), n - 1) === i;
-  const placeOn = (
-    page: ReturnType<typeof doc.getPages>[number],
-    w: number,
-    h: number
-  ) => {
+  if (opts.pageIndex != null && (!Number.isInteger(opts.pageIndex) ||
+    opts.pageIndex < 0 || opts.pageIndex >= doc.getPageCount()))
+    throw new Error("Choose a page in this document.");
+  const isTarget = (i: number) => opts.pageIndex == null || opts.pageIndex === i;
+  const placement = (page: ReturnType<typeof doc.getPages>[number]) => {
+    const crop = page.getCropBox();
+    const angle = ((page.getRotation().angle % 360) + 360) % 360;
+    const quarter = angle === 90 || angle === 270;
+    const w = quarter ? crop.height : crop.width;
+    const h = quarter ? crop.width : crop.height;
     const dw = w * wFrac;
     const dh = (dw / img.width) * img.height;
-    const x = w * clamp(opts.xFrac ?? 0, 0, 1);
-    const y = h - h * clamp(opts.yFrac ?? 0, 0, 1) - dh; // top-left → bottom-left
-    page.drawImage(img, { x, y, width: dw, height: dh, opacity });
+    const left = w * clamp(opts.xFrac ?? 0, 0, 1);
+    const bottom = h * clamp(opts.yFrac ?? 0, 0, 1) + dh;
+    // Inverse of the PDF viewer's crop/rotation transform, from displayed
+    // bottom-left of the stamp to the source PDF's coordinate system.
+    const [x, y] = angle === 90 ? [bottom, left]
+      : angle === 180 ? [crop.width - left, bottom]
+      : angle === 270 ? [crop.width - bottom, crop.height - left]
+      : [left, crop.height - bottom];
+    return { x: crop.x + x, y: crop.y + y, width: dw, height: dh, rotate: degrees(angle), opacity };
   };
 
   if (opts.behind) {
@@ -1722,13 +1783,10 @@ export async function placeStamp(
       const h = sp.getHeight();
       const embedded = await out.embedPage(sp);
       const np = out.addPage([w, h]);
-      if (isTarget(i, srcPages.length)) {
-        const dw = w * wFrac;
-        const dh = (dw / bg.width) * bg.height;
-        const x = w * clamp(opts.xFrac ?? 0, 0, 1);
-        const y = h - h * clamp(opts.yFrac ?? 0, 0, 1) - dh;
-        np.drawImage(bg, { x, y, width: dw, height: dh, opacity });
-      }
+      np.setRotation(sp.getRotation());
+      const crop = sp.getCropBox();
+      np.setCropBox(crop.x, crop.y, crop.width, crop.height);
+      if (isTarget(i)) np.drawImage(bg, placement(sp));
       np.drawPage(embedded, { x: 0, y: 0, width: w, height: h });
     }
     return { name: `${base(file.name)}-letterhead.pdf`, bytes: await out.save() };
@@ -1736,7 +1794,7 @@ export async function placeStamp(
 
   const pages = doc.getPages();
   pages.forEach((p, i) => {
-    if (isTarget(i, pages.length)) placeOn(p, p.getWidth(), p.getHeight());
+    if (isTarget(i)) p.drawImage(img, placement(p));
   });
   return { name: `${base(file.name)}-stamped.pdf`, bytes: await doc.save() };
 }
@@ -1747,7 +1805,12 @@ export async function reorderPages(
   order: string
 ): Promise<OutFile> {
   const src = await loadDoc(file);
-  const idx = parseRanges(order, src.getPageCount());
+  const idx = order.split(",").flatMap((part) => {
+    const range = part.trim().match(/^(\d+)\s*-\s*(\d+)$/);
+    if (range && Number(range[1]) > Number(range[2]))
+      return parseRanges(`${range[2]}-${range[1]}`, src.getPageCount()).reverse();
+    return parseRanges(part, src.getPageCount());
+  });
   if (!idx.length)
     throw new Error('Enter a page order, e.g. "3,1,2" or "1,4-2".');
   const out = await PDFDocument.create();
@@ -1904,7 +1967,7 @@ export async function extractImages(file: File): Promise<OutFile[]> {
         canvas.width = iw;
         canvas.height = ih;
         const ctx = canvas.getContext("2d");
-        if (!ctx) continue;
+        if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
         if (obj.bitmap) {
           ctx.drawImage(obj.bitmap, 0, 0);
         } else if (obj.data) {
@@ -2010,16 +2073,13 @@ export async function addAttachments(files: File[]): Promise<OutFile> {
 export async function extractAttachments(file: File): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
   const pdf = await safePdf.getDocument({ data }).promise;
-  const att = (await pdf.getAttachments()) as Record<
-    string,
-    { filename: string; content: Uint8Array }
-  > | null;
+  const att = await pdf.getAttachments();
   if (!att) throw new Error("This PDF has no embedded attachments.");
   const out: OutFile[] = [];
-  for (const key of Object.keys(att)) {
-    const a = att[key];
-    if (a?.content)
-      out.push({ name: a.filename || key, bytes: new Uint8Array(a.content) });
+  for (const [key, a] of att) {
+    const content = a.content ?? await pdf.getAttachmentContent(key);
+    if (!content) throw new Error(`Could not read attachment: ${a.filename || key}.`);
+    out.push({ name: a.filename || key, bytes: new Uint8Array(content) });
   }
   if (!out.length) throw new Error("This PDF has no embedded attachments.");
   return out;
@@ -2190,21 +2250,18 @@ export async function repairPdf(file: File): Promise<OutFile> {
     throwOnInvalidObject: false,
     updateMetadata: false,
   });
+  if (doc.isEncrypted)
+    throw new Error("This PDF is encrypted. Use Decrypt PDF with its password first.");
   return {
     name: `${base(file.name)}-repaired.pdf`,
     bytes: await doc.save({ useObjectStreams: false }),
   };
 }
 
-/** Remove owner/permission restrictions by re-saving without encryption. */
+/** Open an owner-restricted PDF with its empty user password, preserving vectors. */
 export async function removeRestrictions(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file), {
-    ignoreEncryption: true,
-  });
-  return {
-    name: `${base(file.name)}-unrestricted.pdf`,
-    bytes: await doc.save(),
-  };
+  const out = await decryptPdf(file, "");
+  return { ...out, name: `${base(file.name)}-unrestricted.pdf` };
 }
 
 /** Rasterize: render every page to an image at the chosen DPI and rebuild. */
@@ -2302,7 +2359,8 @@ export async function encryptPdf(
   if (!opts.userPassword && !opts.ownerPassword)
     throw new Error("Enter at least one password.");
   const { PDFDocument: CPDF } = await import("@cantoo/pdf-lib");
-  const doc = await CPDF.load(await readBuf(file), { ignoreEncryption: true });
+  await loadDoc(file);
+  const doc = await CPDF.load(await readBuf(file));
   doc.encrypt({
     userPassword: opts.userPassword || undefined,
     ownerPassword:
@@ -2322,35 +2380,17 @@ export async function decryptPdf(
   file: File,
   password: string
 ): Promise<OutFile> {
-  const data = new Uint8Array(await readBuf(file));
-  let pdf;
+  const { PDFDocument: CPDF } = await import("@cantoo/pdf-lib");
   try {
-    pdf = await safePdf.getDocument({ data, password }).promise;
+    const doc = await CPDF.load(await readBuf(file), { password });
+    doc.context.trailerInfo.Encrypt = undefined;
+    return { name: `${base(file.name)}-decrypted.pdf`, bytes: await doc.save() };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
       /password/i.test(msg) ? "Wrong or missing password." : msg
     );
   }
-  const out = await PDFDocument.create();
-  for (let n = 1; n <= pdf.numPages; n++) {
-    const page = await pdf.getPage(n);
-    const base1 = page.getViewport({ scale: 1 });
-    const vp = page.getViewport({ scale: 2 });
-    const canvas = document.createElement("canvas");
-    canvas.width = vp.width;
-    canvas.height = vp.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
-    await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-    const blob: Blob = await new Promise((res, rej) =>
-      canvas.toBlob((b) => (b ? res(b) : rej(new Error("Render failed."))), "image/png")
-    );
-    const png = await out.embedPng(await blob.arrayBuffer());
-    const p = out.addPage([base1.width, base1.height]);
-    p.drawImage(png, { x: 0, y: 0, width: base1.width, height: base1.height });
-  }
-  return { name: `${base(file.name)}-decrypted.pdf`, bytes: await out.save() };
 }
 
 /* ───────────────────────────── OCR (tesseract.js) ─────────────────────── */
@@ -2371,13 +2411,15 @@ interface OcrWord {
 }
 
 /** Flatten tesseract.js v5 block→paragraph→line→word tree into a word list. */
-function flattenOcrWords(res: any): OcrWord[] {
+function flattenOcrWords(res: any, wholeLines = false): OcrWord[] {
   const out: OcrWord[] = [];
   for (const b of res?.blocks ?? [])
     for (const par of b?.paragraphs ?? [])
-      for (const ln of par?.lines ?? [])
-        for (const w of ln?.words ?? [])
+      for (const ln of par?.lines ?? []) {
+        if (wholeLines && ln?.text && ln.bbox) out.push({ text: ln.text, bbox: ln.bbox });
+        else for (const w of ln?.words ?? [])
           if (w?.text && w.bbox) out.push({ text: w.text, bbox: w.bbox });
+      }
   if (!out.length)
     for (const w of res?.words ?? [])
       if (w?.text && w.bbox) out.push({ text: w.text, bbox: w.bbox });
@@ -2405,7 +2447,7 @@ async function ocrPages(
       canvas.width = vp.width;
       canvas.height = vp.height;
       const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2452,7 +2494,7 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
       canvas.width = vp.width;
       canvas.height = vp.height;
       const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2465,7 +2507,9 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
       const p = out.addPage([pw, ph]);
       p.drawImage(png, { x: 0, y: 0, width: pw, height: ph });
       const { data: res } = await worker.recognize(canvas, {}, { blocks: true });
-      const words = flattenOcrWords(res);
+      // A line is one PDF text run, retaining spaces during search/copy. Separate
+      // word runs can be concatenated by readers even when their pixels have gaps.
+      const words = flattenOcrWords(res, true);
       for (const w of words) {
         const txt = ascii(w.text || "").trim();
         if (!txt) continue;
@@ -2747,7 +2791,7 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
     canvas.width = vp.width;
     canvas.height = vp.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
@@ -2761,15 +2805,14 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
   return out;
 }
 
-export async function downloadFile(f: OutFile) {
+export async function downloadFile(f: OutFile): Promise<boolean> {
   const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
   // Copy into a fresh ArrayBuffer so Blob/Rust gets a clean buffer.
   const buf = f.bytes.slice();
   // Desktop (Tauri WebView2): a blob `<a download>` click silently fails to
   // save — route through a native save dialog + Rust file write instead.
   if (hasTauri) {
-    await saveBytes(f.name, buf);
-    return;
+    return (await saveBytes(f.name, buf)) !== null;
   }
   const blob = new Blob([buf], {
     type: MIME[ext] ?? "application/octet-stream",
@@ -2780,6 +2823,7 @@ export async function downloadFile(f: OutFile) {
   a.download = f.name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return true;
 }
 
 /** Capture a DOM element as a PDF and download it.
@@ -2788,7 +2832,31 @@ export async function downloadFile(f: OutFile) {
 /** Render an element (or each of its direct A4-page children) to a PDF.
  *  If `el` contains multiple direct page children, each becomes one PDF page.
  *  Otherwise the element itself is captured as a single page. */
+class TemplateBackgroundError extends Error {}
+
 export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<OutFile> {
+  // Off-screen exports can mount a fresh PDF background. Wait for its image,
+  // and inspect only this document rather than unrelated gallery previews.
+  const pendingBackground = () => el.matches('[data-template-background-status]:not([data-template-background-status="ready"])')
+    ? el : el.querySelector<HTMLElement>('[data-template-background-status]:not([data-template-background-status="ready"])');
+  if (pendingBackground()) {
+    await new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        observer.disconnect();
+        clearTimeout(timeout);
+        if (error) reject(error); else resolve();
+      };
+      const check = () => {
+        const background = pendingBackground();
+        if (!background) finish();
+        else if (background.dataset.templateBackgroundStatus === "error") finish(new TemplateBackgroundError("The template background could not be loaded. Choose another template before exporting."));
+      };
+      const observer = new MutationObserver(check);
+      const timeout = setTimeout(() => finish(new TemplateBackgroundError("The template background is still loading. Wait for the preview, then export again.")), 10000);
+      observer.observe(el, { attributes: true, attributeFilter: ["data-template-background-status"], subtree: true, childList: true });
+      check();
+    });
+  }
   const { toPng } = await import("html-to-image");
   const pdfDoc = await PDFDocument.create();
 
@@ -2925,14 +2993,14 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
 }
 
 /** Capture and download. Resolves `true` when the file was actually written
- *  (native save dialog or browser download), `false` when it fell back to the
- *  print dialog instead — callers that must react to a real export (e.g. to
+ *  (native save dialog or browser download), `false` when the native dialog
+ *  was cancelled or it fell back to print — callers that react to an export (e.g. to
  *  record a payslip) check the result. */
 export async function downloadElementAsPdf(el: HTMLElement, name: string) {
   try {
-    await downloadFile(await elementToPdfBytes(el, name));
-    return true;
+    return await downloadFile(await elementToPdfBytes(el, name));
   } catch (e) {
+    if (e instanceof TemplateBackgroundError) throw e;
     console.error("PDF export failed:", e);
     window.print();
     return false;
@@ -2977,7 +3045,7 @@ export async function setBookmarks(file: File, spec: string): Promise<OutFile> {
   const roots = parseOutlineSpec(spec);
   if (!roots.length)
     throw new Error('No bookmarks parsed. Use lines like "Chapter 1 | 1".');
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const doc = await loadDoc(file);
   const ctx = doc.context;
   const pages = doc.getPages();
   const pageRef = (i: number) => pages[Math.min(Math.max(0, i), pages.length - 1)].ref;
@@ -3031,7 +3099,7 @@ export async function setBookmarks(file: File, spec: string): Promise<OutFile> {
 
 /** Extract an existing outline to an indented `Title | page` text file. */
 export async function extractBookmarks(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const doc = await loadDoc(file);
   const pages = doc.getPages();
   const refIndex = (ref: PDFRef | undefined) =>
     !ref
@@ -3043,9 +3111,11 @@ export async function extractBookmarks(file: File): Promise<OutFile> {
         );
 
   const out: string[] = [];
+  const visited = new Set<PDFDict>();
   const walk = (node: PDFDict | undefined, depth: number) => {
     let cur = node?.lookupMaybe(PDFName.of("First"), PDFDict);
-    while (cur) {
+    while (cur && !visited.has(cur)) {
+      visited.add(cur);
       const titleObj = cur.lookup(PDFName.of("Title"));
       const title =
         titleObj instanceof PDFHexString || titleObj instanceof PDFString
@@ -3059,7 +3129,7 @@ export async function extractBookmarks(file: File): Promise<OutFile> {
         if (idx >= 0) pageNo = String(idx + 1);
       }
       out.push(`${"  ".repeat(depth)}${title}${pageNo ? ` | ${pageNo}` : ""}`);
-      walk(cur.lookupMaybe(PDFName.of("First"), PDFDict), depth + 1);
+      walk(cur, depth + 1);
       cur = cur.lookupMaybe(PDFName.of("Next"), PDFDict);
     }
   };
@@ -3083,7 +3153,7 @@ function fieldKind(f: unknown): string {
 
 /** List every form field as `name <tab> type [<tab> options]` text. */
 export async function listFormFields(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const doc = await loadDoc(file);
   const fields = doc.getForm().getFields();
   const lines = fields.map((f) => {
     let extra = "";
@@ -3110,7 +3180,7 @@ export interface PdfFormField {
  * render a real input per field instead of asking someone to hand-write JSON.
  */
 export async function readFormFields(file: File): Promise<PdfFormField[]> {
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const doc = await loadDoc(file);
   return doc
     .getForm()
     .getFields()
@@ -3146,7 +3216,9 @@ export async function fillForm(file: File, dataJson: string): Promise<OutFile> {
   } catch {
     throw new Error('Field data must be valid JSON, e.g. {"Name": "Ada", "Agree": true}.');
   }
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new Error("Field data must be a JSON object of field names and values.");
+  const doc = await loadDoc(file);
   const form = doc.getForm();
   let filled = 0;
   for (const [key, value] of Object.entries(data)) {
@@ -3160,8 +3232,13 @@ export async function fillForm(file: File, dataJson: string): Promise<OutFile> {
     if (field instanceof PDFTextField) field.setText(v);
     else if (field instanceof PDFCheckBox)
       TRUTHY.has(v.toLowerCase()) ? field.check() : field.uncheck();
-    else if (field instanceof PDFDropdown || field instanceof PDFOptionList) field.select(v);
-    else if (field instanceof PDFRadioGroup) field.select(v);
+    else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
+      if (v === "") field.clear();
+      else field.select(Array.isArray(value) ? value.map(String) : v);
+    } else if (field instanceof PDFRadioGroup) {
+      if (v === "") field.clear();
+      else field.select(v);
+    }
     else continue;
     filled++;
   }
@@ -3172,7 +3249,7 @@ export async function fillForm(file: File, dataJson: string): Promise<OutFile> {
 
 /** Flatten form fields into static page content (no longer editable). */
 export async function flattenForm(file: File): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  const doc = await loadDoc(file);
   const form = doc.getForm();
   if (!form.getFields().length) throw new Error("This PDF has no form fields to flatten.");
   form.flatten();
@@ -3295,7 +3372,7 @@ export async function deskewPdf(file: File): Promise<OutFile> {
     cv.width = vp.width;
     cv.height = vp.height;
     const ctx = cv.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) throw new Error("Cannot render this page: canvas is unavailable.");
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, cv.width, cv.height);
     await p.render({ canvas: cv, canvasContext: ctx, viewport: vp }).promise;
@@ -3305,7 +3382,7 @@ export async function deskewPdf(file: File): Promise<OutFile> {
     rot.width = cv.width;
     rot.height = cv.height;
     const rctx = rot.getContext("2d");
-    if (!rctx) continue;
+    if (!rctx) throw new Error("Cannot rotate this page: canvas is unavailable.");
     rctx.fillStyle = "#fff";
     rctx.fillRect(0, 0, rot.width, rot.height);
     rctx.translate(rot.width / 2, rot.height / 2);
@@ -3323,7 +3400,7 @@ export async function deskewPdf(file: File): Promise<OutFile> {
 
 /* ═══════════════════════════════ PDF/A ═════════════════════════════════════
    Best-effort archival tagging: writes a PDF/A XMP identification packet,
-   document metadata, MarkInfo and disables object/xref streams. This nudges a
+   document metadata and disables object/xref streams. This nudges a
    file toward PDF/A-1b/2b but is NOT a certified conversion — fonts and colour
    are not re-encoded, so strict validators may still reject it. Use a
    server-side ghostscript pass when guaranteed conformance is required. ───── */
@@ -3335,7 +3412,8 @@ const escapeXml = (s: string) =>
 
 /** Tag a PDF as PDF/A (best-effort, `part` = "1" | "2" | "3", conformance B). */
 export async function toPdfA(file: File, part = "2"): Promise<OutFile> {
-  const doc = await PDFDocument.load(await readBuf(file), { ignoreEncryption: true });
+  if (!["1", "2", "3"].includes(part)) throw new Error("Choose PDF/A part 1, 2 or 3.");
+  const doc = await loadDoc(file);
   const ctx = doc.context;
   const title = nameStem(file.name);
   const now = new Date();
@@ -3345,7 +3423,6 @@ export async function toPdfA(file: File, part = "2"): Promise<OutFile> {
   doc.setCreationDate(now);
   doc.setModificationDate(now);
   doc.catalog.set(PDFName.of("Lang"), PDFString.of("en-US"));
-  doc.catalog.set(PDFName.of("MarkInfo"), ctx.obj({ Marked: true }));
 
   const xmp = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -3428,27 +3505,11 @@ export interface RedactBox {
   wFrac: number;
   hFrac: number;
 }
-/** Cover regions with opaque boxes. Note: this hides content visually; for
- *  guaranteed text removal a server-side sanitise pass is still recommended. */
+/** Bake covered regions into new page images; never retain recoverable source content. */
 export async function redactBoxes(file: File, boxes: RedactBox[]): Promise<OutFile> {
   if (!boxes.length) throw new Error("Draw at least one redaction box.");
-  const doc = await loadDoc(file);
-  const pages = doc.getPages();
-  for (const b of boxes) {
-    const p = pages[b.page];
-    if (!p) continue;
-    const w = p.getWidth();
-    const h = p.getHeight();
-    p.drawRectangle({
-      x: w * b.xFrac,
-      y: h - (b.yFrac + b.hFrac) * h,
-      width: w * b.wFrac,
-      height: h * b.hFrac,
-      color: rgb(0, 0, 0),
-      opacity: 1,
-    });
-  }
-  return { name: `${base(file.name)}-redacted.pdf`, bytes: await doc.save() };
+  const out = await flattenPdf(file, 2, false, boxes);
+  return { ...out, name: `${base(file.name)}-redacted.pdf` };
 }
 
 /* Normalise any supported document to a PDF File so PDF-only flows (e-sign,
@@ -3458,6 +3519,8 @@ export async function ensurePdf(file: File): Promise<File> {
   const name = file.name.toLowerCase();
   const type = file.type;
   if (type === "application/pdf" || name.endsWith(".pdf")) return file;
+  if (/\.(doc|ppt)$/.test(name))
+    throw new Error("Save this legacy Office file as DOCX or PPTX, then upload it again.");
 
   let out: OutFile;
   if (type.startsWith("image/heic") || type.startsWith("image/heif") || /\.(heic|heif)$/.test(name))

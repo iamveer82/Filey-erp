@@ -354,6 +354,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "svg2img",
+    flow: { from: "SVG", to: "Image/PDF" },
     name: "SVG Converter",
     desc: "Convert SVG to PNG, JPG, WebP or PDF",
     icon: Shapes,
@@ -392,6 +393,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "img2svg",
+    flow: { from: "Image", to: "SVG" },
     name: "Image → SVG (Vectorize)",
     desc: "High-quality VTracer raster → vector (PNG/JPG → SVG)",
     icon: PenTool,
@@ -418,6 +420,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "img-compress",
+    flow: { from: "Image", to: "Image" },
     name: "Image Compressor",
     desc: "Shrink & resize JPG / PNG / WebP in bulk",
     icon: Gauge,
@@ -727,6 +730,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "csv2json",
+    flow: { from: "CSV", to: "JSON" },
     name: "CSV → JSON",
     desc: "Convert a CSV file to a JSON array",
     icon: Braces,
@@ -737,6 +741,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "json2csv",
+    flow: { from: "JSON", to: "CSV" },
     name: "JSON → CSV",
     desc: "Convert a JSON array of objects to CSV",
     icon: FileJson,
@@ -979,8 +984,8 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "linearize",
-    name: "Linearize PDF",
-    desc: "Re-save without object streams for fast web view",
+    name: "Compatibility PDF",
+    desc: "Re-save without object streams for older PDF readers",
     icon: Zap,
     cat: "Optimize",
     accept: "application/pdf",
@@ -991,7 +996,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "sanitize",
     name: "Sanitize PDF",
-    desc: "Strip annotations, metadata and embedded scripts",
+    desc: "Keep visible pages as images; remove hidden content, metadata and scripts",
     icon: Shield,
     cat: "Secure",
     accept: "application/pdf",
@@ -1072,6 +1077,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "pdf2zip",
+    flow: { from: "PDF", to: "ZIP" },
     name: "PDF → ZIP",
     desc: "Render every page to an image and bundle as a .zip",
     icon: FileArchive,
@@ -1429,7 +1435,7 @@ export const PDF_TOOLS: Tool[] = [
     icon: PenTool,
     cat: "Edit",
     accept:
-      "application/pdf,image/*,.heic,.heif,.psd,.tif,.tiff,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rtf,.txt,.csv",
+      "application/pdf,image/*,.heic,.heif,.psd,.tif,.tiff,.docx,.xls,.xlsx,.pptx,.rtf,.txt,.csv",
     interactive: "esign",
     fields: [],
     run: async () => {
@@ -1468,7 +1474,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "redact",
     name: "Redact PDF",
-    desc: "Draw black boxes over anything to hide before sharing",
+    desc: "Permanently cover sensitive areas; output pages become images",
     icon: Eraser,
     cat: "Secure",
     accept: "application/pdf",
@@ -1526,7 +1532,7 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "pdf-to-pdfa",
-    name: "PDF to PDF/A",
+    name: "Archival Metadata",
     desc: "Tag for archiving (best-effort; not validator-certified)",
     icon: FileArchive,
     cat: "Optimize",
@@ -1542,7 +1548,7 @@ export const PDF_TOOLS: Tool[] = [
           { value: "2", label: "PDF/A-2b" },
           { value: "3", label: "PDF/A-3b" },
         ],
-        hint: "Writes PDF/A XMP metadata + MarkInfo. For certified conformance use a server-side pass.",
+        hint: "Writes archival XMP metadata. It does not embed missing fonts or certify PDF/A compliance.",
       },
     ],
     run: async (f, p) => [await pdf.toPdfA(f[0], p.part || "2")],
@@ -1583,6 +1589,7 @@ function FieldControl({
   if (f.type === "select") {
     return (
       <SelectMenu
+        ariaLabel={f.label}
         value={value}
         onChange={(v) => onChange(v)}
         options={(f.options ?? []).map((o) => ({ value: o.value, label: o.label }))}
@@ -1594,12 +1601,14 @@ function FieldControl({
       <div className="flex items-center gap-2">
         <input
           type="color"
+          aria-label={f.label}
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
           className="h-9 w-12 cursor-pointer rounded-xl border border-brand-200 bg-white p-0.5"
         />
         <input
           className="input flex-1"
+          aria-label={`${f.label} hex value`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="#000000"
@@ -1612,6 +1621,7 @@ function FieldControl({
       <div className="flex items-center gap-3">
         <input
           type="range"
+          aria-label={f.label}
           min={f.min}
           max={f.max}
           step={f.step}
@@ -1635,6 +1645,7 @@ function FieldControl({
           on ? "bg-primary-500" : "bg-brand-300"
         }`}
         aria-pressed={on}
+        aria-label={f.label}
       >
         <span
           className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
@@ -1648,6 +1659,7 @@ function FieldControl({
     return (
       <input
         type="password"
+        aria-label={f.label}
         className="input"
         value={value}
         placeholder={f.placeholder}
@@ -1659,6 +1671,7 @@ function FieldControl({
   if (f.type === "textarea") {
     return (
       <textarea
+        aria-label={f.label}
         className="input min-h-[120px] resize-y font-mono text-xs leading-relaxed"
         value={value}
         placeholder={f.placeholder}
@@ -1673,6 +1686,7 @@ function FieldControl({
         <Upload size={14} /> {value ? "Change image" : "Choose image"}
         <input
           type="file"
+          aria-label={f.label}
           accept={f.accept || "image/*"}
           className="hidden"
           onChange={(e) => {
@@ -1697,6 +1711,7 @@ function FieldControl({
   return (
     <input
       type={f.type === "number" ? "number" : "text"}
+      aria-label={f.label}
       className="input"
       min={f.min}
       max={f.max}

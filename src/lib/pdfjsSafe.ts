@@ -1,24 +1,26 @@
-import * as pdfjs from "pdfjs-dist";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
-/* Every PDF this app opens arrived from somewhere else — a supplier's invoice,
- * a scan, whatever a user dragged in. pdf.js defaults isEvalSupported to true,
- * which is the path behind "arbitrary JavaScript execution upon opening a
- * malicious PDF" (GHSA against pdfjs-dist < 6.2.108). With the session sitting
- * in localStorage, that is account takeover from opening a document.
+// The official legacy builds include standard JavaScript polyfills needed by
+// older desktop WebViews. Always pair the worker with the same entry/version.
+pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+
+/* Central entry point for PDFs from users and suppliers. Filey now uses
+ * pdfjs-dist 6.3.289 and its matching worker, including the 6.2.108 security
+ * fix. The July 2026 scripting advisory (GHSA-hq66-cqwq-w95j) concerned the
+ * viewer's enableScripting option; Filey renders canvases and does not install
+ * the PDF.js scripting manager or execute a document's embedded actions.
  *
- * Turning eval off is the documented mitigation and costs nothing here: it only
- * affects a rarely-used font/JS path, and this app renders and edits pages
- * rather than running embedded PDF scripts.
- *
- * It exists as a wrapper rather than an option repeated at thirteen call sites
- * so the next call site cannot quietly omit it. Upgrading to >= 6.2.108 is
- * still worth doing — it is a major bump across the whole PDF toolkit, so it
- * wants its own change and its own testing, not a drive-by in a security fix.
+ * isEvalSupported:false was the workaround for the separate 2024 font issue
+ * (GHSA-wgrm-67xf-hhpq). Keep that legacy preference centralized, but do not
+ * treat it as a security boundary: 6.3.289 no longer reads this option. The
+ * upgraded library, absence of a scripting viewer, and desktop CSP are the actual
+ * controls. Keep the library and worker on the same patched version.
  */
 
 type GetDocumentSrc = Parameters<typeof pdfjs.getDocument>[0];
 
-/** pdfjs.getDocument with the eval path disabled. Use this, never the raw one. */
+/** Shared PDF loader; callers should use this instead of raw pdfjs.getDocument. */
 export function getDocument(src: GetDocumentSrc) {
   // Callers here always pass an options object; the scalar forms are handled
   // so the wrapper is a drop-in for pdfjs.getDocument's full signature.

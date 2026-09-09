@@ -55,6 +55,9 @@ const ENV_LIMITED = new Set([
   "extract-tables", "remove-blank", "pdf2zip",
   // pdfjs-backed passes (same worker limitation)
   "pdf-flatten", "extract-attach", "decrypt",
+  // Sanitization now rebuilds visible pages to remove hidden content securely.
+  // Actual output is checked in pdfjs-compatibility.test.ts with native canvas.
+  "sanitize",
 ]);
 
 async function makePdf(pages = 2, name = "fixture.pdf"): Promise<File> {

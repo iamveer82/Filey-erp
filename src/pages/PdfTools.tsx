@@ -1,39 +1,18 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
-  CheckCircle2,
-  LayoutGrid,
-  Signature,
-  Sparkles,
-  ArrowRight,
-  ArrowLeft,
-  FileText,
-  Upload,
-  Loader2,
-  FolderPlus,
+  CheckCircle2, Sparkles, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
+  FileText, Upload, Loader2, FolderPlus, Download, X, Plus, Search, ShieldCheck,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-import { Card, FilterChip, PageHeader, SearchInput } from "../components/ui";
+import { FilterChip, PageHeader, SearchInput } from "../components/ui";
 import { plural } from "../lib/format";
-import FileCard from "../components/FileCard";
 import { toolRuns } from "../lib/api";
 import { useUI } from "../lib/ui";
-import {
-  uploadOutputs,
-  ensureRoom,
-} from "../lib/toolStorage";
+import { uploadOutputs, ensureRoom } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
-import {
-  PDF_TOOLS,
-  toolById,
-  toolFlow,
-  type Tool,
-  ToolFields,
-  defaultParams,
-} from "../components/PdfToolbox";
+import { PDF_TOOLS, toolById, toolFlow, type Tool, ToolFields, defaultParams } from "../components/PdfToolbox";
+import ToolCover from "../components/ToolCover";
 import InlinePdfEditor from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import ESignStudio from "../components/ESignStudio";
@@ -46,237 +25,93 @@ import RotateStudio from "../components/RotateStudio";
 import { useAuth } from "../lib/auth";
 import { saveOutput } from "../lib/files";
 import { isConfigured } from "../lib/supabase";
+import "./PdfTools.css";
 
-/** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
 const LIVE_PREVIEW_TOOLS = new Set([
-  "numbers",
-  "watermark",
-  "img-watermark",
-  "nup",
-  "crop",
-  "remove-annots",
-  "header-footer",
-  "greyscale",
+  "numbers", "watermark", "img-watermark", "nup", "crop",
+  "remove-annots", "header-footer", "greyscale",
 ]);
+const POPULAR_TOOLS = ["merge", "img2pdf", "compress", "esign", "pdf2img", "watermark", "split", "csv2json"];
 
 export default function ToolsPage() {
-  const [active, setActive] = useState<Tool | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  // Reset to 8-tool view when switching category tabs.
-  const [cat, setCat] = useState<string>("All Tools");
-  // 88 tools across 7 categories: chips alone meant scrolling to find one.
+  const [cat, setCat] = useState("Popular");
   const [query, setQuery] = useState("");
   const [params, setParams] = useSearchParams();
-  const closeActive = () => setParams({});
-
-  // Each tool gets its own URL (?tool=<id>) so links are shareable and the
-  // browser Back button returns to the dashboard.
-  useEffect(() => {
-    const id = params.get("tool");
-    if (!id) {
-      if (active) setActive(null);
-      return;
-    }
-    if (active?.id !== id) {
-      const t = toolById(id);
-      if (t) setActive(t);
-    }
-  }, [params, active]);
+  const active = toolById(params.get("tool") || "");
   const { toast } = useUI();
-
+  const closeActive = () => setParams({});
   const logRun = async (toolId: string, files: string[], outputs: OutFile[]) => {
-    const t = toolById(toolId);
     try {
-      const runId = await toolRuns.log(toolId, t?.name ?? toolId, files[0] ?? "file");
+      const runId = await toolRuns.log(toolId, toolById(toolId)?.name ?? toolId, files[0] ?? "file");
       if (typeof runId === "number" && runId > 0) {
-        const total = outputs.reduce((s, o) => s + o.bytes.byteLength, 0);
-        const room = await ensureRoom(total);
-        if (room) {
+        const total = outputs.reduce((sum, out) => sum + out.bytes.byteLength, 0);
+        if (await ensureRoom(total)) {
           const paths = await uploadOutputs(runId, outputs);
           if (paths.length) await toolRuns.setPaths(runId, paths, total);
-        } else {
-          toast.info("Storage quota full - output downloaded but not archived.");
-        }
+        } else toast.info("Storage quota full — output is ready but was not archived.");
       }
     } catch {
-      // Output already downloaded locally; only the archive copy failed.
-      if (isConfigured)
-        toast.info("Output downloaded, but couldn't be archived to recent activity.");
+      if (isConfigured) toast.info("Output is ready, but could not be archived to recent activity.");
     }
   };
-
-  const openTool = (toolId: string) => {
-    setParams({ tool: toolId });
-  };
-
-  const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
-  // Full set per tab â€” the grid shows the first 8 and "View all" reveals the
-  // rest. (Previously capped at 11, which silently hid most of the ~50 tools.)
+  const categories = [...new Set(PDF_TOOLS.map(tool => tool.cat))];
+  const popular = POPULAR_TOOLS.map(id => toolById(id)).filter((tool): tool is Tool => !!tool);
   const needle = query.trim().toLowerCase();
-  const filteredTools = PDF_TOOLS.filter((t) => {
-    if (cat !== "All Tools" && t.cat !== cat) return false;
-    if (!needle) return true;
-    return (
-      t.name.toLowerCase().includes(needle) ||
-      t.desc.toLowerCase().includes(needle) ||
-      t.cat.toLowerCase().includes(needle)
-    );
-  });
-
-  if (active) {
-    return (
-      <PdfToolWorkspace
-        tool={active}
-        onBack={closeActive}
-        onComplete={(toolId, _toolName, file, outs) => logRun(toolId, [file], outs)}
-      />
-    );
-  }
-
-  return (
-    <div className="">
-      <PageHeader
-        title="Tools"
-        subtitle="Convert, merge, split & edit your files, all on-device"
-      />
-
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search tools by name or what they do…"
-          className="w-full max-w-sm"
-        />
-        <span className="text-[12.5px] text-muted-foreground">
-          {plural(filteredTools.length, "tool")}
-        </span>
+  const filtered = (cat === "Popular" && !needle ? (popular.length ? popular : PDF_TOOLS.slice(0, 8)) : PDF_TOOLS).filter(tool =>
+    (cat === "Popular" || cat === "All tools" || tool.cat === cat) &&
+    (!needle || (tool.name + " " + tool.desc + " " + tool.cat).toLowerCase().includes(needle))
+  );
+  if (active) return <PdfToolWorkspace key={active.id} tool={active} onBack={closeActive}
+    onComplete={(id, _name, file, outputs) => { void logRun(id, [file], outputs); }} />;
+  return <div className="tools-page">
+    <PageHeader title="Tools" subtitle="A little help for every file. Convert, organise, edit and share."
+      action={<Link to="/files" className="btn-ghost"><FolderPlus size={15} /> My Files</Link>} />
+    {params.get("tool") && <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-sm">
+      <span>This tool could not be found. Choose one below.</span><button className="btn-ghost" onClick={closeActive}>Dismiss</button>
+    </div>}
+    <div className="tools-toolbar">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchInput value={query} onChange={setQuery} placeholder="Search tools by name or what they do…" className="w-full max-w-md" />
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck size={15} /> Processed on this device</span>
       </div>
-
-      {/* CATEGORY TABS */}
-      <div className="mb-5 flex flex-wrap items-center gap-1.5">
-        {cats.map((c) => (
-          <FilterChip
-            key={c}
-            active={cat === c}
-            onClick={() => {
-              setCat(c);
-              setShowAll(false);
-            }}
-          >
-            {c}
+      <nav className="tools-categories" aria-label="Tool categories">
+        {["Popular", "All tools", ...categories].map(category =>
+          <FilterChip key={category} active={cat === category} onClick={() => setCat(category)}>
+            {category}{category === "All tools" ? " · " + PDF_TOOLS.length : ""}
           </FilterChip>
-        ))}
-      </div>
-
-      {/* TOOLS GRID - joined quiet cards (DEMO parity): shared hairlines
-          inside one rounded-xl border via .joined-kpis. */}
-      <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 joined-kpis">
-        {cat === "All Tools" && !needle && (
-          <ToolMiniCard
-            name="E-sign PDF"
-            desc="Draw, type or upload - place & download"
-            Icon={Signature}
-            flow={{ from: "PDF", to: "PDF" }}
-            onUse={() => setParams({ tool: "esign" })}
-          />
         )}
-        {/* A search is already a narrowing action, so don't re-hide its results
-            behind "View all". */}
-        {(showAll || needle ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
-          <ToolMiniCard
-            key={t.id}
-            name={t.name}
-            desc={t.desc}
-            Icon={t.icon}
-            flow={toolFlow(t)}
-            onUse={() => openTool(t.id)}
-          />
-        ))}
-      </div>
-
-      {filteredTools.length > 8 && !showAll && !needle && (
-        <div className="mb-4 flex justify-center">
-          <button onClick={() => setShowAll(true)} className="btn-ghost">
-            <LayoutGrid size={14} /> View all {filteredTools.length} tools
-          </button>
-        </div>
-      )}
-
-      {needle && filteredTools.length === 0 && (
-        <div className="mb-4 rounded-xl border border-border bg-card px-5 py-10 text-center">
-          <p className="text-[13px] font-medium text-foreground">
-            No tool matches “{query}”
-          </p>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
-            Try a different word, or clear the search to browse all{" "}
-            {PDF_TOOLS.length} tools.
-          </p>
-        </div>
-      )}
-
-      {/* Supported formats */}
-      <Card className="mb-4 p-4">
-        <p className="mb-3 text-sm font-semibold text-foreground">Works with your files</p>
-        <div className="flex flex-wrap gap-x-6 gap-y-4">
-          {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
-            (f) => (
-              <FileCard key={f} formatFile={f} />
-            )
-          )}
-        </div>
-      </Card>
-
-      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <CheckCircle2 size={12} className="text-success" />
-        All processing happens locally - files never leave this device.
-      </p>
+      </nav>
     </div>
-  );
+    <div className="mb-4 mt-2 flex items-baseline justify-between gap-3">
+      <h2 className="text-sm font-semibold text-foreground">{needle ? "Search results" : cat === "Popular" ? "Everyday essentials" : cat}</h2>
+      <span className="text-xs text-muted-foreground" aria-live="polite">{plural(filtered.length, "tool")}</span>
+    </div>
+    {filtered.length ? <div className="tools-grid">
+      {filtered.map(tool => <button type="button" key={tool.id} aria-label={"Open " + tool.name} className="tool-card"
+        onClick={() => setParams({ tool: tool.id })}>
+        <ToolCover tool={tool} />
+        <div className="tool-card-copy">
+          <span className="tool-card-title">{tool.name}<ArrowRight size={16} className="shrink-0" /></span>
+          <p>{tool.desc}</p>
+          <span className="tool-card-action"><span>{tool.cat}</span><span>{tool.interactive ? "Open workspace" : "Choose file"}</span></span>
+        </div>
+      </button>)}
+    </div> : <div className="rounded-xl border border-dashed border-border bg-card px-5 py-12 text-center">
+      <Search size={24} className="mx-auto mb-3 text-muted-foreground" />
+      <h3 className="text-sm font-semibold text-foreground">No matching tools</h3>
+      <p className="mt-1 text-sm text-muted-foreground">Try a file type such as PDF or an action such as merge.</p>
+      <button className="btn-ghost mt-4" onClick={() => { setQuery(""); setCat("All tools"); }}>Clear filters</button>
+    </div>}
+    {cat === "Popular" && !needle && <div className="mt-6 flex justify-center">
+      <button className="btn-ghost" onClick={() => setCat("All tools")}>Explore all {PDF_TOOLS.length} tools <ArrowRight size={15} /></button>
+    </div>}
+    <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
+      <p className="flex items-center gap-2"><CheckCircle2 size={14} /> Your original files stay unchanged.</p>
+      <p>PDF · Images · Word · Excel · PowerPoint · Text · Data</p>
+    </div>
+  </div>;
 }
 
-function ToolMiniCard({
-  name,
-  desc,
-  Icon,
-  flow,
-  onUse,
-}: {
-  name: string;
-  desc: string;
-  Icon: typeof Sparkles;
-  /** Input→output formats shown as a chip, e.g. { from: "DOCX", to: "PDF" }. */
-  flow?: { from: string; to: string };
-  onUse: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onUse}
-      className="cursor-pointer bg-card p-5 text-left transition-colors hover:bg-hover"
-    >
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-hover text-foreground">
-          <Icon className="h-4 w-4" strokeWidth={1.75} />
-        </span>
-        {flow && (
-          <span
-            className="inline-flex items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground"
-            title={`${flow.from} to ${flow.to}`}
-          >
-            {flow.from}
-            <ArrowRight size={9} className="text-primary-400" />
-            {flow.to}
-          </span>
-        )}
-      </div>
-      <div className="text-[14px] font-semibold text-foreground">{name}</div>
-      <div className="mt-1 line-clamp-2 text-[12.5px] text-muted-foreground">{desc}</div>
-    </button>
-  );
-}
-
-/* â”€â”€ Per-tool workspace: sticky back nav, tool card, upload, live preview,
- options panel, run button. Minimal + professional. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function PdfToolWorkspace({
   tool,
   onBack,
@@ -293,9 +128,15 @@ function PdfToolWorkspace({
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
   const [savingFiles, setSavingFiles] = useState(false);
+  const [fileRevision, setFileRevision] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const busy = useRef(false);
   const canSave = isConfigured && !!user && outs.length > 0;
 
   const saveToMyFiles = async () => {
+    if (savingFiles || running || !outs.length) return;
     setSavingFiles(true);
     try {
       for (const o of outs) await saveOutput(o, tool.name);
@@ -312,44 +153,86 @@ function PdfToolWorkspace({
   const first = files[0];
   const firstIsPdf =
     !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
-  const replaceFirstFile = (f: File) =>
-    setFiles((prev) => (prev.length ? [f, ...prev.slice(1)] : [f]));
-
-  const pickFiles = (list: FileList | null) => {
-    if (!list) return;
-    setFiles(Array.from(list));
+  const updateFiles = (next: File[]) => {
+    setFiles(next);
+    setFileRevision(value => value + 1);
     setOuts([]);
+    setError("");
+  };
+  const replaceFirstFile = (file: File) => updateFiles([file, ...files.slice(1)]);
+  const pickFiles = (list: FileList | File[] | null) => {
+    if (!list?.length || running || savingFiles) return;
+    const incoming = Array.from(list);
+    const invalid = incoming.find(file => !acceptsFile(file, tool.accept));
+    if (invalid) { setError(`${invalid.name} is not supported by ${tool.name}. Choose ${toolFlow(tool).from} files.`); return; }
+    if (!tool.multi && incoming.length > 1) { setError("This tool works with one file at a time. Choose one file to continue."); return; }
+    if (incoming.some(file => file.size === 0)) { setError("One of these files is empty. Choose a file with content."); return; }
+    updateFiles(tool.multi ? [...files, ...incoming] : incoming);
   };
   const run = async () => {
+    if (busy.current || running || savingFiles) return;
     if (!files.length) {
       toast.error("Upload a file first.");
       return;
     }
     setRunning(true);
+    busy.current = true;
+    setError("");
+    setOuts([]);
     try {
       const result = await tool.run(files, params);
-      setOuts(result);
-      for (const o of result) downloadFile(o);
-      onComplete(tool.id, tool.name, files[0].name, result);
-      toast.success(
-        `Done - ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
-      );
+      await finishOutputs(result);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+      busy.current = false;
+    }
+  };
+
+  const downloadOutputs = async (outputs: OutFile[]) => {
+    setRunning(true);
+    try {
+      let saved = 0;
+      for (const output of outputs) {
+        if (await downloadFile(output)) saved += 1;
+      }
+      if (saved === outputs.length) {
+        toast.success(`Downloaded ${saved} file${saved === 1 ? "" : "s"}.`);
+      } else {
+        toast.info("Save canceled. Your output is ready; use Download results to try again.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save the output. Try Download results again.");
     } finally {
       setRunning(false);
     }
   };
+  const finishOutputs = async (outputs: OutFile[]) => {
+    if (!outputs.length) throw new Error("No output was generated. Check the file and tool options.");
+    setOuts(outputs);
+    onComplete(tool.id, tool.name, files[0]?.name ?? "document", outputs);
+    await downloadOutputs(outputs);
+  };
+  const acceptOutputs = async (outputs: OutFile[]) => {
+    if (busy.current || running || savingFiles) return;
+    busy.current = true;
+    setRunning(true);
+    setError("");
+    try { await finishOutputs(outputs); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { busy.current = false; setRunning(false); }
+  };
 
   return (
-    <div className="">
+    <div className="tools-page">
       {/* One header, not two. The tool name used to appear in a sticky bar and
           again in a card 90px below it, with the category floating unanchored in
           the top-right corner. Everything identifying the tool now sits on one
           row, and it stays sticky so Upload stays reachable while scrolling. */}
       <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-page px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <button onClick={onBack} className="btn-ghost shrink-0">
+          <button onClick={onBack} disabled={running || savingFiles} className="btn-ghost shrink-0">
             <ArrowLeft size={14} /> All tools
           </button>
           <span className="hidden h-8 w-px bg-border sm:block" />
@@ -358,7 +241,7 @@ function PdfToolWorkspace({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate text-[15px] font-medium text-ink">{tool.name}</p>
+              <h1 className="text-[18px] font-semibold text-foreground">{tool.name}</h1>
               <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {tool.cat}
               </span>
@@ -376,10 +259,15 @@ function PdfToolWorkspace({
                 );
               })()}
             </div>
-            <p className="truncate text-xs text-brand-500">{tool.desc}</p>
+            <p className="mt-1 max-w-prose text-xs text-muted-foreground">{tool.desc}</p>
           </div>
+          {!!outs.length && (
+            <button onClick={() => void downloadOutputs(outs)} disabled={running || savingFiles} className="btn-ghost">
+              Download results
+            </button>
+          )}
           {canSave && (
-            <button onClick={saveToMyFiles} disabled={savingFiles} className="btn-ghost">
+            <button onClick={saveToMyFiles} disabled={savingFiles || running} className="btn-ghost">
               {savingFiles ? (
                 <Loader2 size={14} className="animate-spin" />
               ) : (
@@ -388,72 +276,66 @@ function PdfToolWorkspace({
               Save to My Files
             </button>
           )}
-          <label className="btn-primary cursor-pointer">
-            <Upload size={14} /> {files.length ? plural(files.length, "file") : "Upload"}
+          {(files.length > 0 || tool.interactive === "esign") && <button type="button" className="btn-ghost" disabled={running || savingFiles} onClick={() => fileInput.current?.click()}>
+            {tool.multi && files.length ? <Plus size={14} /> : <Upload size={14} />} {files.length ? tool.multi ? "Add files" : "Replace file" : "Choose file"}
+          </button>}
             <input
+              ref={fileInput}
+              aria-label="Choose files for this tool"
               type="file"
               accept={tool.accept}
               multiple={tool.multi}
+              disabled={running || savingFiles}
               className="hidden"
-              onChange={(e) => pickFiles(e.target.files)}
+              onChange={(e) => { pickFiles(e.target.files); e.target.value = ""; }}
             />
-          </label>
         </div>
       </div>
 
-      {tool.interactive === "fill-form" ? (
+      <ol className="tool-steps" aria-label="Tool progress">
+        {[tool.interactive === "esign" ? "Create or upload" : "Choose files", "Make it yours", "Download"].map((label, index) => {
+          const step = outs.length ? 2 : files.length || tool.interactive === "esign" ? 1 : 0;
+          return <li key={label} aria-current={index === step ? "step" : undefined}><span className="tool-step-number">{index < step ? <CheckCircle2 size={14} /> : index + 1}</span>{label}</li>;
+        })}
+      </ol>
+      {error && <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger"><span className="flex-1">{error}</span><button type="button" aria-label="Dismiss error" className="btn-ghost h-10 w-10 shrink-0 p-0" onClick={() => setError("")}><X size={16} /></button></div>}
+      {!!outs.length && <section className="tool-results" aria-label="Your results">
+        <div className="mb-3 flex items-center gap-2"><CheckCircle2 size={18} className="text-success" /><h2 className="text-sm font-semibold">{plural(outs.length, "file")} ready</h2></div>
+        <div className="divide-y divide-border">{outs.map((output, index) => <div key={index} className="flex items-center gap-3 py-2"><FileText size={18} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{output.name}</p><p className="text-xs text-muted-foreground">{fileSize(output.bytes.byteLength)}</p></div><button type="button" className="btn-ghost" disabled={running || savingFiles} aria-label={"Download " + output.name} onClick={() => void downloadOutputs([output])}><Download size={15} /><span className="hidden sm:inline">Download</span></button></div>)}</div>
+      </section>}
+      {!!files.length && <div className="tool-file-list" aria-label="Selected files">
+        {files.map((file, index) => <div className="tool-file-row" key={index}>
+          <FileText size={17} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={file.name}>{file.name}</p><p className="text-xs text-muted-foreground">{fileSize(file.size)}</p></div>
+          {files.length > 1 && <><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " up"} disabled={running || savingFiles || index === 0} onClick={() => { const next = [...files]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; updateFiles(next); }}><ArrowUp size={14} /></button><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " down"} disabled={running || savingFiles || index === files.length - 1} onClick={() => { const next = [...files]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; updateFiles(next); }}><ArrowDown size={14} /></button></>}
+          <button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Remove " + file.name} disabled={running || savingFiles} onClick={() => updateFiles(files.filter((_, i) => i !== index))}><X size={15} /></button>
+        </div>)}
+      </div>}
+      {running && <p role="status" className="mb-4 flex items-center gap-2 text-sm"><Loader2 size={16} className="animate-spin" />Preparing your results. Keep this tool open.</p>}
+      <fieldset key={fileRevision} disabled={running || savingFiles} className="min-w-0">
+      {!files.length && tool.interactive !== "esign" ? (
+        <div className="tool-dropzone" data-dragging={dragging} onDragOver={event => { event.preventDefault(); if (!running && !savingFiles) setDragging(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={event => { event.preventDefault(); setDragging(false); pickFiles(event.dataTransfer.files); }}>
+          <ToolCover tool={tool} />
+          <div className="tool-upload-copy"><h2 className="text-lg font-semibold text-foreground">{dragging ? "Drop your files here" : "Start with your " + toolFlow(tool).from + " file"}</h2><p className="max-w-sm text-sm text-muted-foreground">Drag {tool.multi ? "your files" : "a file"} here, or choose {tool.multi ? "them" : "one"} from your device.</p><button type="button" className="btn-primary" onClick={() => fileInput.current?.click()}><Upload size={16} />Choose {tool.multi ? "files" : "file"}</button><p className="text-xs text-muted-foreground">{tool.multi ? "Add multiple files, then arrange them in the order you want." : "One file at a time. Your original stays unchanged."}</p></div>
+        </div>
+      ) : tool.interactive === "fill-form" ? (
         <div className="card">
           <FormFillPanel
             file={files[0] ?? undefined}
-            onDone={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
-              toast.success("Filled form downloaded.");
-            }}
+            onDone={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "esign" ? (
         <div className="card min-h-[480px]">
           <ESignStudio
             file={files[0] ?? undefined}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
-              toast.success("Signed document downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
-          {!!outs.length && (
-            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Signed document downloaded.
-            </div>
-          )}
         </div>
-      ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-border bg-card text-center text-sm text-muted-foreground hover:bg-hover">
-          <div>
-            <Upload size={22} className="mx-auto mb-1 text-muted-foreground" />
-            Drop or choose {tool.multi ? "files" : "a file"} to preview here
-            <input
-              type="file"
-              accept={tool.accept}
-              multiple={tool.multi}
-              className="hidden"
-              onChange={(e) => pickFiles(e.target.files)}
-            />
-          </div>
-        </label>
       ) : tool.interactive === "merge" ? (
         <div className="card min-h-[480px]">
           <MergeStudio
             files={files}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "merge", [out]);
-              toast.success("Merged PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "organize" && firstIsPdf ? (
@@ -467,38 +349,21 @@ function PdfToolWorkspace({
                   ? "extract"
                   : "organize"
             }
-            onApply={(outsList) => {
-              setOuts(outsList);
-              outsList.forEach(downloadFile);
-              onComplete(tool.id, tool.name, files[0].name, outsList);
-              toast.success(
-                `${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`
-              );
-            }}
+            onApply={(outputs) => { void acceptOutputs(outputs); }}
           />
         </div>
       ) : tool.interactive === "rotate" && firstIsPdf ? (
         <div className="card min-h-[480px]">
           <RotateStudio
             file={files[0]}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Rotated PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "redact" && firstIsPdf ? (
         <div className="card min-h-[480px]">
           <RedactStudio
             file={files[0]}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Redacted PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : (tool.interactive === "stamp" ||
@@ -520,18 +385,8 @@ function PdfToolWorkspace({
                     ? "background"
                     : "stamp"
             }
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Stamped PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
-          {!!outs.length && (
-            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Stamped PDF downloaded.
-            </div>
-          )}
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -573,8 +428,10 @@ function PdfToolWorkspace({
           </div>
           <aside className="card space-y-3 self-start lg:sticky lg:top-20">
             <p className="text-sm font-medium text-ink">Options</p>
-            <ToolFields tool={tool} params={params} setParams={setParams} />
-            <button onClick={run} disabled={running} className="btn-primary w-full">
+            <fieldset disabled={running || savingFiles}>
+              <ToolFields tool={tool} params={params} setParams={(next) => { setParams(next); setOuts([]); }} />
+            </fieldset>
+            <button onClick={run} disabled={running || savingFiles} className="btn-primary w-full">
               {running ? (
                 <Loader2 size={15} className="animate-spin" />
               ) : (
@@ -582,19 +439,29 @@ function PdfToolWorkspace({
               )}
               Run {tool.name}
             </button>
-            {!!outs.length && (
-              <div className="rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-                ✓ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
-              </div>
-            )}
-            <button onClick={() => setFiles([])} className="btn-ghost w-full">
+            <button onClick={() => updateFiles([])} disabled={running || savingFiles} className="btn-ghost w-full">
               Choose another file
             </button>
           </aside>
         </div>
       )}
+      </fieldset>
     </div>
   );
+}
+
+function fileSize(bytes: number) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function acceptsFile(file: File, accept: string) {
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  const mime: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", bmp: "image/bmp" };
+  const type = file.type.toLowerCase() || mime[extension] || "";
+  return !accept || accept.split(",").some(value => {
+    const rule = value.trim().toLowerCase();
+    return rule === "*/*" || (rule.startsWith(".") ? file.name.toLowerCase().endsWith(rule) : rule.endsWith("/*") ? type.startsWith(rule.slice(0, -1)) : type === rule);
+  });
 }
 
 function FilePreview({ file }: { file: File }) {
