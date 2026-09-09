@@ -8,6 +8,21 @@
 export type DataMode = "local" | "cloud";
 
 const KEY = "filey_data_mode";
+let changedInAnotherTab = false;
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (event) => {
+    if (event.key === null || (event.key === KEY && event.oldValue !== event.newValue)) {
+      changedInAnotherTab = true;
+      window.dispatchEvent(new Event("filey:workspace-changed"));
+    }
+  });
+
+export function assertWorkspaceCurrent(): void {
+  if (changedInAnotherTab)
+    throw new Error(
+      "Storage changed in another tab. Reload this workspace before continuing."
+    );
+}
 
 export function getDataMode(): DataMode | null {
   if (typeof localStorage === "undefined") return null;

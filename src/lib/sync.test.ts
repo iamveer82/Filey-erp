@@ -4,15 +4,45 @@
 // collections.
 import { describe, it, expect, beforeEach } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
-import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus } from "./sync";
+import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
+import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
 
 // syncNow only runs in local mode.
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("filey_data_mode", "local");
+  localStorage.setItem("filey_auto_sync", "on");
 });
 
 const UID = "11111111-2222-3333-4444-555555555555";
+
+it("does not seed or transfer data when automatic sync is off", async () => {
+  localStorage.setItem("filey_auto_sync", "off");
+  await localClient.from("products").insert({ name: "Local only" });
+  const { client, calls } = fakeCloud();
+  expect(await syncCycle(client)).toBe(false);
+  expect(calls).toEqual([]);
+  expect(localStorage.getItem("filey_cloud_seeded")).toBeNull();
+});
+
+it("allows an explicit one-time sync while keeping automatic sync off", async () => {
+  localStorage.setItem("filey_auto_sync", "off");
+  const { client } = fakeCloud();
+  expect(await syncCycle(client, { manual: true })).toBe(true);
+  expect(localStorage.getItem("filey_auto_sync")).toBe("off");
+});
+
+it("refuses to sync device data into another account", async () => {
+  claimLocalWorkspace("device-owner");
+  rememberLocalIdentity("owner@example.test", "device-owner");
+  setLocalSignedIn(true);
+  await localClient.from("products").insert({ name: "Private local product" });
+  const { client, calls } = fakeCloud();
+  expect(await syncNow(client, { manual: true })).toBe(false);
+  expect(await pullNow(client)).toBe(false);
+  expect(calls).toEqual([]);
+  expect(getSyncStatus().error).toContain("another account");
+});
 
 // Minimal fake of the supabase-js surface sync touches. Records every call.
 // opts: uid (session user), org (profiles.org_id), failTables (upsert errors),
@@ -22,6 +52,7 @@ function fakeCloud(opts?: {
   org?: string;
   failTables?: string[];
   pull?: Record<string, any[]>;
+  deletedBeforeBody?: Record<string, number[]>;
   /** Seconds from now the access token dies. Default: comfortably alive. */
   expiresInSecs?: number;
 }) {
@@ -94,7 +125,7 @@ function fakeCloud(opts?: {
               calls.push({ table, op: "select-in", ids });
               const want = new Set(ids.map(String));
               return Promise.resolve({
-                data: rows.filter((r) => want.has(String(r.id))).map(project),
+                data: rows.filter((r) => want.has(String(r.id)) && !opts?.deletedBeforeBody?.[table]?.includes(r.id)).map(project),
                 error: null,
               });
             },
@@ -213,10 +244,40 @@ describe("syncNow", () => {
   it("keeps rows that failed to push marked for retry", async () => {
     await localClient.from("products").insert({ name: "A" });
     const { client } = fakeCloud({ failTables: ["products"] });
-    await syncNow(client);
+    expect(await syncNow(client)).toBe(false);
+    expect(getSyncStatus().state).toBe("error");
+    expect(getSyncStatus().error).toContain("products (1)");
 
     const j = await journalSnapshot();
     expect(j.tables.products?.changed).toEqual([1]);
+  });
+
+  it("reserves transfers before authentication so simultaneous calls cannot race", async () => {
+    for (const transfer of [syncNow, pullNow]) {
+      const { client } = fakeCloud();
+      const session = await client.auth.getSession();
+      let finish!: (value: typeof session) => void;
+      let first = true;
+      client.auth.getSession = () => {
+        if (!first) return Promise.resolve(session);
+        first = false;
+        return new Promise((resolve) => { finish = resolve; });
+      };
+      const pending = transfer(client);
+      expect(isMigrating()).toBe(true);
+      expect(await syncNow(client)).toBe(false);
+      expect(await pullNow(client)).toBe(false);
+      finish(session);
+      expect(await pending).toBe(true);
+      expect(isMigrating()).toBe(false);
+    }
+  });
+
+  it("never drops a payment's invoice relationship to make a failed retry pass", async () => {
+    const { client, calls } = fakeCloud({ failTables: ["invoice_payments"] });
+    const row = { id: 4, invoice_id: 19, amount: 100 };
+    expect(await pushCollection(client, "invoice_payments", [row])).toEqual([4]);
+    expect(calls.map((call) => call.payload)).toEqual([[row], row]);
   });
 
   it("does nothing without a session", async () => {
@@ -272,7 +333,14 @@ describe("org sharing", () => {
     const solo = fakeCloud({ uid: "uid-solo", org: "default" });
     await syncNow(solo.client);
     const up2 = solo.calls.find((c) => c.table === "products" && c.op === "upsert");
-    expect(up2?.payload[0].shared).toBeUndefined();
+    expect(up2?.payload[0].shared).toBe(false);
+  });
+
+  it("keeps explicitly private team records private", async () => {
+    await localClient.from("products").insert({ name: "Private design", shared: false });
+    const { client, calls } = fakeCloud({ org: "real-team" });
+    expect(await syncNow(client)).toBe(true);
+    expect(calls.find((call) => call.table === "products" && call.op === "upsert")?.payload[0].shared).toBe(false);
   });
 });
 
@@ -335,6 +403,37 @@ describe("pullNow", () => {
     expect(calls.some((c) => c.table === "products" && c.op === "select-in")).toBe(false);
   });
 
+  it("does not resurrect a stale record deleted between the metadata and body reads", async () => {
+    await replaceColl("products", [{ id: 1, name: "Old copy", updated_at: "2026-01-01" }]);
+    const { client } = fakeCloud({
+      pull: { products: [{ id: 1, name: "Changed then deleted", updated_at: "2026-02-01" }] },
+      deletedBeforeBody: { products: [1] },
+    });
+    expect(await pullNow(client)).toBe(true);
+    expect((await localClient.from("products").select("*")).data).toEqual([]);
+  });
+
+  it("preserves a local edit made while the final session check was pending", async () => {
+    await replaceColl("products", [{ id: 1, name: "Original" }]);
+    const { client } = fakeCloud({ pull: { products: [{ id: 1, name: "Remote copy" }] } });
+    const getSession = client.auth.getSession;
+    let bodyRead = false;
+    const from = client.from;
+    client.from = (table: string) => {
+      if (table === "products") bodyRead = true;
+      return from(table);
+    };
+    client.auth.getSession = async () => {
+      if (bodyRead) {
+        bodyRead = false;
+        await localClient.from("products").update({ name: "Local edit" }).eq("id", 1);
+      }
+      return getSession();
+    };
+    await pullNow(client);
+    expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Local edit");
+  });
+
   it("still full-snapshots tables that have no updated_at trigger", async () => {
     // crm_people is pushed but carries no set_updated_at trigger in schema.sql,
     // so it must keep coming down whole or edits there would go missing.
@@ -363,6 +462,9 @@ describe("syncCycle first-run seeding", () => {
 });
 
 describe("cleanRowForPush", () => {
+  it("preserves explicit field and relationship clears", () => {
+    expect(cleanRowForPush({ id: 1, email: null, customer_id: null }, UID)).toEqual({ id: 1, email: null, customer_id: null });
+  });
   it("re-stamps owner and remaps local storage paths", () => {
     const out = cleanRowForPush(
       { id: 1, owner: "local-user", storage_path: "local-user/docs/a.pdf", org_id: "o", user_id: "u" },

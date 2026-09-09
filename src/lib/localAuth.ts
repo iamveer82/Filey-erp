@@ -14,6 +14,68 @@
 
 const CRED_KEY = "filey_local_credential";
 const SESSION_KEY = "filey_local_session";
+const OWNER_KEY = "filey_local_workspace_owner";
+
+/** The device workspace has one owner; cloud sign-in must not reassign its books. */
+export function localWorkspaceOwner(): string | null {
+  const saved = localStorage.getItem(OWNER_KEY);
+  if (saved) return saved;
+  // Upgrade existing installations without moving or deleting their records.
+  const profile = localStorage.getItem("filey_local_profile");
+  if (profile) {
+    try {
+      const p = JSON.parse(profile);
+      const id = p.id && p.id !== "local-user" ? p.id : getLocalCredential()?.userId;
+      if (id) {
+        localStorage.setItem(OWNER_KEY, id);
+        return id;
+      }
+    } catch {
+      /* an unreadable profile cannot establish ownership */
+    }
+  }
+  if (
+    localStorage.getItem(SESSION_KEY) === "1" ||
+    localStorage.getItem("filey_cloud_seeded")
+  ) {
+    const id = getLocalCredential()?.userId;
+    if (id) {
+      localStorage.setItem(OWNER_KEY, id);
+      return id;
+    }
+  }
+  return null;
+}
+
+export function assertLocalAccount(userId: string, orgId?: string | null): void {
+  const owner = localWorkspaceOwner();
+  if (owner && owner !== userId)
+    throw new Error(
+      "This device workspace belongs to another account. Sign in with its original account; your cloud workspace is separate."
+    );
+  if (orgId !== undefined) {
+    let profile: { id?: string; org_id?: string } = {};
+    try {
+      profile = JSON.parse(localStorage.getItem("filey_local_profile") || "{}");
+    } catch {
+      /* legacy profile has no verifiable organization */
+    }
+    if (
+      profile.id === userId &&
+      profile.org_id &&
+      profile.org_id !== (orgId || "default")
+    )
+      throw new Error(
+        "Your cloud organization differs from this device workspace. Keep the stores separate and contact your administrator before transferring data."
+      );
+  }
+}
+
+export function claimLocalWorkspace(userId: string): void {
+  if (!userId) throw new Error("Sign in before opening the device workspace.");
+  assertLocalAccount(userId);
+  localStorage.setItem(OWNER_KEY, userId);
+}
 // OWASP's floor for PBKDF2-HMAC-SHA256. Runs once per sign-in, so the cost is
 // invisible to the user and meaningful to anyone brute-forcing the file.
 const ITERATIONS = 210_000;
@@ -31,8 +93,7 @@ export interface LocalCredential {
   verifiedAt: string;
 }
 
-const toB64 = (b: ArrayBuffer): string =>
-  btoa(String.fromCharCode(...new Uint8Array(b)));
+const toB64 = (b: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(b)));
 const fromB64 = (s: string): Uint8Array =>
   Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
@@ -45,7 +106,12 @@ async function derive(password: string, salt: Uint8Array): Promise<string> {
     ["deriveBits"]
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: salt as unknown as BufferSource, iterations: ITERATIONS, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: salt as unknown as BufferSource,
+      iterations: ITERATIONS,
+      hash: "SHA-256",
+    },
     key,
     256
   );
@@ -87,6 +153,8 @@ export async function rememberLocalCredential(
   userId: string,
   password: string
 ): Promise<void> {
+  const owner = localWorkspaceOwner();
+  if (owner && owner !== userId) return; // preserve the device owner's offline credential
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await derive(password, salt);
   const cred: LocalCredential = {
@@ -109,10 +177,19 @@ export async function rememberLocalCredential(
  *  screen with an unclaimed device and no way back into their own data.
  *  Never downgrades a credential that already has a password hash. */
 export function rememberLocalIdentity(email: string, userId: string): void {
+  const owner = localWorkspaceOwner();
+  if (owner && owner !== userId) return;
   const typed = email.trim().toLowerCase();
   const cur = getLocalCredential();
-  if (cur?.hash && cur.email === typed) return;
-  const cred: LocalCredential = { email: typed, userId, verifiedAt: new Date().toISOString() };
+  if (cur?.hash && cur.userId === userId) {
+    updateLocalCredentialEmail(typed);
+    return;
+  }
+  const cred: LocalCredential = {
+    email: typed,
+    userId,
+    verifiedAt: new Date().toISOString(),
+  };
   try {
     localStorage.setItem(CRED_KEY, JSON.stringify(cred));
   } catch {
@@ -166,13 +243,18 @@ export function forgetLocalCredential(): void {
 
 export function isLocalSignedIn(): boolean {
   try {
-    return localStorage.getItem(SESSION_KEY) === "1";
+    const owner = localWorkspaceOwner();
+    return (
+      localStorage.getItem(SESSION_KEY) === "1" &&
+      (!owner || owner === getLocalCredential()?.userId)
+    );
   } catch {
     return false;
   }
 }
 
 export function setLocalSignedIn(on: boolean): void {
+  if (on) claimLocalWorkspace(getLocalCredential()?.userId ?? "");
   try {
     if (on) localStorage.setItem(SESSION_KEY, "1");
     else localStorage.removeItem(SESSION_KEY);

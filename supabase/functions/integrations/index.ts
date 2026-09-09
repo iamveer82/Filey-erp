@@ -51,21 +51,13 @@ Deno.serve(async (req) => {
     const { provider, action, payload } = await req.json();
     const op = `${provider}_${action}`;
 
-    // verify_jwt=true means the platform already checked the signature, so the
-    // sub claim can be trusted for identity and rate limiting.
+    if (!["composio", "zernio"].includes(provider)) return json({ error: "Unknown integration provider" }, 400);
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-    let userId = "";
-    try {
-      userId = JSON.parse(atob(jwt.split(".")[1])).sub ?? "";
-    } catch {
-      /* rejected below */
-    }
-    if (!userId) return json({ error: "Unauthorized" }, 401);
-
-    const supa = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    if (!jwt) return json({ error: "Sign in to use integrations." }, 401);
+    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: auth, error: authError } = await supa.auth.getUser(jwt);
+    if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
+    const userId = auth.user.id;
 
     // A cloud user can bring their own key (integration_keys, service-role
     // readable only). When they have, this call spends their credits, not
@@ -79,6 +71,9 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
 
+    if (action === "status") return json({
+      configured: !!ownKey || !!Deno.env.get(provider === "composio" ? "COMPOSIO_API_KEY" : "ZERNIO_API_KEY"),
+    });
     if (BILLABLE.has(op) && !ownKey) {
       // Same tier resolution as send-email: the org's plan decides the ceiling.
       let paid = false;

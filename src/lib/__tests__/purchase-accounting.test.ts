@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { setDataMode } from "../dataMode";
 import { pos, fin } from "../api";
+import { sb } from "../supabase";
+import { useReportsData } from "../../pages/reports/useReportsData";
 
 // Money path: a received purchase order must post to Accounting (debit
 // Purchases, credit Accounts Payable) and fully reverse when reverted to draft.
@@ -8,6 +11,7 @@ beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
 });
+afterEach(cleanup);
 
 const po = (status: string) =>
   ({
@@ -59,4 +63,28 @@ describe("purchase order → accounting", () => {
       .reduce((s, t) => s + Number(t.amount), 0);
     expect(d).toBeCloseTo(c);
   });
+});
+
+it("posts foreign-currency PO amounts in the ledger currency without taxing VAT twice", async () => {
+  const id = await pos.save({ ...po("received"), currency:"USD", fx_rate:3.6725, tax_rate:5 });
+  // Old rows stored a net-only total. Reading must still agree with the PDF.
+  await sb().from("purchase_orders").update({ total:100 }).eq("id", id);
+  expect((await pos.get(id)).total).toBe(105);
+  expect((await pos.list()).find(row => row.id === id)?.total).toBe(105);
+  const accounts = await fin.accounts();
+  const balance = (re: RegExp) => accounts.find(a => re.test(a.name))?.balance ?? 0;
+  expect(balance(/inventory|stock/i)).toBeCloseTo(367.25);
+  expect(balance(/input vat/i)).toBeCloseTo(18.36);
+  expect(balance(/payable/i)).toBeCloseTo(385.61);
+});
+
+it("uses the same frozen PO rate for reported purchases and their payments", async () => {
+  const id = await pos.save({ ...po("received"), currency: "USD", fx_rate: 4, tax_rate: 0 });
+  await pos.addPayment(id, 50);
+  expect((await pos.list()).find(row => row.id === id)?.fx_rate).toBe(4);
+  const { result } = renderHook(() => useReportsData());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.error).toBe("");
+  expect(result.current.poList.find(row => row.id === id)?.total).toBe(400);
+  expect(result.current.poPayments).toEqual([{ po_id: id, amount: 200 }]);
 });

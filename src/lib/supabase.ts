@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { isLocalMode } from "./dataMode";
+import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { localClient } from "./localdb";
+import { localWorkspaceOwner, isLocalSignedIn } from "./localAuth";
 
 // Filey's hosted cloud — baked in so every packaged build is cloud-ready out
 // of the box (accounts, team sharing, auto-sync all point here). Env vars
@@ -34,9 +35,40 @@ export const supabase: SupabaseClient | null = cloudConfigured
     })
   : null;
 
+/** Recovery must not sign into the app or replace its persisted session. */
+export function createRecoveryClient(): SupabaseClient {
+  if (!cloudConfigured) throw new Error("Password recovery is not configured.");
+  return createClient(url, anonKey, {
+    auth: {
+      storageKey: "filey-password-recovery",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+/** Supabase Auth owns recovery tokens/rate limits; Resend supplies its SMTP. */
+export async function requestPasswordResetEmail(email: string): Promise<void> {
+  const address = email.trim().toLowerCase();
+  if (address.length > 320 || !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address))
+    throw new Error("Enter your account's email address.");
+  // An expired app session must not prevent a signed-out recovery request.
+  // Do not auto-retry sends: a retry can supersede a link already in transit.
+  const { error } = await createRecoveryClient().auth.resetPasswordForEmail(address);
+  if (error?.status === 429)
+    throw new Error("Too many reset requests. Please wait before trying again.");
+  if (error) throw new Error("Could not send the reset email. Please try again shortly.");
+}
+
 /** Returns the active client (local shim or cloud), or throws a clear error. */
 export function sb(): SupabaseClient {
-  if (isLocalMode()) return localClient as unknown as SupabaseClient;
+  assertWorkspaceCurrent();
+  if (isLocalMode()) {
+    if (localWorkspaceOwner() && !isLocalSignedIn())
+      throw new Error("Sign in to the device workspace before accessing its records.");
+    return localClient as unknown as SupabaseClient;
+  }
   if (!supabase) {
     throw new Error(
       "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY " +

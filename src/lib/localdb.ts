@@ -17,6 +17,17 @@ const hasTauri =
 type Row = Record<string, any>;
 type Result = { data: any; error: any };
 
+// All device writes, including pull-sync replacements, share one queue.
+let writeQueue: Promise<unknown> = Promise.resolve();
+function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
+  const execute = () => typeof navigator !== "undefined" && navigator.locks
+    ? navigator.locks.request("filey:local-data", run)
+    : run();
+  const pending = writeQueue.then(execute, execute);
+  writeQueue = pending.catch(() => {});
+  return pending;
+}
+
 // ---- storage backend: collection name -> Row[] ----------------------------
 
 /** Parsed collections, kept between reads.
@@ -218,14 +229,17 @@ export async function loadColl(coll: string): Promise<Row[]> {
     const v = hasTauri
       ? await invoke<string | null>("cache_get", { key })
       : localStorage.getItem(key);
-    const rows = await hydrate(v ? (JSON.parse(v) as Row[]) : []);
+    const parsed: unknown = v ? JSON.parse(v) : [];
+    if (!Array.isArray(parsed) || parsed.some((row) => !row || typeof row !== "object" || Array.isArray(row)))
+      throw new Error("Stored records are not a valid collection");
+    const rows = await hydrate(parsed as Row[]);
     // json stays the STORED form (markers, not payloads) so replaceColl keeps
     // comparing like with like.
     if (hasTauri) memo.set(coll, { rows, json: v ?? "[]" });
     return rows;
-  } catch {
+  } catch (error) {
     // Don't memo a failed read — the next call should try again.
-    return [];
+    throw new Error(`Could not read local ${coll}. Your saved records were not changed. ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -250,28 +264,36 @@ async function saveColl(coll: string, rows: Row[]): Promise<void> {
 /** Overwrite a collection from the cloud (pull-sync) WITHOUT journalling —
  *  journalling it would echo the pulled rows straight back up on the next
  *  push. Returns true when the stored data actually changed. */
-export async function replaceColl(coll: string, rows: Row[]): Promise<boolean> {
-  const next = await dehydrate(rows);
-  // Compare against the stored JSON rather than re-serialising what's already
-  // there: a pull that changes nothing used to parse AND stringify every table.
-  await loadColl(coll); // fills memo.json; free once warm
-  const current = hasTauri
-    ? memo.get(coll)?.json
-    : (localStorage.getItem("localdb:" + coll) ?? "[]");
-  if (current === next) return false;
-  const key = "localdb:" + coll;
-  if (!hasTauri) {
-    localStorage.setItem(key, next);
+export function replaceColl(
+  coll: string,
+  rows: Row[],
+  expectedJournalVersion?: number,
+): Promise<boolean> {
+  return serializeWrite(async () => {
+    if (expectedJournalVersion !== undefined && (await journalVersion()) !== expectedJournalVersion)
+      return false;
+    const next = await dehydrate(rows);
+    // Compare against the stored JSON rather than re-serialising what's already
+    // there: a pull that changes nothing used to parse AND stringify every table.
+    await loadColl(coll); // fills memo.json; free once warm
+    const current = hasTauri
+      ? memo.get(coll)?.json
+      : (localStorage.getItem("localdb:" + coll) ?? "[]");
+    if (current === next) return false;
+    const key = "localdb:" + coll;
+    if (!hasTauri) {
+      localStorage.setItem(key, next);
+      return true;
+    }
+    try {
+      await invoke("cache_set", { key, value: next });
+      memo.set(coll, { rows, json: next });
+    } catch (e) {
+      memo.delete(coll);
+      throw e;
+    }
     return true;
-  }
-  try {
-    await invoke("cache_set", { key, value: next });
-    memo.set(coll, { rows, json: next });
-  } catch (e) {
-    memo.delete(coll);
-    throw e;
-  }
-  return true;
+  });
 }
 
 const nextId = (rows: Row[]): number =>
@@ -305,7 +327,7 @@ async function journalLoad(): Promise<SyncJournal> {
       ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
       : localStorage.getItem(JOURNAL_KEY);
     const j = raw ? JSON.parse(raw) : null;
-    if (j && typeof j.v === "number" && j.tables) {
+    if (j && Number.isFinite(j.v) && j.v >= 0 && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
       for (const t of Object.keys(j.tables)) {
         const e = j.tables[t];
         // Journals written before row-level tracking meant "whole collection".
@@ -318,8 +340,10 @@ async function journalLoad(): Promise<SyncJournal> {
       journalMemo = j as SyncJournal;
       return journalMemo;
     }
-  } catch {
-    /* corrupt journal → start fresh; worst case a full re-push (idempotent) */
+    if (raw) throw new Error("Invalid pending-change journal");
+  } catch (error) {
+    journalMemo = null;
+    throw new Error(`Could not read pending local changes. Sync was stopped to preserve unsent records. ${error instanceof Error ? error.message : String(error)}`);
   }
   journalMemo = { v: 0, tables: {} };
   return journalMemo;
@@ -418,6 +442,11 @@ export async function journalCommit(v: number, tables: string[]): Promise<void> 
 // ---- query builder --------------------------------------------------------
 
 type Op = "select" | "insert" | "update" | "upsert" | "delete";
+type LocalStore = {
+  load: typeof loadColl;
+  save: typeof saveColl;
+  mark: typeof journalMark;
+};
 type Filter =
   | { kind: "eq"; col: string; val: any }
   | { kind: "lte"; col: string; val: any }
@@ -431,11 +460,15 @@ class LocalBuilder implements PromiseLike<Result> {
   private payload: Row[] = [];
   private orders: { col: string; asc: boolean }[] = [];
   private limitN?: number;
+  private offsetN = 0;
   private want: "no" | "single" | "maybe" = "no";
   private returnRows = false; // a write followed by .select()
   private conflictKey?: string;
+  private store?: LocalStore;
 
   constructor(private coll: string) {}
+
+  inStore(store: LocalStore): this { this.store = store; return this; }
 
   select(_cols?: string): this {
     if (this.op !== "select") this.returnRows = true;
@@ -492,6 +525,11 @@ class LocalBuilder implements PromiseLike<Result> {
     this.limitN = n;
     return this;
   }
+  range(from: number, to: number): this {
+    this.offsetN = from;
+    this.limitN = Math.max(0, to - from + 1);
+    return this;
+  }
   single(): this {
     this.want = "single";
     return this;
@@ -537,12 +575,12 @@ class LocalBuilder implements PromiseLike<Result> {
     return true;
   }
 
-  private async exec(): Promise<Result> {
+  private async exec(store = this.store): Promise<Result> {
     try {
       // loadColl hands back the cached array itself, so a write works on a copy:
       // insert/upsert splice in place, and mutating the cache before the store
       // has accepted the write would show rows that a failed save never kept.
-      let rows = await loadColl(this.coll);
+      let rows = await (store?.load ?? loadColl)(this.coll);
       if (this.op !== "select") rows = [...rows];
       let result: any = null;
 
@@ -563,7 +601,7 @@ class LocalBuilder implements PromiseLike<Result> {
             return 0;
           });
         }
-        if (this.limitN != null) out = out.slice(0, this.limitN);
+        if (this.limitN != null) out = out.slice(this.offsetN, this.offsetN + this.limitN);
         result = out;
       } else if (this.op === "insert" || this.op === "upsert") {
         const written: Row[] = [];
@@ -586,8 +624,8 @@ class LocalBuilder implements PromiseLike<Result> {
           rows.push(row);
           written.push(row);
         }
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { changed: written.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "update") {
         const patch = this.payload[0] || {};
@@ -600,14 +638,14 @@ class LocalBuilder implements PromiseLike<Result> {
           }
           return r;
         });
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { changed: written.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "delete") {
         const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { deleted: removed.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, { deleted: removed.map((r) => r.id) });
         result = null;
       }
 
@@ -627,16 +665,95 @@ class LocalBuilder implements PromiseLike<Result> {
     onF?: ((v: Result) => R1 | PromiseLike<R1>) | null,
     onR?: ((e: any) => R2 | PromiseLike<R2>) | null
   ): PromiseLike<R1 | R2> {
-    return this.exec().then(onF as any, onR as any);
+    const result = this.op === "select" || this.store ? this.exec() : withLocalTransaction(async (client) => {
+      const outcome = await this.exec(client.from(this.coll).store);
+      if (outcome.error) throw outcome.error;
+      return outcome;
+    }).catch((error) => ({ data: null, error }));
+    return result.then(onF as any, onR as any);
   }
 }
 
+/** Stage a document's collection writes together, then publish one change event.
+ *  Other writes wait; readers keep seeing committed records. Failed commits
+ *  restore their original collections and journal. A process/power loss during
+ *  commit still requires a native SQLite transaction for crash-atomicity. */
+export function withLocalTransaction<T>(
+  run: (client: Pick<typeof localClient, "from">) => Promise<T>,
+): Promise<T> {
+  return serializeWrite(async () => {
+    const original = new Map<string, Row[]>();
+    const staged = new Map<string, Row[]>();
+    const changes: [string, Parameters<typeof journalMark>[1]][] = [];
+    const store: LocalStore = {
+      async load(coll) {
+        if (staged.has(coll)) return staged.get(coll)!;
+        if (!original.has(coll)) original.set(coll, await loadColl(coll));
+        return original.get(coll)!;
+      },
+      async save(coll, rows) {
+        staged.set(coll, rows);
+      },
+      async mark(coll, opts) {
+        changes.push([coll, opts]);
+      },
+    };
+    const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
+    if (!staged.size) return result;
+    const journal = await journalSnapshot();
+    const committed: string[] = [];
+    try {
+      for (const [coll, rows] of staged) {
+        await saveColl(coll, rows);
+        committed.push(coll);
+      }
+      for (const [coll, opts] of changes) await journalMark(coll, { ...opts, silent: true });
+    } catch (error) {
+      const restored = await Promise.allSettled(
+        committed.map((coll) => saveColl(coll, original.get(coll)!)),
+      );
+      const journalRestored = await journalSave(journal).then(
+        () => true,
+        () => false,
+      );
+      if (!journalRestored || restored.some((entry) => entry.status === "rejected"))
+        throw new Error(
+          "The save failed and local storage could not be fully restored. Stop editing and restore a backup before retrying.",
+        );
+      throw error;
+    }
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:local-write"));
+    return result;
+  });
+}
+
 // ---- rpc ------------------------------------------------------------------
-// adjust_product_stock / adjust_account_balance both have JS read-modify-write
-// fallbacks in api.ts that run when the rpc errors — so returning an error here
-// makes them work locally with no extra code. The other two are cloud/sharing
-// features with no local meaning.
-async function localRpc(name: string): Promise<Result> {
+// Stock and balance adjustments share the document write queue, so concurrent
+// read-modify-write operations preserve every delta. Other RPCs require cloud.
+async function localRpc(name: string, args?: { p_id?: number; p_delta?: number }): Promise<Result> {
+  if (name === "adjust_product_stock" || name === "adjust_account_balance") {
+    try {
+      await withLocalTransaction(async (client) => {
+        if (!Number.isInteger(args?.p_id) || !Number.isFinite(args?.p_delta))
+          throw new Error("A valid record and finite adjustment are required.");
+        const coll = name === "adjust_product_stock" ? "products" : "accounts";
+        const field = name === "adjust_product_stock" ? "quantity" : "balance";
+        const { data, error } = await client.from(coll).select("*").eq("id", args!.p_id).single();
+        if (error) throw new Error(error.message);
+        const updated = await client
+          .from(coll)
+          .update({ [field]: (Number(data[field]) || 0) + args!.p_delta! })
+          .eq("id", args!.p_id);
+        if (updated.error) throw new Error(updated.error.message);
+      });
+      return { data: null, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  }
   return {
     data: null,
     error: { message: `rpc "${name}" is not available in local mode` },
@@ -836,7 +953,7 @@ function localStorageApi() {
 
 export const localClient = {
   from: (coll: string) => new LocalBuilder(coll),
-  rpc: (name: string) => localRpc(name),
+  rpc: (name: string, args?: { p_id?: number; p_delta?: number }) => localRpc(name, args),
   auth: localAuth,
   storage: localStorageApi(),
   channel: () => {

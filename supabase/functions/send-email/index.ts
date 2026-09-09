@@ -5,8 +5,10 @@
 //   supabase functions deploy send-email
 //   supabase secrets set RESEND_API_KEY=re_xxx EMAIL_FROM="Filey <invoices@yourdomain.com>"
 //
-// The function requires a valid Supabase JWT (verified by default), so
-// only signed-in users can send. Body: { to, subject, html }.
+// The function verifies the session with auth.getUser (including new signing keys), so
+// only signed-in users can send. Password recovery is handled by Supabase
+// Auth with Resend SMTP, including Auth's native rate limits.
+// Body: { to, subject, html }.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -32,14 +34,31 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
-    const { to, subject, html, attachments } = await req.json();
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    let body;
+    try { body = await req.json(); } catch { return json({ error: "Invalid JSON payload" }, 400); }
+    if (!body || typeof body !== "object") return json({ error: "Invalid payload" }, 400);
+    const RESEND = Deno.env.get("RESEND_API_KEY");
+    const FROM = Deno.env.get("EMAIL_FROM") ?? "";
+    const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Sign in to use email." }, 401);
+    const { data: auth, error: authError } = await supa.auth.getUser(jwt);
+    if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
+    const userId = auth.user.id;
+    if (body.action === "status") return json({ configured: !!RESEND && !!FROM, from: FROM || null });
+    const { to, subject, html, attachments, requestId } = body;
+    if (requestId !== undefined && (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)))
+      return json({ error: "Invalid request ID" }, 400);
     if (!to || !subject || !html) {
       return json({ error: "to, subject and html are required" }, 400);
     }
     // SECURITY: transactional sender, not a relay — one recipient per call
     // (an array here would let any signed-in user mass-mail from our domain).
     if (typeof to !== "string" || to.length > 320 ||
-        String(subject).length > 500 || String(html).length > 500_000) {
+        typeof subject !== "string" || typeof html !== "string" ||
+        !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(to.trim()) ||
+        subject.length > 500 || html.length > 500_000) {
       return json({ error: "invalid payload" }, 400);
     }
     // Optional file attachments (e.g. the invoice PDF). Base64 content, capped
@@ -61,23 +80,7 @@ serve(async (req) => {
       }
     }
 
-    const RESEND = Deno.env.get("RESEND_API_KEY");
-    const FROM = Deno.env.get("EMAIL_FROM") ?? "Filey <onboarding@resend.dev>";
-    if (!RESEND) return json({ error: "RESEND_API_KEY not configured" }, 500);
-
-    // The platform already verified the JWT (verify_jwt=true), so the sub
-    // claim is trustworthy — decode it for the rate-limit key.
-    const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-    let userId = "";
-    try {
-      userId = JSON.parse(atob(jwt.split(".")[1])).sub ?? "";
-    } catch { /* fall through to reject below */ }
-    if (!userId) return json({ error: "Unauthorized" }, 401);
-
-    const supa = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    if (!RESEND || !FROM) return json({ error: "Email is not configured. Ask the administrator to set the Resend API key and sender address." }, 503);
 
     // Resolve the user's tier from their org's plan (service role bypasses
     // RLS). Mirrors resolveTier() in src/lib/license.ts.
@@ -132,10 +135,12 @@ serve(async (req) => {
     }
 
     const res = await fetch("https://api.resend.com/emails", {
+      signal: AbortSignal.timeout(20000),
       method: "POST",
       headers: {
         Authorization: `Bearer ${RESEND}`,
         "Content-Type": "application/json",
+        ...(requestId ? { "Idempotency-Key": `filey/${userId}/${requestId}` } : {}),
       },
       body: JSON.stringify({
         from: FROM,
@@ -147,7 +152,7 @@ serve(async (req) => {
     });
 
     const data = await res.json();
-    if (!res.ok) return json({ error: data?.message ?? "Send failed" }, 502);
+    if (!res.ok) return json({ error: data?.message ?? "Send failed" }, res.status === 429 ? 429 : 422);
 
     // Count the send (this row is what the rate limit reads).
     const ins = await supa.from("audit_log").insert({

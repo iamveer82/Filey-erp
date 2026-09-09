@@ -62,6 +62,14 @@ Deno.test("handles multiple messages across entries and falls back to 'there'", 
   assertEquals(r[0].fromName, "there");
 });
 
+Deno.test("matches each message to its own contact in a batched webhook", () => {
+  const r = parseWhatsAppWebhook({ entry: [{ changes: [{ value: {
+    contacts: [{ wa_id: "111", profile: { name: "Ada" } }, { wa_id: "222", profile: { name: "Grace" } }],
+    messages: [{ from: "222", type: "text", text: { body: "one" } }, { from: "111", type: "text", text: { body: "two" } }],
+  } }] }] });
+  assertEquals(r.map((m) => m.fromName), ["Grace", "Ada"]);
+});
+
 Deno.test("returns [] for status callbacks, empty text and junk", () => {
   // Read receipts / delivery statuses carry `statuses`, not `messages`.
   assertEquals(parseWhatsAppWebhook({

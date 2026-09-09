@@ -77,9 +77,6 @@ export function parseWhatsAppWebhook(payload: unknown): InboundMsg[] {
       const contacts = Array.isArray(value.contacts)
         ? (value.contacts as Record<string, unknown>[])
         : [];
-      const profile = contacts[0]?.profile as Record<string, unknown> | undefined;
-      const fromName =
-        typeof profile?.name === "string" && profile.name ? profile.name : "there";
       const messages = Array.isArray(value.messages)
         ? (value.messages as Record<string, unknown>[])
         : [];
@@ -88,6 +85,9 @@ export function parseWhatsAppWebhook(payload: unknown): InboundMsg[] {
         if (msg.type !== "text") continue;
         const from = typeof msg.from === "string" ? msg.from : "";
         if (!from) continue;
+        const contact = contacts.find((c) => c?.wa_id === from);
+        const profile = contact?.profile as Record<string, unknown> | undefined;
+        const fromName = typeof profile?.name === "string" && profile.name ? profile.name : "there";
         const textObj = msg.text as Record<string, unknown> | undefined;
         const body = typeof textObj?.body === "string" ? textObj.body.trim() : "";
         if (!body) continue;
@@ -127,7 +127,7 @@ export function parseSlackEvent(payload: unknown): InboundMsg | null {
   if (p.type !== "event_callback") return null;
   const event = p.event as Record<string, unknown> | undefined;
   if (!event || typeof event !== "object") return null;
-  if (event.type !== "message") return null;
+  if (event.type !== "message" && event.type !== "app_mention") return null;
 
   // Ignore bots and every subtype of message (edits, joins, bot_message, …).
   if (event.bot_id !== undefined || event.subtype !== undefined) return null;

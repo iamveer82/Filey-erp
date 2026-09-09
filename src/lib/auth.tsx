@@ -14,6 +14,7 @@ import { startRealtime, stopRealtime } from "./realtime";
 import { registerCloudDevice, entitlement } from "./license";
 import { mfaRequired } from "./mfa";
 import {
+  assertLocalAccount,
   getLocalCredential,
   hasLocalCredential,
   hasLocalPassword,
@@ -86,6 +87,7 @@ export const getLocalProfile = (): Profile => loadLocalProfile();
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function adoptLocalProfile(p: Partial<Profile>): void {
+  if (p.id) assertLocalAccount(p.id, p.org_id);
   const cur = loadLocalProfile();
   const merged: Profile = {
     ...cur,
@@ -212,14 +214,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Offline installs require a real email account too. The device is only
   // "signed in" once an account has claimed it AND the session flag is set, so
   // signing out offline returns to the login screens like anywhere else.
-  const [user, setUser] = useState<User | null>(
-    local && hasLocalCredential() && isLocalSignedIn()
-      ? localUserFrom(getLocalCredential())
-      : null
-  );
+  const [initialIdentity] = useState(() => {
+    const u = local && hasLocalCredential() && isLocalSignedIn()
+      ? localUserFrom(getLocalCredential()) : null;
+    const p = local ? localProfile() : null;
+    // Children can read scoped caches during their first render. A passive
+    // effect is too late, and a pending cloud session must not inherit a scope.
+    setCacheOrg(u ? p?.org_id : null, u?.id);
+    return { user: u, profile: p };
+  });
+  const [user, setUser] = useState<User | null>(initialIdentity.user);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(
-    local ? localProfile() : null
+    initialIdentity.profile
   );
   // Whether we've actually finished checking for a profile for the current
   // user. Until then we must NOT treat a missing profile as "needs setup"
@@ -232,7 +239,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
 
-  const loadProfile = async (u: User) => {
+  const completeLocalSignIn = (u: User) => {
+    const p = localProfile();
+    setLocalSignedIn(true);
+    setCacheOrg(p.org_id, u.id);
+    setUser(u);
+    setProfile(p);
+  };
+
+  const loadProfile = async (u: User, refreshed = false): Promise<void> => {
     if (!supabase) return;
     const { data, error } = await supabase
       .from("profiles")
@@ -244,9 +259,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // RLS hiccup on sign-in made needsProfile true and dropped an existing user
     // into first-run setup — where finishing the form upserts over the real
     // name and company. Surface the failure and let the user retry instead.
+    // A sleeping device may wake with a token the server has already expired.
+    // Refresh once before retrying; never interpret an auth failure as new setup.
+    if (error && /jwt expired/i.test(error.message) && !refreshed) {
+      const { data: renewed, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw refreshError;
+      if (renewed.session?.user.id !== u.id || loadedFor.current !== u.id) return;
+      return loadProfile(u, true);
+    }
     if (error) throw error;
     const prof = (data as Profile) ?? null;
-    setCacheOrg(prof?.org_id);
+    if (loadedFor.current !== u.id) return;
+    setCacheOrg(prof?.org_id, u.id);
     setProfile(prof);
     setProfileError(null);
     setProfileLoaded(true);
@@ -259,17 +283,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
+    let authChanged = false;
 
     supabase.auth
       .getSession()
       .then(({ data }) => {
-        if (!active) return;
+        if (!active || authChanged) return;
+        const u = data.session?.user ?? null;
+        loadedFor.current = u?.id ?? null;
+        setCacheOrg(null, u?.id);
         setSession(data.session);
-        setUser(data.session?.user ?? null);
+        setUser(u);
+        setProfile(null);
+        setProfileError(null);
+        setProfileLoaded(false);
         // Defer DB read: never block while the auth lock may be held.
-        if (data.session?.user) {
-          loadedFor.current = data.session.user.id;
-          void loadProfile(data.session.user).catch((err) => {
+        if (u) {
+          void loadProfile(u).catch((err) => {
+            if (!active || loadedFor.current !== u.id) return;
             console.error("[auth] loadProfile failed:", err);
             setProfileError(err?.message ?? String(err));
           });
@@ -286,6 +317,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Calling supabase.* inside onAuthStateChange while it holds the auth
     // lock deadlocks getSession(). Defer profile load off the lock.
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (!active) return;
+      authChanged = true;
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
@@ -295,10 +328,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (loadedFor.current === s.user.id) return;
         loadedFor.current = s.user.id;
         const u = s.user;
+        setCacheOrg(null, u.id);
+        setProfile(null);
+        setProfileError(null);
         setProfileLoaded(false);
         setTimeout(() => {
           if (active)
             void loadProfile(u).catch((err) => {
+              if (!active || loadedFor.current !== u.id) return;
               console.error("[auth] loadProfile failed:", err);
               setProfileError(err?.message ?? String(err));
             });
@@ -312,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       active = false;
+      loadedFor.current = null;
       sub.subscription.unsubscribe();
     };
   }, []);
@@ -381,16 +419,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } as any);
           if (error) throw error;
           const uid = data.user?.id;
+          assertLocalAccount(uid ?? "");
           if (uid) await rememberLocalCredential(email, uid, password);
           if (uid) await pullCloudProfile(uid, email);
-          setLocalSignedIn(true);
-          setUser(localUserFrom({ email, userId: uid ?? "" }));
-          setProfile(localProfile());
+          completeLocalSignIn(localUserFrom({ email, userId: uid ?? "" }));
           return;
         } catch (e: any) {
           // In local mode the device's own credential is authoritative.
           // If Supabase rejects (expired session, changed password, etc.),
           // fall through to the local hash instead of locking the user out.
+          if (/workspace belongs to another account/i.test(e?.message ?? "")) throw e;
           const msg = e?.message ?? String(e);
           const rejected = /invalid login credentials|invalid email or password/i.test(msg);
           // A server rejection can only be overridden by a password this device
@@ -412,9 +450,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
       if (!(await verifyLocalPassword(email, password)))
         throw new Error("That email and password don't match this device's account.");
-      setLocalSignedIn(true);
-      setUser(localUserFrom(getLocalCredential()));
-      setProfile(localProfile());
+      completeLocalSignIn(localUserFrom(getLocalCredential()));
       return;
     }
     if (!supabase) throw new Error("Supabase not configured");
@@ -458,9 +494,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.user?.id && c.channel === "email")
       await rememberLocalCredential(c.value, data.user.id, password);
     if (local && data.session) {
-      setLocalSignedIn(true);
-      setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: data.user!.id }));
-      setProfile(localProfile());
+      assertLocalAccount(data.session.user.id);
+      completeLocalSignIn(localUserFrom({ email: c.value.trim().toLowerCase(), userId: data.user!.id }));
     }
     // A session here means email confirmation is disabled → straight in.
     // Otherwise an OTP (email code / SMS) was sent and must be verified.
@@ -494,6 +529,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // too. Otherwise anyone who only ever signs in by code has an unclaimed
     // device, and switching that device to offline strands them at the login
     // screen with no account attached.
+    if (local) assertLocalAccount(uid);
     if (c.channel === "email") {
       // Same account (an email change, or the code that confirms a signup this
       // device just stored a password for): keep the password hash and adopt
@@ -508,9 +544,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Local mode doesn't follow the cloud session — the verified code IS
       // the sign-in. Mark the device signed in for the account behind it.
       await pullCloudProfile(uid, c.value.trim().toLowerCase());
-      setLocalSignedIn(true);
-      setUser(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
-      setProfile(localProfile());
+      completeLocalSignIn(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
     }
   };
 
@@ -545,6 +579,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (!supabase) return;
     await supabase.auth.signOut();
+    setLocalSignedIn(false);
     setCacheOrg(null);
     // In offline mode the profile is the ON-DEVICE one and has nothing to do
     // with the cloud session being ended. Clearing it left a truthy synthetic
@@ -566,6 +601,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         company: company.trim(),
       };
       saveLocalProfile(np);
+      setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);
       return;
     }
@@ -581,7 +617,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const { data, error } = await supabase.from("profiles").upsert(row).select().single();
     if (error) throw error;
-    setCacheOrg((data as Profile).org_id);
+    setCacheOrg((data as Profile).org_id, user.id);
     setProfile(data as Profile);
   };
 
@@ -589,6 +625,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (local) {
       const np = { ...(profile ?? { id: LOCAL_USER.id, email: "", name: "", company: "" }), ...patch } as Profile;
       saveLocalProfile(np);
+      setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);
       return;
     }
@@ -600,7 +637,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
     if (error) throw error;
-    setCacheOrg((data as Profile).org_id);
+    setCacheOrg((data as Profile).org_id, user.id);
     setProfile(data as Profile);
   };
 

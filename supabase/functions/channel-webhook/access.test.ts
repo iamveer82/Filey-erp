@@ -69,6 +69,9 @@ function fakePairClient(opts: {
   pairCode?: string | null;
   ownerRef?: string | null;
   priorFailures?: number;
+  expires?: string;
+  enabled?: boolean;
+  loseRace?: boolean;
 }) {
   const updates: { patch: Record<string, unknown>; filters: [string, unknown][] }[] = [];
   const auditInserts: Record<string, unknown>[] = [];
@@ -83,21 +86,25 @@ function fakePairClient(opts: {
                 maybeSingle: () =>
                   Promise.resolve({
                     data: opts.pairCode
-                      ? { credentials: { pair_code: opts.pairCode }, owner_ref: opts.ownerRef ?? null }
+                      ? { credentials: { pair_code: opts.pairCode, pair_expires_at: opts.expires ?? new Date(Date.now() + 60000).toISOString() }, owner_ref: opts.ownerRef ?? null, enabled: opts.enabled ?? true }
                       : { credentials: {}, owner_ref: opts.ownerRef ?? null },
                     error: null,
                   }),
               }),
             }),
           }),
-          update: (patch: Record<string, unknown>) => ({
-            eq: (_c: string, v: unknown) => ({
-              eq: () => {
-                updates.push({ patch, filters: [["user_id", v]] });
-                return Promise.resolve({ error: null });
+          update: (patch: Record<string, unknown>) => {
+            const filters: [string, unknown][] = [];
+            const q = {
+              eq: (c: string, v: unknown) => { filters.push([c, v]); return q; },
+              is: (c: string, v: unknown) => { filters.push([c, v]); return q; },
+              select: () => {
+                updates.push({ patch, filters });
+                return Promise.resolve({ data: opts.loseRace ? [] : [{ owner_ref: patch.owner_ref }], error: null });
               },
-            }),
-          }),
+            };
+            return q;
+          },
         };
       }
       // audit_log: rateLimit counts rows; logAction inserts them.
@@ -167,4 +174,22 @@ Deno.test("already-paired channel refuses to re-pair before any throttle work", 
   const reply = await tryPair(f.client, "OWNER-1", pairMsg(), "PAIR 654321");
   assertEquals(reply, "This channel is already paired.");
   assertEquals(f.auditInserts.length, 0);
+});
+
+Deno.test("expired, disabled and group pairing never claim an account", async () => {
+  for (const opts of [{ expires: "2020-01-01" }, { enabled: false }]) {
+    const f = fakePairClient({ pairCode: "654321", ...opts });
+    await tryPair(f.client, "OWNER-1", pairMsg(), "PAIR 654321");
+    assertEquals(f.updates.length, 0);
+  }
+  const f = fakePairClient({ pairCode: "654321" });
+  await tryPair(f.client, "OWNER-1", pairMsg({ chatType: "supergroup" }), "PAIR 654321");
+  assertEquals(f.updates.length, 0);
+});
+
+Deno.test("a racing pairing cannot overwrite an already claimed identity", async () => {
+  const f = fakePairClient({ pairCode: "654321", loseRace: true });
+  const reply = await tryPair(f.client, "OWNER-1", pairMsg(), "PAIR 654321");
+  assertEquals(reply?.includes("already used"), true);
+  assertEquals(f.updates[0].filters.some(([c, v]) => c === "owner_ref" && v === null), true);
 });

@@ -42,7 +42,7 @@ export const esc = (s: unknown) =>
 
 const SENSITIVE_PAYLOAD_KEYS = new Set([
   "token", "bot_token", "webhook_secret", "signing_secret",
-  "pair_code", "secret", "password", "api_key",
+  "pair_code", "secret", "password", "api_key", "app_secret", "verify_token",
 ]);
 
 /** Shallow copy of the payload with credential-ish keys replaced by
@@ -197,7 +197,8 @@ export async function handleApproval(
       else await io.sendTelegram(String(p.to), String(p.text));
     } catch (e) {
       console.error("send_message", e);
-      return `Approved, but sending on ${chan} failed — check the channel is still connected.`;
+      await scrubAfter();
+      return `Approved, but delivery on ${chan} was not confirmed. Check the conversation before asking me to send again; part of the message may have arrived.`;
     }
     await scrubAfter();
     try {
@@ -218,6 +219,12 @@ export async function handleApproval(
   if (row.action === "connect_channel") {
     const p = row.payload ?? {};
     const provider = String(p.provider) as Channel;
+    if (!["telegram", "whatsapp", "slack"].includes(provider) || !p.token ||
+      (provider === "whatsapp" && (!p.phone_number_id || !p.app_secret)) ||
+      (provider === "slack" && !p.signing_secret)) {
+      await scrubAfter();
+      return "Approved, but channel credentials are incomplete. Ask me to propose the connection again with the required verification secret.";
+    }
     const rand = () => crypto.randomUUID().replace(/-/g, "");
     const pairCode = randomCode(6);
 
@@ -225,8 +232,9 @@ export async function handleApproval(
       provider === "telegram"
         ? { bot_token: p.token, webhook_secret: rand(), pair_code: pairCode }
         : provider === "whatsapp"
-          ? { token: p.token, phone_number_id: p.phone_number_id, pair_code: pairCode }
+          ? { token: p.token, phone_number_id: p.phone_number_id, app_secret: p.app_secret, verify_token: rand(), pair_code: pairCode }
           : { bot_token: p.token, signing_secret: p.signing_secret ?? "", pair_code: pairCode };
+    credentials.pair_expires_at = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     // owner_ref stays null: the channel is configured but nobody is paired to
     // it yet, so ownerRefusal keeps refusing until the PAIR code arrives from
@@ -242,33 +250,37 @@ export async function handleApproval(
       },
       { onConflict: "user_id,provider" }
     );
-    if (ue) return `Approved, but saving the channel failed: ${ue.message}`;
+    if (ue) {
+      await scrubAfter();
+      return "Approved, but saving the channel failed. Check the deployment and propose the connection again.";
+    }
+    io.forgetCreds(provider);
+    await scrubAfter();
 
     if (provider === "telegram") {
-      const base = (io.env("SUPABASE_URL") ?? "").replace(
-        ".supabase.co",
-        ".functions.supabase.co"
-      );
-      const res = await fetch(
-        `https://api.telegram.org/bot${p.token}/setWebhook`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            url: `${base}/channel-webhook`,
-            secret_token: credentials.webhook_secret,
-          }),
-        }
-      );
+      const base = (io.env("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+      let res: Response;
+      try {
+        res = await fetch(
+          `https://api.telegram.org/bot${p.token}/setWebhook`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              url: `${base}/functions/v1/channel-webhook`,
+              secret_token: credentials.webhook_secret,
+            }),
+            signal: AbortSignal.timeout(15000),
+          }
+        );
+      } catch {
+        return "Credentials saved, but Telegram webhook registration was not confirmed. Check the bot configuration and reconnect to get a new pairing code.";
+      }
       const tg = await res.json().catch(() => null);
-      if (!tg?.ok)
-        return `Approved and saved, but Telegram rejected the webhook: ${
-          tg?.description ?? res.status
-        }. Check the bot token.`;
+      if (!res.ok || !tg?.ok)
+        return `Credentials saved, but Telegram rejected webhook registration (HTTP ${res.status}). Check the bot token and reconnect.`;
     }
 
-    io.forgetCreds(provider); // this isolate must not serve the old config
-    await scrubAfter();
     try {
       await client.from("audit_log").insert({
         user_id: ownerId,
@@ -280,7 +292,11 @@ export async function handleApproval(
     } catch { /* best-effort */ }
 
     return (
-      `✅ ${provider} is wired up. Now message me there once with:\n\n` +
+      (provider === "telegram" ? `✅ Telegram webhook registered.`
+        : provider === "whatsapp"
+          ? `WhatsApp credentials saved. In Meta, set the callback to ${io.env("SUPABASE_URL")}/functions/v1/channel-webhook, set verify token ${credentials.verify_token}, and subscribe to messages.`
+          : `Slack credentials saved. Set the Events API Request URL to ${io.env("SUPABASE_URL")}/functions/v1/channel-webhook and subscribe to message.im.`) +
+      ` Now send a private message there within 15 minutes:\n\n` +
       `PAIR ${pairCode}\n\n` +
       `Until that arrives I'll refuse anyone on ${provider} — that code is what ` +
       `proves the account is yours.`

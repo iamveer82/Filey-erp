@@ -39,7 +39,12 @@ const { flushOutbox, outboxOpIsDoomed } = await import("../api");
 const queue = (ops: { k: string; t: string; id?: number; row?: unknown }[]) =>
   localStorage.setItem(
     "outbox",
-    JSON.stringify(ops.map((op, i) => ({ id: i + 1, op: JSON.stringify(op) })))
+    JSON.stringify(
+      ops.map((op, i) => ({
+        id: i + 1,
+        op: JSON.stringify({ ...op, _workspace: "default" }),
+      }))
+    )
   );
 const remaining = (): unknown[] => JSON.parse(localStorage.getItem("outbox") || "[]");
 
@@ -64,6 +69,29 @@ describe("outboxOpIsDoomed", () => {
 });
 
 describe("flushOutbox", () => {
+  it("preserves unattributed or other-account changes without replaying them", async () => {
+    localStorage.setItem(
+      "outbox",
+      JSON.stringify([
+        {
+          id: 1,
+          op: JSON.stringify({ k: "insert", t: "products", row: { name: "Old" } }),
+        },
+        {
+          id: 2,
+          op: JSON.stringify({
+            k: "insert",
+            t: "products",
+            row: { name: "Other" },
+            _workspace: "other-account",
+          }),
+        },
+      ])
+    );
+    await flushOutbox();
+    expect(attempted).toEqual([]);
+    expect(remaining()).toHaveLength(2);
+  });
   it("drops an op that can never apply and drains the rest", async () => {
     queue([
       { k: "insert", t: "doomed_products", row: { name: "dupe" } },

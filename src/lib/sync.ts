@@ -18,7 +18,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { log } from "./log";
 import { supabase } from "./supabase";
-import { isLocalMode } from "./dataMode";
+import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
+import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 import {
   loadColl,
@@ -31,13 +32,13 @@ import {
 } from "./localdb";
 
 const FILES_BUCKET = "files";
-const ENABLED_KEY = "filey_auto_sync"; // "off" disables; anything else = on
+const ENABLED_KEY = "filey_auto_sync";
 
 export const autoSyncEnabled = (): boolean =>
-  typeof localStorage === "undefined" || localStorage.getItem(ENABLED_KEY) !== "off";
+  typeof localStorage !== "undefined" && localStorage.getItem(ENABLED_KEY) === "on";
 
 export function setAutoSyncEnabled(on: boolean): void {
-  if (on) localStorage.removeItem(ENABLED_KEY);
+  if (on) localStorage.setItem(ENABLED_KEY, "on");
   else localStorage.setItem(ENABLED_KEY, "off");
   notify();
   if (on) scheduleSync(500);
@@ -65,14 +66,11 @@ function setStatus(s: SyncStatus): void {
 /** Strip ownership columns the cloud re-stamps (user_id default, force_org_id
  *  trigger); "owner" columns and local file paths need the real uid. Shared
  *  with the one-time migration so both push paths clean rows identically.
- *  Null-valued keys are dropped so the cloud applies its column defaults /
- *  triggers (updated_at, shared, status…) instead of failing a NOT NULL —
- *  local JSON is loose, the cloud schema is strict.
- *  ponytail: dropping nulls means clearing a field to null on desktop won't
- *  propagate on upsert; acceptable — the alternative breaks NOT NULL columns. */
+ *  Explicit nulls are retained: clearing a contact field or relationship must
+ *  also clear it in the cloud. Invalid required fields remain pending instead
+ *  of silently changing their meaning during an upload. */
 export function cleanRowForPush(row: Record<string, any>, uid: string): Record<string, any> {
   const { user_id: _u, org_id: _o, ...rest } = row;
-  for (const k of Object.keys(rest)) if (rest[k] === null) delete rest[k];
   if ("owner" in row) rest.owner = uid;
   if (typeof rest.storage_path === "string")
     rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);
@@ -95,60 +93,41 @@ const NO_SHARE = new Set([
 // Every solo account sits in org 'default', so sharing there would expose
 // rows to unrelated users. Cached per uid; refreshed on every pull.
 let orgCache: { uid: string; inOrg: boolean } | null = null;
-async function inRealOrg(
+export async function inRealOrg(
   supa: SupabaseClient,
   uid: string,
   refresh = false
 ): Promise<boolean> {
   if (!refresh && orgCache?.uid === uid) return orgCache.inOrg;
-  const { data } = await supa
+  const { data, error } = await supa
     .from("profiles")
     .select("org_id")
     .eq("id", uid)
     .maybeSingle();
+  if (error) throw error;
+  assertLocalAccount(uid, data?.org_id ?? null);
   const inOrg = !!data?.org_id && data.org_id !== "default";
   orgCache = { uid, inOrg };
   return inOrg;
 }
 
-// FK columns whose parent may be missing in the local data (e.g. an invoice
-// pointing at a since-deleted customer). All are nullable in the cloud, so a
-// dangling reference is nulled on retry — the row itself is preserved.
-const FK_COLUMNS: Record<string, string[]> = {
-  orders: ["customer_id"],
-  order_items: ["order_id", "product_id"],
-  invoice_docs: ["customer_id", "quotation_id"],
-  invoice_doc_items: ["invoice_id", "product_id"],
-  invoice_payments: ["invoice_id"],
-  quotation_items: ["quotation_id", "product_id"],
-  transactions: ["account_id", "invoice_id"],
-  user_files: ["folder_id"],
-  stock_movements: ["product_id"],
-};
-
 /** Upsert one collection resiliently: try the whole chunk; on any error fall
- *  back to per-row so one bad row can't block the rest, and retry a row with
- *  its foreign keys nulled if a FK constraint is what failed. Returns the ids
- *  that could not be pushed (rare — logged, retried next sync). */
+ *  back to per-row so one bad row can't block the rest. Retry the original
+ *  record unchanged: removing foreign keys can detach paid invoices, stock
+ *  movements, and line items from the records they belong to. */
 export async function pushCollection(
   supa: SupabaseClient,
   table: string,
   rows: Record<string, any>[]
 ): Promise<(string | number)[]> {
   const failed: (string | number)[] = [];
-  const fks = FK_COLUMNS[table] ?? [];
   for (let i = 0; i < rows.length; i += 200) {
     const chunk = rows.slice(i, i + 200);
     const { error } = await supa.from(table).upsert(chunk, { onConflict: "id" });
     if (!error) continue;
     // Chunk failed — isolate the bad rows.
     for (const row of chunk) {
-      let { error: e1 } = await supa.from(table).upsert(row, { onConflict: "id" });
-      if (e1 && fks.length) {
-        const stripped = { ...row };
-        for (const c of fks) delete stripped[c];
-        e1 = (await supa.from(table).upsert(stripped, { onConflict: "id" })).error;
-      }
+      const { error: e1 } = await supa.from(table).upsert(row, { onConflict: "id" });
       if (e1) failed.push(row.id);
     }
   }
@@ -225,14 +204,14 @@ export function setMigrating(v: boolean): void {
 }
 
 export function isMigrating(): boolean {
-  return migrating;
+  return migrating || running;
 }
 
 /** Push everything the journal marked dirty. Returns true when the push ran to
  *  completion (including "nothing to do"). `client` is injectable for tests. */
 export async function syncNow(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean }
+  opts?: { manual?: boolean },
 ): Promise<boolean> {
   const supa = client ?? supabase;
   const manual = opts?.manual === true;
@@ -246,46 +225,62 @@ export async function syncNow(
   };
   if (!isLocalMode())
     return stop(
-      "This device already works directly against the cloud, so there is nothing to upload."
+      "This device already works directly against the cloud, so there is nothing to upload.",
     );
   if (!supa) return stop("Cloud is not configured in this build.");
   if (!manual && !autoSyncEnabled()) return false;
   if (running) return stop("A sync is already running — wait for it to finish.");
-  if (migrating && !manual)
-    return stop("A data migration is running — sync will resume after it finishes.");
-  if (typeof navigator !== "undefined" && !navigator.onLine)
-    return stop("No internet connection.");
+  if (migrating) return stop("A data migration is running — sync will resume after it finishes.");
+  if (typeof navigator !== "undefined" && !navigator.onLine) return stop("No internet connection.");
 
-  const sess = await freshSession(supa);
-  const uid = sess?.user?.id;
-  if (!uid) {
-    setStatus({
-      state: manual
-        ? // Redeeming an offline licence does not sign you in — people reach for
-          // the voucher when the upload fails, so name the actual requirement.
-          "error"
-        : "signed-out",
-      ...(manual
-        ? { error: "Sign in to your Filey account first — uploading needs an account to push to." }
-        : {}),
-    });
-    return false;
-  }
-
-  const j = await journalSnapshot();
-  const dirty = PUSH_TABLES.filter((t) => j.tables[t]);
-  if (!dirty.length) {
-    setStatus({ state: "done" });
-    return true;
-  }
-
+  // Reserve before the first await, so a second sync or workspace switch
+  // cannot start while authentication or the journal is being read.
   running = true;
-  setStatus({ state: "syncing" });
   try {
+    assertWorkspaceCurrent();
+    const sess = await freshSession(supa);
+    const uid = sess?.user?.id;
+    if (!uid) {
+      setStatus({
+        state: manual
+          ? // Redeeming an offline licence does not sign you in — people reach for
+            // the voucher when the upload fails, so name the actual requirement.
+            "error"
+          : "signed-out",
+        ...(manual
+          ? {
+              error: "Sign in to your Filey account first — uploading needs an account to push to.",
+            }
+          : {}),
+      });
+      return false;
+    }
+
+    try {
+      assertLocalAccount(uid);
+      if (localWorkspaceOwner() && !isLocalSignedIn())
+        return stop("Sign in to the device workspace before syncing.");
+    } catch (error) {
+      setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+
+    const j = await journalSnapshot();
+    const dirty = PUSH_TABLES.filter((t) => j.tables[t]);
+    if (!dirty.length) {
+      setStatus({ state: "done" });
+      return true;
+    }
+
+    setStatus({ state: "syncing" });
     // Deletes first, children before parents (reverse FK order).
+    const share = await inRealOrg(supa, uid, true);
     for (const t of [...dirty].reverse()) {
+      assertWorkspaceCurrent();
       const ids = j.tables[t].deleted;
       for (let i = 0; i < ids.length; i += 100) {
+        if ((await freshSession(supa))?.user.id !== uid)
+          throw new Error("Your session changed. Sign in again before syncing.");
         const { error } = await supa
           .from(t)
           .delete()
@@ -299,7 +294,6 @@ export async function syncNow(
     // safe: a stale unchanged row is never re-uploaded over a teammate's
     // newer copy. Resilient per-row fallback means messy local data
     // (dangling FKs, etc.) can't halt the whole sync.
-    const share = await inRealOrg(supa, uid);
     let pushedAny = false;
     const failedByTable: Record<string, (string | number)[]> = {};
     for (const t of dirty) {
@@ -308,8 +302,9 @@ export async function syncNow(
       // the 60s of headroom the initial check bought, so the token used to go
       // dead partway and the rest of the run failed as "JWT expired".
       // getSession is a local read; the refresh only fires near expiry.
-      if (!(await freshSession(supa)))
-        throw new Error("Your session expired mid-upload. Sign in again and retry.");
+      if ((await freshSession(supa))?.user.id !== uid)
+        throw new Error("Your session changed or expired mid-upload. Sign in again and retry.");
+      assertWorkspaceCurrent();
       const entry = j.tables[t];
       const all = await loadColl(t);
       const idSet = new Set(entry.changed);
@@ -318,7 +313,7 @@ export async function syncNow(
         const c = cleanRowForPush(r, uid);
         // Org members share business records with the whole team by default
         // (Vyapar model). Per-record privacy stays a web-side choice.
-        if (share && !NO_SHARE.has(t)) c.shared = true;
+        if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? true) : false;
         return c;
       });
       const failed = await pushCollection(supa, t, cleaned);
@@ -340,19 +335,27 @@ export async function syncNow(
     // Bookkeeping the web UI can show ("desktop last synced …"). Best-effort:
     // older cloud DBs may not have the table yet.
     const now = new Date().toISOString();
-    await supa
-      .from("sync_state")
-      .upsert(
-        dirty.map((t) => ({ user_id: uid, table_name: t, synced_at: now })),
-        { onConflict: "user_id,table_name" }
-      );
+    const completed = dirty.filter((table) => !failedByTable[table]);
+    await supa.from("sync_state").upsert(
+      completed.map((t) => ({ user_id: uid, table_name: t, synced_at: now })),
+      { onConflict: "user_id,table_name" },
+    );
 
-    await journalCommit(j.v, dirty);
-    // Rows that wouldn't upsert stay marked so the next sync retries them.
-    // Silent: re-dispatching the write event would hot-loop on a bad row.
+    // Keep failed tables dirty throughout: clearing and then re-marking them
+    // would lose pending records if storage failed between those two writes.
+    await journalCommit(j.v, completed);
     for (const [t, ids] of Object.entries(failedByTable)) {
       log.warn("sync", `${t}: ${ids.length} row(s) failed, will retry`);
-      await journalMark(t, { changed: ids, silent: true });
+    }
+    if (Object.keys(failedByTable).length) {
+      const detail = Object.entries(failedByTable)
+        .map(([table, ids]) => `${table} (${ids.length})`)
+        .join(", ");
+      setStatus({
+        state: "error",
+        error: `Some records could not be uploaded: ${detail}. Your local records are preserved and will be retried.`,
+      });
+      return false;
     }
     setStatus({ state: "done", at: now });
     return true;
@@ -389,7 +392,7 @@ const INCREMENTAL = new Set([
 ]);
 
 /** Page a table out of the cloud, `cols` wide, ordered by id. */
-async function pullPaged(
+export async function pullPaged(
   supa: SupabaseClient,
   t: string,
   cols: string
@@ -437,8 +440,9 @@ async function pullIncremental(
     for (const r of (data ?? []) as any[]) fetched.set(String(r.id), r);
   }
   // A row deleted between the two queries resolves to neither — drop it.
+  const staleIds = new Set(stale.map((m) => String(m.id)));
   return meta
-    .map((m) => fetched.get(String(m.id)) ?? local.get(String(m.id)))
+    .map((m) => staleIds.has(String(m.id)) ? fetched.get(String(m.id)) : local.get(String(m.id)))
     .filter(Boolean) as Record<string, any>[];
 }
 
@@ -447,16 +451,29 @@ async function pullIncremental(
  *  list is always a full snapshot, so remote deletes propagate for free; the
  *  row BODIES come down incrementally where updated_at is trustworthy. Dirty
  *  tables are skipped — local edits win until they've been pushed. */
-export async function pullNow(client?: SupabaseClient | null): Promise<boolean> {
+export async function pullNow(
+  client?: SupabaseClient | null,
+  opts?: { manual?: boolean },
+): Promise<boolean> {
   const supa = client ?? supabase;
-  if (!isLocalMode() || !supa || !autoSyncEnabled() || running) return false;
+  if (!isLocalMode() || !supa || (!opts?.manual && !autoSyncEnabled()) || running || migrating)
+    return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
-  const sess = await freshSession(supa);
-  const uid = sess?.user?.id;
-  if (!uid) return false;
-
   running = true;
   try {
+    assertWorkspaceCurrent();
+    const sess = await freshSession(supa);
+    const uid = sess?.user?.id;
+    if (!uid) return false;
+    try {
+      assertLocalAccount(uid);
+      if (localWorkspaceOwner() && !isLocalSignedIn()) return false;
+    } catch (error) {
+      setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+
+    setStatus({ state: "syncing" });
     await inRealOrg(supa, uid, true); // refresh org membership for the next push
     const before = await journalSnapshot();
     let changed = false;
@@ -466,11 +483,15 @@ export async function pullNow(client?: SupabaseClient | null): Promise<boolean> 
         ? await pullIncremental(supa, t)
         : await pullPaged(supa, t, "*");
       // A local write raced the pull — stop; the queued push must run first.
+      if ((await freshSession(supa))?.user.id !== uid)
+        throw new Error("Your session changed. Local records were not replaced for this table.");
+      assertWorkspaceCurrent();
       if ((await journalVersion()) !== before.v) break;
-      if (await replaceColl(t, rows)) changed = true;
+      if (await replaceColl(t, rows, before.v)) changed = true;
     }
     if (changed && typeof window !== "undefined")
       window.dispatchEvent(new Event("filey:remote-update"));
+    setStatus({ state: "done", at: new Date().toISOString() });
     return true;
   } catch (e: any) {
     setStatus({ state: "error", error: e?.message ?? String(e) });
@@ -487,11 +508,13 @@ export async function syncCycle(
   client?: SupabaseClient | null,
   opts?: { manual?: boolean }
 ): Promise<boolean> {
+  if (migrating || (!opts?.manual && !autoSyncEnabled())) return false;
   await seedIfNeeded(client);
   // "Sync now" is a button, not a heartbeat: pass the intent down so it does
   // not sit there doing nothing when auto-sync happens to be switched off.
   const pushed = await syncNow(client, opts);
-  const pulled = await pullNow(client);
+  if (!pushed) return false;
+  const pulled = await pullNow(client, opts);
   return pushed && pulled;
 }
 
@@ -506,6 +529,7 @@ async function seedIfNeeded(client?: SupabaseClient | null): Promise<void> {
   if (localStorage.getItem(SEEDED_KEY)) return;
   const { data } = await supa.auth.getSession();
   if (!data.session) return; // seed the first time a session exists
+  assertLocalAccount(data.session.user.id);
   await markAllForSync();
   localStorage.setItem(SEEDED_KEY, "1");
 }
@@ -517,7 +541,7 @@ export function scheduleSync(delayMs = 4000): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    void syncCycle();
+    void syncCycle().catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
   }, delayMs);
 }
 
@@ -544,7 +568,7 @@ export function startAutoSync(): void {
   // until you look at it again — the visibilitychange pull above catches up).
   setInterval(() => {
     if (typeof document !== "undefined" && document.hidden) return;
-    void syncCycle();
+    void syncCycle().catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
   }, 300_000);
 }
 
@@ -575,10 +599,14 @@ async function seedOnFirstConnect(): Promise<void> {
 }
 
 export async function cloudSignIn(email: string, password: string): Promise<void> {
+  const credential = getLocalCredential();
+  if (localWorkspaceOwner() && credential?.email !== email.trim().toLowerCase())
+    throw new Error("Connect the same account that owns this device workspace.");
   if (!supabase) throw new Error("Cloud isn't configured in this build.");
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error(error.message);
-  await seedOnFirstConnect();
+  assertLocalAccount(data.user?.id ?? "");
+  if (autoSyncEnabled()) await seedOnFirstConnect();
 }
 
 /** Create a cloud account from the desktop. Returns "confirm" when the
@@ -591,11 +619,13 @@ export async function cloudSignUp(
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw new Error(error.message);
   if (!data.session) return "confirm";
-  await seedOnFirstConnect();
+  assertLocalAccount(data.session.user.id);
+  if (autoSyncEnabled()) await seedOnFirstConnect();
   return "session";
 }
 
 export async function cloudSignOut(): Promise<void> {
+  setAutoSyncEnabled(false);
   await supabase?.auth.signOut();
   setStatus({ state: "signed-out" });
 }

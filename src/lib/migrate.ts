@@ -9,11 +9,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { cleanRowForPush, pushCollection } from "./sync";
-import { loadColl, replaceColl, clearLocalCache } from "./localdb";
+import { cleanRowForPush, pushCollection, pullPaged, inRealOrg } from "./sync";
+import {
+  loadColl,
+  replaceColl,
+  clearLocalCache,
+  journalSnapshot,
+  journalCommit,
+  journalVersion,
+} from "./localdb";
 
-const hasTauri =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
+
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
 // profiles, invitations…) is harmless — the local shim just stores them.
@@ -30,6 +38,7 @@ const TABLES = [
   "order_items",
   "invoice_docs",
   "invoice_doc_items",
+  "work_items",
   "invoice_payments",
   "invoice_recurrence",
   "quotations",
@@ -159,6 +168,8 @@ export async function migrateLocalToCloud(
         "“Cloud sync (automatic)” above; in cloud mode, log in — then push again."
     );
 
+  assertLocalAccount(uid);
+  await inRealOrg(supabase, uid, true);
   const out: MigrateResult[] = [];
 
   for (const t of PUSH_TABLES) {
@@ -240,54 +251,80 @@ export async function migrateCloudToLocal(
       "Sign in to your cloud account first: switch to Cloud mode, log in, then import."
     );
 
+  const uid = sess.session.user.id;
+  assertLocalAccount(uid);
+  const before = await journalSnapshot();
+  const staged = new Map<string, Record<string, any>[]>();
+  const originals = new Map<string, Record<string, any>[]>();
   const out: MigrateResult[] = [];
-  let fileRows: { storage_path?: string }[] = [];
 
+  // Read the complete source first. No record is replaced on a failed cloud read.
   for (const t of TABLES) {
-    onProgress?.(`Copying ${t}…`);
-    try {
-      const { data, error } = await supabase.from(t).select("*");
-      if (error) {
-        out.push({ table: t, rows: 0, error: error.message });
-        continue;
-      }
-      const rows = data ?? [];
-      // replaceColl rather than a raw key write: it splits oversized fields out
-      // the same way a normal save does, and it keeps the in-memory collection
-      // cache in step — a raw write behind its back left readers on pre-migration
-      // rows until the next reload.
-      await replaceColl(t, rows);
-      if (t === "user_files") fileRows = rows as { storage_path?: string }[];
-      out.push({ table: t, rows: rows.length });
-    } catch (e: any) {
-      out.push({ table: t, rows: 0, error: e?.message ?? String(e) });
-    }
+    onProgress?.(`Reading ${t}…`);
+    staged.set(t, await pullPaged(supabase, t, "*"));
+    originals.set(t, await loadColl(t));
+    out.push({ table: t, rows: staged.get(t)!.length });
   }
 
-  // Pull file bytes for My Files so they open offline. Best-effort.
-  if (fileRows.length) {
-    onProgress?.(`Downloading ${fileRows.length} files…`);
-    let ok = 0;
-    for (const f of fileRows) {
-      const path = f.storage_path;
-      if (!path) continue;
+  const cloudProfile = staged.get("profiles")?.find((row) => row.id === uid);
+  if (cloudProfile) assertLocalAccount(uid, cloudProfile.org_id ?? null);
+  const fileRows = staged.get("user_files") ?? [];
+  let files = 0;
+  for (const f of fileRows) {
+    const path = f.storage_path;
+    if (!path) continue;
+    onProgress?.(`Downloading file ${files + 1} of ${fileRows.length}…`);
+    const { data, error } = await supabase.storage.from(FILES_BUCKET).download(path);
+    if (error || !data)
+      throw new Error(
+        "A file could not be copied. Local records have not been replaced."
+      );
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    await localSet(
+      "fileblob:" + path,
+      JSON.stringify({
+        mime: data.type || "application/octet-stream",
+        b64: bytesToB64(bytes),
+      })
+    );
+    files++;
+  }
+  if (fileRows.length) out.push({ table: "files (blobs)", rows: files });
+  if ((await journalVersion()) !== before.v)
+    throw new Error("Local records changed during the copy. Finish editing and retry.");
+  const current = await supabase.auth.getSession();
+  if (current.data.session?.user.id !== uid)
+    throw new Error(
+      "The cloud account changed during the copy. Local records have not been replaced."
+    );
+
+  const committed: string[] = [];
+  try {
+    // ponytail: compensation handles write errors; process-crash atomicity needs a SQLite transaction.
+    for (const [table, rows] of staged) {
+      committed.push(table);
+      await replaceColl(table, rows);
+    }
+    claimLocalWorkspace(uid);
+    await journalCommit(before.v, TABLES);
+    // An imported snapshot must not be re-uploaded as legacy local data.
+    localStorage.setItem("filey_cloud_seeded", "1");
+  } catch (error) {
+    const failures: string[] = [];
+    for (const table of committed.reverse()) {
       try {
-        const { data, error } = await supabase.storage
-          .from(FILES_BUCKET)
-          .download(path);
-        if (error || !data) continue;
-        const bytes = new Uint8Array(await data.arrayBuffer());
-        await localSet(
-          "fileblob:" + path,
-          JSON.stringify({ mime: data.type || "application/octet-stream", b64: bytesToB64(bytes) })
-        );
-        ok++;
+        await replaceColl(table, originals.get(table)!);
       } catch {
-        /* skip individual file failures */
+        failures.push(table);
       }
     }
-    out.push({ table: "files (blobs)", rows: ok });
+    if (failures.length)
+      throw new Error(
+        `Local storage failed; restore your backup for: ${failures.join(", ")}.`
+      );
+    throw error;
   }
-
+  clearLocalCache();
+  window.dispatchEvent(new Event("filey:remote-update"));
   return out;
 }

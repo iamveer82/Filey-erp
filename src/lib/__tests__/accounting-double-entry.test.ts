@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
 import { fin, billing, erp, advances } from "../api";
+import { todayYmd } from "../format";
 
 // Money path: every posting must keep total debits == total credits, and the
 // balance sign must follow each account's normal balance (asset/expense grow on
@@ -22,6 +23,21 @@ const sums = async () => {
 };
 
 describe("accounting double-entry", () => {
+  it("records the chosen journal date and defaults an omitted date to today", async () => {
+    const accountId = (await fin.createAccount({ code: "1010", name: "Cash", account_type: "asset", balance: 0 } as never)) as number;
+    const datedId = await fin.postTransaction(accountId, "debit", 25, "Backdated entry", "2026-08-31");
+    const defaultId = await fin.postTransaction(accountId, "debit", 10, "Current entry");
+    const entries = await fin.transactions();
+    expect(entries.find((entry) => entry.id === datedId)?.txn_date).toBe("2026-08-31");
+    expect(entries.find((entry) => entry.id === defaultId)?.txn_date).toBe(todayYmd());
+  });
+
+  it("rejects impossible journal dates before creating a posting or changing balance", async () => {
+    const accountId = (await fin.createAccount({ code: "1011", name: "Cash", account_type: "asset", balance: 0 } as never)) as number;
+    await expect(fin.postTransaction(accountId, "debit", 25, "Invalid date", "2026-02-31")).rejects.toThrow("Enter a valid journal date.");
+    expect(await fin.transactions()).toEqual([]);
+    expect((await fin.accounts()).find((account) => account.id === accountId)?.balance).toBe(0);
+  });
   it("an expense posts equal debit and credit legs", async () => {
     await fin.createExpense("Rent", "Office", 500, "2026-06-19", null);
     const { d, c } = await sums();
