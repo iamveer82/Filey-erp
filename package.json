@@ -1,7 +1,7 @@
 {
   "name": "filey-erp",
   "private": true,
-  "version": "2.10.2",
+  "version": "2.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -88,6 +88,7 @@
     "jsdom": "^25.0.1",
     "postcss": "^8.5.15",
     "prettier": "^3.8.3",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.1",
