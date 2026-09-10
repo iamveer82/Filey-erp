@@ -149,3 +149,23 @@ npm run dev
 
 # Create an account, verify data saves to Supabase
 ```
+
+## Applied migration log
+
+The commit that added the September 2026 migrations recorded two of them as
+rejected. They have since been applied. This is the deployed state of project
+`voyrjqgaypiylwskkwpr`:
+
+| Migration | Applied | Verified by |
+| --- | --- | --- |
+| `2026-09-06-business-reliability.sql` | yes | `filey_save_document` resolves |
+| `2026-09-06-crm-workspace.sql` | yes | `crm_*` tables resolve; `filey_convert_lead` resolves |
+| `2026-09-06-international-business.sql` | 10 Sep 2026 | the six country/fx columns return 42501, not 42703 |
+| `2026-09-06-work-items.sql` | 10 Sep 2026 | `to_regclass('public.work_items')` is non-null, `relrowsecurity` true |
+
+Checking from outside, with only the anon key, tells you which of the two it
+is: a missing table answers `PGRST205` and a missing column `42703`, while
+one that exists answers `42501` because RLS stops the anon role before it
+reads anything. A missing *function* is not distinguishable this way — an
+existing function called with the wrong argument names returns `PGRST202`
+just like an absent one, so probe RPCs with their real parameter names.
