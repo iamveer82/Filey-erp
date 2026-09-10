@@ -2,7 +2,7 @@
 // rows to a (fake) cloud client — upserts by id, deletes deleted ids, strips
 // ownership, flags org sharing; pullNow brings cloud rows down into clean
 // collections.
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
@@ -510,5 +510,38 @@ describe('expired session', () => {
     const s = getSyncStatus();
     expect(s.state).toBe('error');
     expect(s.error ?? '').toMatch(/sign in/i);
+  });
+});
+
+// Auto-sync flipped from opt-out to opt-in. Upgrading must not silently stop
+// backing up an install that had simply left the old default alone.
+describe("auto-sync opt-in upgrade", () => {
+  const reimport = async () => {
+    vi.resetModules();
+    return import("./sync");
+  };
+
+  it("keeps sync on for an install that had already seeded to cloud", async () => {
+    localStorage.clear();
+    localStorage.setItem("filey_cloud_seeded", "1");
+    const { autoSyncEnabled } = await reimport();
+    expect(localStorage.getItem("filey_auto_sync")).toBe("on");
+    expect(autoSyncEnabled()).toBe(true);
+  });
+
+  it("leaves a fresh install opted out", async () => {
+    localStorage.clear();
+    const { autoSyncEnabled } = await reimport();
+    expect(localStorage.getItem("filey_auto_sync")).toBeNull();
+    expect(autoSyncEnabled()).toBe(false);
+  });
+
+  it("never overrides a deliberate off", async () => {
+    localStorage.clear();
+    localStorage.setItem("filey_cloud_seeded", "1");
+    localStorage.setItem("filey_auto_sync", "off");
+    const { autoSyncEnabled } = await reimport();
+    expect(localStorage.getItem("filey_auto_sync")).toBe("off");
+    expect(autoSyncEnabled()).toBe(false);
   });
 });

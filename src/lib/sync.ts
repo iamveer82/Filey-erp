@@ -591,6 +591,16 @@ export async function cloudSessionEmail(): Promise<string | null> {
 
 const SEEDED_KEY = "filey_cloud_seeded";
 
+/** Auto-sync used to be opt-out: an absent key meant on. It is opt-in now, so
+ *  upgrading would silently stop backing up every install that had simply left
+ *  the default alone. Having seeded to cloud proves sync was running, so those
+ *  installs keep it; a fresh install has no seed marker and stays off. */
+if (typeof localStorage !== "undefined" &&
+    localStorage.getItem(ENABLED_KEY) === null &&
+    localStorage.getItem(SEEDED_KEY)) {
+  localStorage.setItem(ENABLED_KEY, "on");
+}
+
 // Fresh sign-in: seed (see seedIfNeeded) and sync promptly.
 async function seedOnFirstConnect(): Promise<void> {
   setStatus({ state: "idle" });
