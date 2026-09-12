@@ -33,9 +33,9 @@
     "targets": "all",
     "publisher": "Filey",
     "category": "Business",
-    "shortDescription": "Filey ERP â€” inventory, invoicing, quotations & CRM",
-    "longDescription": "Filey ERP is a desktop ERP for SMBs: inventory, orders, FTA-compliant invoicing & quotations, CRM pipeline, purchasing, reports and a local PDF toolkit. Offline-first, secured per user via Supabase.",
-    "copyright": "Â© Filey",
+    "shortDescription": "Filey ERP - inventory, invoicing, quotations & CRM",
+    "longDescription": "Filey ERP is a desktop workspace for inventory, invoices, quotations, CRM, purchasing, reports and PDF tools, with separate local and cloud storage.",
+    "copyright": "Copyright Filey",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
