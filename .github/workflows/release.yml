@@ -83,11 +83,6 @@ jobs:
       # runner. install reconciles per-platform.
       - run: npm install --no-audit --no-fund
 
-      - name: Typecheck & unit tests
-        run: |
-          npm run typecheck
-          npm test
-
       # The WhatsApp bridge ships as a Tauri sidecar so a QR-paired session can
       # start with the app instead of from a terminal. Compiled to a standalone
       # binary here (Baileys is Node-only), named with the target triple, which
@@ -117,6 +112,13 @@ jobs:
           bun build --compile index.mjs \
             --outfile "../../src-tauri/binaries/filey-wa-bridge-$TRIPLE$EXT"
           ls -la ../../src-tauri/binaries
+
+      # Run after the bridge installs its own dependencies; its tests are part
+      # of the root suite and need those imports even when transport is mocked.
+      - name: Typecheck & unit tests
+        run: |
+          npm run typecheck
+          npm test
 
       - name: Build desktop app
         uses: tauri-apps/tauri-action@v0

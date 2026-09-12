@@ -19,6 +19,8 @@ jobs:
       # @tailwindcss oxide / lightningcss pull @emnapi/*), which makes
       # `npm ci` abort with "missing from lock file" on the linux runner.
       - run: npm install --no-audit --no-fund
+      # Bridge tests import its isolated Node dependencies, not the web bundle.
+      - run: npm ci --prefix tools/wa-bridge --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
