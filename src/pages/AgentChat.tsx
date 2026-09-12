@@ -136,7 +136,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
   const [chat, setChat] = useState<Chat>(resolveOpeningChat);
   const [input, setInput] = useState<string>(() =>
-    typeof location.state?.draft === "string" ? location.state.draft.slice(0, 4000) : ""
+    typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope) ? location.state.draft.slice(0, 4000) : ""
   );
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState(false);

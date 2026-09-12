@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import {
   Activity,
@@ -16,8 +16,11 @@ import {
   Users,
   Upload,
   Bookmark,
-  BarChart3,
   SlidersHorizontal,
+  Cloud,
+  HardDrive,
+  ChevronRight,
+  CalendarDays,
 } from "lucide-react";
 import {
   CRM_OBJECTS,
@@ -56,12 +59,25 @@ import { PageHeader, DataTable, ErrorBanner, Badge, Spinner } from "../component
 import ImportCsvModal from "../components/ImportCsvModal";
 import RecordEditor from "../components/crm/RecordEditor";
 import CrmOverview from "../components/crm/CrmOverview";
+import CrmToday from "../components/crm/CrmToday";
+import CrmBulkEdit from "../components/crm/CrmBulkEdit";
+import { crmDuplicates, crmBulkFields } from "../lib/crmOrganization";
+import { CustomFieldsManager } from "../components/CustomFieldsManager";
+import RecordIdentity, { RecordAvatar } from "../components/crm/RecordIdentity";
+import {
+  parseRecordStack,
+  pushRecord,
+  recordKey,
+  type RecordRef,
+} from "../components/crm/recordStack";
+import "./Crm.css";
 import {
   crmColumns,
   defaultCrmColumns,
   crmSortValue,
   DUE_FILTERS,
   matchesDueFilter,
+  withRelationshipCounts,
 } from "../components/crm/viewOptions";
 
 const icons = {
@@ -73,9 +89,10 @@ const icons = {
   notes: StickyNote,
   activities: Activity,
 };
-type View = CrmObject | "overview" | "reports";
+type View = CrmObject | "overview" | "today" | "reports";
 type Editor = { kind: CrmObject; row?: CrmRow; initial?: Record<string, string> };
 const DESCRIPTIONS: Record<View, string> = {
+  today: "The next steps that keep your business moving.",
   overview: "Your relationships, pipeline, and next steps in one place.",
   companies: "Accounts connected to their people, deals, and history.",
   contacts: "The people behind every business relationship.",
@@ -104,6 +121,7 @@ type SavedView = {
   direction?: string;
   columns?: string;
   due?: string;
+  duplicates?: string;
 };
 function readViews(viewStorageKey: string | null): SavedView[] {
   if (!viewStorageKey) return [];
@@ -152,9 +170,22 @@ function CrmWorkspace({
   const [data, setData] = useState<CrmData>(emptyCrmData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const [editorHistory, setEditorHistory] = useState<Editor[]>([]);
+  const [draftEditor, setDraftEditor] = useState<Editor | null>(null);
+  const recordStack = parseRecordStack(params.get("record"));
+  const topRecord = recordStack[recordStack.length - 1];
+  const selectedRecord =
+    topRecord && data[topRecord.kind].find((row) => row.id === topRecord.id);
+  const editor: Editor | null =
+    draftEditor ||
+    (topRecord && selectedRecord ? { kind: topRecord.kind, row: selectedRecord } : null);
+  const previousRef = draftEditor ? topRecord : recordStack[recordStack.length - 2];
+  const previousRow =
+    previousRef && data[previousRef.kind].find((row) => row.id === previousRef.id);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [bulkEdit, setBulkEdit] = useState<{ kind: CrmObject; rows: CrmRow[] } | null>(
+    null
+  );
+  const [fieldsOpen, setFieldsOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const moving = useRef(false);
@@ -190,8 +221,7 @@ function CrmWorkspace({
   useLiveSync(load);
   const go = (next: View) => {
     setParams({ view: next });
-    setEditor(null);
-    setEditorHistory([]);
+    setDraftEditor(null);
     setOptionsOpen(false);
   };
   const filter = (key: string, value: string) =>
@@ -238,24 +268,47 @@ function CrmWorkspace({
       { replace: true }
     );
   };
+  const writeRecordStack = (stack: RecordRef[], replace = true) => {
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (stack.length) next.set("record", stack.map(recordKey).join(","));
+        else next.delete("record");
+        return next;
+      },
+      { replace }
+    );
+  };
+  const closeRecord = () => {
+    setDraftEditor(null);
+    writeRecordStack([]);
+  };
   const returnToRecord = () => {
-    const previous = editorHistory[editorHistory.length - 1];
-    setEditor(previous || null);
-    setEditorHistory((history) => history.slice(0, -1));
+    if (draftEditor) setDraftEditor(null);
+    else writeRecordStack(recordStack.slice(0, -1));
   };
-  const followRecord = (next: Editor) => {
-    if (editor?.row) setEditorHistory((history) => [...history, editor]);
-    setEditor(next);
+  const open = (object: CrmObject, row: CrmRow) => {
+    setDraftEditor(null);
+    writeRecordStack(
+      pushRecord(recordStack, { kind: object, id: row.id }),
+      recordStack.length > 0
+    );
   };
-  const open = (object: CrmObject, row: CrmRow) => setEditor({ kind: object, row });
   const add = (object: CrmObject, initial?: Record<string, string>) =>
-    setEditor({ kind: object, initial });
-  const rows = kind ? data[kind] : [];
+    setDraftEditor({ kind: object, initial });
+  const rows = useMemo(
+    () => (kind ? withRelationshipCounts(kind, data) : []),
+    [kind, data]
+  );
   const spec = kind ? CRM_OBJECTS[kind] : null;
+  const duplicateIds = new Set(
+    kind ? crmDuplicates(kind, rows).flatMap((group) => group.ids) : []
+  );
   const visible = rows
     .filter(
       (row) =>
         matchesCrmSearch(kind!, row, data, q) &&
+        (params.get("duplicates") !== "1" || duplicateIds.has(row.id)) &&
         (!status || text(row[spec!.group]) === status) &&
         (!owner || text(row.owner || row.assignee || row.author) === owner) &&
         matchesDueFilter(row, due, todayYmd())
@@ -320,6 +373,7 @@ function CrmWorkspace({
         direction: sort?.dir === -1 ? "desc" : "asc",
         columns: selectedColumns.join(","),
         due,
+        duplicates: params.get("duplicates") || "",
       },
     ];
     try {
@@ -344,28 +398,32 @@ function CrmWorkspace({
       setBusy(false);
     }
   };
-  const currentTitle = kind ? CRM_OBJECTS[kind].label : "CRM overview";
+  const currentTitle = kind
+    ? CRM_OBJECTS[kind].label
+    : view === "today"
+      ? "Today"
+      : "CRM overview";
   const navItems = [
     { id: "overview" as View, title: "Overview", Icon: LayoutDashboard },
+    { id: "today" as View, title: "Today", Icon: CalendarDays },
     ...OBJECT_KEYS.map((id) => ({ id, title: CRM_OBJECTS[id].label, Icon: icons[id] })),
-    { id: "reports" as View, title: "Reports", Icon: BarChart3 },
   ];
 
   if (view === "reports")
     return <Navigate to="/reports?tab=insights&section=deals" replace />;
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-4">
-        <Building2 size={14} />
-        <span>
-          Filey / <strong className="text-foreground font-medium">CRM workspace</strong>
-        </span>
-        <span className="ml-auto">
-          {isLocalMode() ? "Stored on this device" : "Cloud workspace"} · Core CRM is free
+    <div className="crm-workspace">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-5">
+        <span>Filey</span>
+        <ChevronRight size={12} />
+        <strong className="text-foreground font-medium">CRM</strong>
+        <span className="ml-auto inline-flex items-center gap-1.5">
+          {isLocalMode() ? <HardDrive size={13} /> : <Cloud size={13} />}
+          {isLocalMode() ? "Stored on this device" : "Cloud workspace"}
         </span>
       </div>
-      <div className="flex flex-col xl:flex-row gap-5">
+      <div className="flex min-w-0 flex-col gap-5">
         <label className="sm:hidden text-sm font-medium">
           CRM section
           <select
@@ -383,7 +441,7 @@ function CrmWorkspace({
         </label>
         <nav
           aria-label="CRM sections"
-          className="xl:w-40 xl:shrink-0 hidden sm:flex xl:flex-col gap-1 overflow-x-auto xl:overflow-visible pb-2 xl:pb-0"
+          className="crm-navigation hidden sm:flex items-center gap-1 overflow-x-auto border-b border-border pb-3"
         >
           {navItems.map(({ id, title, Icon }) => (
             <button
@@ -391,7 +449,7 @@ function CrmWorkspace({
               onClick={() => go(id)}
               aria-current={view === id ? "page" : undefined}
               className={cn(
-                "flex items-center gap-2 px-3 py-2.5 rounded-full text-[13px] whitespace-nowrap",
+                "flex min-h-10 items-center gap-2 px-3 py-2.5 rounded-full text-[13px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 view === id
                   ? "bg-hover text-foreground font-semibold"
                   : "text-muted-foreground hover:bg-hover"
@@ -414,13 +472,13 @@ function CrmWorkspace({
             action={
               <div className="flex gap-2 flex-wrap">
                 <button
-                  className="btn-ghost"
+                  className="btn-ghost w-10 p-0"
                   aria-label="Refresh CRM"
+                  title="Refresh CRM"
                   disabled={loading}
                   onClick={() => void load()}
                 >
                   <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-                  Refresh
                 </button>
                 {kind && (
                   <button
@@ -452,6 +510,20 @@ function CrmWorkspace({
               />
             </div>
           )}
+          {!loading && params.has("record") && (!topRecord || !selectedRecord) && (
+            <div
+              className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 text-sm"
+              role="status"
+            >
+              <span className="flex-1">
+                This record is unavailable in the current workspace. It may have been
+                removed or belong to another workspace.
+              </span>
+              <button className="btn-ghost" onClick={closeRecord}>
+                Dismiss
+              </button>
+            </div>
+          )}
           {loading && !OBJECT_KEYS.some((k) => data[k].length) ? (
             <Spinner label="Loading your CRM workspace…" />
           ) : error && !OBJECT_KEYS.some((k) => data[k].length) ? (
@@ -460,12 +532,23 @@ function CrmWorkspace({
             </p>
           ) : view === "overview" ? (
             <CrmOverview data={data} onOpen={open} go={go} error={!!error} />
+          ) : view === "today" ? (
+            <CrmToday
+              data={data}
+              onOpen={open}
+              onAdd={add}
+              disabled={loading || !!error}
+              onComplete={async (row) => {
+                await saveCrmStatus("tasks", row, "done");
+                await load();
+              }}
+            />
           ) : (
             kind &&
             spec && (
               <>
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  <label className="relative flex-1 min-w-48 max-w-md">
+                <div className="crm-toolbar flex flex-wrap items-center gap-2 mb-3">
+                  <label className="relative flex-1 min-w-48 max-w-sm">
                     <span className="sr-only">Search {spec.label.toLowerCase()}</span>
                     <Search
                       size={15}
@@ -532,12 +615,36 @@ function CrmWorkspace({
                   )}
                   <button
                     className="btn-ghost"
+                    title="Save these filters and columns on this device"
                     disabled={!viewStorageKey}
                     onClick={() => void saveView()}
                   >
                     <Bookmark size={14} />
                     Save view
                   </button>
+                  {!!duplicateIds.size && (
+                    <button
+                      className={cn(
+                        "btn-ghost",
+                        params.get("duplicates") === "1" && "bg-hover"
+                      )}
+                      aria-pressed={params.get("duplicates") === "1"}
+                      onClick={() =>
+                        filter("duplicates", params.get("duplicates") === "1" ? "" : "1")
+                      }
+                    >
+                      Possible duplicates · {duplicateIds.size}
+                    </button>
+                  )}
+                  {(kind === "companies" || kind === "contacts") && (
+                    <button
+                      className="btn-ghost"
+                      disabled={loading || !!error}
+                      onClick={() => setFieldsOpen(true)}
+                    >
+                      Custom fields
+                    </button>
+                  )}
                   <button
                     className="btn-ghost"
                     aria-expanded={optionsOpen}
@@ -716,13 +823,13 @@ function CrmWorkspace({
                       · {sort.dir === 1 ? "ascending" : "descending"}
                     </span>
                   )}
-                  {(q || status || owner || due) && (
+                  {(q || status || owner || due || params.get("duplicates")) && (
                     <button
                       className="btn-ghost"
                       onClick={() =>
                         setParams((previous) => {
                           const next = new URLSearchParams(previous);
-                          ["q", "status", "owner", "due"].forEach((key) =>
+                          ["q", "status", "owner", "due", "duplicates"].forEach((key) =>
                             next.delete(key)
                           );
                           return next;
@@ -749,7 +856,7 @@ function CrmWorkspace({
                               owner: v.owner,
                               mode: v.mode,
                               ...Object.fromEntries(
-                                ["sort", "direction", "columns", "due"]
+                                ["sort", "direction", "columns", "due", "duplicates"]
                                   .filter(
                                     (key) => typeof v[key as keyof SavedView] === "string"
                                   )
@@ -788,7 +895,7 @@ function CrmWorkspace({
                 </div>
                 {mode === "board" && (kind === "deals" || kind === "tasks") ? (
                   <div
-                    className="flex gap-3 overflow-x-auto pb-4"
+                    className="crm-board flex gap-3 overflow-x-auto pb-4"
                     aria-label={`${spec.label} board`}
                   >
                     {(kind === "deals" ? STAGES : TASK_STATUSES)
@@ -806,7 +913,7 @@ function CrmWorkspace({
                         return (
                           <section
                             key={stage}
-                            className="w-64 shrink-0 bg-muted/30 border border-border rounded-lg"
+                            className="crm-board-column w-64 shrink-0 rounded-xl bg-muted/40"
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => {
                               e.preventDefault();
@@ -819,11 +926,36 @@ function CrmWorkspace({
                               if (row) void changeStatus(row, stage);
                             }}
                           >
-                            <div className="px-3 py-3 border-b border-border flex justify-between text-sm font-medium">
-                              <span>{label(stage)}</span>
-                              <span className="text-muted-foreground">
-                                {cards.length}
-                              </span>
+                            <div className="px-3 py-3 space-y-2">
+                              <div className="flex items-center justify-between text-[13px] font-medium">
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    aria-hidden="true"
+                                    className={cn(
+                                      "h-2 w-2 rounded-full",
+                                      stage === "won" || stage === "done"
+                                        ? "bg-success"
+                                        : stage === "lost" || stage === "cancelled"
+                                          ? "bg-muted-foreground"
+                                          : "bg-primary-400"
+                                    )}
+                                  />
+                                  {label(stage)}
+                                </span>
+                                <span className="text-xs tabular-nums text-muted-foreground">
+                                  {cards.length}
+                                </span>
+                              </div>
+                              {kind === "deals" && (
+                                <p className="text-xs tabular-nums text-muted-foreground">
+                                  {aed(
+                                    cards.reduce(
+                                      (sum, row) => sum + (Number(row.value) || 0),
+                                      0
+                                    )
+                                  )}
+                                </p>
+                              )}
                             </div>
                             <div className="p-2 space-y-2 min-h-32">
                               {cards.map((row) => (
@@ -836,7 +968,7 @@ function CrmWorkspace({
                                       `${kind}:${row.id}`
                                     )
                                   }
-                                  className="bg-card border border-border rounded-md p-3"
+                                  className="bg-card border border-border rounded-xl p-3"
                                 >
                                   <button
                                     className="text-left w-full font-medium text-sm hover:underline"
@@ -844,15 +976,27 @@ function CrmWorkspace({
                                   >
                                     {recordName(kind, row)}
                                   </button>
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    {text(row.customer_name || row.assignee) ||
-                                      "Unassigned"}
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
+                                    <RecordAvatar
+                                      kind={kind === "deals" ? "companies" : "contacts"}
+                                      name={text(row.customer_name || row.assignee)}
+                                    />
+                                    <span className="truncate">
+                                      {text(row.customer_name || row.assignee) ||
+                                        "Unassigned"}
+                                    </span>
                                   </div>
                                   {kind === "deals" && (
                                     <div className="font-semibold text-sm mt-3 tabular-nums">
                                       {aed(Number(row.value) || 0)}
                                     </div>
                                   )}
+                                  {row.expected_close || row.due_date ? (
+                                    <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                      <CalendarDays size={13} />
+                                      {fmtDate(text(row.expected_close || row.due_date))}
+                                    </p>
+                                  ) : null}
                                   <select
                                     className="select mt-3 text-xs"
                                     aria-label={`Move ${recordName(kind, row)}`}
@@ -904,6 +1048,18 @@ function CrmWorkspace({
                     sort={sort}
                     onSortChange={changeSort}
                     rowKey={(r) => r.id}
+                    bulkActions={
+                      crmBulkFields(kind).length && !loading && !error
+                        ? [
+                            {
+                              label: "Update selected",
+                              run: (selected) => {
+                                setBulkEdit({ kind, rows: selected });
+                              },
+                            },
+                          ]
+                        : undefined
+                    }
                     pageSize={25}
                     loading={loading}
                     onRowClick={(r) => open(kind, r)}
@@ -919,11 +1075,16 @@ function CrmWorkspace({
                         sortValue: (r) => recordName(kind, r).toLowerCase(),
                         render: (r) => (
                           <button
-                            className="text-left font-medium max-w-72 truncate block hover:underline"
+                            className="text-left min-w-40 max-w-72 hover:underline"
+                            aria-label={recordName(kind, r)}
                             onClick={() => open(kind, r)}
                           >
-                            {r.pinned ? "★ " : ""}
-                            {recordName(kind, r)}
+                            <RecordIdentity kind={kind} row={r} />
+                            {duplicateIds.has(r.id) && (
+                              <span className="block mt-1 text-[11px] text-muted-foreground">
+                                Possible duplicate · review
+                              </span>
+                            )}
                           </button>
                         ),
                       },
@@ -935,6 +1096,12 @@ function CrmWorkspace({
                           sortValue: (r: CrmRow) =>
                             crmSortValue(kind, r, field.key, data),
                           render: (r: CrmRow) => {
+                            if (field.type === "count")
+                              return (
+                                <span className="tabular-nums">
+                                  {Number(r[field.key]) || 0}
+                                </span>
+                              );
                             if (field.type === "company" || field.type === "contact") {
                               const object =
                                 field.type === "company" ? "companies" : "contacts";
@@ -1057,21 +1224,16 @@ function CrmWorkspace({
               : undefined
           }
           data={data}
-          onClose={() => {
-            setEditor(null);
-            setEditorHistory([]);
-          }}
-          onBack={editorHistory.length ? returnToRecord : undefined}
+          onClose={closeRecord}
+          onBack={previousRow ? returnToRecord : undefined}
           backLabel={
-            editorHistory.length
-              ? recordName(
-                  editorHistory[editorHistory.length - 1].kind,
-                  editorHistory[editorHistory.length - 1].row!
-                )
+            previousRef && previousRow
+              ? recordName(previousRef.kind, previousRow)
               : undefined
           }
-          onOpen={(kind, row) => followRecord({ kind, row })}
-          onAdd={(kind, initial) => followRecord({ kind, initial })}
+          onOpen={open}
+          onAdd={add}
+          mutationDisabled={loading || !!error}
           onSave={async (draft) => {
             await saveCrmRecord(editor.kind, draft, data, editor.row);
             returnToRecord();
@@ -1097,12 +1259,30 @@ function CrmWorkspace({
           }}
           onConvert={async () => {
             if (!editor.row) return;
-            await convertCrmLead(editor.row.id);
-            setEditor(null);
+            const dealId = await convertCrmLead(editor.row.id);
+            if (!active.current) return;
+            setDraftEditor(null);
             toast.success("Lead converted to a company, contact and deal");
             await load();
-            go("deals");
+            if (!active.current) return;
+            setParams({ view: "deals", record: `deals:${dealId}` });
           }}
+        />
+      )}
+      {bulkEdit && (
+        <CrmBulkEdit
+          kind={bulkEdit.kind}
+          rows={bulkEdit.rows}
+          data={data}
+          onClose={() => setBulkEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {(kind === "companies" || kind === "contacts") && (
+        <CustomFieldsManager
+          open={fieldsOpen}
+          onOpenChange={setFieldsOpen}
+          module={kind === "companies" ? "customers" : "contacts"}
         />
       )}
       {kind && (

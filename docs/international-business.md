@@ -30,7 +30,7 @@ Presets were checked on 6 September 2026. They are editable suggestions; they do
 
 Apply `supabase/2026-09-06-international-business.sql` before enabling country persistence in cloud or transferring country-tagged local documents. The migration adds nullable columns only and leaves organization/owner RLS intact. It does not relabel or backfill historical invoices. Native local rows are schemaless and retain the fields through the existing database backup and explicit transfer paths.
 
-The previous authorized Supabase management request returned HTTP 403 / Cloudflare 1010. This migration has not been applied remotely. Do not publish the update as cloud-ready. Country settings and records belong to the selected local or cloud workspace; changing storage mode does not automatically merge them.
+The initial management request failed, but this migration was subsequently applied on September 10 and its columns rechecked on September 12. See [the deployment log](SUPABASE_DEPLOY.md#applied-migration-log). Country settings and records belong to the selected local or cloud workspace; changing storage mode does not automatically merge them.
 
 ## Remaining release work
 

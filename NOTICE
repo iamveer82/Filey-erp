@@ -19,3 +19,11 @@ governs that directory's contents:
       MIT License — Copyright (c) lewislulu (@lewislulu)
 
 See the LICENSE file inside each of those directories for the full terms.
+
+Comp AI CRM adaptations
+  Source: https://github.com/omkshirsagar2914-pixel/trycompai-crm
+  Revision: c6d6b7a9b61a3e19600fe1e2877098f6639e64df
+  Copyright (c) 2026 Comp AI. MIT License.
+  Adapted record drawer composition and URL record-stack navigation in
+  src/components/crm/RecordSheet.tsx and src/components/crm/recordStack.ts.
+  Full original notice and terms: licenses/comp-ai-crm.txt.

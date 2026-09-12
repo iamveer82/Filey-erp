@@ -4,8 +4,11 @@ import DocumentMessageDialog from "../DocumentMessageDialog";
 import { bridgeState, sendWaFile } from "../../lib/waBridge";
 import { deliverFile } from "../../lib/agentFiles";
 import { openMessageDraft, prepareWhatsAppDocument } from "../../lib/documentMessage";
+import { sendWhatsAppWithComputer } from "../../lib/whatsappComputerSend";
 
-const identity = vi.hoisted(() => ({ scope: "local:org:user" }));
+const identity = vi.hoisted(() => ({ scope: "local:org:user", computer: false }));
+vi.mock("../../lib/computerUse", () => ({ computerUseSupported: () => identity.computer }));
+vi.mock("../../lib/whatsappComputerSend", () => ({ sendWhatsAppWithComputer: vi.fn() }));
 vi.mock("../../lib/agentStorage", () => ({
   agentStorageScope: () => identity.scope,
   AGENT_STORAGE_EVENT: "filey:agent-storage",
@@ -28,6 +31,7 @@ Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder(
 const props = { title: "Invoice 123", phone: "+971501234567", message: "Your invoice", channel: "whatsapp" as const, loadPdf: async () => file, onClose: vi.fn() };
 beforeEach(() => {
   identity.scope = "local:org:user";
+  identity.computer = false;
   vi.mocked(bridgeState).mockResolvedValue({ state: "connected" });
   vi.mocked(deliverFile).mockResolvedValue({ name: file.name, path: "C:/Exports/Invoice-123.pdf" });
 });
@@ -146,4 +150,45 @@ it("removes the previous PDF when a replacement export fails", async () => {
   await screen.findByText(/Export failed/);
   expect(screen.getByRole("button", { name: "Download PDF" })).toBeDisabled();
   expect(screen.queryByText(file.name)).not.toBeInTheDocument();
+});
+
+it("shows the desktop-only AI option honestly in the browser preview", async () => {
+  render(<DocumentMessageDialog {...props} />);
+  expect(screen.getByRole("button", { name: "Send with Filey AI" })).toBeDisabled();
+  expect(screen.getByText(/localhost\/browser preview/)).toBeInTheDocument();
+  expect(sendWhatsAppWithComputer).not.toHaveBeenCalled();
+});
+
+it("starts the reviewed computer task from one click and prevents another send after uncertainty", async () => {
+  identity.computer = true;
+  vi.mocked(sendWhatsAppWithComputer).mockImplementation(async input => {
+    input.onProgress?.({ message: "Sending…", sendAttempted: true, path: "C:/Exports/Invoice-123.pdf" });
+    return { status: "unknown", sendAttempted: true, message: "Check WhatsApp before sending another copy." };
+  });
+  render(<DocumentMessageDialog {...props} />);
+  const send = screen.getByRole("button", { name: "Send with Filey AI" });
+  await waitFor(() => expect(send).toBeEnabled());
+  fireEvent.click(send);
+  await screen.findByText("Check WhatsApp before sending another copy.");
+  expect(sendWhatsAppWithComputer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    file, phone: props.phone, text: props.message, expectedScope: identity.scope, signal: expect.any(AbortSignal),
+  }));
+  expect(screen.getByRole("button", { name: "Check the send in WhatsApp" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Send PDF via paired WhatsApp" })).toBeDisabled();
+  expect(sendWaFile).not.toHaveBeenCalled();
+});
+
+it("lets the user stop the computer task and reports it without a sent claim", async () => {
+  identity.computer = true;
+  vi.mocked(sendWhatsAppWithComputer).mockImplementation(input => new Promise(resolve => {
+    input.signal!.addEventListener("abort", () => resolve({ status: "stopped", sendAttempted: false, message: "Filey AI stopped." }), { once: true });
+  }));
+  render(<DocumentMessageDialog {...props} />);
+  const send = screen.getByRole("button", { name: "Send with Filey AI" });
+  await waitFor(() => expect(send).toBeEnabled());
+  fireEvent.click(send);
+  await waitFor(() => expect(sendWhatsAppWithComputer).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Filey AI stopped.");
+  expect(screen.getByRole("button", { name: "Send with Filey AI" })).toBeEnabled();
 });

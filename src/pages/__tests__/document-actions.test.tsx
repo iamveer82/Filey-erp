@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { notifyDataChanged } from "../../lib/realtime";
 import { AuthProvider } from "../../lib/auth";
-import { billing, erp, hr, quotes, receipts, recurrences, tools, type CompanyProfile, type Employee, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary } from "../../lib/api";
+import { billing, erp, hr, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary } from "../../lib/api";
 import * as filesApi from "../../lib/files";
 import * as pdfTools from "../../lib/pdfTools";
 import * as emailApi from "../../lib/email";
@@ -112,7 +112,7 @@ beforeEach(() => {
   vi.spyOn(filesApi, "autoSaveDocument").mockResolvedValue(false);
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); setCacheOrg(null); vi.restoreAllMocks(); });
 
 describe("invoice editor actions", () => {
   beforeEach(() => {
@@ -129,6 +129,7 @@ describe("invoice editor actions", () => {
     vi.spyOn(pdfTools, "downloadElementAsPdf").mockRejectedValue(new Error("Folder is read-only"));
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "Edit" }));
     await view.findByDisplayValue("Example customer");
     const exportButton = view.getByTitle("Download PDF (Ctrl+P)");
@@ -142,6 +143,7 @@ describe("invoice editor actions", () => {
     const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "Edit" }));
     const section = (await view.findByText("E-invoice details")).closest("details")!;
     const disclosure = section.querySelector("summary")!;
@@ -167,6 +169,7 @@ describe("invoice editor actions", () => {
     else write.mockRejectedValue(new Error("Folder is read-only"));
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "Edit" }));
     fireEvent.click(await view.findByRole("button", { name: "More" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "XML" }));
@@ -277,13 +280,16 @@ describe("quotation actions", () => {
     vi.spyOn(quotes, "listDocs").mockResolvedValue([{ ...quotation, total: 100 }]);
     vi.spyOn(quotes, "getDoc").mockResolvedValue(quotation);
     vi.spyOn(quotes, "publicLink").mockResolvedValue("test-link");
+    vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1, USD: 1 / 3.6725 });
   });
 
   it("reports a native PDF failure without saving the quotation", async () => {
     const save = vi.spyOn(quotes, "saveDoc").mockResolvedValue(8);
     vi.spyOn(pdfTools, "downloadElementAsPdf").mockRejectedValue(new Error("Folder is read-only"));
     const view = wrap(<Quoting />);
-    fireEvent.click(await view.findByText("Q-AUDIT"));
+    const row = await view.findByText("Q-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(row);
     await view.findByDisplayValue("Example customer");
     fireEvent.click(view.getAllByRole("button", { name: "PDF" })[0]);
     expect(await view.findByText("Could not export quotation: Folder is read-only")).toBeTruthy();
@@ -293,7 +299,9 @@ describe("quotation actions", () => {
   it("closes the document preview and restores focus without saving", async () => {
     const save = vi.spyOn(quotes, "saveDoc").mockResolvedValue(8);
     const view = wrap(<Quoting />);
-    fireEvent.click(await view.findByText("Q-AUDIT"));
+    const row = await view.findByText("Q-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(row);
     const preview = await view.findByRole("button", { name: "Preview" });
     preview.focus();
     fireEvent.click(preview);
@@ -309,7 +317,9 @@ describe("quotation actions", () => {
     vi.spyOn(pdfTools, "elementToPdfBytes").mockResolvedValue({ name: "quote.pdf", bytes: new Uint8Array([1, 2, 3]) });
     const send = vi.spyOn(emailApi, "sendEmail").mockResolvedValue(undefined);
     const view = wrap(<Quoting />);
-    fireEvent.click(await view.findByText("Q-AUDIT"));
+    const row = await view.findByText("Q-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(row);
     fireEvent.change(await view.findByDisplayValue("Example customer"), { target: { value: "Updated customer" } });
     fireEvent.click(view.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
@@ -323,7 +333,9 @@ describe("quotation actions", () => {
     const pdf = vi.spyOn(pdfTools, "elementToPdfBytes").mockRejectedValue(new Error("PDF renderer failed"));
     const send = vi.spyOn(emailApi, "sendEmail").mockResolvedValue(undefined);
     const view = wrap(<Quoting />);
-    fireEvent.click(await view.findByText("Q-AUDIT"));
+    const row = await view.findByText("Q-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(row);
     await view.findByDisplayValue("Example customer");
     fireEvent.click(view.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());

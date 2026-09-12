@@ -22,7 +22,7 @@ const SheetOverlay = forwardRef<
   <SheetPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-ink/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:animate-none",
       className
     )}
     {...props}
@@ -31,7 +31,7 @@ const SheetOverlay = forwardRef<
 SheetOverlay.displayName = "SheetOverlay";
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-white p-6  transition ease-out-quad data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300 border-brand-200",
+  "fixed z-50 gap-4 bg-card text-foreground p-6 transition ease-out-quad data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-200 border-border motion-reduce:transition-none motion-reduce:animate-none",
   {
     variants: {
       side: {
@@ -50,12 +50,14 @@ const sheetVariants = cva(
 interface SheetContentProps
   extends
     React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  showCloseButton?: boolean;
+}
 
 export const SheetContent = forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
+>(({ side = "right", className, children, showCloseButton = true, ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <SheetPrimitive.Content
@@ -64,12 +66,14 @@ export const SheetContent = forwardRef<
       {...props}
     >
       {children}
-      <SheetPrimitive.Close
-        className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-xl text-brand-500 hover:bg-brand-100 hover:text-ink cursor-pointer transition-colors dark:hover:bg-white/10"
-        aria-label="Close"
-      >
-        <X size={16} />
-      </SheetPrimitive.Close>
+      {showCloseButton && (
+        <SheetPrimitive.Close
+          className="btn-ghost absolute right-4 top-4 h-10 w-10 p-0"
+          aria-label="Close"
+        >
+          <X size={16} />
+        </SheetPrimitive.Close>
+      )}
     </SheetPrimitive.Content>
   </SheetPortal>
 ));

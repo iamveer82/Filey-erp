@@ -708,10 +708,16 @@ function CustomerModal({
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
   const [customDefs, setCustomDefs] = useState<CustomFieldDef[]>([]);
+  const [customLoadError, setCustomLoadError] = useState("");
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customAttempt, setCustomAttempt] = useState(0);
 
   useEffect(() => {
-    import("../lib/customFields").then((m) => setCustomDefs(m.listCustomFields("customers")));
-  }, []);
+    if (!open) return;
+    let active = true; setCustomLoading(true); setCustomLoadError(""); setCustomDefs([]);
+    void import("../lib/customFields").then(m => m.syncCustomFields("customers")).then(defs => { if (active) setCustomDefs(defs); }).catch(e => { if (active) setCustomLoadError(e instanceof Error ? e.message : String(e)); }).finally(() => { if (active) setCustomLoading(false); });
+    return () => { active = false; };
+  }, [open, customAttempt]);
 
   useEffect(() => {
     if (!open) return;
@@ -753,7 +759,7 @@ function CustomerModal({
   })();
 
   const save = async () => {
-    if (saving) return;
+    if (saving || customLoading || customLoadError) return;
     setTouched(true);
     if (nameErr) return;
     if (customErr) {
@@ -799,6 +805,7 @@ function CustomerModal({
 
   return (
     <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={edit ? "Edit customer" : "New customer"}>
+      {customLoadError && <p role="alert" className="text-sm text-danger mb-3">Custom fields could not load: {customLoadError} <button className="underline" onClick={() => setCustomAttempt(n => n + 1)}>Retry</button></p>}
       <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Contact name *">
@@ -1012,7 +1019,7 @@ function CustomerModal({
         </button>
         <button
           className="btn-primary"
-          disabled={saving || (touched && nameErr)}
+          disabled={saving || customLoading || !!customLoadError || (touched && nameErr)}
           onClick={save}
         >
           {saving ? "Saving…" : edit ? "Save changes" : "Create customer"}

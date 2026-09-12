@@ -2,10 +2,25 @@
 
 Implemented 6 September 2026. Open Invoicing → a row's Send → WhatsApp or SMS. In the editor, WhatsApp and Messages save the invoice before opening the review dialog. Email remains the existing Resend workflow.
 
+## Send with Filey AI — 12 September 2026
+
+The invoice sharing dialog now offers **Send with Filey AI** in the installed Windows app. Review the recipient and message, then click this button once. Its disclosure authorizes a computer session limited to the newly opened Filey Browser WhatsApp window and its owned file picker, for at most five minutes. Computer use and Messaging must be enabled in AI Access; Plan mode remains read-only. The separate QR bridge is not required for this option.
+
+The task saves the existing invoice PDF, opens the requested WhatsApp chat, reads the recipient's full international number, attaches the saved PDF through the file picker, inserts the exact reviewed caption, verifies the preview, clicks Send once and checks the outgoing document bubble. It verifies the full file path before opening the attachment and the filename/caption before sending. Multiline captions use Shift+Enter rather than bare Enter. No invoice or payment status is changed by this UI task.
+
+The existing configured vision model chooses the next observed action. Filey supplies fixed text for the path and caption; the model cannot choose other files, recipients, arbitrary typed text, URLs, browser windows or ERP tools. Screenshots are transient model input, not saved to chat history. A local vision model avoids hosted inference charges; a user-selected hosted model has that provider's costs. Computer control itself needs no API key. Screenshot interpretation and WhatsApp's changing interface can still require user intervention.
+
+Use **Stop** to cancel. Account/workspace changes, grant replacement, expiry, unsupported model output, mismatched observations and unexpected navigation stop the task. Login, QR scanning, CAPTCHA and platform permission prompts remain with the user. WhatsApp's browser login is separate from QR-bridge pairing. After login, the user can choose Send with Filey AI again; no Send click is issued at the login screen.
+
+Once Send is attempted, only observation is permitted. A missing acknowledgment or ambiguous result is shown as unconfirmed and never retried or routed through the paired bridge automatically. The dialog disables another automatic send to that recipient while it remains open. This is per-dialog protection, not a persistent outbox across app restarts. An observed sent bubble is not an independent delivery receipt.
+
+The localhost/web preview shows the feature and its desktop requirement; it cannot control Windows. Validation passed: production build, changed-file lint, 45 focused JavaScript tests and the native computer-session unit test. Automated checks use synthetic PDFs and mocked vision/native responses. They do not prove live WhatsApp compatibility or customer delivery. A real installed-app acceptance test with a user-selected test recipient remains required before release.
+
 ## Available without a new API key
 
 | Option | What happens | Requirement |
 | --- | --- | --- |
+| Send with Filey AI | Uses the visible WhatsApp window to verify the recipient, attach the PDF, enter the reviewed caption and attempt Send once. | Installed Windows app, WhatsApp browser login, and a configured vision-capable local model or provider. |
 | Prepare WhatsApp + PDF | Saves the original invoice PDF and opens the reviewed recipient and exact message as an **unsent** draft. Shows the saved file path. | On Windows desktop, opens WhatsApp Web in Filey's browser; elsewhere uses the installed handler or browser. Attach the PDF and review before sending. |
 | Open WhatsApp text draft | Opens a recipient-specific draft containing the reviewed message and optional public link. | WhatsApp; this action does not save or attach a PDF. |
 | Share PDF | Opens the device share sheet with the prepared PDF and message. Choose an app and recipient there. | Browser/device support for file sharing and a compatible target app. |
@@ -13,7 +28,7 @@ Implemented 6 September 2026. Open Invoicing → a row's Send → WhatsApp or SM
 | Send PDF via paired WhatsApp | Saves the PDF locally, uploads it as one document with the reviewed caption, and waits for WhatsApp's message acceptance. | Desktop app with WhatsApp paired for the current Filey account in Integrations. |
 | Open SMS draft | Opens the device's SMS handler with recipient, message and optional link. | An installed SMS handler and mobile service. Carrier charges may apply; SMS does not attach PDFs. |
 
-No public API keys were obtained or embedded. Native sharing and click-to-chat do not need a new provider account. Direct WhatsApp sending reuses the existing QR bridge; this is not the official WhatsApp Business Cloud API. Automated provider SMS delivery is not included.
+No public API keys were obtained or embedded. Native sharing and click-to-chat do not need a new provider account. Automatic WhatsApp sending uses either the visible computer workflow or the existing QR bridge; neither uses the official WhatsApp Business Cloud API. Automated provider SMS delivery is not included.
 
 The dialog prioritizes paired PDF sending, native Share PDF, or Prepare WhatsApp + PDF. The separate text-draft action never attaches a file. When pairing is unavailable, the handoff shows the actual saved path and Attach → Document steps. A blocked popup or browser-open failure is reported as a failure to open; a saved PDF remains available. No handoff changes the invoice status.
 

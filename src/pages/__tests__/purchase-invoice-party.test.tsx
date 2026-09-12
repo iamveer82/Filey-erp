@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import { AuthProvider } from "../../lib/auth";
-import { advances, billing, crm, recurrences, suppliers, type CompanyProfile, type InvoiceDoc, type Supplier } from "../../lib/api";
+import { advances, billing, crm, recurrences, suppliers, setCacheOrg, type CompanyProfile, type InvoiceDoc, type Supplier } from "../../lib/api";
 import * as files from "../../lib/files";
 import * as exchangeRates from "../../lib/exchange-rates";
 import Invoicing from "../Invoicing";
@@ -51,6 +51,7 @@ const vendor: Supplier = { id: 42, name: "Gulf Supplies", email: "billing@gulf.e
 async function openPurchase() {
   const view = render(<MemoryRouter><AuthProvider><UIProvider><Invoicing mode="purchase" /></UIProvider></AuthProvider></MemoryRouter>);
   await view.findByText("PINV-PARTY");
+  setCacheOrg("purchase-test-org", "purchase-test-user");
   fireEvent.click(view.getByRole("button", { name: "Edit" }));
   await view.findByLabelText("Supplier name");
   return view;
@@ -73,7 +74,7 @@ beforeEach(() => {
   vi.spyOn(files, "autoSaveDocument").mockResolvedValue(false);
   vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1 });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); setCacheOrg(null); vi.restoreAllMocks(); });
 
 describe("purchase invoice parties", () => {
   it.each(["Save", "Mark as done"])("%s saves supplier snapshots without a CRM foreign key or customer advance", async (action) => {

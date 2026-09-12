@@ -448,6 +448,7 @@ type LocalStore = {
   mark: typeof journalMark;
 };
 type Filter =
+  | { kind: "is"; col: string; val: null | boolean }
   | { kind: "eq"; col: string; val: any }
   | { kind: "lte"; col: string; val: any }
   | { kind: "in"; col: string; val: any[] }
@@ -497,6 +498,10 @@ class LocalBuilder implements PromiseLike<Result> {
 
   eq(col: string, val: any): this {
     this.filters.push({ kind: "eq", col, val });
+    return this;
+  }
+  is(col: string, val: null | boolean): this {
+    this.filters.push({ kind: "is", col, val });
     return this;
   }
   lte(col: string, val: any): this {
@@ -553,6 +558,7 @@ class LocalBuilder implements PromiseLike<Result> {
 
   private matches(r: Row): boolean {
     for (const f of this.filters) {
+      if (f.kind === "is" && !(f.val === null ? r[f.col] == null : r[f.col] === f.val)) return false;
       if (f.kind === "eq" && !this.looseEq(r[f.col], f.val)) return false;
       if (f.kind === "lte" && !(r[f.col] <= f.val)) return false;
       if (f.kind === "in" && !f.val.some((v) => this.looseEq(r[f.col], v)))

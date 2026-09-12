@@ -319,6 +319,8 @@ export interface CrmTask {
 }
 export interface Opportunity {
   id: number;
+  quotation_id?: number | null;
+  invoice_id?: number | null;
   title: string;
   /** Display name, kept in step with customer_id for back-compat. */
   customer_name: string;
@@ -369,6 +371,8 @@ export interface InvoiceItem {
 }
 export interface InvoiceDocSummary {
   id: number;
+  customer_id?: number | null;
+  quotation_id?: number | null;
   /** Authoring user — distinguishes my invoices from team-shared ones. */
   user_id?: string;
   number: string;
@@ -873,17 +877,21 @@ async function saveDocumentLines(
   row: Record<string, unknown>, items: Record<string, unknown>[], id?: number
 ): Promise<number> {
   if (items.length > 500) throw new Error("A document supports at most 500 lines.");
+  const mode = isLocalMode(), scope = activeCacheOrg;
+  const checkScope = () => { assertWorkspaceCurrent(); if (mode !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the document before saving."); };
   if (!isLocalMode()) {
     const { data, error } = await sb().rpc("filey_save_document", { p_table: table, p_header: row, p_items: items, p_id: id || null });
     if (error) throw error;
     return Number(data);
   }
   return withLocalTransaction(async (client) => {
+    checkScope();
     const stale = id ? await sChildren<{ id: number }>(itemTable, fk, id, undefined, client) : [];
     const docId = id || await sInsert(table, row, client);
     await sInsertMany(itemTable, items.map((item, position) => ({ ...item, [fk]: docId, position })), client);
     if (id) await sUpdate(table, id, row, client);
     await sDeleteMany(itemTable, stale.map((line) => line.id), client);
+    checkScope();
     return docId;
   });
 }
@@ -2422,14 +2430,17 @@ const CRM_TABLES = new Set(["crm_customers", "crm_people", "crm_leads", "crm_opp
 
 /** The new CRM editor needs acknowledged writes, including an error if RLS
  *  or a concurrent deletion means an update matched no row. */
-export async function persistCrmRecord(table: string, patch: Record<string, unknown>, id?: number): Promise<number> {
+export async function persistCrmRecord(table: string, patch: Record<string, unknown>, id?: number, expectedUpdatedAt?: string | null): Promise<number> {
   if (!CRM_TABLES.has(table)) throw new Error("Unsupported CRM object.");
   const result = await online(async () => {
     const row = clean(patch);
     delete row.id; delete row.user_id; delete row.org_id; delete row.created_at;
     row.updated_at = new Date().toISOString();
     if (id == null) return sInsert(table, row);
-    const { data, error } = await sb().from(table).update(row).eq("id", id).select("id").single();
+    let query = sb().from(table).update(row).eq("id", id);
+    if (expectedUpdatedAt !== undefined) query = expectedUpdatedAt === null ? query.is("updated_at", null) : query.eq("updated_at", expectedUpdatedAt);
+    const { data, error } = await query.select("id").single();
+    if (expectedUpdatedAt !== undefined && (error?.code === "PGRST116" || (!error && !data))) throw new Error("Record changed or is unavailable. Refresh it before retrying.");
     if (error) throw error;
     if (!data) throw new Error("Record no longer exists or you do not have permission to edit it.");
     return Number(data.id);
@@ -3669,7 +3680,7 @@ export const billing = {
         // (The local shim ignores the column list and returns whole rows, which
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
-          "id,user_id,number,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
+          "id,user_id,number,customer_id,quotation_id,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
           "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
@@ -3724,6 +3735,8 @@ export const billing = {
           return {
             id: d.id,
             number: d.number,
+            customer_id: d.customer_id,
+            quotation_id: d.quotation_id,
             customer_name: d.customer_name,
             status: d.status,
             template: d.template,
@@ -4399,6 +4412,7 @@ export interface QuotationItem {
 }
 export interface QuotationSummary {
   id: number;
+  customer_id?: number | null;
   number: string;
   customer_name: string;
   status: string;
@@ -4422,6 +4436,7 @@ export interface QuotationDoc {
   template: string;
   accent: string;
   currency: string;
+  fx_rate?: number | null;
   quote_date?: string;
   valid_until?: string;
   sales_person?: string;
@@ -4663,6 +4678,7 @@ export const quotes = {
         return docs.map((d) => ({
           id: d.id,
           number: d.number,
+          customer_id: d.customer_id,
           customer_name: d.customer_name,
           status: d.status,
           template: d.template,
@@ -4717,6 +4733,7 @@ export const quotes = {
     ),
   saveDoc: (input: QuotationInput) =>
     online(async () => {
+      const local = isLocalMode(), scope = activeCacheOrg;
       const { items, id, ...docFields } = input;
       const row = clean(docFields as Record<string, unknown>);
       if (!id && !row.tax_country_code) {
@@ -4724,6 +4741,18 @@ export const quotes = {
         if (company.country_code) row.tax_country_code = company.country_code;
       }
       validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
+      if (row.currency !== "AED" && !row.fx_rate) {
+        if (id) {
+          const { data: saved, error } = await sb().from("quotations").select("currency,fx_rate").eq("id", id).single();
+          if (error) throw error;
+          if (saved?.currency === row.currency && Number(saved.fx_rate) > 0) row.fx_rate = saved.fx_rate;
+        }
+      }
+      if (row.currency !== "AED" && !row.fx_rate) {
+        const rates = await getExchangeRates();
+        if (rates[String(row.currency)] > 0) row.fx_rate = rates[String(row.currency)];
+      }
+      if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation before saving.");
       const docId = await saveDocumentLines("quotations", "quotation_items", "quotation_id", row,
         items.map(it => ({
           product: it.product, sku: it.sku ?? null, product_id: it.product_id ?? null,
@@ -4773,79 +4802,62 @@ export const quotes = {
   },
   convertToInvoice: (quotationId: number) =>
     online(async () => {
-      const { data: q, error } = await sb()
-        .from("quotations")
-        .select("*")
-        .eq("id", quotationId)
-        .single();
-      if (error) throw error;
-      const qd = q as QuotationDoc;
-      const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [
-        { col: "position", asc: true },
-      ]);
-      const company = await billing.getCompany().catch(() => null);
-      const y = new Date().getFullYear();
-      const number = `INV-${y}-${String(
-        Math.floor(Math.random() * 9000) + 1000
-      )}`;
-      const issue = todayYmd();
-      const due = new Date(Date.now() + 30 * 86400000)
-        .toISOString()
-        .slice(0, 10);
-      await checkFreeInvoiceCap(invoicesThisMonth);
-      const docId = await sInsert("invoice_docs", {
-        number,
-        status: "draft",
-        template: company?.default_template ?? "minimal",
-        accent: company?.default_accent ?? "#0A0A0A",
-        currency: qd.currency,
-        tax_country_code: qd.tax_country_code,
-        seller_name: company?.name ?? "",
-        seller_address: company?.address ?? null,
-        seller_trn: company?.trn ?? null,
-        seller_email: company?.email ?? null,
-        seller_phone: company?.phone ?? null,
-        logo: company?.logo ?? null,
-        customer_id: qd.customer_id ?? null,
-        customer_name: qd.customer_name,
-        customer_address: qd.customer_address ?? null,
-        customer_trn: qd.customer_trn ?? null,
-        customer_email: qd.customer_email ?? null,
-        issue_date: issue,
-        due_date: due,
-        notes: null,
-        terms: qd.terms ?? null,
-        tax_rate: qd.tax_rate ?? 0,
-        discount: qd.discount ?? 0,
-        round_off: qd.round_off ?? false,
-        quotation_id: quotationId,
-      });
-      if (items.length) {
-        const { error: itemsErr } = await sb()
-          .from("invoice_doc_items")
-          .insert(
-            items.map((it, i) => ({
-              invoice_id: docId,
-              product_id: it.product_id ?? null,
-              description: it.sku
-                ? `${it.product} (${it.sku})`
-                : it.product,
-              qty: it.qty,
-              unit: it.unit ?? null,
-              // The invoice must bill exactly what the customer accepted on the
-              // quote. This used to recompute qty × rate × (1 - discount),
-              // which silently changed the figure on any line the quote had set
-              // to a manual amount or a formula. Carrying the computed line
-              // across as a manual amount keeps the two documents in agreement,
-              // and keeps the customer's own custom columns with it.
-              ...convertedLine(it, qd.unit_price_formula),
-              position: i,
-            }))
-          );
-        if (itemsErr) throw itemsErr;
-      }
-      await sUpdate("quotations", quotationId, { status: "accepted" });
-      return docId;
+      if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
+      const client = sb(), local = isLocalMode(), scope = activeCacheOrg;
+      const company = await billing.getCompany();
+      const { pickDocNumber, loadDocFormats } = await import("./numberFormat");
+      const formats = await loadDocFormats();
+      const convert = async (tx: { from: (table: string) => any }) => {
+        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        const { data: q, error } = await tx.from("quotations").select("*").eq("id", quotationId).single();
+        if (error || !q) throw error || new Error("Quotation not found.");
+        const existing = await sChildren<{ id: number }>("invoice_docs", "quotation_id", quotationId, [{ col: "id", asc: true }], tx);
+        if (existing.length) return existing[0].id;
+        const qd = q as QuotationDoc;
+        const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [{ col: "position", asc: true }], tx);
+        if (!items.length || items.length > 500) throw new Error("A quotation needs between 1 and 500 lines before conversion.");
+        const numbers = await sList<{ number: string }>("invoice_docs", undefined, "number", tx);
+        const due = new Date(); due.setDate(due.getDate() + 30);
+        const header = {
+          number: pickDocNumber("invoice", numbers.map(row => row.number), formats),
+          status: "draft", doc_type: "invoice", quotation_id: quotationId,
+          template: qd.template || company.default_template || "minimal",
+          accent: qd.accent || company.default_accent || "#0A0A0A",
+          currency: qd.currency, fx_rate: qd.fx_rate ?? null, tax_country_code: qd.tax_country_code,
+          seller_name: qd.seller_name || company.name, seller_address: qd.seller_address ?? null,
+          seller_trn: qd.seller_trn ?? null, seller_email: qd.seller_email ?? null,
+          seller_phone: qd.seller_phone ?? null, logo: qd.logo ?? null,
+          customer_id: qd.customer_id ?? null, customer_name: qd.customer_name,
+          customer_address: qd.customer_address ?? null, customer_trn: qd.customer_trn ?? null,
+          customer_email: qd.customer_email ?? null, issue_date: todayYmd(), due_date: localYmd(due),
+          notes: qd.notes ?? null, terms: qd.terms ?? null, tax_rate: qd.tax_rate ?? 0,
+          discount: qd.discount ?? 0, round_off: qd.round_off ?? false,
+          custom_columns: qd.custom_columns ?? [], show_stamp: qd.show_stamp ?? false,
+          show_signature: qd.show_signature ?? false,
+        };
+        const lines = items.map((it, position) => ({
+          product_id: it.product_id ?? null,
+          description: it.sku ? `${it.product} (${it.sku})` : it.product,
+          qty: it.qty, unit: it.unit ?? null, ...convertedLine(it, qd.unit_price_formula), position,
+        }));
+        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        await checkFreeInvoiceCap(invoicesThisMonth);
+        if (!local) {
+          const { data, error: conversionError } = await client.rpc("filey_convert_quotation", {
+            p_id: quotationId, p_header: header, p_items: lines,
+            p_updated_at: (q as { updated_at?: string }).updated_at ?? null,
+          });
+          if (conversionError?.code === "PGRST202") throw new Error("Cloud quotation conversion needs the CRM sales workflow database update. Ask your administrator to apply the 2026-09-12 migration, then retry.");
+          if (conversionError) throw conversionError;
+          if (!Number.isSafeInteger(Number(data)) || Number(data) <= 0) throw new Error("The conversion result could not be confirmed. Refresh sales documents before retrying.");
+          return Number(data);
+        }
+        const id = await sInsert("invoice_docs", clean(header), tx);
+        await sInsertMany("invoice_doc_items", lines.map(line => ({ ...line, invoice_id: id })), tx);
+        await sUpdate("quotations", quotationId, { status: "accepted" }, tx);
+        return id;
+      };
+      return local ? withLocalTransaction(convert) : convert(client);
     }),
 };
 

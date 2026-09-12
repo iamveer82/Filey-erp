@@ -1,0 +1,22 @@
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { CustomFieldsManager } from "../CustomFieldsManager";
+import { saveCustomFields, syncCustomFields } from "../../lib/customFields";
+vi.mock("../../lib/agentStorage", () => ({ agentStorageScope: () => "test", requireAgentStorageScope: () => "test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
+vi.mock("../../lib/customFields", async original => ({ ...await original<object>(), saveCustomFields: vi.fn(), syncCustomFields: vi.fn() }));
+vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: vi.fn(), error: vi.fn() }, confirm: vi.fn() }) }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it("keeps failed loads from replacing definitions and preserves editable fields after a failed save", async () => {
+  vi.mocked(syncCustomFields).mockRejectedValueOnce(new Error("Offline")).mockResolvedValue([]);
+  const close = vi.fn(); render(<CustomFieldsManager open onOpenChange={close} module="contacts"/>);
+  await screen.findByText("Offline"); expect(screen.getByRole("button", { name: "Save fields" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Reload fields" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save fields" })).toBeEnabled());
+  fireEvent.change(screen.getByPlaceholderText("Customer rating"), { target: { value: "Territory" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  expect(saveCustomFields).not.toHaveBeenCalled();
+  vi.mocked(saveCustomFields).mockRejectedValueOnce(new Error("Disk full"));
+  fireEvent.click(screen.getByRole("button", { name: "Save fields" }));
+  await screen.findByText("Disk full"); expect(close).not.toHaveBeenCalled();
+  expect(screen.getByDisplayValue("Territory")).toBeInTheDocument();
+});

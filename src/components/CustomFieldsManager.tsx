@@ -4,7 +4,7 @@
  * the user extend the schema. The values themselves live on each
  * row's `custom_fields` JSONB / object; this component only
  * manages the definitions. */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Plus,
   Trash2,
@@ -23,9 +23,19 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./Sheet";
 import { Button } from "./Button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./Select";
-import { Field } from "./ui";
+import { Field, ErrorBanner } from "./ui";
 import { useUI } from "../lib/ui";
-import { cn } from "../lib/format";
+import { cn, errMsg } from "../lib/format";
+import {
+  agentStorageScope,
+  requireAgentStorageScope,
+  AGENT_STORAGE_EVENT,
+} from "../lib/agentStorage";
+import {
+  syncCustomFields,
+  saveCustomFields,
+  validateCustomValue,
+} from "../lib/customFields";
 import type { CustomFieldDef, CustomFieldType } from "../lib/customFields";
 
 const TYPE_ICONS: Record<CustomFieldType, typeof Type> = {
@@ -70,42 +80,109 @@ export function CustomFieldsManager({
   const [newLabel, setNewLabel] = useState("");
   const [newType, setNewType] = useState<CustomFieldType>("text");
   const [newOptions, setNewOptions] = useState("");
-
-  const sync = useCallback(
-    () =>
-      import("../lib/customFields").then((m) =>
-        m.syncCustomFields(module).then(setDefs)
-      ),
-    [module]
-  );
-
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const scope = useRef<string | null>(null);
+  const inFlight = useRef(false);
   useEffect(() => {
-    if (open) sync();
-  }, [open, sync]);
+    if (!open) return;
+    let active = true;
+    scope.current = agentStorageScope();
+    setDefs([]);
+    setLoading(true);
+    setLoaded(false);
+    setError("");
+    void syncCustomFields(module)
+      .then((value) => {
+        if (active) {
+          setDefs(value);
+          setLoaded(true);
+        }
+      })
+      .catch((e) => {
+        if (active) setError(errMsg(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    const changed = () => {
+      if (agentStorageScope() !== scope.current) {
+        active = false;
+        setDefs([]);
+        setLoading(true);
+        setLoaded(false);
+        setError("Workspace changed. Close and reopen custom fields.");
+      }
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
+    window.addEventListener("filey:workspace-changed", changed);
+    return () => {
+      active = false;
+      window.removeEventListener(AGENT_STORAGE_EVENT, changed);
+      window.removeEventListener("filey:workspace-changed", changed);
+    };
+  }, [open, module, attempt]);
+
+  const save = async () => {
+    if (inFlight.current || loading || !loaded) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      requireAgentStorageScope(scope.current ?? "signed-out");
+      await saveCustomFields(
+        module,
+        defs.map((d, position) => ({ ...d, position })),
+        scope.current ?? "signed-out"
+      );
+      toast.success("Custom fields saved.");
+      onOpenChange(false);
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
 
   const add = () => {
     if (!newLabel.trim()) {
       toast.error("Label is required.");
       return;
     }
-    import("../lib/customFields").then((m) => {
-      const def = m.addCustomField(module, {
-        label: newLabel.trim(),
-        type: newType,
-        options:
-          newType === "select"
-            ? newOptions
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : undefined,
-      });
-      setDefs((d) => [...d, def]);
-      setNewLabel("");
-      setNewOptions("");
-      setNewType("text");
-      toast.success(`Added "${def.label}".`);
-    });
+    const base = newLabel
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, 32);
+    let key = /^[a-z]/.test(base) ? base : `field_${base || "value"}`;
+    if (["constructor", "prototype", "__proto__"].includes(key)) key = `field_${key}`;
+    const original = key;
+    for (let n = 2; defs.some((d) => d.key === key); n++) key = `${original}_${n}`;
+    const def: CustomFieldDef = {
+      id: crypto.randomUUID(),
+      module,
+      key,
+      position: defs.length,
+      createdAt: new Date().toISOString(),
+      label: newLabel.trim(),
+      type: newType,
+      options:
+        newType === "select"
+          ? newOptions
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+    };
+    setDefs((d) => [...d, def]);
+    setNewLabel("");
+    setNewOptions("");
+    setNewType("text");
   };
 
   const remove = async (def: CustomFieldDef) => {
@@ -116,10 +193,7 @@ export function CustomFieldsManager({
       danger: true,
     });
     if (!ok) return;
-    const m = await import("../lib/customFields");
-    m.removeCustomField(module, def.id);
     setDefs((d) => d.filter((f) => f.id !== def.id));
-    toast.success("Removed.");
   };
 
   const move = async (id: string, dir: -1 | 1) => {
@@ -130,51 +204,58 @@ export function CustomFieldsManager({
     const tmp = sorted[i];
     sorted[i] = sorted[j];
     sorted[j] = tmp;
-    const m = await import("../lib/customFields");
-    m.reorderCustomFields(
-      module,
-      sorted.map((f) => f.id)
-    );
     setDefs(sorted.map((f, k) => ({ ...f, position: k })));
   };
 
   const update = async (id: string, patch: Partial<CustomFieldDef>) => {
-    const m = await import("../lib/customFields");
-    m.updateCustomField(module, id, patch);
     setDefs((d) => d.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(value) => {
+        if (!inFlight.current) onOpenChange(value);
+      }}
+    >
       <SheetContent side="right" className="flex flex-col w-full sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Custom fields</SheetTitle>
           <SheetDescription>
-            Add user-defined fields to <b>{module}</b> records. Stored per row, synced
-            across devices. Like Odoo Studio.
+            Choose the extra information to capture in this section. Changes apply
+            when you save. Removing a field hides its existing values.
           </SheetDescription>
         </SheetHeader>
 
-        {/* List */}
-        <div className="mt-4 flex-1 overflow-y-auto space-y-2 pr-1">
+        {error && <ErrorBanner message={error} />}
+        {loading && !error && <p role="status">Loading fields…</p>}
+        {error && (
+          <button
+            className="btn-ghost"
+            disabled={busy}
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            Reload fields
+          </button>
+        )}
+        <fieldset
+          disabled={busy || loading || !loaded}
+          className="mt-4 min-h-0 flex-1 overflow-y-auto space-y-2 pr-1"
+        >
           {defs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-brand-200 p-6 text-center text-sm text-brand-400">
-              No custom fields yet. Add one below to extend the schema.
+              No custom fields yet. Add a field for details that matter to your business.
             </div>
           ) : (
             defs
               .slice()
               .sort((a, b) => a.position - b.position)
-              .map(async (def) => {
+              .map((def) => {
                 const Icon = TYPE_ICONS[def.type];
                 const sample = sampleValues?.[def.key] ?? "";
-                const mod = await import("../lib/customFields");
-                const vErr = sample ? mod.validateCustomValue(def, sample) : null;
+                const vErr = sample ? validateCustomValue(def, sample) : null;
                 return (
-                  <div
-                    key={def.id}
-                    className="rounded-xl border border-brand-200 p-3"
-                  >
+                  <div key={def.id} className="rounded-xl border border-brand-200 p-3">
                     <div className="flex items-start gap-2">
                       <GripVertical
                         size={14}
@@ -270,10 +351,13 @@ export function CustomFieldsManager({
                 );
               })
           )}
-        </div>
+        </fieldset>
 
         {/* Add new */}
-        <div className="mt-3 border-t border-brand-200 pt-3 space-y-2">
+        <fieldset
+          disabled={busy || loading || !loaded}
+          className="mt-3 border-t border-border pt-3 space-y-2"
+        >
           <p className="text-[10px] font-medium tracking-[0.06em] text-brand-400">
             Add new field
           </p>
@@ -317,42 +401,32 @@ export function CustomFieldsManager({
               />
             </Field>
           )}
-          <Button onClick={add} className="w-full">
+          <Button
+            onClick={add}
+            variant="outline"
+            disabled={!newLabel.trim() || defs.length >= 100}
+            className="w-full"
+          >
             <Plus size={14} /> Add field
           </Button>
+        </fieldset>
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <button
+            className="btn-ghost"
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn-primary"
+            disabled={busy || loading || !loaded}
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : "Save fields"}
+          </button>
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-/* ── CustomFieldValue (read-only display chip) ──────────────────── */
-export function CustomFieldValue({
-  def,
-  value,
-}: {
-  def: CustomFieldDef;
-  value: unknown;
-}) {
-  const v = String(value ?? "").trim();
-  if (!v && def.type !== "checkbox") return null;
-  if (def.type === "checkbox") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs">
-        <span
-          className={cn(
-            "h-2.5 w-2.5 rounded-full",
-            v === "true" || v === "1" ? "bg-success" : "bg-brand-200 dark:bg-white/12"
-          )}
-        />
-        <span className="text-brand-500 font-medium">{def.label}</span>
-      </span>
-    );
-  }
-  return (
-    <div className="text-xs">
-      <span className="text-brand-400 font-medium">{def.label}:</span>{" "}
-      <span className="text-ink">{v}</span>
-    </div>
   );
 }

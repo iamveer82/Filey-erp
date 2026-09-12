@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  CheckCircle2, Sparkles, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
+  CheckCircle2, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
   FileText, Upload, Loader2, FolderPlus, Download, X, Plus, Search, ShieldCheck,
 } from "lucide-react";
-import * as safePdf from "../lib/pdfjsSafe";
 import { FilterChip, PageHeader, SearchInput } from "../components/ui";
 import { plural } from "../lib/format";
 import { toolRuns } from "../lib/api";
@@ -13,7 +12,7 @@ import { uploadOutputs, ensureRoom } from "../lib/toolStorage";
 import { downloadFile, type OutFile } from "../lib/pdfTools";
 import { PDF_TOOLS, toolById, toolFlow, type Tool, ToolFields, defaultParams } from "../components/PdfToolbox";
 import ToolCover from "../components/ToolCover";
-import InlinePdfEditor from "../components/InlinePdfEditor";
+import InlinePdfEditor, { type PdfEditorHandle } from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import ESignStudio from "../components/ESignStudio";
 import FormFillPanel from "../components/FormFillPanel";
@@ -133,6 +132,8 @@ function PdfToolWorkspace({
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const busy = useRef(false);
+  const editorRef = useRef<PdfEditorHandle>(null);
+  const actionLabel = toolAction(tool);
   const canSave = isConfigured && !!user && outs.length > 0;
 
   const saveToMyFiles = async () => {
@@ -180,7 +181,8 @@ function PdfToolWorkspace({
     setError("");
     setOuts([]);
     try {
-      const result = await tool.run(files, params);
+      const edited = await editorRef.current?.prepare();
+      const result = await tool.run(edited ? [edited, ...files.slice(1)] : files, params);
       await finishOutputs(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -230,7 +232,7 @@ function PdfToolWorkspace({
           again in a card 90px below it, with the category floating unanchored in
           the top-right corner. Everything identifying the tool now sits on one
           row, and it stays sticky so Upload stays reachable while scrolling. */}
-      <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-page px-4 py-3">
+      <div className="tool-workspace-header">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button onClick={onBack} disabled={running || savingFiles} className="btn-ghost shrink-0">
             <ArrowLeft size={14} /> All tools
@@ -239,7 +241,7 @@ function PdfToolWorkspace({
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
             <Icon size={18} />
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="tool-workspace-title min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-[18px] font-semibold text-foreground">{tool.name}</h1>
               <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -293,7 +295,7 @@ function PdfToolWorkspace({
       </div>
 
       <ol className="tool-steps" aria-label="Tool progress">
-        {[tool.interactive === "esign" ? "Create or upload" : "Choose files", "Make it yours", "Download"].map((label, index) => {
+        {[tool.interactive === "esign" ? "Create or upload" : "Choose files", "Edit & adjust", "Download"].map((label, index) => {
           const step = outs.length ? 2 : files.length || tool.interactive === "esign" ? 1 : 0;
           return <li key={label} aria-current={index === step ? "step" : undefined}><span className="tool-step-number">{index < step ? <CheckCircle2 size={14} /> : index + 1}</span>{label}</li>;
         })}
@@ -303,7 +305,7 @@ function PdfToolWorkspace({
         <div className="mb-3 flex items-center gap-2"><CheckCircle2 size={18} className="text-success" /><h2 className="text-sm font-semibold">{plural(outs.length, "file")} ready</h2></div>
         <div className="divide-y divide-border">{outs.map((output, index) => <div key={index} className="flex items-center gap-3 py-2"><FileText size={18} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{output.name}</p><p className="text-xs text-muted-foreground">{fileSize(output.bytes.byteLength)}</p></div><button type="button" className="btn-ghost" disabled={running || savingFiles} aria-label={"Download " + output.name} onClick={() => void downloadOutputs([output])}><Download size={15} /><span className="hidden sm:inline">Download</span></button></div>)}</div>
       </section>}
-      {!!files.length && <div className="tool-file-list" aria-label="Selected files">
+      {!!files.length && tool.interactive !== "merge" && <div className="tool-file-list" aria-label="Selected files">
         {files.map((file, index) => <div className="tool-file-row" key={index}>
           <FileText size={17} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={file.name}>{file.name}</p><p className="text-xs text-muted-foreground">{fileSize(file.size)}</p></div>
           {files.length > 1 && <><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " up"} disabled={running || savingFiles || index === 0} onClick={() => { const next = [...files]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; updateFiles(next); }}><ArrowUp size={14} /></button><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " down"} disabled={running || savingFiles || index === files.length - 1} onClick={() => { const next = [...files]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; updateFiles(next); }}><ArrowDown size={14} /></button></>}
@@ -311,11 +313,11 @@ function PdfToolWorkspace({
         </div>)}
       </div>}
       {running && <p role="status" className="mb-4 flex items-center gap-2 text-sm"><Loader2 size={16} className="animate-spin" />Preparing your results. Keep this tool open.</p>}
-      <fieldset key={fileRevision} disabled={running || savingFiles} className="min-w-0">
+      <fieldset key={tool.interactive === "merge" ? tool.id : fileRevision} inert={running || savingFiles} disabled={running || savingFiles} className="min-w-0">
       {!files.length && tool.interactive !== "esign" ? (
         <div className="tool-dropzone" data-dragging={dragging} onDragOver={event => { event.preventDefault(); if (!running && !savingFiles) setDragging(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={event => { event.preventDefault(); setDragging(false); pickFiles(event.dataTransfer.files); }}>
           <ToolCover tool={tool} />
-          <div className="tool-upload-copy"><h2 className="text-lg font-semibold text-foreground">{dragging ? "Drop your files here" : "Start with your " + toolFlow(tool).from + " file"}</h2><p className="max-w-sm text-sm text-muted-foreground">Drag {tool.multi ? "your files" : "a file"} here, or choose {tool.multi ? "them" : "one"} from your device.</p><button type="button" className="btn-primary" onClick={() => fileInput.current?.click()}><Upload size={16} />Choose {tool.multi ? "files" : "file"}</button><p className="text-xs text-muted-foreground">{tool.multi ? "Add multiple files, then arrange them in the order you want." : "One file at a time. Your original stays unchanged."}</p></div>
+          <div className="tool-upload-copy"><span className="tool-upload-icon"><Upload size={24} /></span><h2 className="text-lg font-semibold text-foreground">{dragging ? "Drop your files here" : "Add your " + toolFlow(tool).from + (tool.multi ? " files" : " file")}</h2><p className="max-w-sm text-sm text-muted-foreground">Drag {tool.multi ? "your files" : "a file"} here, or choose {tool.multi ? "them" : "one"} from your device.</p><button type="button" className="btn-primary" onClick={() => fileInput.current?.click()}><Upload size={16} />Choose {tool.multi ? "files" : "file"}</button><p className="text-xs text-muted-foreground">{tool.multi ? "Add multiple files, then arrange them in the order you want." : "Processed on your device. Your original stays unchanged."}</p></div>
         </div>
       ) : tool.interactive === "fill-form" ? (
         <div className="card">
@@ -325,21 +327,22 @@ function PdfToolWorkspace({
           />
         </div>
       ) : tool.interactive === "esign" ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <ESignStudio
             file={files[0] ?? undefined}
             onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "merge" ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <MergeStudio
             files={files}
+            onFilesChange={updateFiles}
             onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "organize" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <OrganizeStudio
             file={files[0]}
             action={
@@ -353,14 +356,14 @@ function PdfToolWorkspace({
           />
         </div>
       ) : tool.interactive === "rotate" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <RotateStudio
             file={files[0]}
             onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "redact" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <RedactStudio
             file={files[0]}
             onApply={(out) => { void acceptOutputs([out]); }}
@@ -372,7 +375,7 @@ function PdfToolWorkspace({
           tool.interactive === "logo" ||
           tool.interactive === "background") &&
         firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <StampStudio
             file={files[0]}
             mode={tool.interactive === "text-stamp" ? "text" : "image"}
@@ -389,14 +392,14 @@ function PdfToolWorkspace({
           />
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="card min-h-[480px]">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-brand-500">
+        <div className="tool-working-layout">
+          <div className="tool-studio">
+            <div className="tool-preview-heading">
+              <p className="text-sm font-semibold text-foreground">
                 {firstIsPdf
                   ? LIVE_PREVIEW_TOOLS.has(tool.id)
-                    ? "Live Preview"
-                    : "Editor"
+                    ? "Document preview"
+                    : "Edit document"
                   : "Preview"}
               </p>
               {!firstIsPdf && files.length > 1 && (
@@ -410,6 +413,9 @@ function PdfToolWorkspace({
             ) : firstIsPdf ? (
               <InlinePdfEditor
                 file={files[0]}
+                editorRef={editorRef}
+                disabled={running || savingFiles}
+                onDirtyChange={() => setOuts([])}
                 onApply={(f) => {
                   replaceFirstFile(f);
                   setOuts([]);
@@ -426,8 +432,8 @@ function PdfToolWorkspace({
               </>
             )}
           </div>
-          <aside className="card space-y-3 self-start lg:sticky lg:top-20">
-            <p className="text-sm font-medium text-ink">Options</p>
+          <aside className="tool-options-panel">
+            <div><h2 className="text-sm font-semibold text-foreground">Finish your file</h2><p className="mt-1 text-xs text-muted-foreground">Adjust the settings, then download your result.</p></div>
             <fieldset disabled={running || savingFiles}>
               <ToolFields tool={tool} params={params} setParams={(next) => { setParams(next); setOuts([]); }} />
             </fieldset>
@@ -435,19 +441,24 @@ function PdfToolWorkspace({
               {running ? (
                 <Loader2 size={15} className="animate-spin" />
               ) : (
-                <Sparkles size={15} />
+                <Download size={15} />
               )}
-              Run {tool.name}
+              {running ? "Preparing file…" : actionLabel}
             </button>
-            <button onClick={() => updateFiles([])} disabled={running || savingFiles} className="btn-ghost w-full">
-              Choose another file
-            </button>
+            <p className="text-xs text-muted-foreground">Includes your edits. Saves a new copy.</p>
           </aside>
         </div>
       )}
       </fieldset>
     </div>
   );
+}
+
+function toolAction(tool: Tool) {
+  const flow = toolFlow(tool);
+  if (["To PDF", "From PDF", "Data"].includes(tool.cat) && flow.from !== flow.to && !["Report", "Export", "Data"].includes(flow.to)) return "Convert to " + flow.to;
+  const labels: Record<string, string> = { nup: "Arrange pages", "pdf-info": "Export PDF details", "page-dims": "Export page sizes", "ocr-pdf": "Make searchable", "ocr-text": "Extract text", "pdf-to-pdfa": "Add archival metadata", "bg-color": "Apply background", greyscale: "Make greyscale", invert: "Invert colours", "pdf-meta": "Save PDF details", grid: "Add grid", posterize: "Create poster", booklet: "Create booklet", "pdf2zip": "Create ZIP", "pdf-flatten": "Flatten PDF" };
+  return labels[tool.id] || tool.name;
 }
 
 function fileSize(bytes: number) {
@@ -467,25 +478,15 @@ function acceptsFile(file: File, accept: string) {
 function FilePreview({ file }: { file: File }) {
   const [img, setImg] = useState<string>("");
   const [text, setText] = useState<string>("");
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let dead = false;
     setImg("");
     setText("");
+    setLoading(true);
     (async () => {
       try {
-        if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-          const data = new Uint8Array(await file.arrayBuffer());
-          const pdf = await safePdf.getDocument({ data }).promise;
-          const p = await pdf.getPage(1);
-          const vp = p.getViewport({ scale: 1.4 });
-          const c = document.createElement("canvas");
-          c.width = vp.width;
-          c.height = vp.height;
-          const ctx = c.getContext("2d");
-          if (!ctx) return;
-          await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
-          if (!dead) setImg(c.toDataURL("image/png"));
-        } else if (file.type.startsWith("image/")) {
+        if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
           const r = new FileReader();
           r.onload = () => !dead && setImg(String(r.result || ""));
           r.readAsDataURL(file);
@@ -497,13 +498,14 @@ function FilePreview({ file }: { file: File }) {
           if (!dead) setText(t.slice(0, 4000));
         }
       } catch {
-        /* preview unavailable */
-      }
+        /* Some formats have no browser preview. */
+      } finally { if (!dead) setLoading(false); }
     })();
     return () => {
       dead = true;
     };
   }, [file]);
+  if (loading) return <p role="status" className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 size={18} className="animate-spin" />Loading preview…</p>;
   if (img)
     return (
       <img
@@ -524,7 +526,7 @@ function FilePreview({ file }: { file: File }) {
         <FileText size={28} className="mx-auto text-muted-foreground" />
         <p className="mt-1 text-ink">{file.name}</p>
         <p className="text-xs">
-          Preview not available for this format - Run will still process it.
+          This format has no preview. Your file is ready to convert.
         </p>
       </div>
     </div>

@@ -1734,7 +1734,7 @@ export function ToolFields({
   setParams: (p: Record<string, string>) => void;
 }) {
   if (!tool.fields.length)
-    return <p className="text-xs text-brand-400">No options for this tool.</p>;
+    return <p className="text-xs text-brand-400">Ready to go. No settings needed.</p>;
   // Hide the corner-position field unless the layout that uses it is selected.
   const visible = tool.fields.filter((f) => {
     if (f.key === "iwPos") return params.iwLayout === "corner";

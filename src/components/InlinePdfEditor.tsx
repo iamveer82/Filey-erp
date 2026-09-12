@@ -1,773 +1,772 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+  type PointerEvent,
+} from "react";
 import {
   MousePointer2,
-  Type as TypeIcon,
+  Type,
   Highlighter,
-  Pen,
+  Paintbrush,
   Square,
   Crop,
+  Eraser,
+  Undo2,
+  Redo2,
   RotateCw,
   Trash2,
   Check,
   ChevronLeft,
   ChevronRight,
   Loader2,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
-import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
+import {
+  savePdfAnnotations,
+  type Annotation,
+  type PageChange,
+  type Point,
+} from "../lib/pdfAnnotations";
 import { useUI } from "../lib/ui";
-import { cn } from "../lib/format";
-import { SelectMenu } from "./ui-menu";
 
-
-/* Inline PDF editor — same engine as PdfEditorModal but laid out as a
- * horizontal toolbar above the live preview, editing the page in place.
- * Coordinates are stored in display pixels relative to the stage and
- * converted to PDF points at save time using the measured stage width. */
-
-const RENDER_W = 1100;
-
-type Tool = "select" | "text" | "highlight" | "pen" | "rect" | "crop";
-type Family = "Sans" | "Serif" | "Mono";
-
-interface TextEdit {
-  id: string;
-  page: number;
-  kind: "text";
-  x: number;
-  y: number;
-  text: string;
-  family: Family;
-  size: number;
-  color: string;
-  weight: number;
-  italic: boolean;
-}
-interface HighlightEdit {
-  id: string;
-  page: number;
-  kind: "highlight";
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: string;
-}
-interface RectEdit {
-  id: string;
-  page: number;
-  kind: "rect";
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  stroke: string;
-}
-interface InkEdit {
-  id: string;
-  page: number;
-  kind: "ink";
-  pts: { x: number; y: number }[];
-  color: string;
-  width: number;
-}
-type Edit = TextEdit | HighlightEdit | RectEdit | InkEdit;
-interface PageOp {
-  rotate?: number;
-  deleted?: boolean;
-  crop?: { x: number; y: number; w: number; h: number };
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const h = hex.replace("#", "");
-  const f =
-    h.length === 3
-      ? h
-          .split("")
-          .map((x) => x + x)
-          .join("")
-      : h;
-  const n = parseInt(f, 16);
-  return Number.isNaN(n)
-    ? { r: 0, g: 0, b: 0 }
-    : { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
-}
-const uid = () => Math.random().toString(36).slice(2, 9);
+export type PdfEditorHandle = { prepare: () => Promise<File> };
+type Tool = "select" | "text" | "highlight" | "ink" | "rect" | "crop" | "erase";
+type Snapshot = { marks: Annotation[]; changes: Record<number, PageChange> };
+const EMPTY: Snapshot = { marks: [], changes: {} };
+const TOOLS = [
+  {
+    id: "select",
+    name: "Select",
+    icon: MousePointer2,
+    hint: "Select a mark to move it or change its text. Arrow keys move a selected mark.",
+  },
+  {
+    id: "ink",
+    name: "Brush",
+    icon: Paintbrush,
+    hint: "Draw on the page with your mouse, pen or finger.",
+  },
+  {
+    id: "text",
+    name: "Text",
+    icon: Type,
+    hint: "Click the page to add text. Edit the wording in the text field above.",
+  },
+  {
+    id: "highlight",
+    name: "Highlight",
+    icon: Highlighter,
+    hint: "Drag across the area you want to highlight.",
+  },
+  { id: "rect", name: "Shape", icon: Square, hint: "Drag to draw a rectangle." },
+  {
+    id: "erase",
+    name: "Eraser",
+    icon: Eraser,
+    hint: "Click an added mark to remove it. Original PDF content stays unchanged.",
+  },
+  {
+    id: "crop",
+    name: "Crop",
+    icon: Crop,
+    hint: "Drag to choose the visible page area. Cropping does not redact hidden content.",
+  },
+] as const;
+const moveMark = (mark: Annotation, dx: number, dy: number): Annotation =>
+  mark.kind === "ink"
+    ? { ...mark, points: mark.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+    : { ...mark, x: mark.x + dx, y: mark.y + dy };
 
 export default function InlinePdfEditor({
   file,
   onApply,
+  editorRef,
+  onDirtyChange,
+  disabled = false,
 }: {
   file: File;
-  /** Called with the baked PDF when the user applies edits. */
   onApply: (file: File) => void;
+  editorRef?: Ref<PdfEditorHandle>;
+  onDirtyChange?: (dirty: boolean) => void;
+  disabled?: boolean;
 }) {
-  const { toast, prompt } = useUI();
-  // toast is recreated on every UIProvider render, so it must NOT sit in the
-  // render effect's deps — doing so turned a single error toast into an
-  // infinite loop. Read it through a ref instead.
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
-  // Password for encrypted PDFs, persisted across page changes so we only
-  // prompt once. Reset when the file changes.
-  const pwdRef = useRef<string | undefined>(undefined);
-  const [pages, setPages] = useState(0);
+  const { toast } = useUI();
   const [page, setPage] = useState(0);
-  const [pageImg, setPageImg] = useState("");
-  const [ptSize, setPtSize] = useState<Record<number, { w: number; h: number }>>({});
-  const [tool, setTool] = useState<Tool>("select");
-  const [edits, setEdits] = useState<Edit[]>([]);
-  const [ops, setOps] = useState<Record<number, PageOp>>({});
-  const [saving, setSaving] = useState(false);
-
-  const [textOpt, setTextOpt] = useState({
-    family: "Sans" as Family,
-    size: 16,
-    color: "#0a0a0a",
-    weight: 400,
-    italic: false,
-  });
-  const [penOpt, setPenOpt] = useState({ color: "#FFD600", width: 3 });
-  const [rectOpt, setRectOpt] = useState({ stroke: "#0a0a0a" });
-  const [hiOpt, setHiOpt] = useState({ color: "#FFE066" });
-
-  const dragRef = useRef<{
-    kind: "ink" | "highlight" | "rect" | "crop";
-    start: { x: number; y: number };
-    cur: { x: number; y: number };
-    inkPts?: { x: number; y: number }[];
+  const [pageCount, setPageCount] = useState(0);
+  const [preview, setPreview] = useState<{
+    src: string;
+    width: number;
+    height: number;
   } | null>(null);
-  const [, force] = useState(0);
-  const reflect = () => force((n) => n + 1);
-
-  // Forget any cached password when a new file is loaded.
+  const [error, setError] = useState("");
+  const [tool, setTool] = useState<Tool>("select");
+  const [history, setHistory] = useState<{ entries: Snapshot[]; index: number }>({
+    entries: [EMPTY],
+    index: 0,
+  });
+  const snapshot = history.entries[history.index];
+  const { marks, changes } = snapshot;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [color, setColor] = useState("#172b4d");
+  const [width, setWidth] = useState(3);
+  const [text, setText] = useState("Your text");
+  const [size, setSize] = useState(16);
+  const [bold, setBold] = useState(false);
+  const [family, setFamily] = useState<"Sans" | "Serif" | "Mono">("Sans");
+  const [zoom, setZoom] = useState(100);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Annotation | null>(null);
+  const [cropDraft, setCropDraft] = useState<PageChange["crop"]>();
+  const stage = useRef<SVGSVGElement>(null);
+  const gesture = useRef<{ start: Point; points: Point[]; original?: Annotation } | null>(
+    null
+  );
+  const dirty =
+    marks.length > 0 ||
+    Object.values(changes).some((p) => p.deleted || p.crop || p.rotation);
+  const locked = disabled || saving;
+  const active = marks.find((mark) => mark.id === selected);
+  const changeCallback = useRef(onDirtyChange);
+  changeCallback.current = onDirtyChange;
   useEffect(() => {
-    pwdRef.current = undefined;
+    changeCallback.current?.(dirty);
+  }, [snapshot, dirty]);
+  useEffect(() => {
+    setHistory({ entries: [EMPTY], index: 0 });
+    setPage(0);
+    setSelected(null);
   }, [file]);
+  const commit = (next: Snapshot) =>
+    setHistory((prev) => ({
+      entries: [...prev.entries.slice(0, prev.index + 1), next],
+      index: prev.index + 1,
+    }));
+  const undo = () => {
+    setHistory((prev) => ({ ...prev, index: Math.max(0, prev.index - 1) }));
+    setSelected(null);
+  };
+  const redo = () => {
+    setHistory((prev) => ({
+      ...prev,
+      index: Math.min(prev.entries.length - 1, prev.index + 1),
+    }));
+    setSelected(null);
+  };
+  const remove = (id: string) => {
+    commit({ ...snapshot, marks: marks.filter((mark) => mark.id !== id) });
+    setSelected(null);
+  };
+  const updateMark = (next: Annotation) =>
+    commit({
+      ...snapshot,
+      marks: marks.map((mark) => (mark.id === next.id ? next : mark)),
+    });
+  const updatePage = (patch: PageChange) =>
+    commit({
+      ...snapshot,
+      changes: { ...changes, [page]: { ...changes[page], ...patch } },
+    });
 
-  // Render the chosen page on file/page change. Encrypted PDFs are handled by
-  // prompting for a password (via pdfjs onPassword) rather than erroring.
   useEffect(() => {
     let dead = false;
+    let task: ReturnType<typeof safePdf.getDocument> | undefined;
+    setPreview(null);
+    setError("");
+    setSelected(null);
     (async () => {
       try {
-        const data = new Uint8Array(await file.arrayBuffer());
-        const task = safePdf.getDocument({ data, password: pwdRef.current });
-        task.onPassword = (updatePassword: (pw: string) => void, reason: number) => {
-          // reason 2 = previous password was wrong, 1 = none supplied yet.
-          prompt({
-            title: reason === 2 ? "Incorrect password" : "Password required",
-            label: "This PDF is encrypted. Enter its password to edit it.",
-            placeholder: "Password",
-          }).then((pw) => {
-            if (dead) return;
-            if (pw == null) {
-              task.destroy();
-              return;
-            }
-            pwdRef.current = pw;
-            updatePassword(pw);
-          });
-        };
+        task = safePdf.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
         const pdf = await task.promise;
         if (dead) return;
-        setPages(pdf.numPages);
-        const idx = Math.min(Math.max(0, page), pdf.numPages - 1);
-        const p = await pdf.getPage(idx + 1);
-        const pt = p.getViewport({ scale: 1 });
-        if (dead) return;
-        setPtSize((s) => ({ ...s, [idx]: { w: pt.width, h: pt.height } }));
-        const scale = RENDER_W / pt.width;
-        const vp = p.getViewport({ scale });
+        setPageCount(pdf.numPages);
+        const p = await pdf.getPage(Math.min(page + 1, pdf.numPages));
+        const base = p.getViewport({ scale: 1 });
+        const viewport = p.getViewport({ scale: 1400 / base.width });
         const canvas = document.createElement("canvas");
-        canvas.width = vp.width;
-        canvas.height = vp.height;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
         const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        await p.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-        if (dead) return;
-        setPageImg(canvas.toDataURL("image/png"));
-      } catch (e) {
-        // A cancelled password prompt destroys the task — stay silent for that.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!/destroy|password/i.test(msg)) toastRef.current.error(msg);
+        if (!ctx) throw new Error("The document preview could not be created.");
+        await p.render({ canvas, canvasContext: ctx, viewport }).promise;
+        if (!dead)
+          setPreview({
+            src: canvas.toDataURL("image/png"),
+            width: base.width,
+            height: base.height,
+          });
+      } catch (failure) {
+        if (!dead)
+          setError(
+            /password|encrypted/i.test(String(failure))
+              ? "This PDF is locked. Use Unlock PDF first, then open the unlocked copy here."
+              : "Could not preview this PDF. Try another file."
+          );
+      } finally {
+        if (task) void task.destroy().catch(() => {});
       }
     })();
     return () => {
       dead = true;
+      if (task) void task.destroy().catch(() => {});
     };
-  }, [file, page, prompt]);
+  }, [file, page]);
 
-  const stage = useRef<HTMLDivElement>(null);
-  const local = (e: React.PointerEvent) => {
-    const r = stage.current?.getBoundingClientRect() ?? new DOMRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  };
-
-  const onDown = (e: React.PointerEvent) => {
-    if (!pageImg || tool === "select") return;
-    e.preventDefault();
-    const p = local(e);
-    if (tool === "text") {
-      const id = uid();
-      setEdits((arr) => [
-        ...arr,
-        { id, page, kind: "text", x: p.x, y: p.y, text: "Type here…", ...textOpt },
-      ]);
-      setTool("select");
-      setTimeout(() => {
-        const el = document.querySelector<HTMLElement>(`[data-edit="${id}"]`);
-        el?.focus();
-        if (el && document.createRange) {
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          const sel = window.getSelection();
-          sel?.removeAllRanges();
-          sel?.addRange(range);
-        }
-      }, 0);
-      return;
-    }
-    if (tool === "pen") {
-      dragRef.current = { kind: "ink", start: p, cur: p, inkPts: [p] };
-      reflect();
-      return;
-    }
-    dragRef.current = { kind: tool, start: p, cur: p };
-    reflect();
-  };
-  const onMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const p = local(e);
-    d.cur = p;
-    if (d.kind === "ink") d.inkPts?.push(p);
-    reflect();
-  };
-  const onUp = () => {
-    const d = dragRef.current;
-    if (!d) return;
-    const { start, cur } = d;
-    if (d.kind === "ink" && d.inkPts && d.inkPts.length > 1) {
-      setEdits((arr) => [
-        ...arr,
-        {
-          id: uid(),
-          page,
-          kind: "ink",
-          pts: d.inkPts!,
-          color: penOpt.color,
-          width: penOpt.width,
-        },
-      ]);
-    } else if (d.kind === "highlight" || d.kind === "rect" || d.kind === "crop") {
-      const x = Math.min(start.x, cur.x);
-      const y = Math.min(start.y, cur.y);
-      const w = Math.abs(cur.x - start.x);
-      const h = Math.abs(cur.y - start.y);
-      if (w > 4 && h > 4) {
-        if (d.kind === "highlight")
-          setEdits((arr) => [
-            ...arr,
-            { id: uid(), page, kind: "highlight", x, y, w, h, color: hiOpt.color },
-          ]);
-        else if (d.kind === "rect")
-          setEdits((arr) => [
-            ...arr,
-            { id: uid(), page, kind: "rect", x, y, w, h, stroke: rectOpt.stroke },
-          ]);
-        else
-          setOps((o) => ({ ...o, [page]: { ...(o[page] ?? {}), crop: { x, y, w, h } } }));
-      }
-    }
-    dragRef.current = null;
-    reflect();
-  };
-
-  const removeEdit = (id: string) => setEdits((arr) => arr.filter((e) => e.id !== id));
-  const updateText = (id: string, text: string) =>
-    setEdits((arr) =>
-      arr.map((e) => (e.id === id && e.kind === "text" ? { ...e, text } : e))
-    );
-  const setPageOp = (i: number, patch: Partial<PageOp>) =>
-    setOps((o) => ({ ...o, [i]: { ...(o[i] ?? {}), ...patch } }));
-  const rotatePage = (deg: number) =>
-    setPageOp(page, { rotate: ((ops[page]?.rotate ?? 0) + deg + 360) % 360 });
-  const deletePage = () => {
-    if (!confirm("Delete this page?")) return;
-    if (pages <= 1) return toast.error("A PDF must have at least one page.");
-    setPageOp(page, { deleted: true });
-    setPage((p) => Math.min(p + 1, pages - 1));
-  };
-  const clearPageEdits = () => {
-    setEdits((arr) => arr.filter((e) => e.page !== page));
-    setOps((o) => ({ ...o, [page]: { ...(o[page] ?? {}), crop: undefined } }));
-  };
-
-  const dirty =
-    edits.length > 0 || Object.values(ops).some((o) => o.rotate || o.deleted || o.crop);
-
+  const prepare = () =>
+    dirty ? savePdfAnnotations(file, marks, changes) : Promise.resolve(file);
+  useImperativeHandle(editorRef, () => ({ prepare }));
   const apply = async () => {
     setSaving(true);
     try {
-      const dispW = stage.current?.clientWidth || RENDER_W;
-      const doc = await PDFDocument.load(await file.arrayBuffer(), {
-        ignoreEncryption: true,
-      });
-      const fontCache: Partial<
-        Record<string, Awaited<ReturnType<typeof doc.embedFont>>>
-      > = {};
-      const stdFont = async (family: Family, weight: number, italic: boolean) => {
-        const map: Record<
-          Family,
-          {
-            reg: StandardFonts;
-            bold: StandardFonts;
-            ita: StandardFonts;
-            bita: StandardFonts;
-          }
-        > = {
-          Sans: {
-            reg: StandardFonts.Helvetica,
-            bold: StandardFonts.HelveticaBold,
-            ita: StandardFonts.HelveticaOblique,
-            bita: StandardFonts.HelveticaBoldOblique,
-          },
-          Serif: {
-            reg: StandardFonts.TimesRoman,
-            bold: StandardFonts.TimesRomanBold,
-            ita: StandardFonts.TimesRomanItalic,
-            bita: StandardFonts.TimesRomanBoldItalic,
-          },
-          Mono: {
-            reg: StandardFonts.Courier,
-            bold: StandardFonts.CourierBold,
-            ita: StandardFonts.CourierOblique,
-            bita: StandardFonts.CourierBoldOblique,
-          },
-        };
-        const m = map[family];
-        const which = weight >= 600 ? (italic ? m.bita : m.bold) : italic ? m.ita : m.reg;
-        const key = String(which);
-        if (!fontCache[key]) fontCache[key] = await doc.embedFont(which);
-        return fontCache[key]!;
-      };
-
-      const pageList = doc.getPages();
-      for (let i = 0; i < pageList.length; i++) {
-        if (ops[i]?.deleted) continue;
-        const p = pageList[i];
-        const wPt = p.getWidth();
-        const hPt = p.getHeight();
-        const s = wPt / dispW; // display px → pt
-
-        const rot = ops[i]?.rotate;
-        if (rot) p.setRotation(degrees((p.getRotation().angle + rot) % 360));
-
-        for (const e of edits.filter((x) => x.page === i)) {
-          if (e.kind === "highlight") {
-            const c = hexToRgb(e.color);
-            p.drawRectangle({
-              x: e.x * s,
-              y: hPt - (e.y + e.h) * s,
-              width: e.w * s,
-              height: e.h * s,
-              color: rgb(c.r, c.g, c.b),
-              opacity: 0.4,
-              borderWidth: 0,
-            });
-          } else if (e.kind === "rect") {
-            const c = hexToRgb(e.stroke);
-            p.drawRectangle({
-              x: e.x * s,
-              y: hPt - (e.y + e.h) * s,
-              width: e.w * s,
-              height: e.h * s,
-              borderColor: rgb(c.r, c.g, c.b),
-              borderWidth: 1.5,
-            });
-          } else if (e.kind === "ink") {
-            const c = hexToRgb(e.color);
-            for (let k = 1; k < e.pts.length; k++) {
-              const a = e.pts[k - 1];
-              const b = e.pts[k];
-              p.drawLine({
-                start: { x: a.x * s, y: hPt - a.y * s },
-                end: { x: b.x * s, y: hPt - b.y * s },
-                thickness: e.width * s,
-                color: rgb(c.r, c.g, c.b),
-              });
-            }
-          } else if (e.kind === "text") {
-            const font = await stdFont(e.family, e.weight, e.italic);
-            const c = hexToRgb(e.color);
-            const sizePt = e.size * s;
-            p.drawText(e.text, {
-              x: e.x * s,
-              y: hPt - e.y * s - sizePt,
-              size: sizePt,
-              color: rgb(c.r, c.g, c.b),
-              font,
-            });
-          }
-        }
-
-        const cr = ops[i]?.crop;
-        if (cr) p.setCropBox(cr.x * s, hPt - (cr.y + cr.h) * s, cr.w * s, cr.h * s);
-      }
-      for (let i = pageList.length - 1; i >= 0; i--)
-        if (ops[i]?.deleted) doc.removePage(i);
-
-      const name = file.name.replace(/\.pdf$/i, "") + "-edited.pdf";
-      const bytes = await doc.save();
-      onApply(new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
-      toast.success("Edits applied.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      onApply(await prepare());
+      toast.success("Edits saved to your working copy.");
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : String(failure));
     } finally {
       setSaving(false);
     }
   };
-
-  const cursor = tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
-  const pageOps = ops[page] ?? {};
-  const pageEdits = edits.filter((e) => e.page === page);
-  const drag = dragRef.current;
-
-  const Tbtn = ({
-    id,
-    label,
-    Icon,
-  }: {
-    id: Tool;
-    label: string;
-    Icon: typeof TypeIcon;
-  }) => (
-    <button
-      onClick={() => setTool(id)}
-      title={label}
-      aria-label={label}
-      className={cn(
-        "grid h-8 w-8 place-items-center rounded-lg cursor-pointer transition-colors",
-        tool === id
-          ? "bg-primary-400 text-[#0A0A0A]"
-          : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"
-      )}
-    >
-      <Icon size={15} />
-    </button>
-  );
-  const color = (v: string, on: (s: string) => void) => (
-    <input
-      type="color"
-      value={v}
-      onChange={(e) => on(e.target.value)}
-      className="h-7 w-7 cursor-pointer rounded border border-brand-200"
-    />
-  );
+  const rotation = changes[page]?.rotation || 0;
+  const baseW = preview?.width || 595,
+    baseH = preview?.height || 842;
+  const quarter = rotation === 90 || rotation === 270;
+  const viewW = quarter ? baseH : baseW,
+    viewH = quarter ? baseW : baseH;
+  const transform =
+    rotation === 90
+      ? `translate(${baseH} 0) rotate(90)`
+      : rotation === 180
+        ? `translate(${baseW} ${baseH}) rotate(180)`
+        : rotation === 270
+          ? `translate(0 ${baseW}) rotate(270)`
+          : undefined;
+  const local = (event: PointerEvent): Point => {
+    const rect = stage.current!.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * viewW,
+      y = ((event.clientY - rect.top) / rect.height) * viewH;
+    const p =
+      rotation === 90
+        ? { x: y, y: baseH - x }
+        : rotation === 180
+          ? { x: baseW - x, y: baseH - y }
+          : rotation === 270
+            ? { x: baseW - y, y: x }
+            : { x, y };
+    return { x: Math.max(0, Math.min(baseW, p.x)), y: Math.max(0, Math.min(baseH, p.y)) };
+  };
+  const down = (event: PointerEvent<SVGSVGElement>) => {
+    if (locked || !preview || changes[page]?.deleted || event.button !== 0) return;
+    const id = (event.target as Element)
+      .closest("[data-annotation]")
+      ?.getAttribute("data-annotation");
+    const hit = marks.find((mark) => mark.id === id);
+    if (tool === "erase") {
+      if (hit) remove(hit.id);
+      return;
+    }
+    const point = local(event);
+    if (tool === "select" && !hit) {
+      setSelected(null);
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (tool === "text") {
+      const mark: Annotation = {
+        id: crypto.randomUUID(),
+        page,
+        kind: "text",
+        ...point,
+        text,
+        color,
+        size,
+        bold,
+        family,
+      };
+      commit({ ...snapshot, marks: [...marks, mark] });
+      setSelected(mark.id);
+      setTool("select");
+      return;
+    }
+    if (hit && tool === "select") setSelected(hit.id);
+    gesture.current = {
+      start: point,
+      points: [point],
+      original: tool === "select" ? hit : undefined,
+    };
+    if (tool === "ink")
+      setDraft({
+        id: crypto.randomUUID(),
+        page,
+        kind: "ink",
+        points: [point],
+        color,
+        width,
+      });
+  };
+  const move = (event: PointerEvent<SVGSVGElement>) => {
+    const g = gesture.current;
+    if (!g || locked) return;
+    const point = local(event);
+    if (g.original) {
+      setDraft(moveMark(g.original, point.x - g.start.x, point.y - g.start.y));
+      return;
+    }
+    if (tool === "ink") {
+      g.points.push(point);
+      setDraft({ id: "drawing", page, kind: "ink", points: [...g.points], color, width });
+    } else {
+      const box = {
+        x: Math.min(g.start.x, point.x),
+        y: Math.min(g.start.y, point.y),
+        w: Math.abs(point.x - g.start.x),
+        h: Math.abs(point.y - g.start.y),
+      };
+      if (tool === "crop") setCropDraft(box);
+      else if (tool === "highlight" || tool === "rect")
+        setDraft({
+          id: "drawing",
+          page,
+          kind: tool,
+          ...box,
+          color: tool === "highlight" ? "#faca1a" : color,
+        });
+    }
+  };
+  const up = () => {
+    if (!gesture.current) return;
+    if (draft) {
+      if (gesture.current.original) updateMark(draft);
+      else if (draft.kind === "ink" || ("w" in draft && draft.w > 2 && draft.h > 2))
+        commit({ ...snapshot, marks: [...marks, { ...draft, id: crypto.randomUUID() }] });
+    } else if (cropDraft && cropDraft.w > 4 && cropDraft.h > 4)
+      updatePage({ crop: cropDraft });
+    gesture.current = null;
+    setDraft(null);
+    setCropDraft(undefined);
+  };
+  const selectedText = active?.kind === "text" ? active : null;
+  const choosePage = (value: number) => {
+    gesture.current = null;
+    setDraft(null);
+    setCropDraft(undefined);
+    setPage(value);
+  };
 
   return (
-    <div>
-      {/* ── Horizontal toolbar ─────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
-        <Tbtn id="select" label="Select" Icon={MousePointer2} />
-        <Tbtn id="text" label="Text" Icon={TypeIcon} />
-        <Tbtn id="highlight" label="Highlight" Icon={Highlighter} />
-        <Tbtn id="pen" label="Pen" Icon={Pen} />
-        <Tbtn id="rect" label="Rectangle" Icon={Square} />
-        <Tbtn id="crop" label="Crop" Icon={Crop} />
-
-        {/* contextual options */}
-        {tool !== "select" && (
-          <span className="mx-1 h-5 w-px bg-brand-200" />
-        )}
-        {tool === "text" && (
-          <div className="flex items-center gap-1.5">
-            <SelectMenu
-              size="sm"
-              className="w-auto h-7"
-              value={textOpt.family}
-              onChange={(v) => setTextOpt({ ...textOpt, family: v as Family })}
-              options={[
-                { value: "Sans", label: "Sans" },
-                { value: "Serif", label: "Serif" },
-                { value: "Mono", label: "Mono" },
-              ]}
-            />
-            <SelectMenu
-              size="sm"
-              className="w-auto h-7"
-              value={String(textOpt.weight)}
-              onChange={(v) => setTextOpt({ ...textOpt, weight: Number(v) })}
-              options={[
-                { value: "400", label: "Normal" },
-                { value: "700", label: "Bold" },
-              ]}
-            />
-            <input
-              type="range"
-              min={8}
-              max={64}
-              value={textOpt.size}
-              onChange={(e) => setTextOpt({ ...textOpt, size: Number(e.target.value) })}
-              className="w-20 accent-primary-500"
-              title={`${textOpt.size}px`}
-            />
-            {color(textOpt.color, (c) => setTextOpt({ ...textOpt, color: c }))}
-          </div>
-        )}
-        {tool === "highlight" && color(hiOpt.color, (c) => setHiOpt({ color: c }))}
-        {tool === "pen" && (
-          <div className="flex items-center gap-1.5">
-            {color(penOpt.color, (c) => setPenOpt({ ...penOpt, color: c }))}
-            <input
-              type="range"
-              min={1}
-              max={12}
-              value={penOpt.width}
-              onChange={(e) => setPenOpt({ ...penOpt, width: Number(e.target.value) })}
-              className="w-20 accent-primary-500"
-              title={`${penOpt.width}px`}
-            />
-          </div>
-        )}
-        {tool === "rect" && color(rectOpt.stroke, (c) => setRectOpt({ stroke: c }))}
-        {tool === "crop" && pageOps.crop && (
+    <div
+      className="pdf-editor"
+      onKeyDown={(event) => {
+        if (locked || /INPUT|TEXTAREA|SELECT/.test((event.target as HTMLElement).tagName))
+          return;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+          event.preventDefault();
+          event.shiftKey ? redo() : undo();
+        }
+        if (active && (event.key === "Delete" || event.key === "Backspace")) {
+          event.preventDefault();
+          remove(active.id);
+        }
+        if (
+          active &&
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+        ) {
+          event.preventDefault();
+          const step = event.shiftKey ? 10 : 1;
+          updateMark(
+            moveMark(
+              active,
+              event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0,
+              event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0
+            )
+          );
+        }
+      }}
+    >
+      <div className="pdf-editor-toolbar" role="group" aria-label="Editing tools">
+        {TOOLS.map((item) => (
           <button
-            className="btn-ghost h-7 text-xs"
-            onClick={() =>
-              setOps((o) => ({ ...o, [page]: { ...(o[page] ?? {}), crop: undefined } }))
-            }
+            key={item.id}
+            type="button"
+            className="btn-ghost pdf-editor-tool"
+            aria-pressed={tool === item.id}
+            disabled={locked}
+            onClick={() => {
+              setTool(item.id);
+              setSelected(null);
+            }}
           >
-            Clear crop
+            <item.icon size={16} />
+            {item.name}
+          </button>
+        ))}
+        <span className="flex-1" />
+        <button
+          type="button"
+          className="btn-ghost pdf-editor-icon"
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+          disabled={locked || history.index === 0}
+          onClick={undo}
+        >
+          <Undo2 size={16} />
+        </button>
+        <button
+          type="button"
+          className="btn-ghost pdf-editor-icon"
+          title="Redo (Ctrl+Shift+Z)"
+          aria-label="Redo"
+          disabled={locked || history.index === history.entries.length - 1}
+          onClick={redo}
+        >
+          <Redo2 size={16} />
+        </button>
+      </div>
+      <fieldset disabled={locked} className="pdf-editor-options">
+        {(tool === "ink" || tool === "text" || tool === "rect" || !!active) && (
+          <label className="flex items-center gap-2 text-xs">
+            Colour
+            <input
+              type="color"
+              aria-label="Drawing colour"
+              value={active?.color || color}
+              onChange={(event) => {
+                setColor(event.target.value);
+                if (active) updateMark({ ...active, color: event.target.value });
+              }}
+              className="h-10 w-10 cursor-pointer rounded-full border border-border bg-card p-1"
+            />
+          </label>
+        )}
+        {tool === "ink" && (
+          <label className="flex items-center gap-2 text-xs">
+            Brush size
+            <input
+              type="range"
+              min="1"
+              max="18"
+              value={width}
+              onChange={(event) => setWidth(Number(event.target.value))}
+              className="w-24 accent-primary-500"
+            />
+            <span className="w-9 tabular-nums">{width} pt</span>
+          </label>
+        )}
+        {(tool === "text" || selectedText) && (
+          <>
+            <label className="sr-only" htmlFor="annotation-text">
+              Text content
+            </label>
+            <input
+              id="annotation-text"
+              className="input min-w-0 flex-1"
+              value={selectedText?.text ?? text}
+              onChange={(event) => {
+                setText(event.target.value);
+                if (selectedText)
+                  updateMark({ ...selectedText, text: event.target.value });
+              }}
+            />
+            <select
+              aria-label="Text font"
+              className="select w-24"
+              value={selectedText?.family ?? family}
+              onChange={(event) => {
+                const value = event.target.value as typeof family;
+                setFamily(value);
+                if (selectedText) updateMark({ ...selectedText, family: value });
+              }}
+            >
+              <option>Sans</option>
+              <option>Serif</option>
+              <option>Mono</option>
+            </select>
+            <input
+              type="number"
+              aria-label="Text size"
+              min="8"
+              max="72"
+              className="input w-20"
+              value={selectedText?.size ?? size}
+              onChange={(event) => {
+                const value = Math.max(8, Math.min(72, Number(event.target.value)));
+                setSize(value);
+                if (selectedText) updateMark({ ...selectedText, size: value });
+              }}
+            />
+            <button
+              type="button"
+              className="btn-ghost"
+              aria-pressed={selectedText?.bold ?? bold}
+              onClick={() => {
+                const value = !(selectedText?.bold ?? bold);
+                setBold(value);
+                if (selectedText) updateMark({ ...selectedText, bold: value });
+              }}
+            >
+              Bold
+            </button>
+          </>
+        )}
+        {active && (
+          <button type="button" className="btn-ghost" onClick={() => remove(active.id)}>
+            <Trash2 size={15} />
+            Remove mark
           </button>
         )}
-
-        <span className="flex-1" />
-
-        {/* page nav + page ops */}
-        <button
-          className="btn-ghost h-7 !px-1.5"
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-          disabled={page <= 0}
-          aria-label="Previous page"
-        >
-          <ChevronLeft size={14} />
-        </button>
-        <span className="whitespace-nowrap text-xs font-medium text-brand-500">
-          {page + 1}/{pages || "…"}
-          {pageOps.deleted ? " ✕" : ""}
+        {tool === "crop" && changes[page]?.crop && (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => updatePage({ crop: undefined })}
+          >
+            Reset crop
+          </button>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {TOOLS.find((item) => item.id === tool)?.hint}
+        </p>
+      </fieldset>
+      <div className="pdf-editor-viewbar">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label="Previous page"
+            disabled={locked || page === 0}
+            onClick={() => choosePage(page - 1)}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="px-2 text-xs tabular-nums">
+            Page {page + 1} of {pageCount || "…"}
+          </span>
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label="Next page"
+            disabled={locked || page >= pageCount - 1}
+            onClick={() => choosePage(page + 1)}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label="Rotate page right"
+            disabled={locked || !preview}
+            onClick={() => updatePage({ rotation: (rotation + 90) % 360 })}
+          >
+            <RotateCw size={16} />
+          </button>
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label={changes[page]?.deleted ? "Restore page" : "Remove page"}
+            disabled={
+              locked ||
+              (!changes[page]?.deleted &&
+                pageCount - Object.values(changes).filter((p) => p.deleted).length <= 1)
+            }
+            onClick={() => updatePage({ deleted: !changes[page]?.deleted })}
+          >
+            <Trash2 size={16} />
+          </button>
+          <span className="mx-1 h-5 w-px bg-border" />
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label="Zoom out"
+            disabled={zoom <= 50}
+            onClick={() => setZoom(Math.max(50, zoom - 25))}
+          >
+            <ZoomOut size={16} />
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setZoom(100)}
+            title="Fit page width"
+          >
+            {zoom === 100 ? "Fit" : zoom + "%"}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost pdf-editor-icon"
+            aria-label="Zoom in"
+            disabled={zoom >= 200}
+            onClick={() => setZoom(Math.min(200, zoom + 25))}
+          >
+            <ZoomIn size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="pdf-editor-canvas">
+        {error ? (
+          <div role="alert" className="p-8 text-sm text-danger">
+            {error}
+          </div>
+        ) : !preview ? (
+          <div
+            role="status"
+            className="grid min-h-80 place-items-center text-muted-foreground"
+          >
+            <Loader2 size={22} className="animate-spin" />
+            <span>Loading page…</span>
+          </div>
+        ) : (
+          <>
+            {changes[page]?.deleted && (
+              <p role="status" className="mb-3 text-center text-sm">
+                This page will be removed. Use Restore page or Undo to keep it.
+              </p>
+            )}
+            <svg
+              ref={stage}
+              viewBox={`0 0 ${viewW} ${viewH}`}
+              className="pdf-editor-paper"
+              role="group"
+              aria-label={`Editable PDF page ${page + 1}`}
+              tabIndex={0}
+              style={{
+                width: `${zoom}%`,
+                maxWidth: "none",
+                opacity: changes[page]?.deleted ? 0.35 : 1,
+                cursor:
+                  tool === "select" ? "default" : tool === "text" ? "text" : "crosshair",
+                touchAction: tool === "select" && !active ? "pan-y" : "none",
+              }}
+              onPointerDown={down}
+              onPointerMove={move}
+              onPointerUp={up}
+              onPointerCancel={() => {
+                gesture.current = null;
+                setDraft(null);
+                setCropDraft(undefined);
+              }}
+            >
+              <g transform={transform}>
+                <image href={preview.src} width={baseW} height={baseH} />
+                {[
+                  ...marks.filter((mark) => mark.page === page && mark.id !== draft?.id),
+                  ...(draft ? [draft] : []),
+                ].map((mark) => (
+                  <g
+                    key={mark.id}
+                    data-annotation={mark.id}
+                    role="button"
+                    aria-label={`${mark.kind === "ink" ? "Brush stroke" : mark.kind === "rect" ? "Rectangle" : mark.kind === "text" ? "Text: " + mark.text : "Highlight"}`}
+                    tabIndex={locked ? -1 : 0}
+                    onFocus={() => setSelected(mark.id)}
+                    onKeyDown={(event) => {
+                      if (!locked && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        tool === "erase" ? remove(mark.id) : setSelected(mark.id);
+                      }
+                    }}
+                    style={{
+                      cursor:
+                        tool === "erase"
+                          ? "crosshair"
+                          : tool === "select"
+                            ? "move"
+                            : undefined,
+                    }}
+                  >
+                    {mark.kind === "ink" ? (
+                      mark.points.length === 1 ? (
+                        <circle
+                          cx={mark.points[0].x}
+                          cy={mark.points[0].y}
+                          r={mark.width / 2}
+                          fill={mark.color}
+                        />
+                      ) : (
+                        <polyline
+                          points={mark.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                          stroke={mark.color}
+                          strokeWidth={mark.width}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          fill="none"
+                          pointerEvents="stroke"
+                        />
+                      )
+                    ) : mark.kind === "text" ? (
+                      <text
+                        x={mark.x}
+                        y={mark.y + mark.size}
+                        fontSize={mark.size}
+                        fontFamily={
+                          mark.family === "Serif"
+                            ? "Times New Roman, serif"
+                            : mark.family === "Mono"
+                              ? "Courier New, monospace"
+                              : "Arial, sans-serif"
+                        }
+                        fontWeight={mark.bold ? 700 : 400}
+                        fill={mark.color}
+                      >
+                        {mark.text}
+                      </text>
+                    ) : (
+                      <rect
+                        x={mark.x}
+                        y={mark.y}
+                        width={mark.w}
+                        height={mark.h}
+                        fill={mark.kind === "highlight" ? mark.color : "transparent"}
+                        fillOpacity={mark.kind === "highlight" ? 0.35 : 1}
+                        stroke={mark.kind === "rect" ? mark.color : "none"}
+                        strokeWidth={1.5}
+                      />
+                    )}
+                    {selected === mark.id && (
+                      <title>Selected. Drag to move, or press Delete to remove.</title>
+                    )}
+                  </g>
+                ))}
+                {(cropDraft || changes[page]?.crop) &&
+                  (() => {
+                    const box = cropDraft || changes[page]!.crop!;
+                    return (
+                      <rect
+                        {...{ x: box.x, y: box.y, width: box.w, height: box.h }}
+                        fill="none"
+                        stroke="#172b4d"
+                        strokeWidth={2}
+                        strokeDasharray="6 4"
+                        pointerEvents="none"
+                      />
+                    );
+                  })()}
+              </g>
+            </svg>
+          </>
+        )}
+      </div>
+      <div className="pdf-editor-footer">
+        <span role="status" className="text-xs text-muted-foreground">
+          {dirty
+            ? "Edits will be included when you create your file."
+            : "Your original file stays unchanged."}
         </span>
         <button
-          className="btn-ghost h-7 !px-1.5"
-          onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
-          disabled={page >= pages - 1}
-          aria-label="Next page"
+          type="button"
+          className="btn-ghost"
+          disabled={locked || !dirty}
+          onClick={() => void apply()}
         >
-          <ChevronRight size={14} />
-        </button>
-        <button
-          className="btn-ghost h-7 !px-1.5"
-          title="Rotate left"
-          aria-label="Rotate page left"
-          onClick={() => rotatePage(-90)}
-        >
-          <RotateCw size={13} className="-scale-x-100" />
-        </button>
-        <button
-          className="btn-ghost h-7 !px-1.5"
-          title="Rotate right"
-          aria-label="Rotate page right"
-          onClick={() => rotatePage(90)}
-        >
-          <RotateCw size={13} />
-        </button>
-        <button
-          className="btn-ghost h-7 !px-1.5"
-          title="Delete page"
-          aria-label="Delete current page"
-          onClick={deletePage}
-        >
-          <Trash2 size={13} />
-        </button>
-        <button
-          className="btn-ghost h-7 text-xs"
-          onClick={clearPageEdits}
-          aria-label="Clear all annotations"
-        >
-          Clear
-        </button>
-        <button
-          onClick={apply}
-          disabled={saving || !dirty}
-          className="btn-primary h-7 text-xs"
-          aria-label="Apply edits and download"
-        >
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
-          Apply
+          {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+          Save edits
         </button>
       </div>
-
-      {/* ── Interactive stage ──────────────────────────────────────────── */}
-      <div
-        ref={stage}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerLeave={onUp}
-        className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white"
-        style={{
-          aspectRatio: ptSize[page] ? `${ptSize[page].w} / ${ptSize[page].h}` : undefined,
-          cursor,
-          touchAction: "none",
-        }}
-      >
-        {pageImg ? (
-          <img
-            src={pageImg}
-            alt={`page ${page + 1}`}
-            className="block h-full w-full select-none"
-            draggable={false}
-          />
-        ) : (
-          <div className="grid h-full place-items-center text-sm text-brand-400">
-            <Loader2 size={20} className="animate-spin" />
-          </div>
-        )}
-
-        {pageEdits.map((e) => {
-          if (e.kind === "highlight")
-            return (
-              <div
-                key={e.id}
-                onDoubleClick={() => removeEdit(e.id)}
-                style={{
-                  left: e.x,
-                  top: e.y,
-                  width: e.w,
-                  height: e.h,
-                  background: e.color,
-                  opacity: 0.45,
-                }}
-                className="absolute"
-                title="Double-click to delete"
-              />
-            );
-          if (e.kind === "rect")
-            return (
-              <div
-                key={e.id}
-                onDoubleClick={() => removeEdit(e.id)}
-                style={{
-                  left: e.x,
-                  top: e.y,
-                  width: e.w,
-                  height: e.h,
-                  border: `1.5px solid ${e.stroke}`,
-                }}
-                className="absolute"
-                title="Double-click to delete"
-              />
-            );
-          if (e.kind === "ink")
-            return (
-              <svg
-                key={e.id}
-                className="pointer-events-none absolute inset-0 h-full w-full"
-              >
-                <polyline
-                  fill="none"
-                  stroke={e.color}
-                  strokeWidth={e.width}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={e.pts.map((p) => `${p.x},${p.y}`).join(" ")}
-                />
-              </svg>
-            );
-          return (
-            <div
-              key={e.id}
-              data-edit={e.id}
-              contentEditable
-              suppressContentEditableWarning
-              onBlur={(ev) => updateText(e.id, ev.currentTarget.textContent ?? "")}
-              onDoubleClick={(ev) => ev.stopPropagation()}
-              onKeyDown={(ev) => {
-                if (ev.key === "Delete" && ev.ctrlKey) {
-                  ev.preventDefault();
-                  removeEdit(e.id);
-                }
-              }}
-              style={{
-                left: e.x,
-                top: e.y,
-                fontFamily:
-                  e.family === "Sans"
-                    ? "'Plus Jakarta Sans', sans-serif"
-                    : e.family === "Serif"
-                      ? "'Lora', serif"
-                      : "'IBM Plex Mono', monospace",
-                fontSize: e.size,
-                color: e.color,
-                fontWeight: e.weight,
-                fontStyle: e.italic ? "italic" : "normal",
-                whiteSpace: "pre",
-              }}
-              className="absolute outline-none focus:ring-1 focus:ring-primary-500"
-            >
-              {e.text}
-            </div>
-          );
-        })}
-
-        {drag && drag.kind !== "ink" && (
-          <div
-            style={{
-              left: Math.min(drag.start.x, drag.cur.x),
-              top: Math.min(drag.start.y, drag.cur.y),
-              width: Math.abs(drag.cur.x - drag.start.x),
-              height: Math.abs(drag.cur.y - drag.start.y),
-              background: drag.kind === "highlight" ? hiOpt.color : "transparent",
-              opacity: drag.kind === "highlight" ? 0.35 : 1,
-              border:
-                drag.kind === "rect"
-                  ? `1.5px solid ${rectOpt.stroke}`
-                  : drag.kind === "crop"
-                    ? "2px dashed #FFD600"
-                    : undefined,
-            }}
-            className="pointer-events-none absolute"
-          />
-        )}
-        {drag && drag.kind === "ink" && drag.inkPts && (
-          <svg className="pointer-events-none absolute inset-0 h-full w-full">
-            <polyline
-              fill="none"
-              stroke={penOpt.color}
-              strokeWidth={penOpt.width}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              points={drag.inkPts.map((p) => `${p.x},${p.y}`).join(" ")}
-            />
-          </svg>
-        )}
-        {pageOps.crop && (
-          <div
-            style={{
-              left: pageOps.crop.x,
-              top: pageOps.crop.y,
-              width: pageOps.crop.w,
-              height: pageOps.crop.h,
-            }}
-            className="pointer-events-none absolute border-2 border-dashed border-primary-500"
-          />
-        )}
-      </div>
-      <p className="mt-2 text-center text-[11px] text-brand-400">
-        Pick a tool, edit directly on the page, then <strong>Apply</strong>. Double-click
-        a highlight/box to remove it.
-      </p>
     </div>
   );
 }

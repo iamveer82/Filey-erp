@@ -11,6 +11,8 @@ Filey AI can observe and operate Windows desktop apps through a temporary sessio
 
 The ordinary agent approval mode still applies. A temporary computer grant does not remove tool confirmation rules. It is not saved for future launches, and the model cannot grant access to itself.
 
+The invoice dialog's **Send with Filey AI** is an explicit approval for one reviewed WhatsApp send. Unlike the general chat grant, its native session accepts only the selected Filey Browser window and owned file dialogs. It ends when the task completes or stops. Session identifiers prevent an older task from acting through or revoking a newer grant. See [invoice-messaging.md](invoice-messaging.md) for the workflow and release checks.
+
 The existing `ownerOnly` tool flag distinguishes a trusted signed-in interactive user from incoming customer requests. It is **not** an organization administrator role: each signed-in desktop user can grant access to their own Windows session. Remote customers cannot use this tool. Filey organization permissions and database access rules are unchanged.
 
 ## Data and execution boundaries

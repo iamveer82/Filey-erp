@@ -130,10 +130,10 @@ export default function RotateStudio({
         onClick={apply}
         disabled={saving || angle === 0}
         className="btn-primary mt-4 w-full"
-        aria-label="Apply rotation and download"
+        aria-label="Rotate PDF"
       >
         {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-        Apply rotation to all pages & download
+        Rotate PDF
       </button>
     </div>
   );

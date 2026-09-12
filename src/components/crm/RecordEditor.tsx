@@ -1,13 +1,6 @@
-import { useRef, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowUpRight,
-  Check,
-  MessageCircle,
-  Pencil,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { ArrowUpRight, Check, MessageCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   CRM_OBJECTS,
   OBJECT_KEYS,
@@ -24,7 +17,17 @@ import {
   type CrmData,
 } from "../../lib/crmWorkspace";
 import { aed, fmtDate, errMsg, cn } from "../../lib/format";
-import { Modal, ErrorBanner, Badge } from "../ui";
+import { ErrorBanner, Badge, statusTone } from "../ui";
+import RecordSheet from "./RecordSheet";
+import { RecordAvatar } from "./RecordIdentity";
+import RecordSales from "./RecordSales";
+import CrmAiActions from "./CrmAiActions";
+import { crmDuplicates } from "../../lib/crmOrganization";
+import {
+  inputTypeFor,
+  syncCustomFields,
+  type CustomFieldDef,
+} from "../../lib/customFields";
 
 export default function RecordEditor({
   kind,
@@ -39,6 +42,7 @@ export default function RecordEditor({
   onAdd,
   onBack,
   backLabel,
+  mutationDisabled = false,
 }: {
   kind: CrmObject;
   row?: CrmRow;
@@ -52,6 +56,7 @@ export default function RecordEditor({
   onAdd: (kind: CrmObject, initial: Record<string, string>) => void;
   onBack?: () => void;
   backLabel?: string;
+  mutationDisabled?: boolean;
 }) {
   const spec = CRM_OBJECTS[kind];
   const [draft, setDraft] = useState<Record<string, string>>(() => ({
@@ -65,7 +70,33 @@ export default function RecordEditor({
   const inFlight = useRef(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(!row);
-  const [section, setSection] = useState<"details" | CrmObject>("details");
+  const [section, setSection] = useState<"details" | "documents" | CrmObject>("details");
+  const customModule =
+    kind === "companies" ? "customers" : kind === "contacts" ? "contacts" : null;
+  const [customDefs, setCustomDefs] = useState<CustomFieldDef[] | null>(null);
+  const [customError, setCustomError] = useState("");
+  const [customAttempt, setCustomAttempt] = useState(0);
+  useEffect(() => {
+    if (!customModule) return;
+    let active = true;
+    setCustomDefs(null);
+    setCustomError("");
+    void syncCustomFields(customModule)
+      .then((defs) => {
+        if (active) setCustomDefs(defs);
+      })
+      .catch((e) => {
+        if (active) setCustomError(errMsg(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [customModule, customAttempt]);
+  const customValues =
+    row?.custom_fields && typeof row.custom_fields === "object"
+      ? (row.custom_fields as Record<string, unknown>)
+      : {};
+  const customBlocked = !!customModule && customDefs === null;
   const set = (key: string, value: string) =>
     setDraft((d) => ({
       ...d,
@@ -76,7 +107,7 @@ export default function RecordEditor({
         : {}),
     }));
   const run = async (fn: () => Promise<void>) => {
-    if (inFlight.current) return;
+    if (inFlight.current || mutationDisabled) return;
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -129,25 +160,64 @@ export default function RecordEditor({
         "activities",
       ]
     : [];
+  const duplicates = row
+    ? crmDuplicates(kind, data[kind]).filter((group) => group.ids.includes(row.id))
+    : [];
   return (
-    <Modal
-      open
+    <RecordSheet
       title={row ? recordName(kind, row).slice(0, 100) : `New ${spec.singular}`}
+      description={
+        row
+          ? `${label(spec.singular)} · #${row.id}`
+          : `Create ${spec.singular} in your workspace. Required fields are marked *.`
+      }
+      media={
+        <RecordAvatar
+          kind={kind}
+          name={row ? recordName(kind, row) : spec.singular}
+          large
+        />
+      }
+      busy={busy}
       onClose={() => {
         if (!inFlight.current) onClose();
       }}
-      size="xl"
+      onBack={!editing ? onBack : undefined}
+      backLabel={backLabel}
     >
-      {onBack && !editing && (
-        <button
-          type="button"
-          className="btn-ghost mb-4 max-w-full"
-          onClick={onBack}
-          disabled={busy}
-        >
-          <ArrowLeft size={14} className="shrink-0" />
-          <span className="truncate">Back to {backLabel || "record"}</span>
-        </button>
+      {mutationDisabled && (
+        <p role="status" className="mb-4 text-sm text-danger">
+          Refresh the workspace successfully before changing this record.
+        </p>
+      )}
+      {!editing && !!duplicates.length && (
+        <details className="mb-4 rounded-xl border border-border p-3 text-xs">
+          <summary className="cursor-pointer font-medium">
+            Review possible duplicates
+          </summary>
+          <p className="mt-2 text-muted-foreground">
+            Matching details can belong to different people. Review each record before
+            making changes.
+          </p>
+          {duplicates.map((group) => (
+            <div key={group.reason} className="mt-2">
+              <p className="text-muted-foreground">{group.reason}</p>
+              {group.ids
+                .filter((id) => id !== row?.id)
+                .map((id) => (
+                  <button
+                    key={id}
+                    className="btn-ghost"
+                    onClick={() =>
+                      onOpen(kind, data[kind].find((item) => item.id === id)!)
+                    }
+                  >
+                    {recordName(kind, data[kind].find((item) => item.id === id)!)} · #{id}
+                  </button>
+                ))}
+            </div>
+          ))}
+        </details>
       )}
       {onBack && editing && (
         <p className="text-xs text-muted-foreground mb-4">
@@ -159,6 +229,14 @@ export default function RecordEditor({
       {error && (
         <div className="mb-4">
           <ErrorBanner message={error} />
+        </div>
+      )}
+      {customError && (
+        <div className="mb-4">
+          <ErrorBanner message={`Custom fields could not load: ${customError}`} />
+          <button className="btn-ghost" onClick={() => setCustomAttempt((n) => n + 1)}>
+            Retry custom fields
+          </button>
         </div>
       )}
       {editing ? (
@@ -176,10 +254,25 @@ export default function RecordEditor({
                   : String(fields.get(field.key) || ""),
               ])
             );
+            if (customBlocked) return;
+            if (customModule)
+              submitted.custom_fields = JSON.stringify(
+                Object.fromEntries(
+                  (customDefs || []).map((def) => [
+                    def.key,
+                    def.type === "checkbox"
+                      ? fields.has(`custom:${def.key}`)
+                      : String(fields.get(`custom:${def.key}`) || ""),
+                  ])
+                )
+              );
             void run(() => onSave(submitted));
           }}
         >
-          <fieldset disabled={busy} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <fieldset
+            disabled={busy || mutationDisabled}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4"
+          >
             {spec.fields.map((field) => {
               const id = `crm-${kind}-${field.key}`;
               let options = field.options?.map((value) => ({
@@ -268,7 +361,7 @@ export default function RecordEditor({
                         <textarea
                           id={id}
                           name={field.key}
-                          className="textarea min-h-28"
+                          className="textarea"
                           value={draft[field.key]}
                           required={field.required}
                           maxLength={20000}
@@ -280,6 +373,11 @@ export default function RecordEditor({
                           name={field.key}
                           className="input"
                           type={field.type || "text"}
+                          list={
+                            ["owner", "assignee"].includes(field.key)
+                              ? "crm-record-owners"
+                              : undefined
+                          }
                           value={field.type === "date" ? undefined : draft[field.key]}
                           defaultValue={
                             field.type === "date" ? draft[field.key] : undefined
@@ -304,6 +402,78 @@ export default function RecordEditor({
               );
             })}
           </fieldset>
+          <datalist id="crm-record-owners">
+            {[
+              ...new Set(
+                OBJECT_KEYS.flatMap((object) =>
+                  data[object].map((item) => text(item.owner || item.assignee))
+                ).filter(Boolean)
+              ),
+            ]
+              .sort()
+              .map((owner) => (
+                <option key={owner} value={owner} />
+              ))}
+          </datalist>
+          {customModule && (
+            <fieldset
+              disabled={busy || mutationDisabled || customBlocked}
+              className="mt-5 border-t border-border pt-4 grid sm:grid-cols-2 gap-4"
+            >
+              <legend className="text-sm font-semibold pt-4">Custom fields</legend>
+              {customBlocked && !customError && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  Loading custom fields…
+                </p>
+              )}
+              {customDefs?.length === 0 && (
+                <p className="sm:col-span-2 text-xs text-muted-foreground">
+                  Add fields from the CRM toolbar to capture more information.
+                </p>
+              )}
+              {customDefs?.map((def) => (
+                <label key={def.key} className="block">
+                  <span className="label">
+                    {def.label}
+                    {def.required ? " *" : ""}
+                  </span>
+                  {def.type === "select" ? (
+                    <select
+                      className="select"
+                      name={`custom:${def.key}`}
+                      defaultValue={text(customValues[def.key])}
+                      required={def.required}
+                    >
+                      <option value="">Choose…</option>
+                      {def.options?.map((option) => (
+                        <option key={option}>{option}</option>
+                      ))}
+                    </select>
+                  ) : def.type === "checkbox" ? (
+                    <input
+                      className="h-4 w-4 accent-primary"
+                      name={`custom:${def.key}`}
+                      type="checkbox"
+                      defaultChecked={[true, "true", 1, "1"].includes(
+                        customValues[def.key] as string | number | boolean
+                      )}
+                      required={def.required}
+                    />
+                  ) : (
+                    <input
+                      className="input"
+                      name={`custom:${def.key}`}
+                      type={inputTypeFor(def.type)}
+                      step={def.type === "number" ? "any" : undefined}
+                      defaultValue={text(customValues[def.key])}
+                      required={def.required}
+                      maxLength={500}
+                    />
+                  )}
+                </label>
+              ))}
+            </fieldset>
+          )}
           <div className="sticky -bottom-5 z-10 flex flex-wrap justify-end gap-2 bg-card py-4 mt-5 border-t border-border">
             <button
               type="button"
@@ -319,7 +489,10 @@ export default function RecordEditor({
             >
               Cancel
             </button>
-            <button className="btn-primary" disabled={busy}>
+            <button
+              className="btn-primary"
+              disabled={busy || mutationDisabled || customBlocked}
+            >
               {busy ? "Saving…" : row ? "Save changes" : `Create ${spec.singular}`}
             </button>
           </div>
@@ -327,10 +500,12 @@ export default function RecordEditor({
       ) : (
         row && (
           <>
-            <div className="flex flex-wrap gap-2 mb-5">
-              <Badge tone="neutral">
-                {spec.singular} #{row.id}
-              </Badge>
+            <div className="flex flex-wrap items-center gap-2 mb-5">
+              {text(row[spec.group]) && (
+                <Badge tone={statusTone(text(row[spec.group]))}>
+                  {label(row[spec.group])}
+                </Badge>
+              )}
               <span className="flex-1" />
               {email && (
                 <a className="btn-ghost" href={`mailto:${encodeURIComponent(email)}`}>
@@ -371,7 +546,7 @@ export default function RecordEditor({
                   setError("");
                   setEditing(true);
                 }}
-                disabled={busy}
+                disabled={busy || mutationDisabled}
               >
                 <Pencil size={14} />
                 Edit
@@ -406,18 +581,34 @@ export default function RecordEditor({
                     </span>
                   </button>
                 ))}
+                {["companies", "contacts", "deals"].includes(kind) && (
+                  <button
+                    className={cn(
+                      "btn-ghost shrink-0",
+                      section === "documents" && "bg-hover"
+                    )}
+                    aria-pressed={section === "documents"}
+                    onClick={() => setSection("documents")}
+                  >
+                    Documents
+                  </button>
+                )}
               </div>
             )}
+            {section === "documents" && (
+              <RecordSales key={`${kind}:${row.id}`} kind={kind} row={row} />
+            )}
             {section === "details" && (
-              <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-4 text-sm mb-6">
+              <dl className="crm-properties grid sm:grid-cols-2 gap-x-6 text-[13px] mb-6">
                 {spec.fields
                   .filter((field) => field.type !== "textarea")
                   .map((field) => (
-                    <div key={field.key}>
-                      <dt className="text-xs text-muted-foreground mb-1">
-                        {field.label}
-                      </dt>
-                      <dd className="break-words">
+                    <div
+                      key={field.key}
+                      className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] items-start gap-3 border-b border-border py-3"
+                    >
+                      <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                      <dd className="min-w-0 break-words">
                         {field.type === "company" && company ? (
                           <button
                             className="text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
@@ -435,6 +626,14 @@ export default function RecordEditor({
                             >
                               {linkedName(row, data)}
                             </button>
+                          ) : row.target_type === "invoice" &&
+                            Number(row.target_id) > 0 ? (
+                            <Link
+                              className="underline underline-offset-4"
+                              to={`/invoicing?open=${Number(row.target_id)}`}
+                            >
+                              Invoice #{text(row.target_id)}
+                            </Link>
                           ) : (
                             linkedName(row, data)
                           )
@@ -460,8 +659,11 @@ export default function RecordEditor({
                           )
                         ) : field.key === "value" || field.key === "est_value" ? (
                           aed(Number(row[field.key]) || 0)
+                        ) : field.options ? (
+                          label(text(row[field.key])) || "—"
                         ) : (
-                          text(row[field.key]) || "—"
+                          text(row[field.key]) ||
+                          (["owner", "assignee"].includes(field.key) ? "Unassigned" : "—")
                         )}
                       </dd>
                     </div>
@@ -469,7 +671,10 @@ export default function RecordEditor({
                 {spec.fields
                   .filter((field) => field.type === "textarea")
                   .map((field) => (
-                    <div className="sm:col-span-2" key={field.key}>
+                    <div
+                      className="sm:col-span-2 border-b border-border py-3"
+                      key={field.key}
+                    >
                       <dt className="text-xs text-muted-foreground mb-1">
                         {field.label}
                       </dt>
@@ -480,11 +685,32 @@ export default function RecordEditor({
                   ))}
               </dl>
             )}
+            {section === "details" && !!customDefs?.length && (
+              <dl className="grid sm:grid-cols-2 gap-x-6 mb-4">
+                {customDefs.map((def) => (
+                  <div
+                    key={def.key}
+                    className="grid grid-cols-2 gap-3 border-b border-border py-3 text-[13px]"
+                  >
+                    <dt className="text-xs text-muted-foreground">{def.label}</dt>
+                    <dd className="break-words">
+                      {def.type === "checkbox"
+                        ? [true, "true", 1, "1"].includes(
+                            customValues[def.key] as string | number | boolean
+                          )
+                          ? "Yes"
+                          : "No"
+                        : text(customValues[def.key]) || "—"}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
             {kind === "leads" && row.status !== "converted" && (
               <div className="border-t border-border py-4 flex flex-wrap items-center gap-3">
                 <button
                   className="btn-primary"
-                  disabled={busy}
+                  disabled={busy || mutationDisabled}
                   onClick={() => void run(onConvert)}
                 >
                   <Check size={14} />
@@ -554,6 +780,55 @@ export default function RecordEditor({
                 )}
               </div>
             )}
+            {section === "details" && related && (
+              <section className="border-t border-border py-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Relationship history</h3>
+                </div>
+                {[
+                  ...relatedRows("activities").map((item) => ({
+                    kind: "activities" as const,
+                    item,
+                  })),
+                  ...relatedRows("notes").map((item) => ({
+                    kind: "notes" as const,
+                    item,
+                  })),
+                ]
+                  .sort((a, b) =>
+                    text(b.item.created_at).localeCompare(text(a.item.created_at))
+                  )
+                  .slice(0, 5)
+                  .map(({ kind: object, item }) => (
+                    <button
+                      key={`${object}:${item.id}`}
+                      className="flex w-full items-start gap-3 border-b border-border py-3 text-left hover:bg-hover"
+                      onClick={() => onOpen(object, item)}
+                    >
+                      <RecordAvatar kind={object} name={recordName(object, item)} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium">
+                          {recordName(object, item)}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {object === "notes" ? "Note" : label(item.kind)} ·{" "}
+                          {fmtDate(item.created_at)}
+                        </span>
+                      </span>
+                      <ArrowUpRight
+                        size={14}
+                        className="mt-1 shrink-0 text-muted-foreground"
+                      />
+                    </button>
+                  ))}
+                {!relatedRows("activities").length && !relatedRows("notes").length && (
+                  <p className="py-3 text-[13px] text-muted-foreground">
+                    Add a note or log a conversation to keep this relationship's history
+                    in one place.
+                  </p>
+                )}
+              </section>
+            )}
             {relatedKinds
               .filter((object) => section === object)
               .map((k) => {
@@ -595,13 +870,14 @@ export default function RecordEditor({
                   </section>
                 );
               })}
+            {section === "details" && <CrmAiActions kind={kind} row={row} />}
             <div className="border-t border-border pt-4 flex flex-wrap gap-3 items-center justify-between">
               <span className="text-xs text-muted-foreground">
                 Created {fmtDate(row.created_at)}
               </span>
               <button
                 className="btn-ghost text-danger"
-                disabled={busy}
+                disabled={busy || mutationDisabled}
                 onClick={() => void run(onDelete)}
               >
                 <Trash2 size={14} />
@@ -611,6 +887,6 @@ export default function RecordEditor({
           </>
         )
       )}
-    </Modal>
+    </RecordSheet>
   );
 }

@@ -11,6 +11,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      "output", // disposable local QA artifacts; never shipped
       "node_modules",
       ".agents", // vendored agent-skill scripts, not part of the app
       ".claude", // workflow scripts, not part of the app

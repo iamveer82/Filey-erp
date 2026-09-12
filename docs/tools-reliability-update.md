@@ -4,7 +4,7 @@ This update changes local tool execution and UI handoffs. It does not change cus
 
 ## Tools interface
 
-The catalogue opens with eight everyday tools, searchable access to all 88 tools, and horizontal category filters. Every tool has its own GoFiley illustration showing its specific operation, alongside its icon and input/output labels. The illustrations use lossless WebP encoding and load lazily. Cards, pill buttons, upload workspaces and result panels follow the existing Filey theme in both light and dark mode.
+The catalogue opens with eight everyday tools, searchable access to all 88 tools, and horizontal category filters. Every tool has its own GoFiley illustration showing its specific operation, alongside its icon and input/output labels. The illustrations use optimized 640px WebP assets and load lazily. Cards, pill buttons, upload workspaces and result panels follow the existing Filey theme in both light and dark mode.
 
 The shared workflow validates uploads, supports file ordering and removal, resets editor state when inputs change, and keeps generated results available after a cancelled download. Editors leave download-success feedback to the shared save handler. Original input files are never overwritten.
 
@@ -46,3 +46,11 @@ Run the relevant checks with:
 npm run typecheck
 npm test -- src/components/PdfToolbox.audit.test.ts src/components/__tests__/esign-controls.test.tsx src/components/__tests__/esign-output.test.tsx src/components/__tests__/form-fill-panel.test.tsx src/lib/__tests__/pdfjs-compatibility.test.ts src/lib/__tests__/pdftools-smoke.test.ts src/lib/__tests__/pdf-download.test.ts src/lib/__tests__/ranges.test.ts
 ```
+
+## Tools workspace update — 11 September 2026
+
+All 88 tools now have distinct covers; the complete built-in image generation prompt set is in [tool-cover-prompts.json](tool-cover-prompts.json). Originals are retained outside the shipped public folder.
+
+Uploads lead into a consistent document workspace with labelled pill controls and action-specific buttons. The PDF canvas supports brush, text, highlights, rectangles, erasing added marks, crop, rotation, page removal/restoration, zoom, and undo/redo. Edits are automatically included by the primary action, and save failures stop processing instead of silently exporting the original. Annotation coordinates remain stable across viewport resizing, page rotation and crop offsets. Text remains searchable. The eraser removes added marks; use Redact PDF to remove original document content. Merge file ordering has one source of truth, including accessible earlier/later buttons.
+
+Validation for this update: production build passed; 15 focused checks across 8 test files passed. Browser QA used a disposable local workspace and a synthetic two-page PDF: brush, undo/redo, automatic edit inclusion, successful download, mobile upload layout, and dark-mode editing were checked. No customer business records were modified. Existing build warnings about large dependency bundles and dynamic imports remain.

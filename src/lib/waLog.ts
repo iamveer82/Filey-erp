@@ -16,6 +16,7 @@ export interface WaLogEntry {
   from: string;
   name?: string;
   text: string;
+  document?: { key: string; filename: string; channel: "whatsapp" | "sms"; outcome: "draft" | "handed_off" | "accepted" | "observed_sent" | "unknown" };
 }
 
 const KEY = "filey.wa_log";

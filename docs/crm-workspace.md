@@ -1,6 +1,25 @@
 # Filey CRM workspace
 
+See [the sales and follow-up update](crm-sales-update.md) for Today, linked quotations/invoices, contextual AI, PDF sharing, duplicate review, bulk edits and custom fields, including the cloud migration prerequisite.
+
 The `/crm` route has a new workspace built around companies, contacts, leads, deals, tasks, notes, activity, and reports. Connections live in the separate Integrations section. Existing business records remain in their original tables, so customer-linked invoices and quotations retain their relationships.
+
+## September 12 interface update
+
+The workspace now uses horizontal section navigation, compact record lists with avatars, live contact/open-deal counts, and a pipeline board with stage totals and dates. Buttons use Filey's shared pill shapes and appearance tokens. Reports remain in Filey's central Reports section.
+
+Records open in a responsive side drawer with properties, related records, tasks, notes and recent activity. Opening a related record keeps a Back path. The `record` URL parameter restores this path after reload; it accepts only known record types and positive safe integer IDs and resolves them against the current workspace's loaded data. An unavailable record shows an explicit message. New unsaved forms stay in memory. Save failures preserve their fields, and failed workspace refreshes block record mutations until a successful refresh.
+
+Lead conversion uses the existing local/cloud implementation and opens the resulting deal. **Ask Filey AI** opens Filey's existing assistant with an editable record-context prompt. It does not run the prompt or send a message automatically. CRM core workflows need no additional API key; configured AI and messaging providers retain their own setup and costs.
+
+The drawer composition and URL stack were adapted from the MIT-licensed [requested Comp AI CRM fork](https://github.com/omkshirsagar2914-pixel/trycompai-crm), revision `c6d6b7a9b61a3e19600fe1e2877098f6639e64df`. See [the retained MIT notice](../licenses/comp-ai-crm.txt) and `NOTICE`. This adaptation reuses Filey's existing database, authentication and agent. It does not embed Comp AI's Next.js/Nest/Prisma backend, Eve agent, or promise feature parity. No database migration is required for this interface update.
+
+Verification covers URL navigation, linked-record workflows, conversion, saved-view isolation, relationship counts, duplicate-write protection and failure recovery. Tests use isolated storage with network access blocked. Browser checks inspect existing local QA records and cancel forms without modifying them. Production cloud writes, live AI providers and a packaged native installer require separate release verification.
+
+```sh
+npm test -- src/components/crm src/components/__tests__/crm-record-editor.test.tsx src/components/__tests__/crm-record-panel.test.tsx src/lib/__tests__/crmWorkspace.test.ts src/lib/__tests__/agent-crm-tools.test.ts src/lib/crmLinks.test.ts
+npm run build
+```
 
 ## Everyday workflows
 

@@ -9,6 +9,8 @@ import {
 } from "./api";
 import { sb } from "./supabase";
 import { isLocalMode } from "./dataMode";
+import { requireAgentStorageScope } from "./agentStorage";
+import { syncCustomFields, validateCustomValue } from "./customFields";
 
 export type CrmObject =
   | "companies"
@@ -225,7 +227,7 @@ export function linkedName(row: CrmRow, data: CrmData): string {
   return kind && linked
     ? recordName(kind, linked)
     : row.target_type
-      ? `${label(row.target_type)} #${row.target_id} (unavailable)`
+      ? `${label(row.target_type)} #${row.target_id}${row.target_type === "invoice" ? "" : " (unavailable)"}`
       : "Unlinked";
 }
 
@@ -394,8 +396,8 @@ export function validateCrmDraft(
         (extra != null ||
           !Number.isSafeInteger(Number(rawId)) ||
           Number(rawId) <= 0 ||
-          !linkedKind ||
-          !data[linkedKind].some((r) => r.id === Number(rawId)))
+          (type !== "invoice" &&
+            (!linkedKind || !data[linkedKind].some((r) => r.id === Number(rawId)))))
       ) {
         // Preserve legacy links to invoices/employees even when those objects are not loaded here.
         if (value !== (previous && targetKey(previous)))
@@ -483,6 +485,41 @@ export async function saveCrmRecord(
   previous?: CrmRow
 ): Promise<number> {
   const patch = validateCrmDraft(kind, draft, data, previous);
+  if (draft.custom_fields !== undefined) {
+    const module =
+      kind === "companies" ? "customers" : kind === "contacts" ? "contacts" : null;
+    if (!module)
+      throw new Error("Custom fields are supported for companies and contacts.");
+    const scope = requireAgentStorageScope();
+    const values = JSON.parse(draft.custom_fields);
+    if (!values || typeof values !== "object" || Array.isArray(values))
+      throw new Error("Custom field values must be an object.");
+    const defs = await syncCustomFields(module);
+    if (Object.keys(values).some((key) => !defs.some((def) => def.key === key)))
+      throw new Error("Custom fields changed. Reopen the record before saving.");
+    const custom = { ...((previous?.custom_fields as Record<string, unknown>) || {}) };
+    for (const def of defs) {
+      const value = values[def.key] ?? "";
+      const problem = validateCustomValue(def, value);
+      if (problem) throw new Error(problem);
+      custom[def.key] = value;
+    }
+    requireAgentStorageScope(scope);
+    patch.custom_fields = custom;
+  }
+  if (patch.target_type === "invoice") {
+    const scope = requireAgentStorageScope();
+    const { data: invoice, error } = await sb()
+      .from("invoice_docs")
+      .select("id")
+      .eq("id", patch.target_id)
+      .single();
+    if (error || !invoice)
+      throw new Error(
+        "The linked invoice is unavailable. Choose another related record."
+      );
+    requireAgentStorageScope(scope);
+  }
   return persistCrmRecord(CRM_OBJECTS[kind].table, patch, previous?.id);
 }
 

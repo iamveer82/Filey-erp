@@ -33,7 +33,7 @@ it("downloads a drawn signature without requiring an uploaded document", async (
   const done = vi.fn();
   const view = render(<UIProvider><ESignStudio onApply={done} /></UIProvider>);
   draw(view.container);
-  fireEvent.click(view.getByRole("button", { name: "Download Signature" }));
+  fireEvent.click(view.getByRole("button", { name: "Download signature" }));
   await waitFor(() => expect(done).toHaveBeenCalledWith({ name: "signature.png", bytes: new Uint8Array([1, 2, 3]) }));
   expect(engine.stamp).not.toHaveBeenCalled();
 });
@@ -43,9 +43,9 @@ it("signs the original multi-page PDF and returns a PDF instead of exporting one
   const file = new File(["three-page fixture"], "source.pdf", { type: "application/pdf" });
   Object.defineProperty(file, "arrayBuffer", { value: async () => new ArrayBuffer(1) });
   const view = render(<UIProvider><ESignStudio file={file} onApply={done} /></UIProvider>);
-  await view.findByRole("button", { name: "Sign & Download" });
+  await view.findByRole("button", { name: "Download signed PDF" });
   draw(view.container);
-  fireEvent.click(view.getByRole("button", { name: "Sign & Download" }));
+  fireEvent.click(view.getByRole("button", { name: "Download signed PDF" }));
   await waitFor(() => expect(engine.stamp).toHaveBeenCalledWith(file, "data:image/png;base64,AQID", expect.objectContaining({ pageIndex: 0 })));
   expect(done).toHaveBeenCalledWith({ name: "source-signed.pdf", bytes: new Uint8Array([1, 2, 3]) });
 });

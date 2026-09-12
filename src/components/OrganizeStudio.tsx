@@ -177,10 +177,10 @@ export default function OrganizeStudio({
 
   const applyLabel =
     action === "split"
-      ? `Split into ${parts} files & download`
+      ? `Split into ${parts} files`
       : action === "extract"
-        ? `Extract ${selected.size} page${selected.size === 1 ? "" : "s"} & download`
-        : "Apply & download";
+        ? `Extract ${selected.size} page${selected.size === 1 ? "" : "s"}`
+        : "Download PDF";
 
   const focusIdx = focusPage != null ? display.indexOf(focusPage) : -1;
 
@@ -204,7 +204,7 @@ export default function OrganizeStudio({
         <div className="flex items-center justify-between">
           <button
             onClick={() => setFocusPage(null)}
-            className="btn-ghost h-8 text-xs"
+            className="btn-ghost"
             aria-label="View all pages"
           >
             <Grid3X3 size={13} /> All pages
@@ -421,7 +421,7 @@ export default function OrganizeStudio({
         onClick={apply}
         disabled={busy || loading}
         className="btn-primary mt-4 w-full"
-        aria-label="Apply changes and download"
+        aria-label={applyLabel}
       >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
         {applyLabel}

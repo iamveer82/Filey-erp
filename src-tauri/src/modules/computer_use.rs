@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::WebviewWindow;
+use tauri::{Manager, WebviewWindow};
 
 const MAX_OUTPUT: u64 = 6_000_000;
 const SNAPSHOT_LIFETIME: Duration = Duration::from_secs(120);
@@ -22,6 +22,7 @@ struct Session {
     expires: Instant,
     windows: HashMap<String, u64>,
     snapshot: Option<Snapshot>,
+    root_window: Option<String>,
 }
 #[derive(Default)]
 struct State {
@@ -65,13 +66,35 @@ pub fn window_closed(label: &str) {
 }
 
 #[tauri::command]
-pub fn computer_start(window: WebviewWindow, duration_seconds: u64) -> Result<Value, String> {
+pub fn computer_start(
+    window: WebviewWindow,
+    duration_seconds: u64,
+    window_id: Option<String>,
+) -> Result<Value, String> {
     check_window(&window)?;
     if !cfg!(windows) {
         return Err("Native computer control currently requires Windows.".into());
     }
     if !(60..=900).contains(&duration_seconds) {
         return Err("Computer access must last between 60 and 900 seconds.".into());
+    }
+    if let Some(ref id) = window_id {
+        #[cfg(windows)]
+        let valid = window
+            .app_handle()
+            .webview_windows()
+            .values()
+            .any(|candidate| {
+                candidate.label().starts_with("filey-browser-")
+                    && candidate
+                        .hwnd()
+                        .is_ok_and(|handle| (handle.0 as usize).to_string() == *id)
+            });
+        #[cfg(not(windows))]
+        let valid = false;
+        if !valid {
+            return Err("Choose a Filey browser window for this computer task.".into());
+        }
     }
     let mut current = state()
         .lock()
@@ -83,6 +106,7 @@ pub fn computer_start(window: WebviewWindow, duration_seconds: u64) -> Result<Va
         expires: Instant::now() + Duration::from_secs(duration_seconds),
         windows: HashMap::new(),
         snapshot: None,
+        root_window: window_id,
     });
     let expires_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -183,7 +207,7 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
     if action == "list_windows" {
         active.snapshot = None;
         active.windows.clear();
-        return Ok(json!({"action": action}));
+        return Ok(json!({"action": action, "root_window_id": active.root_window}));
     }
     if action == "screenshot" {
         let window = text(request, "window_id", 24)?;
@@ -444,6 +468,13 @@ fn execute(token: String, request: Value) -> Result<Value, String> {
             .as_array()
             .ok_or("Invalid window list.")?
             .iter()
+            .filter(|w| {
+                active.root_window.as_ref().is_none_or(|root| {
+                    w["window_id"].as_str() == Some(root.as_str())
+                        || w["root_owner_id"].as_str() == Some(root.as_str())
+                            && w["window_class"].as_str() == Some("#32770")
+                })
+            })
             .filter_map(|w| {
                 Some((
                     w["window_id"].as_str()?.to_owned(),
@@ -478,6 +509,7 @@ mod tests {
             token: "session".into(),
             expires: Instant::now() + Duration::from_secs(300),
             windows: HashMap::from([("123".into(), 456)]),
+            root_window: None,
             snapshot: Some(Snapshot {
                 id: "fresh".into(),
                 captured: Instant::now(),
@@ -487,6 +519,18 @@ mod tests {
     }
     #[test]
     fn validates_targets_and_consumes_snapshots_without_executing_any_input() {
+        let mut bound = active();
+        bound.root_window = Some("123".into());
+        assert_eq!(
+            prepare(&json!({"action":"list_windows"}), &mut bound).unwrap()["root_window_id"],
+            "123"
+        );
+        assert!(bound.windows.is_empty());
+        assert!(prepare(
+            &json!({"action":"screenshot","window_id":"999"}),
+            &mut bound
+        )
+        .is_err());
         let mut listed = active();
         let capture = prepare(
             &json!({"action":"screenshot","window_id":"123"}),

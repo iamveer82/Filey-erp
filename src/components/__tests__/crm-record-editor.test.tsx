@@ -1,8 +1,20 @@
-import { cleanup, render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  cleanup,
+  render as renderComponent,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import RecordEditor from "../crm/RecordEditor";
 import { emptyCrmData } from "../../lib/crmWorkspace";
+vi.mock("../../lib/customFields", async original => ({ ...await original<object>(), syncCustomFields: vi.fn(async () => []) }));
 afterEach(cleanup);
+const render = (element: ReactElement) =>
+  renderComponent(<MemoryRouter>{element}</MemoryRouter>);
 
 it("discards cancelled edits and opens a linked deal prefilled with company and contact", () => {
   const data = emptyCrmData();
@@ -105,4 +117,29 @@ it("submits the visible native date value even when browser autofill bypasses Re
       })
     )
   );
+});
+
+it("keeps a failed save editable and blocks mutation after a failed workspace refresh", async () => {
+  const save = vi.fn().mockRejectedValue(new Error("Connection lost. Try again."));
+  const props = {
+    kind: "contacts" as const,
+    data: emptyCrmData(),
+    onSave: save,
+    onClose: vi.fn(),
+    onDelete: vi.fn(),
+    onConvert: vi.fn(),
+    onOpen: vi.fn(),
+    onAdd: vi.fn(),
+  };
+  render(<RecordEditor {...props} />);
+  fireEvent.change(screen.getByLabelText("Full name *"), { target: { value: "Sam" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create contact" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Create contact" }));
+  await screen.findByText("Connection lost. Try again.");
+  expect(screen.getByLabelText("Full name *")).toHaveValue("Sam");
+  expect(screen.getByRole("button", { name: "Create contact" })).toBeEnabled();
+  cleanup();
+  render(<RecordEditor {...props} row={{ id: 4, name: "Sam" }} mutationDisabled />);
+  expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Delete contact" })).toBeDisabled();
 });

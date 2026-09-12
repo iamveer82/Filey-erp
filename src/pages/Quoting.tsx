@@ -1,6 +1,8 @@
 import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { dealQuoteContext, linkDealQuotation } from "../lib/crmSales";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
   Plus,
   Trash2,
@@ -311,6 +313,8 @@ export default function Quoting() {
     "all" | "draft" | "sent" | "accepted"
   >("all");
   const [saving, setSaving] = useState(false);
+  const commitInFlight = useRef(false);
+  const [sourceDeal, setSourceDeal] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [converting, setConverting] = useState(false);
   const [quickView, setQuickView] = useState<{
@@ -350,25 +354,43 @@ export default function Quoting() {
   useEffect(reload, []);
   useLiveSync(reload);
 
-  // Deep-link: ?new=1 opens a blank quotation once company loads.
+  // Deal/customer links prepare a reviewable draft; opening them writes nothing.
   useEffect(() => {
-    if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, docs.map((d) => d.number), quoteFmt));
-      setParams({}, { replace: true });
-    }
-  }, [params, company, form, setParams, docs]);
+    if (params.get("new") !== "1" || !company || form || docsLoading) return;
+    let active = true;
+    const scope = agentStorageScope();
+    void (async () => {
+      const dealId = params.has("deal") ? Number(params.get("deal")) : null;
+      const context = dealId !== null ? await dealQuoteContext(dealId) : null;
+      if (context?.deal.quotation_id) { if (active) setParams({ open: String(context.deal.quotation_id) }, { replace: true }); return; }
+      const customerId = Number(params.get("customer"));
+      const customer = context?.customer || (customerId ? (await crm.customers()).find(c => c.id === customerId) : null);
+      if (params.has("customer") && !customer) throw new Error("This company is unavailable. Reopen it from CRM.");
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (!active) return;
+      const draft = blankForm(company, docs.map(d => d.number), quoteFmt);
+      if (customer) Object.assign(draft, { customer_id: customer.id, customer_name: customer.company || customer.name, customer_address: customer.address, customer_trn: customer.trn, customer_email: customer.email });
+      if (context) { draft.sales_person = context.deal.owner || ""; draft.items[0].product = context.deal.title; }
+      setSourceDeal(context?.deal.id ?? null); setForm(draft); setParams({}, { replace: true });
+    })().catch(e => { if (active) { toast.error(errMsg(e)); setParams({}, { replace: true }); } });
+    return () => { active = false; };
+  }, [params, company, form, setParams, docsLoading, docs, quoteFmt, toast]);
 
   const newQuote = async () => {
     if (!company) return;
+    setSourceDeal(null);
     const f = blankForm(company, docs.map((d) => d.number), quoteFmt);
     // The section's preset wins over the profile-wide default template.
     f.template = await startingTemplate("quote", company.default_template, f.template);
     setForm(f);
   };
 
-  const editQuote = async (id: number) => {
+  const editQuote = useCallback(async (id: number) => {
     try {
+      const scope = agentStorageScope();
       const d = await quotes.getDoc(id);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setSourceDeal(null);
       setForm({
         ...d,
         id: d.id,
@@ -421,9 +443,18 @@ export default function Quoting() {
     } catch (e: any) {
       toast.error(e?.message || "Failed to load quotation");
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    if (!params.has("open") || !company) return;
+    const id = Number(params.get("open"));
+    setParams({}, { replace: true });
+    if (Number.isSafeInteger(id) && id > 0) void editQuote(id);
+    else toast.error("Choose an existing quotation.");
+  }, [params, company, editQuote, setParams, toast]);
 
   const duplicateQuote = async (id?: number) => {
+    setSourceDeal(null);
     try {
       const newBase = {
         number: pickQuoteNumber(docs.map((x) => x.number), quoteFmt),
@@ -470,7 +501,7 @@ export default function Quoting() {
   };
 
   const commit = async (targetStatus?: string) => {
-    if (!form || saving) return;
+    if (!form || commitInFlight.current) return;
     if (!form.number.trim()) {
       toast.error("Quotation number is required");
       return;
@@ -488,6 +519,7 @@ export default function Quoting() {
       return;
     }
 
+    commitInFlight.current = true;
     setSaving(true);
     try {
       const payload: any = {
@@ -528,6 +560,10 @@ export default function Quoting() {
       const id = await quotes.saveDoc(payload as QuotationInput);
       const next = { ...form, id, status: targetStatus ?? form.status };
       setForm(next);
+      if (sourceDeal) {
+        try { await linkDealQuotation(sourceDeal, id); }
+        catch (e) { toast.error(`Quotation saved. CRM link needs attention: ${errMsg(e)} Save again to retry the link.`); await loadDocs(); return; }
+      }
       await loadDocs();
 
       // Auto-archive the quotation PDF to My Files (best-effort, deduped).
@@ -549,6 +585,7 @@ export default function Quoting() {
     } catch (e) {
       toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
+      commitInFlight.current = false;
       setSaving(false);
     }
   };
@@ -626,9 +663,9 @@ export default function Quoting() {
 
   const convertRow = async (d: QuotationSummary) => {
     try {
-      await quotes.convertToInvoice(d.id);
+      const id = await quotes.convertToInvoice(d.id);
       toast.success("Invoice created from quotation.");
-      navigate("/invoicing");
+      navigate(`/invoicing?open=${id}`);
     } catch (e) {
       toast.error(`Could not convert: ${errMsg(e)}`);
     }
@@ -725,7 +762,7 @@ export default function Quoting() {
   if (form) {
     const m = (v: number) => money(v, form.currency || "AED");
     const set = <K extends keyof Form>(k: K, v: Form[K]) =>
-      setForm({ ...form, [k]: v });
+      setForm({ ...form, [k]: v, ...(k === "currency" && v !== form.currency ? { fx_rate: null } : {}) });
     const setItem = (idx: number, patch: Partial<Item>) => {
       const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
       setForm({ ...form, items });
@@ -958,9 +995,9 @@ export default function Quoting() {
       }
       setConverting(true);
       try {
-        await quotes.convertToInvoice(form.id);
+        const id = await quotes.convertToInvoice(form.id);
         toast.success("Invoice created from quotation.");
-        navigate("/invoicing");
+        navigate(`/invoicing?open=${id}`);
       } catch (e) {
         toast.error(`Could not convert: ${errMsg(e)}`);
       } finally {
@@ -1027,7 +1064,7 @@ export default function Quoting() {
           {/* Toolbar */}
           <PageHeader
             title={form.id ? "Edit Quotation" : "New Quotation"}
-            subtitle="Build quotations with per-line discount/tax and convert them to invoices"
+            subtitle={sourceDeal ? `Prepared from CRM deal #${sourceDeal}. Review the items and prices before saving.` : "Build quotations with per-line discount/tax and convert them to invoices"}
             action={<div className="no-print flex items-center gap-2 flex-wrap">
               <button
                 className="btn-ghost shrink-0"

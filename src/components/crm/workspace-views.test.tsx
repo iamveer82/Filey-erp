@@ -17,6 +17,7 @@ import {
   loadCrmData,
   saveCrmRecord,
   saveCrmStatus,
+  convertCrmLead,
   type CrmData,
 } from "../../lib/crmWorkspace";
 
@@ -30,11 +31,13 @@ vi.mock("../../lib/ui", () => ({
   useUI: () => ({ prompt, confirm: vi.fn(), toast: { success, error: vi.fn() } }),
 }));
 vi.mock("../../lib/realtime", () => ({ useLiveSync: () => {} }));
+vi.mock("../../lib/customFields", async original => ({ ...await original<object>(), syncCustomFields: vi.fn(async () => []) }));
 vi.mock("../../lib/crmWorkspace", async (load) => ({
   ...(await load<object>()),
   loadCrmData: vi.fn(),
   saveCrmRecord: vi.fn(),
   saveCrmStatus: vi.fn(),
+  convertCrmLead: vi.fn(),
 }));
 let data: CrmData;
 beforeEach(() => {
@@ -197,6 +200,7 @@ it("returns from a linked contact editor to the company without writing on cance
   expect(saveCrmRecord).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Add contact" }));
   fireEvent.change(screen.getByLabelText("Full name *"), { target: { value: "Sam" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create contact" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Create contact" }));
   await waitFor(() =>
     expect(saveCrmRecord).toHaveBeenCalledWith(
@@ -253,4 +257,65 @@ it("completes a task from a due view and refreshes it out of that view", async (
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Call buyer" })).not.toBeInTheDocument()
   );
+});
+
+it("restores a linked record drawer from its URL and returns to the parent without writes", async () => {
+  data.contacts = [{ id: 9, name: "Sam", company_id: 2 }];
+  mount("/crm?view=companies&q=Alpha&record=companies:2,contacts:9");
+  await screen.findByRole("dialog", { name: "Sam" });
+  fireEvent.click(screen.getByRole("button", { name: "Back to Alpha Company" }));
+  expect(screen.getByRole("dialog", { name: "Alpha Company" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+  expect(screen.getByRole("textbox", { name: "Search companies" })).toHaveValue("Alpha");
+  expect(saveCrmRecord).not.toHaveBeenCalled();
+});
+
+it("shows an unavailable deep link instead of opening a different or stale record", async () => {
+  mount("/crm?view=companies&record=companies:999");
+  await screen.findByText(/This record is unavailable in the current workspace/);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(screen.queryByText(/This record is unavailable/)).not.toBeInTheDocument();
+  expect(saveCrmRecord).not.toHaveBeenCalled();
+});
+
+it("offers conversion and an explicit AI handoff without starting work when a lead is opened", async () => {
+  data.leads = [{ id: 11, name: "Prospect", company: "New business", status: "new" }];
+  mount("/crm?view=leads&record=leads:11");
+  await screen.findByRole("dialog", { name: "Prospect" });
+  expect(screen.getByRole("button", { name: "Convert lead" })).toBeEnabled();
+  expect(screen.queryByRole("link", { name: "Continue in Filey AI" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Draft a follow-up" }));
+  expect((screen.getByLabelText("Review your request") as HTMLTextAreaElement).value).toContain("lead #11");
+  expect(screen.getByRole("link", { name: "Continue in Filey AI" })).toHaveAttribute(
+    "href",
+    "/agent"
+  );
+  expect(saveCrmRecord).not.toHaveBeenCalled();
+});
+
+it("opens the linked deal after a successful lead conversion", async () => {
+  data.leads = [{ id: 11, name: "Prospect", status: "new" }];
+  vi.mocked(convertCrmLead).mockImplementation(async () => {
+    data = {
+      ...data,
+      contacts: [{ id: 15, company_id: 2, name: "Prospect" }],
+      deals: [
+        {
+          id: 20,
+          title: "New contract",
+          stage: "qualification",
+          customer_id: 2,
+          person_id: 15,
+        },
+      ],
+    };
+    return 20;
+  });
+  mount("/crm?view=leads&record=leads:11");
+  fireEvent.click(await screen.findByRole("button", { name: "Convert lead" }));
+  await screen.findByRole("dialog", { name: "New contract" });
+  expect(convertCrmLead).toHaveBeenCalledExactlyOnceWith(11);
+  expect(screen.getByRole("button", { name: "Alpha Company" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Prospect" })).toBeInTheDocument();
 });

@@ -13,7 +13,7 @@ const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
  * viewer). Bytes come from fileBytes (download → arrayBuffer), avoiding a
  * fetch(blobURL) the webview CSP blocks. zoom=1 fits the whole page to the
  * panel; +/- re-render crisply at the new scale. */
-export default function PdfCanvas({ file }: { file: SavedFile }) {
+export default function PdfCanvas({ file }: { file: SavedFile | File }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
   const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -24,20 +24,22 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
   // Load the document once per file.
   useEffect(() => {
     let dead = false;
+    let task: ReturnType<typeof safePdf.getDocument> | undefined;
     setLoading(true);
     setErr("");
     setPdf(null);
     setZoom(1);
     (async () => {
       try {
-        const bytes = await fileBytes(file);
+        const bytes = file instanceof File ? new Uint8Array(await file.arrayBuffer()) : await fileBytes(file);
         if (dead) return;
         if (!bytes) {
           setErr("File not found.");
           setLoading(false);
           return;
         }
-        const doc = await safePdf.getDocument({ data: bytes }).promise;
+        task = safePdf.getDocument({ data: bytes });
+        const doc = await task.promise;
         if (dead) return;
         setPdf(doc);
       } catch (e) {
@@ -49,8 +51,9 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
     })();
     return () => {
       dead = true;
+      void task?.destroy();
     };
-  }, [file.id]);
+  }, [file]);
 
   // (Re)render the pages whenever the document or zoom changes.
   useEffect(() => {
@@ -69,7 +72,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
         if (dead) return;
         const page = await pdf.getPage(i);
         const base = page.getViewport({ scale: 1 });
-        const fit = Math.min(maxW / base.width, maxH / base.height);
+        const fit = Math.max(0.1, Math.min(maxW / base.width, maxH / base.height));
         const scale = fit * zoom;
         const vp = page.getViewport({ scale: scale * dpr });
         const canvas = document.createElement("canvas");
@@ -86,7 +89,7 @@ export default function PdfCanvas({ file }: { file: SavedFile }) {
       if (dead) return;
       host.replaceChildren(...canvases);
       setLoading(false);
-    })();
+    })().catch(e => { if (!dead) { setErr(e instanceof Error ? e.message : String(e)); setLoading(false); } });
     return () => {
       dead = true;
     };

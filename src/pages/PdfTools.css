@@ -29,3 +29,33 @@
 @media(min-width:1300px){.tools-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:600px){.tool-dropzone{grid-template-columns:1fr}.tool-dropzone .tool-cover{min-height:0;aspect-ratio:21/9}.tool-upload-copy{padding:24px}.tools-grid{gap:12px}.tools-categories{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.tools-categories>*{flex-shrink:0}.tool-steps{gap:12px}.tools-toolbar{position:static}}
 @media(prefers-reduced-motion:reduce){.tool-card,.tool-dropzone{transition:none}}
+
+/* Shared file workspace: clear canvas, quiet controls, one primary action. */
+.tool-workspace-header{position:sticky;top:0;z-index:30;margin-bottom:20px;padding:12px 0;background:hsl(var(--page));border-bottom:1px solid hsl(var(--border))}
+.tool-dropzone{max-width:1050px;margin:32px auto;min-height:360px;border-style:solid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
+.tool-upload-copy{margin:16px;padding:32px;border:1px dashed hsl(var(--border));border-radius:12px;align-items:center;text-align:center}
+.tool-upload-copy .btn-primary{min-width:180px}
+.tool-upload-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:12px;background:hsl(var(--muted));color:hsl(var(--foreground))}
+.tool-dropzone[data-dragging=true]{border-width:1px}
+.tool-working-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:20px;align-items:start}
+.tool-studio{min-width:0;border:1px solid hsl(var(--border));border-radius:12px;background:hsl(var(--card));padding:16px}
+.tool-options-panel{position:sticky;top:100px;display:flex;flex-direction:column;gap:20px;border:1px solid hsl(var(--border));border-radius:12px;background:hsl(var(--card));padding:20px}
+.tool-options-panel>.btn-primary{min-height:44px}
+.tool-preview-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.pdf-editor{min-width:0}
+.pdf-editor-toolbar,.pdf-editor-options,.pdf-editor-viewbar,.pdf-editor-footer{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 0}
+.pdf-editor-toolbar{padding-top:0}
+.pdf-editor-tool{padding-inline:12px;gap:6px}
+.pdf-editor-tool[aria-pressed=true]{background:hsl(var(--foreground));border-color:hsl(var(--foreground));color:hsl(var(--background))}
+.pdf-editor .pdf-editor-icon{width:40px;height:40px;padding:0;flex-shrink:0}
+.pdf-editor-options{border-block:1px solid hsl(var(--border));min-width:0}
+.pdf-editor-options>p{flex-basis:100%;line-height:1.6}
+.pdf-editor-viewbar,.pdf-editor-footer{justify-content:space-between}
+.pdf-editor-canvas{overflow:auto;max-height:75vh;min-height:300px;padding:24px;background:hsl(var(--muted));border-radius:8px;overscroll-behavior:contain}
+.pdf-editor-paper{display:block;margin-inline:auto;background:#fff;user-select:none;box-shadow:0 2px 6px #0002}
+.pdf-editor-paper:focus-visible{outline:2px solid hsl(var(--ring));outline-offset:4px}
+.pdf-editor-paper [data-annotation]:focus-visible{outline:2px dashed hsl(var(--ring));outline-offset:2px}
+.pdf-editor-footer{padding-bottom:0;gap:12px}
+@media(max-width:1100px){.tool-working-layout{grid-template-columns:minmax(0,1fr)}.tool-options-panel{position:static}.tool-options-panel fieldset>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}.tool-options-panel fieldset>div>div{margin:0}.tool-options-panel>.btn-primary{align-self:flex-end;width:auto;min-width:200px}}
+@media(max-width:600px){.tool-dropzone{grid-template-columns:1fr;margin:16px 0}.tool-upload-copy{padding:24px 16px;margin:12px}.tool-studio{padding:12px}.tool-workspace-header{position:static}.pdf-editor-canvas{padding:12px;max-height:65vh}.pdf-editor-toolbar{gap:6px}.pdf-editor-tool{padding-inline:10px}.pdf-editor-footer>.btn-ghost{width:100%}.tool-options-panel>.btn-primary{width:100%}}
+@media(max-width:600px){.tool-workspace-title{order:-1;flex-basis:100%;min-width:0;margin-bottom:8px}.tool-workspace-header>div>span{display:none}.tool-workspace-header>div{gap:8px}.tool-workspace-header button{font-size:12px;padding-inline:12px}.tool-options-panel{grid-row:1}.tool-file-row{gap:6px;padding-inline:10px}}

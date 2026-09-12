@@ -6,6 +6,8 @@ Sign in to Filey, open its browser controls, and enter an HTTPS address. Sign in
 
 Filey AI can open and manage these windows with `workspace_browser` (the UI uses the same `desktopBrowserCommand` adapter). To observe or operate a page, the user must separately enable temporary **Computer access**; `computer_use` then captures the returned native `window_id` and works against fresh screenshots. Opening a WhatsApp draft does not attach a PDF or send a message. Those steps require actual interaction and the agent's normal approval rules.
 
+The invoice dialog also has **Send with Filey AI**. Clicking it authorizes the reviewed PDF/message and a temporary computer session restricted to that task's WhatsApp window and file picker. It uses the same screenshot/input controls, stops for login, and verifies the attachment before its single Send click. It does not require the separate WhatsApp QR bridge. See [invoice-messaging.md](invoice-messaging.md).
+
 ## Boundaries
 
 - Remote website windows receive no Filey capabilities. The native custom-command dispatcher additionally refuses all callers except the main Filey webview, including remote frames that attempt to reach bundled Filey pages.

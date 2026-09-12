@@ -427,7 +427,7 @@ export default function StampStudio({
   return (
     <div>
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
+      <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-border bg-card pb-4">
         {mode === "text" ? (
           <>
             <SelectMenu
@@ -445,24 +445,25 @@ export default function StampStudio({
               type="color"
               value={badgeColor}
               onChange={(e) => setBadgeColor(e.target.value)}
-              className="h-7 w-7 cursor-pointer rounded border border-brand-200"
+              className="h-10 w-10 cursor-pointer rounded-full border border-border bg-card p-1"
               title="Badge colour"
+              aria-label="Badge colour"
             />
           </>
         ) : (
           <>
             {allowDraw && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={() => setPadOpen((v) => !v)}
                 title="Draw your signature"
-                aria-label="Draw mode"
+                aria-label="Draw signature"
               >
-                <PenLine size={13} /> Draw
+                <PenLine size={16} /> Draw signature
               </button>
             )}
             <label
-              className="btn-ghost h-8 cursor-pointer text-xs"
+              className="btn-ghost cursor-pointer"
               aria-label="Upload stamp image"
             >
               <Upload size={13} /> {stamp ? "Change" : `Upload ${noun}`}
@@ -478,17 +479,17 @@ export default function StampStudio({
             </label>
             {stamp && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={saveCurrent}
                 title="Save to your library"
                 aria-label="Save stamp to library"
               >
-                <Save size={13} /> Save
+                <Save size={16} /> Save to library
               </button>
             )}
             {stamp && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={() => setStamp(null)}
                 title="Remove from canvas"
                 aria-label="Remove stamp from canvas"
@@ -507,6 +508,7 @@ export default function StampStudio({
           min={0.05}
           max={1}
           step={0.05}
+          aria-label="Stamp opacity"
           value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
           className="w-24 accent-primary-500"
@@ -530,7 +532,7 @@ export default function StampStudio({
 
         <button
           aria-label="Previous page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.max(0, p - 1))}
           disabled={page <= 0}
         >
@@ -541,7 +543,7 @@ export default function StampStudio({
         </span>
         <button
           aria-label="Next page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
           disabled={page >= pages - 1}
         >
@@ -550,17 +552,17 @@ export default function StampStudio({
         <button
           onClick={apply}
           disabled={saving || !stamp}
-          className="btn-primary h-7 text-xs"
-          aria-label="Apply stamps and download"
+          className="btn-primary"
+          aria-label="Download PDF"
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
-          Apply
+          Download PDF
         </button>
       </div>
 
       {/* ── Signature draw pad ─────────────────────────────────────────────── */}
       {padOpen && (
-        <div className="mb-2 rounded-xl border border-brand-200 bg-white p-2">
+        <div className="mb-4 rounded-xl border border-border bg-card p-4">
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-medium text-brand-500">Signature</span>
             {/* Pen / eraser */}
@@ -569,7 +571,7 @@ export default function StampStudio({
                 onClick={() => setPenMode("draw")}
                 title="Pen"
                 aria-label="Pen tool"
-                className={`grid h-7 w-8 place-items-center ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+                className={`grid h-10 w-10 place-items-center rounded-full ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
               >
                 <PenLine size={13} />
               </button>
@@ -588,7 +590,8 @@ export default function StampStudio({
                 value={penColor}
                 onChange={(e) => setPenColor(e.target.value)}
                 title="Ink colour"
-                className="h-7 w-7 cursor-pointer rounded border border-brand-200"
+                aria-label="Ink colour"
+                className="h-10 w-10 cursor-pointer rounded-full border border-border bg-card p-1"
               />
             )}
             <span className="text-[11px] text-brand-400">
@@ -599,6 +602,7 @@ export default function StampStudio({
               min={1}
               max={14}
               step={1}
+              aria-label="Brush size"
               value={penWidth}
               onChange={(e) => setPenWidth(Number(e.target.value))}
               className="w-24 accent-primary-500"
@@ -606,18 +610,18 @@ export default function StampStudio({
             />
             <span className="ml-auto flex gap-1.5">
               <button
-                className="btn-ghost h-7 text-xs"
+                className="btn-ghost"
                 onClick={clearPad}
                 aria-label="Clear signature pad"
               >
                 Clear
               </button>
               <button
-                className="btn-primary h-7 text-xs"
+                className="btn-primary"
                 onClick={usePad}
                 aria-label="Use signature"
               >
-                <Check size={12} /> Use
+                <Check size={16} /> Use signature
               </button>
             </span>
           </div>
@@ -629,7 +633,7 @@ export default function StampStudio({
             onPointerMove={padMove}
             onPointerUp={padUp}
             onPointerLeave={padUp}
-            className={`w-full rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
+            className={`w-full rounded-lg border border-dashed border-brand-300 bg-white ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
             style={{ touchAction: "none", aspectRatio: "3 / 1" }}
           />
         </div>
@@ -734,7 +738,7 @@ export default function StampStudio({
         {mode === "text"
           ? "Pick a badge, drag to place and resize, then "
           : `Upload or pick a saved ${noun}, drag to place and resize, then `}
-        <strong>Apply</strong>. Toggle “All pages” to apply to the whole document.
+        <strong>Download PDF</strong>. Toggle “All pages” to apply to the whole document.
       </p>
     </div>
   );

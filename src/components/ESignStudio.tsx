@@ -376,12 +376,12 @@ export default function ESignStudio({
           { id: "draw-only" as Mode, label: "Make a Sign", desc: "Draw your signature" },
           {
             id: "upload-both" as Mode,
-            label: "Upload Doc + Sign",
+            label: "Use a signature image",
             desc: "Combine document & signature",
           },
           {
             id: "upload-draw" as Mode,
-            label: "Upload Doc + Draw",
+            label: "Draw on a document",
             desc: "Draw sign on document",
           },
         ].map((m) => (
@@ -391,10 +391,10 @@ export default function ESignStudio({
               reset();
               setMode(m.id);
             }}
-            className={`flex-1 min-w-[140px] rounded-xl border-2 p-3 text-left transition-all cursor-pointer ${
+            className={`flex-1 min-w-[140px] rounded-xl border p-3 text-left transition-colors cursor-pointer ${
               mode === m.id
-                ? "border-primary-500 bg-primary-50 dark:bg-primary-500/10"
-                : "border-brand-200 hover:border-brand-300 bg-white dark:bg-white/8"
+                ? "border-foreground bg-muted"
+                : "border-border hover:border-foreground/50 bg-card"
             }`}
           >
             <p className="text-sm font-medium text-ink">{m.label}</p>
@@ -465,7 +465,7 @@ export default function ESignStudio({
           </div>
           <div className="flex items-center gap-2">
             <button onClick={applySign} disabled={!hasDrawing || saving} className="btn-primary">
-              <Download size={14} /> Download Signature
+              <Download size={14} /> Download signature
             </button>
             {done && (
               <span className="flex items-center gap-1 text-xs font-medium text-success">
@@ -666,7 +666,7 @@ export default function ESignStudio({
                   className="btn-primary"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  {saving ? "Signing…" : "Sign & Download"}
+                  {saving ? "Signing…" : "Download signed PDF"}
                 </button>
                 {done && (
                   <span className="flex items-center gap-1 text-xs font-medium text-success">

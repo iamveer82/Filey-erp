@@ -9,6 +9,7 @@ import {
   Stamp,
   PenTool,
   ChevronDown,
+  Minus,
 } from "lucide-react";
 import { MenuPopover, MenuItemRow, MenuSep } from "../components/ui-menu";
 import {
@@ -27,8 +28,9 @@ import {
   type DocFormats,
 } from "../lib/numberFormat";
 import { errMsg, fmtDate, todayYmd } from "../lib/format";
-import { PageHeader, Field, MetricCard, DataTable, Card, SearchInput, ErrorBanner } from "../components/ui";
-import DocumentPreviewControls from "../components/DocumentPreviewControls";
+import { PageHeader, Field, DataTable, Card, SearchInput, ErrorBanner } from "../components/ui";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
+import { Toggle } from "./settings/PreferencesPanel";
 import {
   RowActions,
   QuickViewModal,
@@ -68,6 +70,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 const today = () => todayYmd();
+const DECLARATION_HEADER_SPACE = 180;
 
 /** Default body. Tokens in {curly braces} are filled from the form fields at
  *  render time, so the standard wording stays intact while the figures update
@@ -85,6 +88,9 @@ type DeclForm = {
   ref: string;
   show_stamp?: boolean;
   show_signature?: boolean;
+  use_letterhead?: boolean;
+  header_space?: number;
+  footer_space?: number;
   /** Per-letter stamp/signature copy (position, opacity, crop) seeded from the company asset. */
   stamp?: StampSig;
   signature?: StampSig;
@@ -107,9 +113,13 @@ interface SavedDecl extends DeclForm {
   updated_at: string;
 }
 
+const letterName = (letter: Pick<DeclForm, "title">) =>
+  letter.title?.trim() || "DECLARATION LETTER";
+
 function blankDecl(company?: CompanyProfile | null): DeclForm {
   return {
     title: "DECLARATION LETTER",
+    header_space: DECLARATION_HEADER_SPACE,
     ref: "",
     date: today(),
     company_name: company?.name || "Your Company",
@@ -276,7 +286,7 @@ export default function DeclarationLetter() {
    *  send menu shares a text summary of the letter (DEMO parity). */
   const shareRow = (kind: ShareKind, d: SavedDecl) => {
     const text = [
-      `Declaration Letter ${d.ref || d.lpo_ref || ""}`.trim(),
+      `${letterName(d)} ${d.ref || d.lpo_ref || ""}`.trim(),
       `Recipient: ${d.recipient_name || "—"}`,
       `LPO: ${d.lpo_ref || "—"}`,
       `Amount: AED ${fmtAmount(d.amount)}`,
@@ -304,6 +314,7 @@ export default function DeclarationLetter() {
   const q = search.toLowerCase();
   const filtered = docs.filter(
     (d) =>
+      letterName(d).toLowerCase().includes(q) ||
       (d.ref || "").toLowerCase().includes(q) ||
       (d.recipient_name || "").toLowerCase().includes(q) ||
       (d.lpo_ref || "").toLowerCase().includes(q)
@@ -336,34 +347,18 @@ export default function DeclarationLetter() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
-        <MetricCard
-          label="Letters"
-          value={String(docs.length)}
-          change="All time"
-          changeTone="up"
-        />
-        <MetricCard
-          label="This month"
-          value={String(thisMonthCount)}
-          change="Created recently"
-          changeTone="up"
-        />
-        <MetricCard
-          label="Recipients"
-          value={String(uniqueRecipients)}
-          change="Unique parties"
-          changeTone="up"
-        />
-      </div>
-
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <SearchInput
-          className="max-w-md"
-          placeholder="Search by recipient, LPO or reference…"
+          className="w-full sm:max-w-sm"
+          placeholder="Search by name, recipient or reference…"
           value={search}
           onChange={setSearch}
         />
+        {!loading && !loadError && (
+          <p className="text-xs text-muted-foreground">
+            {docs.length} {docs.length === 1 ? "letter" : "letters"} · {thisMonthCount} this month · {uniqueRecipients} {uniqueRecipients === 1 ? "recipient" : "recipients"}
+          </p>
+        )}
       </div>
 
       {loadError && <div className="mb-4 space-y-2"><ErrorBanner message={loadError} /><button className="btn-ghost" disabled={loading} onClick={() => void loadDocs()}>Retry</button></div>}
@@ -399,10 +394,13 @@ export default function DeclarationLetter() {
         columns={[
           {
             key: "ref",
-            label: "Reference",
-            sortValue: (d) => d.ref || d.lpo_ref,
+            label: "Letter / reference",
+            sortValue: (d) => letterName(d),
             render: (d) => (
-              <span className="font-medium">{d.ref || d.lpo_ref || "Untitled"}</span>
+              <div className="min-w-0">
+                <span className="block font-medium break-words">{letterName(d)}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{d.ref || d.lpo_ref || "No reference"}</span>
+              </div>
             ),
           },
           {
@@ -472,12 +470,12 @@ export default function DeclarationLetter() {
         data={
           quickView
             ? {
-                title:
-                  quickView.ref || quickView.lpo_ref || "Declaration Letter",
+                title: letterName(quickView),
                 subtitle: quickView.recipient_name
                   ? `For ${quickView.recipient_name}`
                   : "VAT supply declaration in the standard UAE format",
                 meta: [
+                  { label: "Reference", value: quickView.ref },
                   { label: "Recipient", value: quickView.recipient_name },
                   { label: "Recipient TRN", value: quickView.recipient_trn },
                   { label: "LPO #", value: quickView.lpo_ref },
@@ -502,7 +500,7 @@ export default function DeclarationLetter() {
                 footer: (
                   <div className="mt-4 rounded-lg border border-border p-3 bg-hover/20">
                     <div className="text-[11.5px] font-medium text-muted-foreground mb-1">
-                      Declaration text
+                      Letter text
                     </div>
                     <div className="text-[13px] text-foreground whitespace-pre-wrap">
                       {resolveBody(quickView)}
@@ -540,18 +538,17 @@ function DeclarationEditor({
     return { ...rest, title: rest.title ?? "DECLARATION LETTER" };
   });
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
-  const [useLetterhead, setUseLetterhead] = useState(false);
-  const [headerSpace, setHeaderSpace] = useState(DEFAULT_HEADER_SPACE);
-  const [footerSpace, setFooterSpace] = useState(DEFAULT_FOOTER_SPACE);
+  const [useLetterhead, setUseLetterhead] = useState(doc.use_letterhead ?? false);
+  const [headerSpace, setHeaderSpace] = useState(doc.header_space ?? DEFAULT_HEADER_SPACE);
+  const [footerSpace, setFooterSpace] = useState(doc.footer_space ?? DEFAULT_FOOTER_SPACE);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [showStamp, setShowStamp] = useState(form.show_stamp ?? false);
   const [showSignature, setShowSignature] = useState(form.show_signature ?? false);
   const [zoom, setZoom] = useState(100);
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
-  const isNew = !doc.updated_at;
+  const [isNew, setIsNew] = useState(!doc.updated_at);
   const declRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -576,13 +573,13 @@ function DeclarationEditor({
     loadLetterhead()
       .then((l) => {
         setLh(l);
-        setUseLetterhead(hasLetterhead(l));
+        setUseLetterhead(doc.use_letterhead ?? hasLetterhead(l));
       })
       .catch(() => {});
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
     suppliersApi.list().then(setSupplierList).catch(() => {});
     crm.customers().then(setCustomerList).catch(() => {});
-  }, []);
+  }, [doc.use_letterhead]);
 
   /** Fill recipient fields from a saved supplier ("s:<id>") or customer ("c:<id>"). */
   const fillRecipient = (key: string) => {
@@ -608,7 +605,7 @@ function DeclarationEditor({
   };
 
   const set = <K extends keyof DeclForm>(k: K, v: DeclForm[K]) =>
-    setForm({ ...form, [k]: v });
+    setForm((f) => ({ ...f, [k]: v }));
 
   const sheetEl = () => {
     const el =
@@ -620,9 +617,10 @@ function DeclarationEditor({
   };
 
   const baseName = () =>
-    `Declaration-${(form.lpo_ref || form.ref || form.recipient_name || "letter")
-      .replace(/[^\w.-]+/g, "_")
-      .slice(0, 40)}`;
+    [letterName(form), form.lpo_ref || form.ref || form.recipient_name || "letter"]
+      .map((part) => part.replace(/[^\p{L}\p{M}\p{N}._-]+/gu, "_").slice(0, 60))
+      .join("-")
+      .replace(/\.+$/, "");
 
   const downloadPdf = async () => {
     if (downloading) return;
@@ -650,15 +648,23 @@ function DeclarationEditor({
         updated_at: new Date().toISOString(),
         show_stamp: showStamp,
         show_signature: showSignature,
+        use_letterhead: useLetterhead,
+        header_space: headerSpace,
+        footer_space: footerSpace,
       };
       const list = await upsertDeclaration(saved);
       onSaved(list);
+      setIsNew(false);
       // …and archive a PDF copy to My Files (best-effort).
       const base = baseName();
-      if (el) await autoSaveDocument(`${base}.pdf`, "declaration", () =>
-        elementToPdfBytes(el, base)
-      );
-      toast.success("Saved.");
+      try {
+        if (el) await autoSaveDocument(`${base}.pdf`, "declaration", () =>
+          elementToPdfBytes(el, base)
+        );
+        toast.success("Letter saved.");
+      } catch {
+        toast.error("Letter saved, but the PDF copy could not be added to My Files. You can still download it.");
+      }
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -666,306 +672,218 @@ function DeclarationEditor({
     }
   };
 
-  const baseWidth = device === "desktop" ? 794 : 420;
-  const sheetH = Math.round(baseWidth * 1.4142);
+  // Preview zoom changes the view, never the A4 layout used for PDF export.
+  const baseWidth = 794;
+  const sheetH = 1123;
   const paragraphs = resolveBody(form).split(/\n{2,}/);
 
   return (
-    <div className="">
+    <div>
       <PageHeader
-        title={isNew ? "New Declaration Letter" : "Edit Declaration Letter"}
-        subtitle="Prepare your VAT supply declaration and download a PDF for your supplier"
+        title={letterName(form) === "DECLARATION LETTER" ? (isNew ? "New declaration letter" : "Declaration letter") : letterName(form)}
+        subtitle="Add the details, review the wording, and download your letter."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <button className="btn-ghost" disabled={saving} onClick={onBack}>
+            <button className="btn-ghost" disabled={saving || downloading} onClick={onBack}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-ghost" disabled={saving} onClick={async () => {
-              if (await confirm({ title: "Reset this letter?", message: "This clears your unsaved edits. The saved letter stays unchanged until you save again.", confirmLabel: "Reset" })) {
-                setForm({ ...blankDecl(company), ref: form.ref });
-              }
-            }}>
-              <RotateCcw size={15} /> Reset
-            </button>
             <button className="btn-ghost" onClick={downloadPdf} disabled={downloading || saving}>
-              <Download size={15} /> {downloading ? "Exporting…" : "PDF"}
+              <Download size={15} /> {downloading ? "Exporting…" : "Download PDF"}
             </button>
-            <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            <button className="btn-primary" onClick={handleSave} disabled={saving || downloading}>
               <Save size={15} /> {saving ? "Saving…" : "Save"}
             </button>
           </div>
         }
       />
 
-            <ResizablePanels
+      <ResizablePanels
+        defaultRightWidth={400}
+        minRightWidth={300}
         left={
-          <div className="no-print space-y-4">
-            
-          {/* Parties */}
-          <Card>
-            <div className="mb-4">
-              <Field label="Letter Title">
-                <input
-                  className="input"
-                  placeholder="DECLARATION LETTER"
-                  value={form.title ?? ""}
-                  onChange={(e) => set("title", e.target.value)}
-                />
-              </Field>
-            </div>
+          <Card className="!p-0 overflow-hidden">
+            <fieldset disabled={saving || downloading} className="min-w-0">
+              <Tabs defaultValue="details">
+                <TabsList aria-label="Letter editor" className="flex w-full px-2 sm:px-4 pt-1">
+                  <TabsTrigger value="details" className="min-h-11">Details</TabsTrigger>
+                  <TabsTrigger value="wording" className="min-h-11">Letter text</TabsTrigger>
+                  <TabsTrigger value="appearance" className="min-h-11">Appearance</TabsTrigger>
+                </TabsList>
 
-            <p className="font-medium text-ink mb-3">Your Company</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Company Name">
-                <input
-                  className="input"
-                  value={form.company_name}
-                  onChange={(e) => set("company_name", e.target.value)}
-                />
-              </Field>
-              <Field label="Company TRN">
-                <input
-                  className="input"
-                  placeholder="100000000000003"
-                  value={form.company_trn}
-                  onChange={(e) => set("company_trn", e.target.value)}
-                />
-              </Field>
-            </div>
+                <TabsContent value="details" className="!mt-0 divide-y divide-border">
+                  <section className="p-4 sm:p-5 space-y-3" aria-labelledby="declaration-details">
+                    <h2 id="declaration-details" className="text-sm font-semibold text-foreground">Letter details</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Reference">
+                        <input className="input" placeholder="DL-0001" value={form.ref} onChange={(e) => set("ref", e.target.value)} />
+                      </Field>
+                      <Field label="Date">
+                        <DateField value={form.date} onChange={(v) => set("date", v)} clearable={false} />
+                      </Field>
+                    </div>
+                    <Field label="Letter name">
+                      <input className="input" placeholder="e.g. Authorization letter" aria-describedby="declaration-name-hint" value={form.title ?? ""} onChange={(e) => set("title", e.target.value)} />
+                    </Field>
+                    <p id="declaration-name-hint" className="text-xs text-muted-foreground">Shown on your letter, in saved letters, and in the PDF filename.</p>
+                  </section>
 
-            <p className="font-medium text-ink mb-3 mt-5">Recipient (Supplier)</p>
-            {(supplierList.length > 0 || customerList.length > 0) && (
-              <div className="mb-3">
-                <Field label="Fill from saved supplier / buyer">
-                  <RecipientFillMenu
-                    suppliers={supplierList}
-                    customers={customerList}
-                    onPick={fillRecipient}
-                  />
-                </Field>
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Name">
-                <input
-                  className="input"
-                  placeholder="Dune Lubricants & Oil IND LLC"
-                  value={form.recipient_name}
-                  onChange={(e) => set("recipient_name", e.target.value)}
-                />
-              </Field>
-              <Field label="Location">
-                <input
-                  className="input"
-                  placeholder="Sharjah - UAE"
-                  value={form.recipient_location}
-                  onChange={(e) => set("recipient_location", e.target.value)}
-                />
-              </Field>
-              <Field label="Recipient TRN">
-                <input
-                  className="input"
-                  placeholder="105444251000003"
-                  value={form.recipient_trn}
-                  onChange={(e) => set("recipient_trn", e.target.value)}
-                />
-              </Field>
-              <Field label="Date">
-                <DateField
-                  value={form.date}
-                  onChange={(v) => set("date", v)}
-                  clearable={false}
-                />
-              </Field>
-            </div>
-          </Card>
+                  <section className="p-4 sm:p-5 space-y-3" aria-labelledby="declaration-company">
+                    <h2 id="declaration-company" className="text-sm font-semibold text-foreground">Your company</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Company name">
+                        <input className="input" value={form.company_name} onChange={(e) => set("company_name", e.target.value)} />
+                      </Field>
+                      <Field label="Company TRN">
+                        <input className="input" placeholder="Tax registration number" value={form.company_trn} onChange={(e) => set("company_trn", e.target.value)} />
+                      </Field>
+                    </div>
+                  </section>
 
-          {/* Reference / figures */}
-          <Card>
-            <p className="font-medium text-ink mb-3">Order Reference</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Reference">
-                <input
-                  className="input"
-                  placeholder="DL-0001"
-                  value={form.ref}
-                  onChange={(e) => set("ref", e.target.value)}
-                />
-              </Field>
-              <Field label="LPO Number">
-                <input
-                  className="input"
-                  placeholder="BF/DL/100/10/26"
-                  value={form.lpo_ref}
-                  onChange={(e) => set("lpo_ref", e.target.value)}
-                />
-              </Field>
-              <Field label="Amount (AED)">
-                <input
-                  className="input tabular-nums"
-                  placeholder="715650"
-                  value={form.amount}
-                  onChange={(e) => set("amount", e.target.value)}
-                />
-              </Field>
-              <Field label="Quantity">
-                <input
-                  className="input tabular-nums"
-                  placeholder="200"
-                  value={form.qty}
-                  onChange={(e) => set("qty", e.target.value)}
-                />
-              </Field>
-              <Field label="Unit">
-                <input
-                  className="input"
-                  placeholder="MT"
-                  value={form.unit}
-                  onChange={(e) => set("unit", e.target.value)}
-                />
-              </Field>
-            </div>
-          </Card>
+                  <section className="p-4 sm:p-5 space-y-3" aria-labelledby="declaration-recipient">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h2 id="declaration-recipient" className="text-sm font-semibold text-foreground">Recipient</h2>
+                      {(supplierList.length > 0 || customerList.length > 0) && (
+                        <RecipientFillMenu suppliers={supplierList} customers={customerList} onPick={fillRecipient} />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Recipient name">
+                        <input className="input" placeholder="Supplier or customer name" value={form.recipient_name} onChange={(e) => set("recipient_name", e.target.value)} />
+                      </Field>
+                      <Field label="Recipient TRN">
+                        <input className="input" placeholder="Tax registration number" value={form.recipient_trn} onChange={(e) => set("recipient_trn", e.target.value)} />
+                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Recipient address">
+                          <input className="input" placeholder="City, region and country" value={form.recipient_location} onChange={(e) => set("recipient_location", e.target.value)} />
+                        </Field>
+                      </div>
+                    </div>
+                  </section>
 
-          {/* Body */}
-          <Card>
-            <p className="font-medium text-ink mb-1">Declaration Text</p>
-            <p className="text-xs text-brand-400 mb-3">
-              Tokens like <code className="font-medium">{"{company}"}</code>,{" "}
-              <code className="font-medium">{"{trn}"}</code>,{" "}
-              <code className="font-medium">{"{lpo}"}</code>,{" "}
-              <code className="font-medium">{"{qty}"}</code>,{" "}
-              <code className="font-medium">{"{amount}"}</code> auto-fill from the fields
-              above.
-            </p>
-            <textarea
-              className="textarea font-mono text-xs leading-relaxed"
-              rows={12}
-              value={form.body}
-              onChange={(e) => set("body", e.target.value)}
-            />
-          </Card>
+                  <section className="p-4 sm:p-5 space-y-3" aria-labelledby="declaration-order">
+                    <h2 id="declaration-order" className="text-sm font-semibold text-foreground">Order details</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="LPO number">
+                        <input className="input" placeholder="Purchase order reference" value={form.lpo_ref} onChange={(e) => set("lpo_ref", e.target.value)} />
+                      </Field>
+                      <Field label="Amount (AED)">
+                        <input className="input tabular-nums" inputMode="decimal" placeholder="0.00" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
+                      </Field>
+                      <Field label="Quantity">
+                        <input className="input tabular-nums" inputMode="decimal" placeholder="0" value={form.qty} onChange={(e) => set("qty", e.target.value)} />
+                      </Field>
+                      <Field label="Unit">
+                        <input className="input" placeholder="e.g. MT" value={form.unit} onChange={(e) => set("unit", e.target.value)} />
+                      </Field>
+                    </div>
+                  </section>
+                </TabsContent>
 
-          {/* Branding */}
-          <Card>
-            <p className="font-medium text-ink mb-3">Branding</p>
-            <label className="flex items-center justify-between py-1.5 mb-3 cursor-pointer">
-              <span className="text-sm text-ink flex items-center gap-2">
-                <FileText size={15} /> Use letterhead
-                {!hasLetterhead(lh) && (
-                  <span className="text-[11px] text-brand-400">
-                    (set one in Settings → Company Details)
-                  </span>
-                )}
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-label="Use letterhead"
-                aria-checked={useLetterhead}
-                disabled={!hasLetterhead(lh)}
-                onClick={() => setUseLetterhead((v) => !v)}
-                className={`w-9 h-5 rounded-full relative transition-colors ${
-                  useLetterhead ? "bg-primary-400" : "bg-brand-200"
-                } ${!hasLetterhead(lh) ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-              >
-                <span
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
-                    useLetterhead ? "left-4" : "left-0.5"
-                  }`}
-                />
-              </button>
-            </label>
-            {useLetterhead && hasLetterhead(lh) && (
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <Field label="Header space (px)">
-                  <input
-                    type="number"
-                    min={0}
-                    step={10}
-                    className="input tabular-nums"
-                    value={headerSpace}
-                    onChange={(e) =>
-                      setHeaderSpace(Math.max(0, Number(e.target.value) || 0))
-                    }
-                  />
-                </Field>
-                <Field label="Footer space (px)">
-                  <input
-                    type="number"
-                    min={0}
-                    step={10}
-                    className="input tabular-nums"
-                    value={footerSpace}
-                    onChange={(e) =>
-                      setFooterSpace(Math.max(0, Number(e.target.value) || 0))
-                    }
-                  />
-                </Field>
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Card className="!p-3">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm font-medium text-ink">Show stamp</span>
-                  <input
-                    type="checkbox"
-                    className="toggle"
-                    checked={showStamp}
-                    onChange={(e) => setShowStamp(e.target.checked)}
-                  />
-                </label>
-              </Card>
-              <Card className="!p-3">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm font-medium text-ink">Show signature</span>
-                  <input
-                    type="checkbox"
-                    className="toggle"
-                    checked={showSignature}
-                    onChange={(e) => setShowSignature(e.target.checked)}
-                  />
-                </label>
-              </Card>
-            </div>
-            {(showStamp || showSignature) &&
-              (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {showStamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
-                    <StampSigAdjust
-                      label="Stamp"
-                      icon={<Stamp size={13} />}
-                      value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
-                      onChange={(v) => setForm({ ...form, stamp: v })}
+                <TabsContent value="wording" className="!mt-0 p-4 sm:p-5 space-y-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">Make the wording your own</h2>
+                    <p id="declaration-wording-help" className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Edit the letter below. Fields in braces fill from Details and update in the preview.
+                    </p>
+                  </div>
+                  <Field label="Letter text">
+                    <textarea
+                      className="textarea text-sm leading-relaxed min-h-80"
+                      aria-describedby="declaration-wording-help"
+                      rows={18}
+                      value={form.body}
+                      onChange={(e) => set("body", e.target.value)}
                     />
-                  )}
-                  {showSignature &&
-                    (form.signature?.data || companyStampSig.signature?.data) && (
-                      <StampSigAdjust
-                        label="Signature"
-                        icon={<PenTool size={13} />}
-                        value={
-                          form.signature?.data ? form.signature : companyStampSig.signature!
-                        }
-                        onChange={(v) => setForm({ ...form, signature: v })}
-                      />
+                  </Field>
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer py-2 font-medium text-foreground">Available automatic fields</summary>
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {["company", "trn", "recipient", "recipientTrn", "lpo", "qty", "unit", "amount"].map((token) => (
+                        <code key={token} className="rounded-md bg-muted px-2 py-1">{"{" + token + "}"}</code>
+                      ))}
+                    </div>
+                  </details>
+                </TabsContent>
+
+                <TabsContent value="appearance" className="!mt-0 p-4 sm:p-5">
+                  <h2 className="text-sm font-semibold text-foreground">Letter appearance</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">Choose which company assets appear on this letter.</p>
+                  <div className="mt-4 divide-y divide-border">
+                    <label className="flex items-center justify-between gap-4 py-4 cursor-pointer">
+                      <span className="flex min-w-0 items-start gap-3">
+                        <FileText size={17} className="mt-0.5 shrink-0 text-muted-foreground" />
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">Use letterhead</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">{hasLetterhead(lh) ? "Use your company’s saved letterhead." : "Add a letterhead in Settings → Company Details."}</span>
+                        </span>
+                      </span>
+                      <Toggle label="Use letterhead" on={useLetterhead} disabled={!hasLetterhead(lh)} onChange={setUseLetterhead} />
+                    </label>
+                    {useLetterhead && hasLetterhead(lh) && (
+                      <div className="grid grid-cols-2 gap-3 py-4">
+                        <Field label="Header space (px)">
+                          <input type="number" min={0} step={10} className="input tabular-nums" value={headerSpace} onChange={(e) => setHeaderSpace(Math.max(0, Number(e.target.value) || 0))} />
+                        </Field>
+                        <Field label="Footer space (px)">
+                          <input type="number" min={0} step={10} className="input tabular-nums" value={footerSpace} onChange={(e) => setFooterSpace(Math.max(0, Number(e.target.value) || 0))} />
+                        </Field>
+                      </div>
                     )}
-                </div>
-              )}
+                    <label className="flex items-center justify-between gap-4 py-4 cursor-pointer">
+                      <span className="flex min-w-0 items-start gap-3">
+                        <Stamp size={17} className="mt-0.5 shrink-0 text-muted-foreground" />
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">Show stamp</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">{form.stamp?.data || companyStampSig.stamp?.data ? "Position your stamp directly on the preview." : "Add a stamp in Settings → Company Details."}</span>
+                        </span>
+                      </span>
+                      <Toggle label="Show stamp" disabled={!form.stamp?.data && !companyStampSig.stamp?.data} on={showStamp} onChange={setShowStamp} />
+                    </label>
+                    <label className="flex items-center justify-between gap-4 py-4 cursor-pointer">
+                      <span className="flex min-w-0 items-start gap-3">
+                        <PenTool size={17} className="mt-0.5 shrink-0 text-muted-foreground" />
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">Show signature</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">{form.signature?.data || companyStampSig.signature?.data ? "Position your signature directly on the preview." : "Add a signature in Settings → Company Details."}</span>
+                        </span>
+                      </span>
+                      <Toggle label="Show signature" disabled={!form.signature?.data && !companyStampSig.signature?.data} on={showSignature} onChange={setShowSignature} />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {showStamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                      <StampSigAdjust label="Stamp" icon={<Stamp size={13} />} value={form.stamp?.data ? form.stamp : companyStampSig.stamp!} onChange={(v) => set("stamp", v)} />
+                    )}
+                    {showSignature && (form.signature?.data || companyStampSig.signature?.data) && (
+                      <StampSigAdjust label="Signature" icon={<PenTool size={13} />} value={form.signature?.data ? form.signature : companyStampSig.signature!} onChange={(v) => set("signature", v)} />
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 sm:px-5 py-3">
+                <p className="text-xs text-muted-foreground">Changes are stored when you save.</p>
+                <button type="button" className="btn-ghost text-xs" onClick={async () => {
+                  if (await confirm({ title: "Reset this letter?", message: "This clears your unsaved edits. The saved letter stays unchanged until you save again.", confirmLabel: "Reset" })) {
+                    setForm({ ...blankDecl(company), ref: form.ref });
+                    setShowStamp(false);
+                    setShowSignature(false);
+                    setUseLetterhead(hasLetterhead(lh));
+                    setHeaderSpace(DECLARATION_HEADER_SPACE);
+                    setFooterSpace(DEFAULT_FOOTER_SPACE);
+                  }
+                }}>
+                  <RotateCcw size={14} /> Reset draft
+                </button>
+              </div>
+            </fieldset>
           </Card>
-          </div>
         }
         right={
-          <div className="sticky top-4 space-y-4">
-            
           <Card className="!p-4">
-            <div className="no-print flex items-start justify-between mb-3">
-              <div>
-                <p className="font-medium text-ink">Preview</p>
-                <p className="text-xs text-brand-400">
-                  This is how your declaration letter will look
-                </p>
-              </div>
+            <div className="no-print mb-4 pr-12">
+              <h2 className="text-sm font-semibold text-foreground">Live preview</h2>
+              <p className="mt-1 text-xs text-muted-foreground">A4 portrait · 210 × 297 mm</p>
             </div>
 
             <FitPreview baseWidth={baseWidth} zoom={zoom} padding={0}>
@@ -1011,8 +929,8 @@ function DeclarationEditor({
                       lineHeight: 1.7,
                     }}
                   >
-                    <h1 className="text-center text-[15px] font-bold underline tracking-wide mb-6">
-                      {form.title?.trim() || "DECLARATION LETTER"}
+                    <h1 className="text-center text-[15px] font-bold underline tracking-wide mb-6 break-words">
+                      {letterName(form)}
                     </h1>
 
                     <p className="text-right text-sm font-bold mb-6">
@@ -1051,9 +969,15 @@ function DeclarationEditor({
               </div>
             </FitPreview>
 
-            <DocumentPreviewControls device={device} onDeviceChange={setDevice} zoom={zoom} onZoomChange={setZoom} />
+            <div className="no-print mt-3 flex flex-wrap items-center justify-between gap-2" role="group" aria-label="Document preview controls">
+              <button type="button" className="btn-ghost text-xs" onClick={() => setZoom(100)}>Fit to panel</button>
+              <div className="flex items-center gap-1">
+                <button type="button" className="btn-ghost h-10 w-10 p-0" aria-label="Zoom out" disabled={zoom <= 50} onClick={() => setZoom(Math.max(50, zoom - 10))}><Minus size={16} /></button>
+                <output className="w-10 text-center text-xs tabular-nums text-muted-foreground" aria-label="Preview zoom level">{zoom}%</output>
+                <button type="button" className="btn-ghost h-10 w-10 p-0" aria-label="Zoom in" disabled={zoom >= 150} onClick={() => setZoom(Math.min(150, zoom + 10))}><Plus size={16} /></button>
+              </div>
+            </div>
           </Card>
-          </div>
         }
       />
     </div>
@@ -1082,10 +1006,10 @@ function RecipientFillMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="input inline-flex items-center justify-between gap-1.5 text-left hover:bg-hover cursor-pointer"
+        className="btn-ghost text-xs"
       >
         <span className="min-w-0 flex-1 truncate text-left">
-          Select to auto-fill…
+          Choose saved recipient
         </span>
         <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
       </button>

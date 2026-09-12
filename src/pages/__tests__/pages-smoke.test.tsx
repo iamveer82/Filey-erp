@@ -165,7 +165,7 @@ function ReportDestination() {
   return <p>{location.pathname}{location.search}</p>;
 }
 
-it.each(["/crm", "/crm?view=reports"])("%s opens central CRM insights", async (path) => {
+it.each(["/crm", "/crm?view=reports"])("%s keeps insights in central Reports", async (path) => {
   const view = render(
     <MemoryRouter initialEntries={[path]}>
       <AuthProvider>
@@ -178,8 +178,12 @@ it.each(["/crm", "/crm?view=reports"])("%s opens central CRM insights", async (p
       </AuthProvider>
     </MemoryRouter>
   );
-  if (path === "/crm") fireEvent.click(view.getByRole("button", { name: "Reports" }));
-  expect(await view.findByText("/reports?tab=insights&section=deals")).toBeTruthy();
+  if (path === "/crm") {
+    expect(view.queryByRole("button", { name: "Reports" })).toBeNull();
+    expect(view.getByRole("heading", { name: "CRM overview" })).toBeTruthy();
+  } else {
+    expect(await view.findByText("/reports?tab=insights&section=deals")).toBeTruthy();
+  }
   view.unmount();
 });
 
@@ -192,9 +196,10 @@ it.each([
   try {
     const message = `Could not refresh ${name}. Displayed records may be incomplete.`;
     expect(await view.findByText(message)).toBeTruthy();
+    const readsBeforeRetry = list.mock.calls.length;
     fireEvent.click(view.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(view.queryByText(message)).toBeNull());
-    expect(list).toHaveBeenCalledTimes(2);
+    expect(list.mock.calls.length).toBeGreaterThan(readsBeforeRetry);
   } finally {
     view.unmount();
     list.mockRestore();

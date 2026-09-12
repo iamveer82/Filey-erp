@@ -24,6 +24,8 @@ public static class FileyDesktop {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int max);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr window, uint flags);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int max);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -34,6 +36,7 @@ public static class FileyDesktop {
   public static Rect Bounds;
   public static uint ProcessId;
   public static string Title(IntPtr window) { var text = new StringBuilder(512); GetWindowText(window, text, text.Capacity); return text.ToString(); }
+  public static string ClassName(IntPtr window) { var text = new StringBuilder(256); GetClassName(window, text, text.Capacity); return text.ToString(); }
   public static void CheckStop() { if ((GetAsyncKeyState(27) & 0x8000) != 0) throw new Exception("Computer action stopped by Escape."); }
   static void Send(Input[] values) {
     CheckStop();
@@ -48,6 +51,8 @@ public static class FileyDesktop {
   static Input Key(ushort code, uint flags) { return new Input { type=1, data=new Union { keyboard=new Keyboard { key=code, flags=flags | ((code >= 33 && code <= 40 || code == 46) ? 1u : 0u) } } }; }
   public static void Type(string text) {
     foreach (char c in text) {
+      // A line break must not press bare Enter and send a chat prematurely.
+      if (c == '\n') { Send(new[] { Key(16,0), Key(13,0), Key(13,2), Key(16,2) }); continue; }
       Send(new[] { new Input { type=1, data=new Union { keyboard=new Keyboard { scan=c, flags=4 } } },
         new Input { type=1, data=new Union { keyboard=new Keyboard { scan=c, flags=6 } } } });
     }
@@ -76,7 +81,11 @@ if ($request.action -eq 'list_windows') {
     $handle = [IntPtr]::new($_)
     [uint32]$processId = 0
     [void][FileyDesktop]::GetWindowThreadProcessId($handle, [ref]$processId)
-    @{ window_id = $_.ToString(); title = [FileyDesktop]::Title($handle); process_id = $processId; minimized = [FileyDesktop]::IsIconic($handle) }
+    $rootOwner = [FileyDesktop]::GetAncestor($handle, 3).ToInt64().ToString()
+    $windowClass = [FileyDesktop]::ClassName($handle)
+    if (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or ($rootOwner -eq $request.root_window_id -and $windowClass -eq '#32770')) {
+      @{ window_id = $_.ToString(); title = [FileyDesktop]::Title($handle); process_id = $processId; minimized = [FileyDesktop]::IsIconic($handle); root_owner_id = $rootOwner; window_class = $windowClass }
+    }
   })
   @{ windows = $windows } | ConvertTo-Json -Depth 5 -Compress
   exit

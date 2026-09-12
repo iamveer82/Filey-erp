@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useImperativeHandle } from "react";
 import { Link, MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import { AuthProvider } from "../../lib/auth";
 import { toolRuns } from "../../lib/api";
 import PdfTools from "../PdfTools";
 
-const boundary = vi.hoisted(() => ({ run: vi.fn(), download: vi.fn() }));
+const boundary = vi.hoisted(() => ({ run: vi.fn(), download: vi.fn(), prepare: vi.fn() }));
 vi.mock("../../lib/pdfTools", async (original) => ({ ...await original<typeof import("../../lib/pdfTools")>(), downloadFile: boundary.download }));
+vi.mock("../../components/InlinePdfEditor", () => ({ default: function MockPdfEditor({ editorRef }: { editorRef: import("react").Ref<unknown> }) { useImperativeHandle(editorRef, () => ({ prepare: boundary.prepare })); return <div>Document editor</div>; } }));
 vi.mock("../../components/PdfToolbox", () => {
-  const tools = ["alpha", "beta"].map(id => ({ id, name: id === "alpha" ? "Alpha tool" : "Beta tool", cat: "Convert", desc: "Test local conversion", icon: () => null, accept: ".bin", multi: id === "beta", run: boundary.run }));
+  const tools = ["alpha", "beta"].map(id => ({ id, name: id === "alpha" ? "Alpha tool" : "Beta tool", cat: "Convert", desc: "Test local conversion", icon: () => null, accept: ".bin,.pdf", multi: id === "beta", run: boundary.run }));
   return { PDF_TOOLS: tools, toolById: (id: string) => tools.find(t => t.id === id), toolFlow: () => ({ from: "BIN", to: "PDF" }), defaultParams: () => ({ suffix: "default" }), ToolFields: ({ params, setParams }: { params: Record<string, string>; setParams: (next: Record<string, string>) => void }) => <input aria-label="Output suffix" value={params.suffix} onChange={e => setParams({ suffix: e.target.value })} /> };
 });
 
@@ -74,7 +76,7 @@ function upload(container: HTMLElement) {
 it("keeps generated output after cancellation and retries the download without rerunning the tool", async () => {
   const view = setup();
   upload(view.container);
-  fireEvent.click(view.getByRole("button", { name: "Run Alpha tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   expect(await view.findByText(/Save canceled/)).toBeTruthy();
   expect(boundary.run).toHaveBeenCalledOnce();
   boundary.download.mockResolvedValue(true);
@@ -93,10 +95,10 @@ it("accepts dropped files, rejects the wrong format and keeps the uploaded file 
   fireEvent.drop(view.container.querySelector(".tool-dropzone")!, { dataTransfer: { files: [new File(["source"], "source.bin")] } });
   expect(view.queryByRole("alert")).toBeNull();
   boundary.run.mockRejectedValueOnce(new Error("Cannot read this file"));
-  fireEvent.click(view.getByRole("button", { name: "Run Alpha tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   expect(await view.findByRole("alert")).toHaveTextContent("Cannot read this file");
   expect(view.getByRole("button", { name: "Remove source.bin" })).toBeEnabled();
-  fireEvent.click(view.getByRole("button", { name: "Run Alpha tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   expect(await view.findByRole("region", { name: "Your results" })).toHaveTextContent("output.pdf");
   expect(view.queryByRole("alert")).toBeNull();
 });
@@ -108,7 +110,7 @@ it("adds and reorders multiple files before processing and removes a file withou
   fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [first] } });
   fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [second] } });
   fireEvent.click(view.getByRole("button", { name: "Move second.bin up" }));
-  fireEvent.click(view.getByRole("button", { name: "Run Beta tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Beta tool" }));
   await waitFor(() => expect(boundary.run).toHaveBeenCalledWith([second, first], { suffix: "default" }));
   await view.findByText(/Save canceled/);
   fireEvent.click(view.getByRole("button", { name: "Remove first.bin" }));
@@ -131,17 +133,30 @@ it("finds tools from the illustrated catalogue and recovers an empty search", as
 it("clears old output when options change and resets files and options on direct tool navigation", async () => {
   const view = setup();
   upload(view.container);
-  fireEvent.click(view.getByRole("button", { name: "Run Alpha tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   await view.findByText(/Save canceled/);
   fireEvent.change(view.getByRole("textbox", { name: "Output suffix" }), { target: { value: "revised" } });
   expect(view.queryByRole("button", { name: "Download results" })).toBeNull();
   fireEvent.click(view.getByRole("link", { name: "Switch tool" }));
   await view.findByText("Beta tool");
-  expect(view.queryByRole("button", { name: "Run Beta tool" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Beta tool" })).toBeNull();
   upload(view.container);
   expect(view.getByRole("textbox", { name: "Output suffix" })).toHaveValue("default");
-  fireEvent.click(view.getByRole("button", { name: "Run Beta tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Beta tool" }));
   await waitFor(() => expect(boundary.run).toHaveBeenCalledTimes(2));
   expect(boundary.run.mock.calls[1][1]).toEqual({ suffix: "default" });
 });
 
+
+it("includes pending canvas edits in the primary action and stops if preparing edits fails", async () => {
+  const view = setup();
+  const original = new File(["source"], "source.pdf", { type: "application/pdf" });
+  const edited = new File(["with brush strokes"], "edited.pdf", { type: "application/pdf" });
+  boundary.prepare.mockRejectedValueOnce(new Error("Could not save edits")).mockResolvedValueOnce(edited);
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [original] } });
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
+  expect(await view.findByRole("alert")).toHaveTextContent("Could not save edits");
+  expect(boundary.run).not.toHaveBeenCalled();
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
+  await waitFor(() => expect(boundary.run).toHaveBeenCalledWith([edited], { suffix: "default" }));
+});

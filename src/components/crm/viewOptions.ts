@@ -36,11 +36,21 @@ export function crmColumns(kind: CrmObject) {
     ...spec.fields.filter(
       (field) => field.key !== spec.title && field.type !== "textarea"
     ),
+    ...(kind === "companies"
+      ? [{ key: "contact_count", label: "Contacts", type: "count" as const }]
+      : []),
+    ...(["companies", "contacts"].includes(kind)
+      ? [{ key: "open_deal_count", label: "Open deals", type: "count" as const }]
+      : []),
     { key: "created_at", label: "Created", type: "date" as const },
   ];
 }
 
 export function defaultCrmColumns(kind: CrmObject): string[] {
+  if (kind === "companies")
+    return ["email", "phone", "segment", "contact_count", "open_deal_count"];
+  if (kind === "contacts")
+    return ["company_id", "email", "phone", "owner", "open_deal_count"];
   return [
     ...crmColumns(kind)
       .filter(
@@ -69,6 +79,7 @@ export function crmSortValue(
   data: CrmData
 ): string | number {
   if (key === "record") return recordName(kind, row).toLocaleLowerCase();
+  if (key === "contact_count" || key === "open_deal_count") return Number(row[key]) || 0;
   const field = CRM_OBJECTS[kind].fields.find((item) => item.key === key);
   if (field?.type === "target") return linkedName(row, data).toLocaleLowerCase();
   if (field?.type === "company" || field?.type === "contact") {
@@ -79,4 +90,26 @@ export function crmSortValue(
   if (field?.type === "number" || field?.type === "checkbox")
     return Number(row[key]) || 0;
   return text(row[key]).toLocaleLowerCase();
+}
+
+/** Read-only rollups, calculated in one pass without writing derived fields to CRM. */
+export function withRelationshipCounts(kind: CrmObject, data: CrmData): CrmRow[] {
+  if (kind !== "companies" && kind !== "contacts") return data[kind];
+  const contacts = new Map<number, number>(),
+    deals = new Map<number, number>();
+  if (kind === "companies")
+    for (const contact of data.contacts) {
+      const id = Number(contact.company_id);
+      contacts.set(id, (contacts.get(id) || 0) + 1);
+    }
+  for (const deal of data.deals) {
+    if (["won", "lost"].includes(text(deal.stage))) continue;
+    const id = Number(kind === "companies" ? deal.customer_id : deal.person_id);
+    deals.set(id, (deals.get(id) || 0) + 1);
+  }
+  return data[kind].map((row) => ({
+    ...row,
+    contact_count: contacts.get(row.id) || 0,
+    open_deal_count: deals.get(row.id) || 0,
+  }));
 }

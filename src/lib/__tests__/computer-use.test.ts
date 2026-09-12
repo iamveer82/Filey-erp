@@ -84,3 +84,15 @@ it("revokes the grant when the native helper reports Escape was pressed", async 
   expect(getComputerUseState().enabled).toBe(false);
   expect(invoke).toHaveBeenLastCalledWith("computer_stop", { sessionToken: "private-native-token" });
 });
+
+it("binds a task to its browser and prevents an old task from using or revoking a replacement grant", async () => {
+  const previous = await enableComputerUse(300, "42");
+  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: 300, windowId: "42" });
+  const replacement = await enableComputerUse();
+  vi.mocked(invoke).mockClear();
+  await expect(runComputerUse({ action: "list_windows" }, undefined, previous)).rejects.toMatchObject({ name: "AbortError" });
+  await disableComputerUse(previous);
+  expect(invoke).not.toHaveBeenCalled();
+  await runComputerUse({ action: "list_windows" }, undefined, replacement);
+  expect(invoke).toHaveBeenCalledOnce();
+});

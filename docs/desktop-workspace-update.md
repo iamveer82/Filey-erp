@@ -32,16 +32,16 @@ Free local software does not make every external service free. Resend email need
 
 AI keys remain in the user's browser/desktop profile without application-level encryption; the settings explain this. The local model catalogue and connection checks have regression coverage, but no models were installed or live hosted keys tested during this pass. Users choose and run a suitable local model, or supply their own supported provider key. No existing provider configuration or credentials were changed during the browser review.
 
-## Pending cloud migrations
+## Cloud migrations
 
-These two additive migrations remain **pending remote application and validation**:
+These two additive migrations were applied on September 10 and their schema presence rechecked on September 12. See the [deployment log](SUPABASE_DEPLOY.md#applied-migration-log).
 
 | Migration | Required before |
 | --- | --- |
 | `supabase/2026-09-06-international-business.sql` | Saving or transferring the new country-tagged business records to cloud. |
 | `supabase/2026-09-06-work-items.sql` | Enabling cloud Projects/Helpdesk and transferring records containing `work_items`. |
 
-The previous management API attempt for the work-items migration returned HTTP 403 / code 1010. Local collections do not require these SQL migrations. Apply through an authorized database connection, then verify owner/organization isolation, linked-record checks, and local/cloud transfer behavior before describing those cloud features as released. Do not embed management or service-role credentials in the client.
+Local collections do not require these SQL migrations. For self-hosted installations, apply them through an authorized database connection. Live multi-account transfer and sync exercises remain operational checks; schema presence alone does not verify those flows. Do not embed management or service-role credentials in the client.
 
 Country-aware forms and document snapshots are a foundation, not full national localization. The ledger remains AED, and national filings, country-specific payroll and statutory certification remain incomplete. See [international business](international-business.md) and [platform readiness](platform-readiness.md).
 
@@ -67,4 +67,4 @@ PDF.js was upgraded to 6.3.289 with its matching official legacy worker for desk
 - The last read-only Settings review found a controlled color picker with no change handler. It now preserves native edits until its existing save-on-blur step; the rebuilt Preferences screen loaded without new console errors. No color or other stored preference was changed during that verification.
 - QA development uses its own dependency cache to avoid interference with the normal app server. A temporary stale-React error after a dependency optimization was resolved by isolating that cache and reloading; Accounting and the full route review then passed.
 - **Native installer: not validated.** Fresh install, signed packaging, existing-user upgrade, offline restart, native file dialogs, real backup/restore, cross-device sync and rollback remain release checks. A passing web build or mocked save test does not validate the installed Windows application.
-- Apply and verify the two pending cloud migrations and resolve the remaining dependency findings before declaring the corresponding release work complete.
+- The two migrations are now deployed. See the [2.11.0 release notes](releases/v2.11.0.md) for the later test results and distribution details. The dependency findings and native operational checks above remain separate limitations.

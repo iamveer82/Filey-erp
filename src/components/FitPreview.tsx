@@ -41,32 +41,27 @@ export default function FitPreview({
     const box = boxRef.current;
     if (!box) return;
 
-    // Measure after content has rendered and scrollbars have appeared.
-    // Measuring synchronously on mount can read a clientWidth that doesn't
-    // yet include the vertical scrollbar (the invoice content hasn't
-    // painted yet). Once it does, the scrollbar steals ~15px from the
-    // available width, but our scale was already locked in — so the right
-    // edge of the invoice gets clipped behind overflow:hidden.
-    //
-    // requestAnimationFrame fires after the next paint, by which point
-    // children have rendered and any scrollbar is present in clientWidth.
     const measure = () => {
-      const avail = box.clientWidth - 32; // 32 = p-4 (16px each side)
+      const avail = box.clientWidth - 32; // p-4 on each side
       if (avail > 0) setFitW(avail);
     };
+    let frame = 0;
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    scheduleMeasure();
 
-    const raf = requestAnimationFrame(measure);
-
-    // Re-measure on window resize (panel width can change when the
-    // browser window resizes). We deliberately do NOT use ResizeObserver
-    // on the box itself — it fires on every scrollbar show/hide and
-    // focus/blur, causing jarring zoom jumps.
-    const onResize = () => requestAnimationFrame(measure);
-    window.addEventListener("resize", onResize);
+    // Panel dragging and sidebar changes resize the paper without resizing the
+    // window. Only the available width changes the fit; height-only updates bail out.
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(scheduleMeasure);
+    observer?.observe(box);
+    window.addEventListener("resize", scheduleMeasure);
 
     return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
     };
   }, []);
 
@@ -78,7 +73,7 @@ export default function FitPreview({
   return (
     <div
       ref={boxRef}
-      className="fp-box bg-brand-100 rounded-xl p-4 overflow-y-auto overflow-x-hidden max-h-[85vh]"
+      className="fp-box bg-brand-100 rounded-xl p-4 overflow-y-auto overflow-x-hidden max-h-[85vh] [scrollbar-gutter:stable]"
     >
       {scale <= 0.98 ? (
         /* Scale down: render at full resolution, then GPU-scale to fit.

@@ -24,19 +24,21 @@ function publish(state: ComputerUseState) { current = state; for (const listener
 
 /** Called only by an explicit owner UI action, never exposed as an agent tool.
  * The token is kept in this module, outside prompts, tool results and storage. */
-export async function enableComputerUse(durationSeconds = 300): Promise<void> {
+export async function enableComputerUse(durationSeconds = 300, windowId?: string): Promise<number> {
   if (!computerUseSupported()) throw new Error("Computer control requires the Windows desktop app.");
   const scope = agentStorageScope();
   if (!scope) throw new Error("Sign in before enabling computer access.");
   if (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 900)
     throw new Error("Choose a computer session between 60 and 900 seconds.");
+  if (windowId !== undefined && !/^[1-9]\d{0,19}$/.test(windowId))
+    throw new Error("Choose a Filey browser window for this task.");
   if (starting) throw new Error("Computer access is already starting.");
   await disableComputerUse();
   starting = true;
   const version = ++generation;
   publish({ enabled: false, expiresAt: null, busy: true });
   try {
-    const result = await invoke<{ sessionToken: string; expiresAt: number }>("computer_start", { durationSeconds });
+    const result = await invoke<{ sessionToken: string; expiresAt: number }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}) });
     if (!result || typeof result.sessionToken !== "string" || !Number.isFinite(result.expiresAt))
       throw new Error("The native computer permission response was invalid.");
     if (version !== generation || scope !== agentStorageScope()) {
@@ -46,13 +48,15 @@ export async function enableComputerUse(durationSeconds = 300): Promise<void> {
     grant = { ...result, scope };
     publish({ enabled: true, expiresAt: result.expiresAt, busy: false });
     expiryTimer = setTimeout(() => { void disableComputerUse().catch(() => {}); }, Math.max(0, result.expiresAt - Date.now()));
+    return version;
   } finally {
     if (version === generation) { starting = false; if (!grant) publish({ enabled: false, expiresAt: null, busy: false }); }
   }
 }
 
 /** Revocation is immediate locally, even if the native acknowledgment fails. */
-export async function disableComputerUse(): Promise<void> {
+export async function disableComputerUse(sessionId?: number): Promise<void> {
+  if (sessionId !== undefined && sessionId !== generation) return;
   generation++;
   starting = false;
   clearTimeout(expiryTimer);
@@ -60,6 +64,12 @@ export async function disableComputerUse(): Promise<void> {
   grant = null;
   publish({ enabled: false, expiresAt: null, busy: false });
   if (previous) await invoke("computer_stop", { sessionToken: previous.sessionToken });
+}
+
+/** A task can act only through its own grant; replacing it ends that task. */
+export function computerUseSessionActive(sessionId: number): boolean {
+  return generation === sessionId && !!grant && grant.expiresAt > Date.now()
+    && grant.scope === agentStorageScope();
 }
 
 function validate(args: Record<string, unknown>): Record<string, unknown> {
@@ -100,7 +110,9 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
 
 /** Each input uses one fresh native screenshot ID. Abort also revokes the
  * session and kills the fixed helper; it never retries an uncertain action. */
-export async function runComputerUse(args: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+export async function runComputerUse(args: Record<string, unknown>, signal?: AbortSignal, sessionId?: number): Promise<Record<string, unknown>> {
+  if (sessionId !== undefined && !computerUseSessionActive(sessionId))
+    throw new DOMException("This computer session ended or was replaced.", "AbortError");
   const request = validate(args);
   const permission = grant;
   if (!permission || permission.expiresAt <= Date.now() || permission.scope !== agentStorageScope()) {
@@ -110,7 +122,7 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
   if (current.busy) throw new Error("A computer action is running. Wait or stop it before continuing.");
   if (signal?.aborted) { await disableComputerUse(); throw new DOMException("Computer action canceled", "AbortError"); }
   const version = generation;
-  const abort = () => { void disableComputerUse().catch(() => {}); };
+  const abort = () => { void disableComputerUse(version).catch(() => {}); };
   signal?.addEventListener("abort", abort, { once: true });
   publish({ ...current, busy: true });
   try {
@@ -126,7 +138,7 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
     return result;
   } catch (error) {
     if (String(error).includes("Computer action stopped by Escape")) {
-      await disableComputerUse();
+      await disableComputerUse(version);
       throw new DOMException("Computer access stopped by Escape", "AbortError");
     }
     throw error;

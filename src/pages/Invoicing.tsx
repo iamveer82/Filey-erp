@@ -2,9 +2,10 @@ import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
 import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
 import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/documentMessage";
 import { isLocalMode } from "../lib/dataMode";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { useSearchParams } from "react-router-dom";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
   Plus,
   Trash2,
@@ -491,9 +492,11 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     setForm(f);
   };
 
-const editInvoice = async (id: number) => {
+  const editInvoice = useCallback(async (id: number) => {
     try {
+      const scope = agentStorageScope();
       const d = await billing.getDoc(id);
+      requireAgentStorageScope(scope ?? "signed-out");
       setForm({
         id: d.id,
         number: d.number,
@@ -599,7 +602,15 @@ const editInvoice = async (id: number) => {
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    if (!params.has("open") || !company) return;
+    const id = Number(params.get("open"));
+    setParams({}, { replace: true });
+    if (Number.isSafeInteger(id) && id > 0) void editInvoice(id);
+    else toast.error("Choose an existing invoice.");
+  }, [params, company, editInvoice, setParams, toast]);
 
   const duplicateInvoice = async (id: number) => {
     try {
@@ -964,6 +975,7 @@ const editInvoice = async (id: number) => {
       }
       if (kind === "whatsapp" || kind === "sms") {
         setMessageDialog({
+          documentKey: `invoice:${d.id}`,
           title: subject,
           phone,
           message: text,

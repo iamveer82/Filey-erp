@@ -9,6 +9,13 @@ import { WA_HEADER, waFormat } from "../waAgent";
 beforeEach(() => { localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); waLogClear(); });
 
 describe("waLogList", () => {
+  it("keeps document outcomes across reopening and isolates them from another account", () => {
+    const document = { key: "invoice:1", filename: "Invoice.pdf", channel: "whatsapp" as const, outcome: "unknown" as const };
+    waLogAdd({ dir: "out", from: "971501234567", text: "[outcome unknown] Invoice", document });
+    expect(waLogList()[0].document).toEqual(document);
+    setCacheOrg("test-org", "another-user"); expect(waLogList()).toEqual([]);
+    setCacheOrg("test-org", "test-user"); expect(waLogList()[0].document?.outcome).toBe("unknown");
+  });
   it("returns newest last and honours the limit", () => {
     for (let i = 0; i < 5; i++)
       waLogAdd({ dir: "in", from: "971501234567", text: `m${i}` });

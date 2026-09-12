@@ -1,20 +1,10 @@
-/* ── Custom field registry (Odoo Studio pattern) ──────────────────
- * Each module can have its own set of user-defined fields. The
- * registry lives in localStorage (and `app_settings` for cross-device
- * sync) so the user can add/remove fields without DB migrations.
- *
- * Storage keys:
- * - `filey.custom_fields.<module>` — JSON: CustomFieldDef[]
- * - `app_settings.custom_fields_<module>` — same shape, synced
- *
- * CustomFieldDef shape:
- * { id, module, key, label, type, options?, required?, position }
- *
- * Custom field values are stored in a `custom_fields` JSONB column
- * on each row, OR (for non-supabase rows) in localStorage. The
- * `applyCustomFields` helper writes a value into a row, the
- * `readCustomFields` helper reads them back. */
+/** Definitions live in workspace settings, with an account- and mode-scoped cache. Values remain on their business records. */
 import { tools } from "./api";
+import {
+  readAgentStorage,
+  writeAgentStorage,
+  requireAgentStorageScope,
+} from "./agentStorage";
 
 export type CustomFieldType =
   | "text"
@@ -36,7 +26,8 @@ export interface CustomFieldDef {
     | "orders"
     | "purchase_orders"
     | "employees"
-    | "leads";
+    | "leads"
+    | "contacts";
   key: string;
   label: string;
   type: CustomFieldType;
@@ -49,6 +40,42 @@ export interface CustomFieldDef {
 
 const STORAGE_PREFIX = "filey.custom_fields.";
 const SETTINGS_PREFIX = "custom_fields_";
+const TYPES = new Set([
+  "text",
+  "number",
+  "date",
+  "select",
+  "checkbox",
+  "url",
+  "email",
+  "phone",
+]);
+function validDefinition(
+  value: unknown,
+  module: CustomFieldDef["module"]
+): value is CustomFieldDef {
+  if (!value || typeof value !== "object") return false;
+  const d = value as CustomFieldDef;
+  return (
+    d.module === module &&
+    typeof d.id === "string" &&
+    typeof d.label === "string" &&
+    d.label.trim().length > 0 &&
+    d.label.length <= 100 &&
+    typeof d.key === "string" &&
+    /^[a-z][a-z0-9_]{0,63}$/.test(d.key) &&
+    !["__proto__", "constructor", "prototype"].includes(d.key) &&
+    TYPES.has(d.type) &&
+    Number.isFinite(d.position) &&
+    (d.options == null ||
+      (Array.isArray(d.options) &&
+        d.options.length <= 100 &&
+        d.options.every(
+          (option) => typeof option === "string" && option.length <= 500
+        ))) &&
+    (d.type !== "select" || !!d.options?.length)
+  );
+}
 
 function storageKey(module: CustomFieldDef["module"]): string {
   return STORAGE_PREFIX + module;
@@ -60,10 +87,10 @@ function settingsKey(module: CustomFieldDef["module"]): string {
 /** Load all custom field defs for a module. */
 export function listCustomFields(module: CustomFieldDef["module"]): CustomFieldDef[] {
   try {
-    const raw = localStorage.getItem(storageKey(module));
+    const raw = readAgentStorage(storageKey(module));
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) && arr.every((d) => validDefinition(d, module)) ? arr : [];
   } catch (e) {
     console.error("Failed to parse custom fields list", e);
     return [];
@@ -71,16 +98,25 @@ export function listCustomFields(module: CustomFieldDef["module"]): CustomFieldD
 }
 
 /** Save all custom field defs for a module (replaces). */
-export function saveCustomFields(
+export async function saveCustomFields(
   module: CustomFieldDef["module"],
-  defs: CustomFieldDef[]
-): void {
+  defs: CustomFieldDef[],
+  expectedScope = requireAgentStorageScope()
+): Promise<void> {
+  requireAgentStorageScope(expectedScope);
+  if (defs.length > 100) throw new Error("Use up to 100 custom fields per section.");
+  if (defs.some((d) => !validDefinition(d, module)))
+    throw new Error("Each custom field needs a label and a valid unique key.");
+  if (new Set(defs.map((d) => d.key)).size !== defs.length)
+    throw new Error("Custom field keys must be unique.");
+  const json = JSON.stringify(defs);
+  await tools.setSetting(settingsKey(module), json);
+  requireAgentStorageScope(expectedScope);
+  // The acknowledged settings row is authoritative; the cache is optional.
   try {
-    localStorage.setItem(storageKey(module), JSON.stringify(defs));
-    void tools.setSetting(settingsKey(module), JSON.stringify(defs)).catch((e) => console.warn("Failed to sync custom fields to server", e));
+    writeAgentStorage(storageKey(module), json, expectedScope);
   } catch (e) {
-    console.warn("Failed to save custom fields", e);
-    /* storage full / unavailable */
+    console.warn("Custom fields saved; cache unavailable", e);
   }
 }
 
@@ -88,98 +124,26 @@ export function saveCustomFields(
 export async function syncCustomFields(
   module: CustomFieldDef["module"]
 ): Promise<CustomFieldDef[]> {
+  const scope = requireAgentStorageScope();
+  const settings = await tools.settings();
+  requireAgentStorageScope(scope);
+  const row = settings.find((s) => s.key === settingsKey(module));
+  const remote: CustomFieldDef[] = row?.value ? JSON.parse(row.value) : [];
+  if (
+    !Array.isArray(remote) ||
+    remote.length > 100 ||
+    remote.some((d) => !validDefinition(d, module)) ||
+    new Set(remote.map((d) => d.key)).size !== remote.length
+  )
+    throw new Error(
+      "Custom field definitions could not be read. Existing data was preserved."
+    );
   try {
-    const settings = await tools.settings();
-    const row = settings.find((s) => s.key === settingsKey(module));
-    if (row?.value) {
-      const remote: CustomFieldDef[] = JSON.parse(row.value);
-      try {
-        localStorage.setItem(storageKey(module), JSON.stringify(remote));
-      } catch (e) {
-        console.warn("Failed to cache remote custom fields", e);
-        /* ignore */
-      }
-      return remote;
-    }
+    writeAgentStorage(storageKey(module), JSON.stringify(remote), scope);
   } catch (e) {
-    console.warn("Failed to sync custom fields from server", e);
-    /* offline */
+    console.warn("Custom fields loaded; cache unavailable", e);
   }
-  return listCustomFields(module);
-}
-
-/** Add a new field. Generates a stable `key` slug from the label. */
-export function addCustomField(
-  module: CustomFieldDef["module"],
-  input: Omit<CustomFieldDef, "id" | "key" | "module" | "position" | "createdAt"> & {
-    key?: string;
-  }
-): CustomFieldDef {
-  const existing = listCustomFields(module);
-  const key =
-    input.key ||
-    input.label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_|_$/g, "")
-      .slice(0, 32) ||
-    `field_${Date.now()}`;
-  // Ensure key is unique
-  let finalKey = key;
-  let n = 1;
-  while (existing.some((f) => f.key === finalKey)) {
-    finalKey = `${key}_${n++}`;
-  }
-  const def: CustomFieldDef = {
-    id: `cf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    module,
-    key: finalKey,
-    label: input.label,
-    type: input.type,
-    options: input.options,
-    required: input.required,
-    position: existing.length,
-    createdAt: new Date().toISOString(),
-  };
-  const next = [...existing, def];
-  saveCustomFields(module, next);
-  return def;
-}
-
-/** Update an existing field by id. */
-export function updateCustomField(
-  module: CustomFieldDef["module"],
-  id: string,
-  patch: Partial<Omit<CustomFieldDef, "id" | "module" | "createdAt">>
-): void {
-  const existing = listCustomFields(module);
-  const next = existing.map((f) => (f.id === id ? { ...f, ...patch } : f));
-  saveCustomFields(module, next);
-}
-
-/** Remove a field by id. */
-export function removeCustomField(module: CustomFieldDef["module"], id: string): void {
-  const existing = listCustomFields(module);
-  saveCustomFields(
-    module,
-    existing.filter((f) => f.id !== id)
-  );
-}
-
-/** Reorder fields by array of ids. */
-export function reorderCustomFields(
-  module: CustomFieldDef["module"],
-  idsInOrder: string[]
-): void {
-  const existing = listCustomFields(module);
-  const byId = new Map(existing.map((f) => [f.id, f]));
-  const next = idsInOrder
-    .map((id, i) => {
-      const f = byId.get(id);
-      return f ? { ...f, position: i } : null;
-    })
-    .filter((f): f is CustomFieldDef => f !== null);
-  saveCustomFields(module, next);
+  return remote;
 }
 
 /** Render a field def as an HTML input attribute hint. */
@@ -205,12 +169,28 @@ export function inputTypeFor(type: CustomFieldType): string {
 /** Validate a value against a field def. Returns null on success,
  * or an error message. */
 export function validateCustomValue(def: CustomFieldDef, value: unknown): string | null {
+  if (value != null && !["string", "number", "boolean"].includes(typeof value))
+    return `${def.label} must be a simple value.`;
   const v = String(value ?? "").trim();
-  if (def.required && !v) return `${def.label} is required.`;
+  if (v.length > 500) return `${def.label} is too long.`;
+  if (def.required && (!v || (def.type === "checkbox" && !["true", "1"].includes(v))))
+    return `${def.label} is required.`;
   if (!v) return null;
   switch (def.type) {
+    case "date":
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(v) ||
+        !Number.isFinite(Date.parse(v)) ||
+        new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v
+      )
+        return `${def.label} must be a valid date.`;
+      return null;
+    case "checkbox":
+      return ["true", "false", "1", "0"].includes(v)
+        ? null
+        : `${def.label} must be yes or no.`;
     case "number":
-      if (isNaN(Number(v))) return `${def.label} must be a number.`;
+      if (!Number.isFinite(Number(v))) return `${def.label} must be a number.`;
       return null;
     case "email":
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
@@ -218,7 +198,9 @@ export function validateCustomValue(def: CustomFieldDef, value: unknown): string
       return null;
     case "url":
       try {
-        new URL(v.startsWith("http") ? v : `https://${v}`);
+        const url = new URL(v.includes(":") ? v : `https://${v}`);
+        if (!["https:", "http:"].includes(url.protocol))
+          return `${def.label} must use http or https.`;
       } catch (e) {
         console.warn("Invalid custom field URL", e);
         return `${def.label} must be a valid URL.`;
@@ -229,7 +211,7 @@ export function validateCustomValue(def: CustomFieldDef, value: unknown): string
         return `${def.label} must be one of the options.`;
       return null;
     case "phone":
-      if (!/^[+\d\s\-\(\)]{6,}$/.test(v)) return `${def.label} must be a valid phone.`;
+      if (!/^[+\d\s()-]{6,}$/.test(v)) return `${def.label} must be a valid phone.`;
       return null;
     default:
       return null;

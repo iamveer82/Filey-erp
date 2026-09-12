@@ -162,6 +162,12 @@ rejected. They have since been applied. This is the deployed state of project
 | `2026-09-06-crm-workspace.sql` | yes | `crm_*` tables resolve; `filey_convert_lead` resolves |
 | `2026-09-06-international-business.sql` | 10 Sep 2026 | the six country/fx columns return 42501, not 42703 |
 | `2026-09-06-work-items.sql` | 10 Sep 2026 | `to_regclass('public.work_items')` is non-null, `relrowsecurity` true |
+| `2026-09-12-crm-sales-workflow.sql` | 12 Sep 2026 | isolated PostgreSQL rollback/access/concurrency checks; hosted function resolves, invoker security, authenticated grant, anonymous denial |
+
+The September 12 migration changes only the conversion function and its grants;
+it does not rewrite business records. The international columns and work-items
+table were rechecked in the hosted catalog on the same date. Management credentials
+were supplied only to the deployment process, never committed or bundled.
 
 Checking from outside, with only the anon key, tells you which of the two it
 is: a missing table answers `PGRST205` and a missing column `42703`, while

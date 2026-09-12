@@ -27,15 +27,15 @@ Each work record supports 200 tasks, 500 time entries and 500 updates. These liv
 
 Country settings, jurisdiction snapshots, independent document currencies, Indian/UAE tax-ID format handling, EU standard-rate suggestions and quote conversion fixes are implemented. See [international-business.md](international-business.md) for exact coverage, sources and setup. The ledger remains AED and national filings/payroll are incomplete; this is not full statutory localization.
 
-The additional `supabase/2026-09-06-international-business.sql` migration is also pending remote deployment. Apply it before saving or transferring country-tagged records to cloud.
+The additional `supabase/2026-09-06-international-business.sql` migration was applied on September 10 and its columns rechecked on September 12. Self-hosted installations must apply it before saving or transferring country-tagged records to cloud.
 
 ## Deployment status
 
 The new cloud table and row-level policies are in `supabase/2026-09-06-work-items.sql`. It is additive and preserves existing data. It restricts records to the current account and organization, prevents kind/owner changes, checks linked records within the organization, increments revisions and enables realtime updates.
 
-**The management API rejected the migration attempt with HTTP 403 (response code 1010). It has not been applied to the hosted project.** Cloud Projects/Helpdesk and transfers involving `work_items` are not ready until this succeeds. Do not publish this build as a completed cloud update before applying and validating the migration. Local collections do not require SQL migration.
+The initial management request failed, but the work-items migration was subsequently applied on September 10. Its table was rechecked on September 12. See [the deployment log](SUPABASE_DEPLOY.md#applied-migration-log). Local collections do not require SQL migration.
 
-Apply the migration through an authorized Supabase SQL connection, verify owner/organization isolation with two test accounts, and exercise local/cloud copy and sync with projects, tasks, time entries and related invoice/customer records. The new table is included in both transfer registries. Do not bypass access restrictions or substitute a frontend service-role key.
+Self-hosted installations must apply the migration through an authorized Supabase SQL connection. Live checks with two disposable accounts and local/cloud copy and sync remain operational validation beyond schema deployment. The new table is included in both transfer registries. Do not bypass access restrictions or substitute a frontend service-role key.
 
 ## Competitive coverage and remaining work
 
@@ -60,9 +60,9 @@ The comparison is based on [Odoo's application catalogue](https://www.odoo.com/p
 
 Latest validation: 143 test files and 983 tests passed; focused country/purchase tests passed after the final correction. Production build and TypeScript checks passed. Changed-file lint has zero errors and 125 warnings. The tests cover work-item persistence, stale-edit rejection, failed-save retention, agent gating, local invoice limits, jurisdiction snapshots, tax-ID formats, quote conversion and purchase postings. Browser review confirmed country-specific form labels and the hosted-project setup-required state. Cloud saves and a packaged native installer remain unverified.
 
-1. Apply and validate both additive cloud migrations before enabling cloud service modules, country-tagged documents or transferring their records.
+1. Both additive migrations are deployed; verify live multi-account behavior using disposable records before expanding cloud use.
 2. Test local free access on a fresh device, paid activation, offline restart and existing-license upgrades.
 3. Run a complete native backup/restore drill with saved PDFs and the new work records on a disposable workspace.
 4. Test stale-window conflicts and account/organization isolation in the hosted database, not only the local shim.
 5. Verify actual WhatsApp and mobile share delivery as described in `invoice-messaging.md`.
-6. Package and sign an installer only after these checks. No new installer or update has been published by this change.
+6. The original source pass did not package an installer. See the [2.11.0 release notes](releases/v2.11.0.md) for the subsequent distribution and validation scope.
