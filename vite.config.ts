@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { AI_DEV_ORIGINS } from "./src/lib/aiEndpoint";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -10,19 +11,9 @@ export default defineConfig(async () => ({
 
   build: {
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        // Vite 8 uses rolldown, which expects `manualChunks` as a function
-        // (the object form is rollup-only). Match on node_modules paths.
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
-          if (/[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id))
-            return "react";
-          if (/[\\/]recharts[\\/]/.test(id)) return "charts";
-          if (/[\\/](pdf-lib|pdfjs-dist)[\\/]/.test(id)) return "pdf";
-        },
-      },
-    },
+    // Let route imports determine chunks; forced vendor groups pulled shared
+    // React/runtime helpers (and PDF engines) into the initial app download.
+
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -46,15 +37,14 @@ export default defineConfig(async () => ({
       // is locked while building on Windows and would crash the Vite watcher.
       ignored: ["**/src-tauri/**", "**/tools/wa-bridge/**"],
     },
-    proxy: {
-      // OpenCode Zen sends no CORS headers, so a plain browser can never call
-      // it cross-origin ("Failed to fetch" before auth even runs). Serving it
-      // same-origin makes the preflight — and CORS itself — disappear.
-      "^/zen/v1/": {
-        target: "https://opencode.ai",
+    proxy: Object.fromEntries(AI_DEV_ORIGINS.map((origin, index) => [
+      `^/__filey_ai/${index}/`, {
+        target: origin,
         changeOrigin: true,
         secure: true,
+        followRedirects: false,
+        rewrite: (path: string) => path.replace(`/__filey_ai/${index}`, ""),
       },
-    },
+    ])),
   },
 }));
