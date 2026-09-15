@@ -48,8 +48,6 @@ export default function DocTemplateGallery({
     options.unshift({ id: value, name: value.startsWith("custom-") ? "Saved custom template" : legacy?.name || "Saved template", category: "Current template" });
   }
   const selected = options.find((template) => template.id === value);
-  const compact = options.slice(0, 4);
-  if (selected && !compact.some((template) => template.id === value)) compact[compact.length - 1] = selected;
   const categories = ["All", ...new Set(options.map((template) => template.category))];
   const query = search.trim().toLowerCase();
   const filtered = options.filter((template) => (category === "All" || template.category === category) && (template.name + " " + template.category).toLowerCase().includes(query));
@@ -84,10 +82,11 @@ export default function DocTemplateGallery({
       {loading && <p role="status" className="mb-3 text-xs text-muted-foreground">Loading this workspace’s saved templates…</p>}
       {loadError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger"><span>Could not load saved templates: {loadError}</span><button type="button" className="btn-ghost" onClick={reload}>Retry</button></div>}
       {!loading && !loadError && !customTemplates.length && hasUnscopedCustomTemplates() && <p className="mb-3 text-xs text-muted-foreground">An older template cache is preserved on this device. It is not loaded automatically because its workspace owner cannot be verified.</p>}
-      <div className="grid min-w-0 gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))" }}>
-        {compact.map(tile)}
+      <div className="flex min-w-0 items-center gap-4" aria-label="Selected document template">
+        {selected && <div className="w-14 shrink-0 overflow-hidden rounded-md border border-border" aria-hidden="true"><TemplateTilePreview templateId={selected.id} customTemplates={customTemplates} docType={docType} /></div>}
+        <div className="min-w-0 flex-1"><p className="text-sm font-medium break-words">{selected?.name || "Choose your document layout"}</p><p className="mt-1 text-xs text-muted-foreground">{selected ? "Selected layout" : "No layout selected"} · {options.length} templates available</p></div>
+        <button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={selected ? "Preview " + selected.name + " template" : "Browse templates"} onClick={() => selected ? setPreviewId(selected.id) : setView(true)}><Maximize2 size={15} /></button>
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">{selected ? "Selected: " + selected.name : "Select a layout for this document"} · {options.length} templates available</p>
 
       <Modal open={viewAll} onClose={() => setView(false)} title="Choose a template" size="3xl">
         <div className="mb-5 space-y-4">

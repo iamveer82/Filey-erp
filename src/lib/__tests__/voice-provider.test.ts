@@ -4,7 +4,7 @@ const config = vi.hoisted(() => ({
   baseUrl: "https://api.groq.com/openai/v1",
   apiKey: "test-key",
 }));
-vi.mock("../ai", () => ({ getAiConfig: () => config }));
+vi.mock("../ai", () => ({ getAiConfig: () => config, getAiRequestConfig: async () => config }));
 import { sttAvailable, ttsAvailable, transcribeAudio, textToSpeech } from "../voice";
 afterEach(() => vi.unstubAllGlobals());
 

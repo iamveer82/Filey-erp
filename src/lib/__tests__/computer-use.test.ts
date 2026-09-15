@@ -1,6 +1,8 @@
+vi.mock("../moduleAccess", () => ({ requireModuleAccess: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { enableComputerUse, disableComputerUse, getComputerUseState, runComputerUse } from "../computerUse";
+import { requireModuleAccess } from "../moduleAccess";
 
 const identity = vi.hoisted(() => ({ scope: "local:company:user:owner" as string | null }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: () => identity.scope, AGENT_STORAGE_EVENT: "filey:agent-storage" }));
@@ -10,8 +12,8 @@ beforeEach(() => {
   identity.scope = "local:company:user:owner";
   Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
-  vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "computer_start") return { sessionToken: "private-native-token", expiresAt: Date.now() + 60_000 };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "computer_start") return { sessionToken: "private-native-token", expiresAt: (args as {durationSeconds:number|null}).durationSeconds === null ? null : Date.now() + 60_000 };
     return { ok: true };
   });
 });
@@ -22,13 +24,39 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-it("requires an explicit session and keeps its token outside public state and tool results", async () => {
-  await expect(runComputerUse({ action: "list_windows" })).rejects.toThrow("Enable it");
+it("keeps its default grant token outside public state and tool results", async () => {
+  await expect(runComputerUse({ action: "list_windows" })).rejects.toThrow("Start a new task");
   expect(invoke).not.toHaveBeenCalled();
   await enableComputerUse();
-  expect(getComputerUseState()).toEqual({ enabled: true, expiresAt: expect.any(Number), busy: false });
+  expect(getComputerUseState()).toEqual({ enabled: true, expiresAt: null, busy: false });
   expect(await runComputerUse({ action: "list_windows" })).toEqual({ ok: true });
   expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: { action: "list_windows" } });
+});
+
+it("reuses default access without a five-minute timeout and still stops explicitly", async () => {
+  vi.useFakeTimers();
+  const first = await enableComputerUse();
+  await vi.advanceTimersByTimeAsync(30 * 60_000);
+  expect(getComputerUseState().enabled).toBe(true);
+  expect(await enableComputerUse()).toBe(first);
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "computer_start")).toHaveLength(1);
+  await disableComputerUse(first);
+  expect(getComputerUseState().enabled).toBe(false);
+});
+
+it("does not start native access when stopped during the initial permission check", async () => {
+  let allow!: () => void;
+  vi.mocked(requireModuleAccess).mockImplementationOnce(() => new Promise<void>((resolve) => { allow = resolve; }));
+  const pending = enableComputerUse();
+  const rejected = expect(pending).rejects.toThrow("before computer access started");
+  await vi.waitFor(() => expect(allow).toBeTypeOf("function"));
+  await disableComputerUse();
+  allow();
+  await rejected;
+  expect(invoke).not.toHaveBeenCalled();
+  expect(getComputerUseState()).toEqual({ enabled: false, expiresAt: null, busy: false });
+  await enableComputerUse();
+  expect(getComputerUseState().enabled).toBe(true);
 });
 
 it("rejects unsupported actions/coordinates/shortcuts and never passes arbitrary code to the native helper", async () => {
@@ -60,11 +88,13 @@ it("stops an in-flight action on Abort without accepting its late result", async
     ? new Promise((resolve) => { complete = resolve; }) : Promise.resolve(undefined));
   const controller = new AbortController();
   const pending = runComputerUse({ action: "list_windows" }, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(complete).toBeTypeOf("function"));
   controller.abort();
   expect(getComputerUseState().enabled).toBe(false);
   expect(invoke).toHaveBeenLastCalledWith("computer_stop", { sessionToken: "private-native-token" });
   complete({ windows: [] });
-  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await rejected;
 });
 
 it("expires grants automatically and refuses malformed native screenshot payloads", async () => {

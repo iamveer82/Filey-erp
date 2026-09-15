@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ fail: false, offsets: [] as number[] }));
 vi.mock("../supabase", () => ({
   isConfigured: true,
-  supabase: null,
+  supabase: { rpc: async () => ({ data: {allowed:true,admin:true,modules:null},error:null }) },
   sb: () => ({
     from: () => {
       let offset = 0;
@@ -36,7 +36,7 @@ beforeEach(() => {
   localStorage.clear();
   state.fail = false;
   state.offsets = [];
-  setCacheOrg(null);
+  setCacheOrg(null); setCacheOrg("test-org","test-user");
 });
 it("reads beyond the cloud row cap with stable pagination", async () => {
   expect(await erp.products()).toHaveLength(1205);

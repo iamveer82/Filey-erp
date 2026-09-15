@@ -17,6 +17,7 @@
 export type LogLevel = "info" | "warn" | "error";
 
 export interface LogEntry {
+  id: string;
   at: number;
   level: LogLevel;
   /** Where it came from: "agent", "whatsapp", "sync"… */
@@ -32,6 +33,7 @@ const listeners = new Set<(e: LogEntry) => void>();
 
 function push(level: LogLevel, scope: string, message: string, detail?: unknown) {
   const entry: LogEntry = {
+    id: crypto.randomUUID(),
     at: Date.now(),
     level,
     scope,
@@ -57,7 +59,7 @@ function push(level: LogLevel, scope: string, message: string, detail?: unknown)
 
 function stringify(v: unknown): string {
   if (typeof v === "string") return v.slice(0, 500);
-  if (v instanceof Error) return `${v.name}: ${v.message}`;
+  if (v instanceof Error) return `${v.name}: ${v.message}`.slice(0, 500);
   try {
     return JSON.stringify(v).slice(0, 500);
   } catch {
@@ -91,7 +93,7 @@ export function onLog(cb: (e: LogEntry) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-/** Log entries as text, for pasting into a bug report. Pass a filtered array
+/** Local raw text only. Use supportSummary for sharing. Pass a filtered array
  *  to serialise only the visible subset; omit for the whole buffer. */
 export function logAsText(filter?: LogEntry[]): string {
   const rows = filter ?? entries;
@@ -103,4 +105,14 @@ export function logAsText(filter?: LogEntry[]): string {
         }${e.detail ? ` — ${e.detail}` : ""}`
     )
     .join("\n");
+}
+
+/** Allowlisted metadata only: free-form logs can contain keys, URLs, invoices or
+ * message content that a regex cannot reliably redact. IDs match the local view. */
+export function supportSummary(rows: LogEntry[] = entries): string {
+  const areas = new Set(["agent", "whatsapp", "sync", "storage", "computer", "browser", "email", "voice", "integrations"]);
+  return JSON.stringify({ format: "filey-support-v1", generatedAt: new Date().toISOString(),
+    events: rows.map(e => ({id:e.id, at:new Date(e.at).toISOString(), level:e.level, area:areas.has(e.scope) ? e.scope : "app"})),
+    omitted: ["messages", "details", "account identifiers", "records", "credentials", "attachments"]
+  }, null, 2);
 }

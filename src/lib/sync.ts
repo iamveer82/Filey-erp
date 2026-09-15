@@ -5,11 +5,8 @@
 // rows plus records shared by org teammates (RLS decides). That is how a
 // second device or a teammate's desktop stays current.
 //
-// Conflict rule is last-writer-wins per row: pushes upsert by id, and dirty
-// tables are never overwritten by a pull (local edits win until they've been
-// pushed). ponytail: numeric local ids can collide when two devices insert
-// into the same table inside one poll window (~60s) — last push wins. Move to
-// uuid ids if teams ever hit it in practice.
+// Uploads compare the last cloud revision inside a database transaction.
+// Conflicting rows remain local and pending until explicitly reviewed.
 //
 // Requires a cloud session. In local mode the app itself authenticates against
 // the local shim, so the real supabase-js client is signed in separately
@@ -29,6 +26,9 @@ import {
   journalVersion,
   journalCommit,
   journalMark,
+  localClient,
+  rememberSyncRevision,
+  resolveLocalSyncConflict,
 } from "./localdb";
 
 const FILES_BUCKET = "files";
@@ -69,9 +69,9 @@ function setStatus(s: SyncStatus): void {
  *  Explicit nulls are retained: clearing a contact field or relationship must
  *  also clear it in the cloud. Invalid required fields remain pending instead
  *  of silently changing their meaning during an upload. */
-export function cleanRowForPush(row: Record<string, any>, uid: string): Record<string, any> {
+export function cleanRowForPush(row: Record<string, any>, uid: string, table?: string): Record<string, any> {
   const { user_id: _u, org_id: _o, ...rest } = row;
-  if ("owner" in row) rest.owner = uid;
+  if ("owner" in row && (!table || ["user_files", "user_folders", "user_assets"].includes(table))) rest.owner = uid;
   if (typeof rest.storage_path === "string")
     rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);
   return rest;
@@ -111,47 +111,110 @@ export async function inRealOrg(
   return inOrg;
 }
 
-/** Upsert one collection resiliently: try the whole chunk; on any error fall
- *  back to per-row so one bad row can't block the rest. Retry the original
- *  record unchanged: removing foreign keys can detach paid invoices, stock
- *  movements, and line items from the records they belong to. */
+/** Upload each record with its last observed cloud revision. Never strip
+ * relationships or fall back to an unconditional overwrite after a failure. */
 export async function pushCollection(
   supa: SupabaseClient,
   table: string,
   rows: Record<string, any>[]
 ): Promise<(string | number)[]> {
   const failed: (string | number)[] = [];
-  for (let i = 0; i < rows.length; i += 200) {
-    const chunk = rows.slice(i, i + 200);
-    const { error } = await supa.from(table).upsert(chunk, { onConflict: "id" });
-    if (!error) continue;
-    // Chunk failed — isolate the bad rows.
-    for (const row of chunk) {
-      const { error: e1 } = await supa.from(table).upsert(row, { onConflict: "id" });
-      if (e1) failed.push(row.id);
+  // ponytail: sequential row RPCs preserve FK order and isolate failures;
+  // add a transactional batch RPC when measured large-import latency needs it.
+  for (const row of rows) {
+    const { sync_revision, ...payload } = row;
+    const { data, error } = await supa.rpc("sync_record", {
+      p_table: table, p_row: payload, p_expected: sync_revision ?? null,
+    });
+    if (error || !data?.ok || !Number.isSafeInteger(data.revision) || data.revision < 1) {
+      failed.push(row.id);
+      if (data?.conflict) await saveConflict(table, row.id);
+    } else {
+      await rememberSyncRevision(table, row.id, data.revision);
+      await clearConflict(table, row.id);
     }
   }
   return failed;
 }
 
-async function pushFileBlobs(
+export interface SyncConflict { id: string; table: string; recordId: string | number; at: string }
+export async function listSyncConflicts(): Promise<SyncConflict[]> {
+  return await loadColl("sync_conflicts") as SyncConflict[];
+}
+async function saveConflict(table: string, recordId: string | number): Promise<void> {
+  const { error } = await localClient.from("sync_conflicts").upsert({
+    id: `${table}:${recordId}`, table, recordId, at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+async function clearConflict(table: string, recordId: string | number): Promise<void> {
+  const { error } = await localClient.from("sync_conflicts").delete().eq("id", `${table}:${recordId}`);
+  if (error) throw error;
+}
+export async function reviewSyncConflict(conflict: SyncConflict): Promise<{ local: Record<string, any> | null; cloud: Record<string, any> | null }> {
+  if (!supabase) throw new Error("Cloud is not configured.");
+  assertWorkspaceCurrent();
+  const session = await freshSession(supabase);
+  if (!session) throw new Error("Sign in to review conflicts.");
+  assertLocalAccount(session.user.id);
+  await inRealOrg(supabase, session.user.id, true);
+  const { data, error } = await supabase.from(conflict.table).select("*").eq("id", conflict.recordId).maybeSingle();
+  if (error) throw error;
+  return { local: (await loadColl(conflict.table)).find(row => row.id === conflict.recordId) ?? null, cloud: data };
+}
+export async function resolveSyncConflict(conflict: SyncConflict, cloud: Record<string, any> | null, keepLocal: boolean, reviewedLocal: Record<string, any> | null): Promise<void> {
+  if (running || migrating) throw new Error("Wait for the current transfer to finish.");
+  assertWorkspaceCurrent();
+  const session = supabase && await freshSession(supabase);
+  if (!session) throw new Error("Sign in to resolve conflicts.");
+  assertLocalAccount(session.user.id);
+  await resolveLocalSyncConflict(conflict.table, conflict.recordId, cloud, keepLocal, reviewedLocal);
+  await clearConflict(conflict.table, conflict.recordId);
+  notify();
+}
+
+export async function pushFileBlobs(
   supa: SupabaseClient,
   uid: string,
-  rows: { storage_path?: string }[]
-): Promise<void> {
+  rows: Record<string, any>[]
+): Promise<{ rows: Record<string, any>[]; failed: (string | number)[] }> {
+  const uploaded: Record<string, any>[] = [];
+  const failed: (string | number)[] = [];
   for (const f of rows) {
     const localPath = f.storage_path;
-    if (!localPath) continue;
     try {
+      if (!localPath) throw new Error("Missing file path");
       const bytes = await readBlobBytes(localPath);
-      if (!bytes) continue;
-      const cloudPath = localPath.replace(/^local-user\//, `${uid}/`);
-      await supa.storage
+      if (!bytes) throw new Error("File is missing on this device");
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))))
+        .map(n => n.toString(16).padStart(2, "0")).join("");
+      // Immutable content paths keep a failed/conflicting metadata upload from
+      // replacing a file already referenced by a newer cloud record.
+      const cloudPath = `${uid}/synced/${hash}/${String(localPath).split("/").pop()}`;
+      assertWorkspaceCurrent();
+      if ((await freshSession(supa))?.user.id !== uid) throw new Error("Cloud account changed");
+      const { error } = await supa.storage
         .from(FILES_BUCKET)
-        .upload(cloudPath, new Blob([new Uint8Array(bytes)]), { upsert: true });
+        .upload(cloudPath, new Blob([new Uint8Array(bytes)], { type: f.mime }), { upsert: false, contentType: f.mime });
+      if (error && Number(error.statusCode) !== 409) throw error;
+      uploaded.push({ ...f, storage_path: cloudPath });
     } catch {
-      /* skip individual file failures — rows still sync */
+      failed.push(f.id);
     }
+  }
+  return { rows: uploaded, failed };
+}
+
+/** Cache file bytes before exposing their metadata to local readers. */
+export async function pullFileBlobs(supa: SupabaseClient, rows: Record<string, any>[]): Promise<void> {
+  for (const row of rows) {
+    if (!row.storage_path) throw new Error("A cloud file is missing its storage path.");
+    if (await readBlobBytes(row.storage_path)) continue;
+    const { data, error } = await supa.storage.from(FILES_BUCKET).download(row.storage_path);
+    if (error || !data) throw new Error("A file could not be downloaded. Local file records were preserved; retry sync when connected.");
+    assertWorkspaceCurrent();
+    const saved = await localClient.storage.from(FILES_BUCKET).upload(row.storage_path, data, { contentType: row.mime || data.type });
+    if (saved.error) throw saved.error;
   }
 }
 
@@ -275,17 +338,20 @@ export async function syncNow(
     setStatus({ state: "syncing" });
     // Deletes first, children before parents (reverse FK order).
     const share = await inRealOrg(supa, uid, true);
+    const failedByTable: Record<string, (string | number)[]> = {};
     for (const t of [...dirty].reverse()) {
       assertWorkspaceCurrent();
       const ids = j.tables[t].deleted;
-      for (let i = 0; i < ids.length; i += 100) {
+      for (const id of ids) {
         if ((await freshSession(supa))?.user.id !== uid)
           throw new Error("Your session changed. Sign in again before syncing.");
-        const { error } = await supa
-          .from(t)
-          .delete()
-          .in("id", ids.slice(i, i + 100));
-        if (error) throw new Error(`${t}: ${error.message}`);
+        const { data, error } = await supa.rpc("sync_record", {
+          p_table: t, p_row: { id }, p_expected: j.tables[t].deletedRevisions?.[String(id)] ?? null, p_delete: true,
+        });
+        if (error || !data?.ok) {
+          (failedByTable[t] ??= []).push(id);
+          if (data?.conflict) await saveConflict(t, id);
+        } else await clearConflict(t, id);
       }
     }
 
@@ -295,7 +361,6 @@ export async function syncNow(
     // newer copy. Resilient per-row fallback means messy local data
     // (dangling FKs, etc.) can't halt the whole sync.
     let pushedAny = false;
-    const failedByTable: Record<string, (string | number)[]> = {};
     for (const t of dirty) {
       // Re-check the token per table, not once for the whole push. A first
       // seed is thousands of rows across every table and takes far longer than
@@ -309,17 +374,21 @@ export async function syncNow(
       const all = await loadColl(t);
       const idSet = new Set(entry.changed);
       const rows = entry.all ? all : all.filter((r) => idSet.has(r.id));
-      const cleaned = rows.map((r) => {
-        const c = cleanRowForPush(r, uid);
-        // Org members share business records with the whole team by default
-        // (Vyapar model). Per-record privacy stays a web-side choice.
-        if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? true) : false;
+      let ready = rows;
+      if (t === "user_files") {
+        const uploaded = await pushFileBlobs(supa, uid, rows);
+        ready = uploaded.rows;
+        if (uploaded.failed.length) failedByTable[t] = [...(failedByTable[t] ?? []), ...uploaded.failed];
+      }
+      const cleaned = ready.map((r) => {
+        const c = cleanRowForPush(r, uid, t);
+        // Sharing is always opt-in; syncing a private local row must not publish it.
+        if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? false) : false;
         return c;
       });
       const failed = await pushCollection(supa, t, cleaned);
-      if (failed.length) failedByTable[t] = failed;
+      if (failed.length) failedByTable[t] = [...new Set([...(failedByTable[t] ?? []), ...failed])];
       if (rows.length) pushedAny = true;
-      if (t === "user_files") await pushFileBlobs(supa, uid, rows);
     }
 
     // Pushed rows kept their local ids — bump identity sequences past them so
@@ -353,7 +422,7 @@ export async function syncNow(
         .join(", ");
       setStatus({
         state: "error",
-        error: `Some records could not be uploaded: ${detail}. Your local records are preserved and will be retried.`,
+        error: `Some records could not be uploaded: ${detail}. Local records are preserved. Review conflicts below; other failures can be retried. The cloud requires the latest sync migration.`,
       });
       return false;
     }
@@ -366,12 +435,6 @@ export async function syncNow(
     running = false;
   }
 }
-
-// Tables whose rows reference blobs in cloud Storage; pulling the metadata
-// without the bytes would list files that can't open locally.
-// ponytail: files sync device→cloud only; pull them once a blob-download
-// path exists in the local storage shim.
-const PULL_SKIP = new Set(["user_files", "user_assets"]);
 
 // Tables carrying the `set_updated_at` BEFORE UPDATE trigger (schema.sql, the
 // `do $$` block that also installs RLS and force_org_id). Only these can be
@@ -478,10 +541,11 @@ export async function pullNow(
     const before = await journalSnapshot();
     let changed = false;
     for (const t of PUSH_TABLES) {
-      if (PULL_SKIP.has(t) || before.tables[t]) continue;
+      if (before.tables[t]) continue;
       const rows = INCREMENTAL.has(t)
         ? await pullIncremental(supa, t)
         : await pullPaged(supa, t, "*");
+      if (t === "user_files") await pullFileBlobs(supa, rows);
       // A local write raced the pull — stop; the queued push must run first.
       if ((await freshSession(supa))?.user.id !== uid)
         throw new Error("Your session changed. Local records were not replaced for this table.");

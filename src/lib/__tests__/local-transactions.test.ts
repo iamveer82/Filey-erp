@@ -16,14 +16,14 @@ it("refuses to overwrite an unreadable collection and preserves concurrent inser
   expect((await localClient.from("products").insert({ name: "Replacement" })).error?.message).toContain("Could not read local products");
   expect(localStorage.getItem("localdb:products")).toBe("broken-original");
   localStorage.removeItem("localdb:products");
-  await Promise.all(Array.from({ length: 20 }, (_, i) => localClient.from("products").insert({ name: `Product ${i}`, quantity: 0 })));
+  await Promise.all(Array.from({ length: 20 }, (_, i) => localClient.from("products").insert({ id: i + 1, name: `Product ${i}`, quantity: 0 })));
   expect((await erp.products())).toHaveLength(20);
   await Promise.all(Array.from({ length: 20 }, () => erp.updateStock(1, 0.5)));
   expect((await erp.products()).find((product) => product.id === 1)?.quantity).toBe(10);
 });
 
 it("keeps transaction writes invisible until commit and rolls back a failed second collection", async () => {
-  await localClient.from("products").insert({ name: "Original" });
+  await localClient.from("products").insert({ id: 1, name: "Original" });
   const journal = await journalSnapshot();
   const saved = Storage.prototype.setItem;
   let failed = false;
@@ -72,7 +72,7 @@ it("rolls back invoice finalization and posted edits when stock or ledger commit
   for (const docType of ["invoice", "purchase"]) {
     localStorage.clear();
     localStorage.setItem("filey_data_mode", "local");
-    await localClient.from("products").insert({ name: "Widget", quantity: 10, cost_price: 4 });
+    await localClient.from("products").insert({ id: 1, name: "Widget", quantity: 10, cost_price: 4 });
     const items = [{ description: "Widget", product_id: 1, qty: 3, unit_price: 10 }];
     const id = await billing.saveDoc(invoice({ doc_type: docType, status: "draft", items, tax_rate: 5 }));
     const draft = await snapshot();
@@ -151,7 +151,7 @@ it("does not mistake a hardware asset for accounts receivable", async () => {
 });
 
 it("preserves the collection if its pending-change journal cannot be read", async () => {
-  await localClient.from("products").insert({ name: "Keep me" });
+  await localClient.from("products").insert({ id: 1, name: "Keep me" });
   localStorage.setItem("syncjournal", "unreadable-original");
   const { error } = await localClient.from("products").update({ name: "Must not save" }).eq("id", 1);
   expect(error?.message).toContain("Could not read pending local changes");
@@ -160,7 +160,7 @@ it("preserves the collection if its pending-change journal cannot be read", asyn
 });
 
 it("records one payroll for simultaneous and repeated employee-period requests", async () => {
-  await localClient.from("employees").insert({ name: "Asha" });
+  await localClient.from("employees").insert({ id: 1, name: "Asha" });
   const results = await Promise.allSettled([
     hr.runPayroll(1, "2026-09", 1000, 100, 50),
     hr.runPayroll(1, " 2026-09 ", 1000, 100, 50),
@@ -174,7 +174,7 @@ it("records one payroll for simultaneous and repeated employee-period requests",
 });
 
 it("rolls back payroll when its ledger fails, then allows a clean retry", async () => {
-  await localClient.from("employees").insert({ name: "Asha" });
+  await localClient.from("employees").insert({ id: 1, name: "Asha" });
   const saved = Storage.prototype.setItem;
   const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
     if (key === "localdb:transactions") throw new Error("Ledger unavailable");

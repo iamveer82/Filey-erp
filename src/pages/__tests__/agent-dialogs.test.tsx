@@ -16,6 +16,7 @@ import * as ai from "../../lib/ai";
 import { gateFor, getAgentMode } from "../../lib/agentMode";
 import { isCapabilityEnabled, setCapabilityEnabled } from "../../lib/capabilities";
 import { setCacheOrg } from "../../lib/api";
+import * as computer from "../../lib/computerUse";
 
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
@@ -114,15 +115,13 @@ it("preserves access on opening and reflects an explicit approval-mode change in
   expect(screen.getByRole("button", { name: "Agent access" })).toHaveTextContent(
     "Access: Manual"
   );
-  expect(
-    screen.getByText(
-      "Asks before every action that changes anything. Reading is always free."
-    )
-  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Agent access" })).toHaveAttribute("title",
+    "Asks before every action that changes anything. Reading is always free.");
   expect(isCapabilityEnabled("crm")).toBe(false);
 });
 
-it("prepares a starter for review and sends only after the user finishes composing", async () => {
+it("keeps the chat minimal and sends only the user's composed message", async () => {
+  const enable = vi.spyOn(computer, "enableComputerUse");
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
     yield { type: "text" as const, text: "Looking up invoices." };
@@ -133,12 +132,16 @@ it("prepares a starter for review and sends only after the user finishes composi
       <AgentChat />
     </MemoryRouter>
   );
-  expect(screen.getByTitle("Choose or configure your AI model")).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "AI settings" })).toHaveAttribute(
     "href",
     "/settings?section=ai"
   );
-  fireEvent.click(screen.getByRole("button", { name: "Find unpaid invoices" }));
+  expect(screen.queryByRole("button", { name: "Find unpaid invoices" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Open AI settings")).not.toBeInTheDocument();
+  expect(screen.queryByText("Choose a model")).not.toBeInTheDocument();
   const input = screen.getByRole("textbox", { name: "Message Filey AI" });
+  expect(input).toHaveValue("");
+  fireEvent.change(input, { target: { value: "Who owes me money?" } });
   expect(input).toHaveValue("Who owes me money?");
   expect(stream).not.toHaveBeenCalled();
   fireEvent.keyDown(input, { key: "Enter", isComposing: true });
@@ -155,6 +158,34 @@ it("prepares a starter for review and sends only after the user finishes composi
   expect(
     await screen.findByText("No unpaid invoices found in this test.")
   ).toBeInTheDocument();
+  expect(enable).not.toHaveBeenCalled();
+});
+
+it("starts desktop computer access on chat open and keeps it available across completed turns", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  vi.spyOn(computer, "computerUseSupported").mockReturnValue(true);
+  const enable = vi.spyOn(computer, "enableComputerUse").mockResolvedValue(42);
+  const disable = vi.spyOn(computer, "disableComputerUse").mockResolvedValue();
+  let session!: () => Promise<number>;
+  vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* (_messages, options) {
+    session = options!.computerSession!;
+    expect(await session()).toBe(42);
+    expect(await session()).toBe(42);
+    yield { type: "text", text: "Computer task checked." };
+    return "Computer task complete.";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  expect(screen.queryByRole("button", { name: "Enable for 5 minutes" })).not.toBeInTheDocument();
+  await waitFor(() => expect(enable).toHaveBeenCalledOnce());
+  expect(screen.queryByText("Computer access")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Open my browser" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Computer task complete.");
+  expect(enable.mock.calls.every(args => args.length === 0)).toBe(true);
+  expect(disable).not.toHaveBeenCalled();
+  await expect(session()).rejects.toMatchObject({ name: "AbortError" });
+  cleanup();
+  expect(disable).toHaveBeenCalled();
 });
 
 it("keeps autonomous plan and tool results with the reply and passes history to follow-ups", async () => {
@@ -185,7 +216,8 @@ it("keeps autonomous plan and tool results with the reply and passes history to 
       <AgentChat />
     </MemoryRouter>
   );
-  fireEvent.click(screen.getByRole("button", { name: "Autonomous mode" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Autonomous mode" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), {
     target: { value: "Review invoices" },
   });

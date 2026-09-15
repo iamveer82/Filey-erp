@@ -19,8 +19,6 @@ import {
   PDFRadioGroup,
   PDFOptionList,
 } from "pdf-lib";
-import initVtracer, { to_svg as vtracerToSvg } from "vtracer-wasm";
-import vtracerWasmUrl from "vtracer-wasm/vtracer.wasm?url";
 import * as safePdf from "./pdfjsSafe";
 import { pdfjs } from "./pdfjsSafe";
 import { parseRanges } from "./ranges";
@@ -185,31 +183,10 @@ export async function imagesToPdf(files: File[]): Promise<OutFile> {
   return { name: "images.pdf", bytes: await doc.save() };
 }
 
-export async function pdfToImages(
-  file: File,
-  scale = 2
-): Promise<OutFile[]> {
-  const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
-  const out: OutFile[] = [];
-  for (let n = 1; n <= pdf.numPages; n++) {
-    const page = await pdf.getPage(n);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("pdfToImages: failed to get 2d canvas context");
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    const blob: Blob = await new Promise((resolve, reject) =>
-      canvas.toBlob((value) => value ? resolve(value) : reject(new Error(`Could not encode PDF page ${n} as PNG.`)), "image/png")
-    );
-    out.push({
-      name: `${base(file.name)}-p${n}.png`,
-      bytes: new Uint8Array(await blob.arrayBuffer()),
-    });
-  }
-  return out;
+export interface ConversionContext { signal?: AbortSignal; onProgress?: (message:string) => void; }
+
+export async function pdfToImages(file: File, scale = 2, context?: ConversionContext): Promise<OutFile[]> {
+  return pdfToImageFormat(file,"png",scale,context);
 }
 
 export type PageNumFormat = "n" | "n-of-N" | "page-n" | "page-n-of-N";
@@ -312,7 +289,7 @@ export async function addWatermark(
 export async function compressPdf(file: File): Promise<OutFile> {
   const doc = await loadDoc(file);
   const bytes = await doc.save({ useObjectStreams: true });
-  return { name: `${base(file.name)}-compressed.pdf`, bytes };
+  return { name: `${base(file.name)}-compressed.pdf`, bytes: bytes.length < file.size ? bytes : new Uint8Array(await readBuf(file)) };
 }
 
 export type SvgFormat = "png" | "jpeg" | "webp" | "pdf";
@@ -505,9 +482,10 @@ const VTRACER_PRESET: Record<TracePreset, VtracerConfig> = {
   },
 };
 
-let vtracerReady: Promise<unknown> | null = null;
-const ensureVtracer = () =>
-  (vtracerReady ??= initVtracer({ module_or_path: vtracerWasmUrl }));
+let vtracerReady: Promise<typeof import("vtracer-wasm")> | null = null;
+const ensureVtracer = () => vtracerReady ??= Promise.all([import("vtracer-wasm"),import("vtracer-wasm/vtracer.wasm?url")]).then(async ([engine,wasm]) => {
+  await engine.default({module_or_path:wasm.default});return engine;
+}).catch(error => {vtracerReady=null;throw error;});
 
 /**
  * Professional raster → vector via VTracer (visioncortex, MIT) compiled
@@ -554,7 +532,7 @@ export async function imageToSvg(
     ctx.drawImage(img, 0, 0, w, h);
     const { data } = ctx.getImageData(0, 0, w, h);
 
-    await ensureVtracer();
+    const {to_svg: vtracerToSvg} = await ensureVtracer();
     const cfg = VTRACER_PRESET[preset];
     const svg = vtracerToSvg(new Uint8Array(data.buffer), w, h, {
       ...cfg,
@@ -635,7 +613,9 @@ export async function compressImage(
 /** Extract the embedded text layer of a PDF to a .txt file. */
 export async function pdfToText(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   let text = "";
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -652,6 +632,7 @@ export async function pdfToText(file: File): Promise<OutFile> {
     name: `${nameStem(file.name)}.txt`,
     bytes: new TextEncoder().encode(text.trim() + "\n"),
   };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /**
@@ -666,7 +647,9 @@ export async function flattenPdf(
   redactions: RedactBox[] = []
 ): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   for (const box of redactions) {
     if (!Number.isInteger(box.page) || box.page < 0 || box.page >= pdf.numPages ||
       ![box.xFrac, box.yFrac, box.wFrac, box.hFrac].every(Number.isFinite) ||
@@ -722,6 +705,7 @@ export async function flattenPdf(
     name: `${base(file.name)}-flattened.pdf`,
     bytes: await out.save(),
   };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** Set the PDF's Title / Author document metadata. */
@@ -1386,7 +1370,9 @@ export async function markdownToPdf(file: File): Promise<OutFile> {
 /** Extract every page's text + basic metadata as JSON. */
 export async function pdfToJsonText(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const doc = await loadDoc(file);
   const pages: { page: number; text: string }[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
@@ -1399,6 +1385,7 @@ export async function pdfToJsonText(file: File): Promise<OutFile> {
       .trim();
     pages.push({ page: n, text: txt });
   }
+  if (!pages.some(page => page.text.trim())) throw new Error("This PDF has no selectable text. Use OCR to PDF first, then export JSON.");
   const payload = {
     file: file.name,
     pages: pdf.numPages,
@@ -1412,6 +1399,7 @@ export async function pdfToJsonText(file: File): Promise<OutFile> {
     name: `${nameStem(file.name)}.json`,
     bytes: new TextEncoder().encode(JSON.stringify(payload, null, 2)),
   };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** BMP is not a browser canvas encoder; write its standard 24-bit pixel format. */
@@ -1446,42 +1434,45 @@ function canvasBmp(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): Ui
 export async function pdfToImageFormat(
   file: File,
   format: "png" | "jpeg" | "webp" | "bmp",
-  scale = 2
+  scale = 2,
+  context: ConversionContext = {},
 ): Promise<OutFile[]> {
-  const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
-  const out: OutFile[] = [];
-  const mime =
-    format === "bmp" ? "image/bmp" :
-    format === "jpeg" ? "image/jpeg" : `image/${format}`;
-  const ext = format === "jpeg" ? "jpg" : format;
-  for (let n = 1; n <= pdf.numPages; n++) {
-    const page = await pdf.getPage(n);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error(`Cannot render PDF page ${n}: canvas is unavailable.`);
-    if (format === "jpeg" || format === "bmp") {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!Number.isFinite(scale) || scale <= 0 || scale > 4) throw new Error("Image scale must be greater than zero and at most 4.");
+  context.signal?.throwIfAborted();
+  const task = safePdf.getDocument({data:new Uint8Array(await readBuf(file))});
+  const stop = () => { void task.destroy().catch(()=>{}); };
+  context.signal?.addEventListener("abort",stop,{once:true});
+  const out:OutFile[]=[];
+  let totalBytes=0;
+  try {
+    context.signal?.throwIfAborted();
+    const pdf=await task.promise;
+    for(let n=1;n<=pdf.numPages;n++) {
+      context.signal?.throwIfAborted();
+      context.onProgress?.(`Rendering page ${n} of ${pdf.numPages}…`);
+      context.signal?.throwIfAborted();
+      const page=await pdf.getPage(n);
+      const viewport=page.getViewport({scale});
+      // Bound one canvas before allocating it; output bytes are bounded below.
+      if(viewport.width*viewport.height>16_777_216) throw new Error("This page is too large to render safely. Use a smaller page size or image scale.");
+      const canvas=document.createElement("canvas");
+      canvas.width=viewport.width;canvas.height=viewport.height;
+      try {
+        const ctx=canvas.getContext("2d");
+        if(!ctx)throw new Error(`Cannot render PDF page ${n}: canvas is unavailable.`);
+        if(format==="jpeg" || format==="bmp") {ctx.fillStyle="#ffffff";ctx.fillRect(0,0,canvas.width,canvas.height);}
+        await page.render({canvas,canvasContext:ctx,viewport}).promise;
+        context.signal?.throwIfAborted();
+        const mime=format==="jpeg"?"image/jpeg":`image/${format}`;
+        const bytes=format==="bmp"?canvasBmp(canvas,ctx):new Uint8Array(await (await new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?.type===mime?resolve(blob):reject(new Error(`Could not encode PDF page ${n} as ${format.toUpperCase()}.`)),mime,format==="jpeg"?0.92:undefined))).arrayBuffer());
+        totalBytes+=bytes.byteLength;
+        if(totalBytes>256*1024*1024) throw new Error("The images exceed 256 MB. Split this PDF into smaller batches before converting.");
+        out.push({name:`${base(file.name)}-p${n}.${format==="jpeg"?"jpg":format}`,bytes});
+      } finally {canvas.width=0;canvas.height=0;page.cleanup();}
     }
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    if (format === "bmp") {
-      out.push({ name: `${base(file.name)}-p${n}.bmp`, bytes: canvasBmp(canvas, ctx) });
-      continue;
-    }
-    const blob: Blob | null = await new Promise((res) =>
-      canvas.toBlob((b) => res(b), mime, format === "jpeg" ? 0.92 : undefined)
-    );
-    if (!blob || blob.type !== mime) throw new Error(`Browser cannot encode ${format}.`);
-    out.push({
-      name: `${base(file.name)}-p${n}.${ext}`,
-      bytes: new Uint8Array(await blob.arrayBuffer()),
-    });
-  }
-  return out;
+    context.signal?.throwIfAborted();
+    return out;
+  } finally {context.signal?.removeEventListener("abort",stop);await task.destroy().catch(()=>{});}
 }
 
 /** Render every page through a canvas filter (greyscale or invert). */
@@ -1491,7 +1482,9 @@ async function rasterTransform(
   scale = 2
 ): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const out = await PDFDocument.create();
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1533,6 +1526,7 @@ async function rasterTransform(
     name: `${base(file.name)}-${mode === "grey" ? "grey" : "inverted"}.pdf`,
     bytes: await out.save(),
   };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 export const greyscalePdf = (file: File) => rasterTransform(file, "grey");
@@ -2177,7 +2171,9 @@ async function pdfTables(
   file: File
 ): Promise<{ page: number; rows: string[][] }[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const result: { page: number; rows: string[][] }[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -2225,6 +2221,7 @@ async function pdfTables(
     result.push({ page: n, rows });
   }
   return result;
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** Heuristic table extraction → CSV. */
@@ -2298,14 +2295,14 @@ function zipStore(entries: { name: string; bytes: Uint8Array }[]): Uint8Array {
     const crc = crc32(e.bytes);
     const size = e.bytes.length;
     const local = concat([
-      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(0x04034b50), u16(20), u16(0x800), u16(0), u16(0), u16(0),
       u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0),
       nameBytes, e.bytes,
     ]);
     chunks.push(local);
     central.push(
       concat([
-        u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(0x02014b50), u16(20), u16(20), u16(0x800), u16(0), u16(0), u16(0),
         u32(crc), u32(size), u32(size), u16(nameBytes.length),
         u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes,
       ])
@@ -2320,6 +2317,26 @@ function zipStore(entries: { name: string; bytes: Uint8Array }[]): Uint8Array {
   ]);
   return concat([...chunks, cd, end]);
 }
+/** A single explicit download for multi-file results, with safe unique names. */
+export function zipOutputs(outputs: OutFile[]): OutFile {
+  if (!outputs.length) throw new Error("There are no results to download.");
+  if (outputs.length > 10000 || outputs.reduce((sum, file) => sum + file.bytes.byteLength, 0) > 256 * 1024 * 1024)
+    throw new Error("These results are too large to bundle. Download the files individually.");
+  const used = new Set<string>();
+  const entries = outputs.map((file, index) => {
+    const safe = file.name.replace(/[\\/:*?"<>|]|\p{Cc}/gu, "_").replace(/^\.+|[. ]+$/g, "").slice(0, 180) || `file-${index + 1}`;
+    let name = safe;
+    for (let suffix = 2; used.has(name.toLowerCase()); suffix++) name = `${suffix}-${safe}`;
+    used.add(name.toLowerCase());
+    return { ...file, name };
+  });
+  return { name: "filey-results.zip", bytes: zipStore(entries) };
+}
+
+export function fileFromOutput(output: OutFile): File {
+  return new File([output.bytes.slice().buffer], output.name, { type: MIME[output.name.split(".").pop()?.toLowerCase() || ""] || "application/octet-stream" });
+}
+
 function concat(parts: Uint8Array[]): Uint8Array {
   const len = parts.reduce((s, p) => s + p.length, 0);
   const out = new Uint8Array(len);

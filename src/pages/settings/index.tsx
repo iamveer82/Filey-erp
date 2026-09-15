@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Building2,
@@ -21,21 +21,22 @@ import { PageHeader } from "../../components/ui";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
 import { cloudConfigured } from "../../lib/supabase";
 import { cn } from "../../lib/format";
-import CompanyDetails from "./CompanyDetails";
-import AccountProfile from "./AccountProfile";
-import AiSettings from "../../components/AiSettings";
-import UsersRoles from "./UsersRoles";
-import ActivityLog from "./ActivityLog";
-import DiagnosticsPanel from "./DiagnosticsPanel";
-import SecurityPanel, { ChangePasswordModal } from "./SecurityPanel";
-import AppsManager from "./AppsManager";
-import AppearancePanel from "./AppearancePanel";
-import PreferencesPanel from "./PreferencesPanel";
-import NotificationsPanel from "./NotificationsPanel";
-import BillingPanel from "./BillingPanel";
-import BackupPanel from "./BackupPanel";
-import DataModePanel from "./DataModePanel";
-import LicensePanel from "./LicensePanel";
+const CompanyDetails = lazy(() => import("./CompanyDetails"));
+const AccountProfile = lazy(() => import("./AccountProfile"));
+const AiSettings = lazy(() => import("../../components/AiSettings"));
+const UsersRoles = lazy(() => import("./UsersRoles"));
+const ActivityLog = lazy(() => import("./ActivityLog"));
+const DiagnosticsPanel = lazy(() => import("./DiagnosticsPanel"));
+const SecurityPanel = lazy(() => import("./SecurityPanel"));
+const ChangePasswordModal = lazy(() => import("./SecurityPanel").then(module => ({default:module.ChangePasswordModal})));
+const AppsManager = lazy(() => import("./AppsManager"));
+const AppearancePanel = lazy(() => import("./AppearancePanel"));
+const PreferencesPanel = lazy(() => import("./PreferencesPanel"));
+const NotificationsPanel = lazy(() => import("./NotificationsPanel"));
+const BillingPanel = lazy(() => import("./BillingPanel"));
+const BackupPanel = lazy(() => import("./BackupPanel"));
+const DataModePanel = lazy(() => import("./DataModePanel"));
+const LicensePanel = lazy(() => import("./LicensePanel"));
 
 type Section =
   | "company"
@@ -163,14 +164,14 @@ export default function Settings() {
                   className="mt-0"
                   style={{ display: section === id ? "block" : "none" }}
                 >
-                  {el}
+                  <Suspense fallback={<p role="status" className="p-5 text-sm text-muted-foreground">Loading {ALL_NAV.find(item => item.id === id)?.label}…</p>}>{el}</Suspense>
                 </TabsContent>
               );
             });
           })()}
         </div>
       </Tabs>
-      <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
+      {pwOpen && <Suspense fallback={null}><ChangePasswordModal open onClose={() => setPwOpen(false)} /></Suspense>}
     </div>
   );
 }

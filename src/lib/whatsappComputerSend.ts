@@ -8,6 +8,9 @@ import {
 } from "./computerUse";
 import { desktopBrowserCommand } from "./desktopBrowser";
 import { internationalPhone, saveDocumentPdf, type DocumentMessageContext } from "./documentMessage";
+import { CREDENTIAL_EVENT } from "./credentialStore";
+
+const modelSettings = () => { const { apiKey: _secret, ...settings } = getAiConfig(); return JSON.stringify(settings); };
 
 export interface WhatsAppComputerProgress {
   message: string;
@@ -102,11 +105,10 @@ export async function sendWhatsAppWithComputer(input: DocumentMessageContext & {
   if (running || getComputerUseState().enabled || getComputerUseState().busy)
     throw new Error("Stop the other computer task before sending this invoice.");
 
-  const cfg = JSON.stringify(getAiConfig());
+  const cfg = modelSettings();
   const controller = new AbortController();
   const signal = controller.signal;
   const cancel = () => controller.abort();
-  const timer = setTimeout(cancel, 300_000);
   let sessionId: number | undefined;
   let path: string | undefined;
   let sendAttempted = false;
@@ -121,7 +123,7 @@ export async function sendWhatsAppWithComputer(input: DocumentMessageContext & {
     if (!isToolAllowed("computer_use") || !isToolAllowed("send_invoice_whatsapp"))
       throw new Error("Enable Computer use and Messaging in Filey AI Access before sending.");
     if (gateFor("computer_use", true) === "block") throw new Error("Filey AI is in Plan mode. Switch to an action mode before sending.");
-    if (cfg !== JSON.stringify(getAiConfig())) throw new Error("The AI model changed. Start this task again with the selected model.");
+    if (cfg !== modelSettings()) throw new Error("The AI model changed. Start this task again with the selected model.");
     if (sessionId !== undefined && !computerUseSessionActive(sessionId)) throw new DOMException("Computer access ended", "AbortError");
   };
   const scopeChanged = () => { try { assertCurrent(); } catch { cancel(); } };
@@ -131,6 +133,7 @@ export async function sendWhatsAppWithComputer(input: DocumentMessageContext & {
   });
   input.signal?.addEventListener("abort", cancel, { once: true });
   window.addEventListener(AGENT_STORAGE_EVENT, scopeChanged);
+  window.addEventListener(CREDENTIAL_EVENT, cancel);
   window.addEventListener("filey:workspace-changed", scopeChanged);
   running = true;
   try {
@@ -150,7 +153,7 @@ export async function sendWhatsAppWithComputer(input: DocumentMessageContext & {
     if (!tabId || !windowId) throw new Error("WhatsApp did not open a controllable Filey browser window.");
     assertCurrent();
     if (getComputerUseState().enabled || getComputerUseState().busy) throw new Error("Another computer session started. Stop it before trying again.");
-    sessionId = await enableComputerUse(300, windowId);
+    sessionId = await enableComputerUse(null, windowId);
     const command = async (args: Record<string, unknown>) => {
       assertCurrent();
       const result = await runComputerUse(args, signal, sessionId);
@@ -264,10 +267,10 @@ export async function sendWhatsAppWithComputer(input: DocumentMessageContext & {
           : error instanceof Error ? error.message : "Filey AI could not complete WhatsApp sharing. Review the opened window.",
     };
   } finally {
-    clearTimeout(timer);
     stopWatching();
     input.signal?.removeEventListener("abort", cancel);
     window.removeEventListener(AGENT_STORAGE_EVENT, scopeChanged);
+    window.removeEventListener(CREDENTIAL_EVENT, cancel);
     window.removeEventListener("filey:workspace-changed", scopeChanged);
     if (sessionId !== undefined) await disableComputerUse(sessionId).catch(() => {});
     running = false;

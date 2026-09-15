@@ -465,7 +465,7 @@ export default function ESignStudio({
           </div>
           <div className="flex items-center gap-2">
             <button onClick={applySign} disabled={!hasDrawing || saving} className="btn-primary">
-              <Download size={14} /> Download signature
+              <Download size={14} /> {onApply ? "Create signature" : "Download signature"}
             </button>
             {done && (
               <span className="flex items-center gap-1 text-xs font-medium text-success">
@@ -666,7 +666,7 @@ export default function ESignStudio({
                   className="btn-primary"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  {saving ? "Signing…" : "Download signed PDF"}
+                  {saving ? "Signing…" : onApply ? "Create signed PDF" : "Download signed PDF"}
                 </button>
                 {done && (
                   <span className="flex items-center gap-1 text-xs font-medium text-success">

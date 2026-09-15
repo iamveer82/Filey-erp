@@ -1,3 +1,5 @@
+// Membership denial is exercised by module-access tests; these fixtures isolate native pairing ownership.
+vi.mock("../moduleAccess", () => ({requireModuleAccess: vi.fn(async () => {})}));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const session = vi.hoisted(() => ({
@@ -71,9 +73,11 @@ it("stops a connection completed after the user signs out without assigning it",
       })
   );
   const connecting = bridge.startBridge();
+  const rejected = expect(connecting).rejects.toThrow("account changed");
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
   session.account = null;
   finish({ state: "connected" });
-  await expect(connecting).rejects.toThrow("account changed");
+  await rejected;
   expect(rpc).toHaveBeenCalledWith("wa_bridge_stop");
   expect(localStorage.getItem("filey.wa_bridge.account")).toBeNull();
 });

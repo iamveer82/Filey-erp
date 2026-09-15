@@ -22,7 +22,7 @@ describe("fin.repairLedger", () => {
     // Bank account opened with 50,000 on the books, no journal entry for it.
     await localClient
       .from("accounts")
-      .insert({ name: "Bank", account_type: "asset", balance: 50000 });
+      .insert({ id: 1, name: "Bank", account_type: "asset", balance: 50000 });
     // One 1,000 receipt, posted twice by the legacy bug. Both are reflected in
     // the stored balance: 50,000 + 1,000 + 1,000.
     await localClient.from("transactions").insert([
@@ -42,7 +42,7 @@ describe("fin.repairLedger", () => {
   it("is idempotent — a second run changes nothing", async () => {
     await localClient
       .from("accounts")
-      .insert({ name: "Bank", account_type: "asset", balance: 50000 });
+      .insert({ id: 1, name: "Bank", account_type: "asset", balance: 50000 });
     await localClient.from("transactions").insert([
       { account_id: 1, txn_type: "debit", amount: 1000, description: "Receipt", txn_date: "2026-07-01" },
       { account_id: 1, txn_type: "debit", amount: 1000, description: "Receipt", txn_date: "2026-07-01" },
@@ -60,7 +60,7 @@ describe("fin.repairLedger", () => {
   it("still corrects a balance that drifted from its journal", async () => {
     await localClient
       .from("accounts")
-      .insert({ name: "Bank", account_type: "asset", balance: 0 });
+      .insert({ id: 1, name: "Bank", account_type: "asset", balance: 0 });
     await localClient.from("transactions").insert([
       { account_id: 1, txn_type: "debit", amount: 700, description: "A", txn_date: "2026-07-01" },
       { account_id: 1, txn_type: "credit", amount: 200, description: "B", txn_date: "2026-07-02" },
@@ -82,7 +82,7 @@ describe("fin.repairLedger", () => {
     // decrease the balance, not increase it.
     await localClient
       .from("accounts")
-      .insert({ name: "Accounts Payable", account_type: "liability", balance: 0 });
+      .insert({ id: 1, name: "Accounts Payable", account_type: "liability", balance: 0 });
     await localClient.from("transactions").insert([
       { account_id: 1, txn_type: "credit", amount: 300, description: "Bill", txn_date: "2026-07-01" },
       { account_id: 1, txn_type: "credit", amount: 300, description: "Bill", txn_date: "2026-07-01" },

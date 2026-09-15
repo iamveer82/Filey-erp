@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Loader2, RefreshCw, ChevronDown } from "lucide-react";
+import { Sparkles, Loader2, RefreshCw, ChevronDown, Check, Eye, EyeOff, KeyRound, ExternalLink, Save, CircleAlert } from "lucide-react";
 import {
   getAiConfig,
   setAiConfig,
   aiChat,
-  aiReady,
-  listLocalAiModels,
+  listAiModels,
+  aiCredentialName,
   type AiConfig,
   type AiProvider,
 } from "../lib/ai";
-import { isLocalAiEndpoint, mergeAiConfig } from "../lib/aiEndpoint";
+import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig } from "../lib/aiEndpoint";
 import { useUI } from "../lib/ui";
-import { SelectMenu } from "./ui-menu";
 import { SettingsPanel, SettingsSection } from "./SettingsLayout";
+import { getCacheScope } from "../lib/api";
+import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
 
-/* Settings → AI Assistant. Bring-your-own-key: the key lives only in this
- * browser (localStorage) and requests go straight to the chosen provider. */
+/* Settings → AI Assistant. Provider metadata is separate from credentials. */
 
 interface Preset {
   label: string;
@@ -34,18 +34,21 @@ const PRESETS: Preset[] = [
     provider: "anthropic",
     baseUrl: "https://api.anthropic.com/v1",
     model: "claude-opus-5",
+    keyUrl: "https://platform.claude.com/settings/keys",
   },
   {
     label: "OpenAI",
     provider: "openai",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
+    keyUrl: "https://platform.openai.com/api-keys",
   },
   {
     label: "OpenRouter (any model)",
     provider: "openai",
     baseUrl: "https://openrouter.ai/api/v1",
     model: "openai/gpt-4o-mini",
+    keyUrl: "https://openrouter.ai/settings/keys",
   },
   {
     label: "OpenRouter · free models",
@@ -98,7 +101,7 @@ const PRESETS: Preset[] = [
     label: "xAI (Grok)",
     provider: "openai",
     baseUrl: "https://api.x.ai/v1",
-    model: "grok-2-latest",
+    model: "grok-4.6",
   },
   {
     label: "Google Gemini",
@@ -138,7 +141,7 @@ const PRESETS: Preset[] = [
     label: "Cerebras",
     provider: "openai",
     baseUrl: "https://api.cerebras.ai/v1",
-    model: "llama-3.3-70b",
+    model: "gpt-oss-120b",
   },
   {
     label: "Perplexity",
@@ -185,187 +188,233 @@ const PROVIDER_DEFAULT_URL: Record<AiProvider, string> = {
 
 export default function AiSettings() {
   const { toast } = useUI();
-  const [cfg, setCfg] = useState<AiConfig>(getAiConfig());
-  const [testing, setTesting] = useState(false);
-  const [finding, setFinding] = useState(false);
+  const [cfg, setCfg] = useState<AiConfig>(() => ({ ...getAiConfig(), apiKey: "" }));
+  const [dirty, setDirty] = useState(false);
+  const [keyChanged, setKeyChanged] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [busy, setBusy] = useState<"save" | "test" | "models" | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [modelMessage, setModelMessage] = useState("");
   const [keyNotice, setKeyNotice] = useState("");
-  const request = useRef(0);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [savedKey, setSavedKey] = useState(() => hasCredential(aiCredentialName(getAiConfig())));
+  const scope = useRef(getCacheScope());
+  const request = useRef<AbortController | null>(null);
   const local = isLocalAiEndpoint(cfg);
-  const preset = PRESETS.find((p) => p.baseUrl === cfg.baseUrl.trim().replace(/\/+$/, "") &&
+  const desktop = "__TAURI_INTERNALS__" in window;
+  const credentialName = aiCredentialName(cfg);
+  const preset = PRESETS.find(p => p.provider === cfg.provider && p.baseUrl === cfg.baseUrl.trim().replace(/\/+$/, "") &&
     (p.model === cfg.model || p.access === "local")) ??
-    PRESETS.find((p) => p.baseUrl === cfg.baseUrl.trim().replace(/\/+$/, ""));
-  // Typing used to write localStorage on every keystroke — with storage
-  // blocked, each keypress threw. Local state updates immediately; the store
-  // is written debounced, and flushed before anything reads it back.
-  const pending = useRef<Partial<AiConfig>>({});
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    PRESETS.find(p => p.provider === cfg.provider && p.baseUrl === cfg.baseUrl.trim().replace(/\/+$/, ""));
+  const keyAvailable = keyChanged ? !!cfg.apiKey.trim() : savedKey;
+  const ready = !!aiEndpoint(cfg.baseUrl) && !!cfg.model.trim() && (local || keyAvailable);
 
-  const flush = () => {
-    if (!Object.keys(pending.current).length) return;
-    const patch = pending.current;
-    pending.current = {};
-    setAiConfig(patch);
-  };
+  useEffect(() => {
+    const refresh = () => setSavedKey(hasCredential(credentialName));
+    window.addEventListener(CREDENTIAL_EVENT, refresh);
+    return () => window.removeEventListener(CREDENTIAL_EVENT, refresh);
+  }, [credentialName]);
 
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current);
-      request.current++;
-      flush();
-    },
-    []
-  );
+  useEffect(() => {
+    void quarantineLegacyCredentials().catch(() => toast.error("Legacy credentials could not be moved to secure storage. Unlock your OS account and try again."));
+    const reset = () => {
+      if (scope.current === getCacheScope()) return;
+      request.current?.abort();
+      request.current = null;
+      scope.current = getCacheScope();
+      const next = getAiConfig();
+      setCfg({ ...next, apiKey: "" });
+      setSavedKey(hasCredential(aiCredentialName(next)));
+      setDirty(false); setKeyChanged(false); setShowKey(false); setBusy(null);
+      setResult(null); setModels([]); setModelMessage(""); setKeyNotice("");
+    };
+    window.addEventListener("filey:agent-storage", reset);
+    return () => { request.current?.abort(); request.current = null; window.removeEventListener("filey:agent-storage", reset); };
+  }, [toast]);
 
-  const update = (patch: Partial<AiConfig>, immediate = false) => {
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const update = (patch: Partial<AiConfig>) => {
     const next = mergeAiConfig(cfg, patch);
-    if (cfg.apiKey && !next.apiKey && patch.apiKey === undefined)
-      setKeyNotice("The endpoint changed. Enter this provider's own key if it requires one.");
-    else if (patch.apiKey !== undefined) setKeyNotice("");
+    if (aiEndpoint(cfg.baseUrl)?.origin !== aiEndpoint(next.baseUrl)?.origin) {
+      next.apiKey = "";
+      setKeyChanged(false); setShowKey(false);
+      setKeyNotice("Each provider uses its own key. Saved keys stay with their original provider.");
+    }
+    if (patch.apiKey !== undefined) { setKeyChanged(true); setKeyNotice(""); }
     if (patch.baseUrl !== undefined || patch.provider !== undefined || patch.apiKey !== undefined) {
-      request.current++;
-      setFinding(false);
-      setModels([]);
-      setModelMessage("");
+      setModels([]); setModelMessage("");
     }
-    pending.current = next;
-    setCfg(next);
-    clearTimeout(timer.current);
-    if (immediate) flush();
-    else timer.current = setTimeout(flush, 400);
+    setCfg(next); setDirty(true); setResult(null);
+    setSavedKey(hasCredential(aiCredentialName(next)));
   };
 
-  const applyPreset = (p: Preset) =>
-    update({ provider: p.provider, baseUrl: p.baseUrl, model: p.model });
+  const persist = async () => {
+    if (!scope.current || scope.current !== getCacheScope()) throw new Error("Sign in to this workspace before saving AI settings.");
+    if (!aiEndpoint(cfg.baseUrl)) throw new Error("Enter a valid API base URL.");
+    const { apiKey, ...settings } = cfg;
+    setAiConfig({ ...settings, baseUrl: settings.baseUrl.trim().replace(/\/+$/, ""), model: settings.model.trim(),
+      ...(keyChanged ? { apiKey: apiKey.trim() } : {}) }, scope.current);
+    // An unrelated failed integration key must not block this AI provider.
+    await flushCredentials(aiCredentialName(cfg));
+    setDirty(false); setKeyChanged(false); setCfg(current => ({ ...current, apiKey: "" }));
+    setShowKey(false); setSavedKey(hasCredential(aiCredentialName(cfg)));
+  };
 
-  const findModels = async () => {
-    const current = ++request.current;
-    setFinding(true);
-    setModelMessage("");
+  const run = async (action: "save" | "test" | "models") => {
+    const controller = new AbortController();
+    request.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), action === "test" ? 60000 : 15000);
+    setBusy(action); setResult(null);
     try {
-      const found = await listLocalAiModels(cfg);
-      if (request.current !== current) return;
-      setModels(found);
-      setModelMessage(found.length ? "Choose a model below or enter its ID. Tool and image support depend on the model." :
-        "No models found. Download a model in your local server, then try again.");
+      if (action === "models") {
+        // Discover from the draft without replacing the user's saved settings.
+        const found = await listAiModels(cfg, controller.signal, !keyChanged);
+        if (controller.signal.aborted) return;
+        setModels(found);
+        setModelMessage(found.length ? `${found.length} models available. Choose a chat model with tool support for business actions.` :
+          local ? "No models installed. Download one in your local server, then refresh." : "No models returned. Enter a model ID from your provider.");
+      } else {
+        await persist();
+        if (controller.signal.aborted) return;
+        if (action === "save") setResult({ ok: true, text: "Settings saved. Test the connection to verify your model." });
+        else {
+          const text = await aiChat([{ role: "user", text: "Reply with the single word: ok" }], { maxTokens: 2048, signal: controller.signal });
+          if (controller.signal.aborted) return;
+          if (!text.trim()) throw new Error("The provider accepted the request but returned no text. Try a different chat model; this model may need a larger reasoning budget.");
+          setResult({ ok: true, text: `Connected to ${cfg.model.trim()}. Your model returned a text response.` });
+          toast.success("AI connection verified");
+        }
+      }
     } catch (error) {
-      if (request.current === current) setModelMessage(
-        `${error instanceof Error ? error.message : String(error)} Check that your local server is running. Browser builds also need the server to allow this origin.`);
+      if (request.current !== controller) return;
+      const text = controller.signal.aborted ? "The connection check timed out. Check your network or try another model." :
+        error instanceof Error ? error.message : typeof error === "string" ? error : "Could not connect. Check the provider, key and model.";
+      if (action === "models") setModelMessage(`${text} You can enter the model ID manually.`);
+      else setResult({ ok: false, text });
     } finally {
-      if (request.current === current) setFinding(false);
-    }
-  };
-
-  const test = async () => {
-    flush(); // test what's on screen, not the last debounced snapshot
-    setTesting(true);
-    try {
-      const r = await aiChat([{ role: "user", text: "Reply with the single word: ok" }], {
-        maxTokens: 8,
-        temperature: 0,
-      });
-      if (!r.trim()) throw new Error("The model returned no text. Check the model ID and compatibility, then try again.");
-      toast.success(`Connected - model replied: "${r.slice(0, 40)}"`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTesting(false);
+      clearTimeout(timeout);
+      if (request.current === controller) { request.current = null; setBusy(null); }
     }
   };
 
   return (
     <SettingsPanel>
-      <SettingsSection title="AI provider" description="Run Filey AI on your device or connect a provider with your own key.">
+      <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5"><Sparkles size={13} />{local ? "On this device" : "Your provider"}</span>
+          <span>{dirty ? "Unsaved changes" : "Settings for this workspace"}</span>
+        </div>
         <div className="space-y-2">
           <label className="label" htmlFor="ai-preset">Provider preset</label>
-          <select id="ai-preset" className="input" value={preset?.label ?? ""} onChange={(event) => {
-            const selected = PRESETS.find((p) => p.label === event.target.value);
-            if (selected) applyPreset(selected);
+          <select id="ai-preset" className="input" disabled={!!busy} value={preset?.label ?? ""} onChange={event => {
+            const selected = PRESETS.find(p => p.label === event.target.value);
+            if (selected) update({ provider: selected.provider, baseUrl: selected.baseUrl, model: selected.model });
           }}>
             <option value="" disabled>Custom configuration</option>
             <optgroup label="Local · no API key required">
-              {PRESETS.filter((p) => p.access === "local").map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
+              {PRESETS.filter(p => p.access === "local").map(p => <option key={p.label}>{p.label}</option>)}
             </optgroup>
             <optgroup label="Hosted · free tiers">
-              {PRESETS.filter((p) => p.access === "free-tier").map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
+              {PRESETS.filter(p => p.access === "free-tier").map(p => <option key={p.label}>{p.label}</option>)}
             </optgroup>
             <optgroup label="More providers · bring your own key">
-              {PRESETS.filter((p) => !p.access).map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
+              {PRESETS.filter(p => !p.access).map(p => <option key={p.label}>{p.label}</option>)}
             </optgroup>
           </select>
-          <p className="text-xs leading-relaxed text-muted-foreground">Downloaded local models use your hardware. Hosted free tiers need your own account and have limits.</p>
         </div>
         {preset?.note && <p className="text-[13px] leading-relaxed text-muted-foreground">{preset.note}</p>}
-        {(preset?.guide || preset?.keyUrl) && <div className="flex flex-wrap items-center gap-3">
-          {preset.keyUrl && <a className="btn-ghost" href={preset.keyUrl} target="_blank" rel="noopener noreferrer">Get your API key</a>}
-          {preset.guide && <a className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground" href={preset.guide} target="_blank" rel="noopener noreferrer">Provider setup & limits</a>}
+        {(preset?.guide || preset?.keyUrl) && <div className="flex flex-wrap items-center gap-2">
+          {preset.keyUrl && <a className="btn-ghost rounded-full" href={preset.keyUrl} target="_blank" rel="noopener noreferrer"><KeyRound size={14} />Get your API key<ExternalLink size={12} /></a>}
+          {preset.guide && <a className="btn-ghost rounded-full" href={preset.guide} target="_blank" rel="noopener noreferrer">Setup guide<ExternalLink size={12} /></a>}
         </div>}
       </SettingsSection>
 
-      <SettingsSection title="Connection" description="Choose a model for chat and document scanning. Business actions need tool calling; document images need vision support."
+      <SettingsSection title="Connection" description="Add your key, choose a model and test the connection. Chat and agent actions use this model."
         actions={<>
-          <p className="mr-auto max-w-sm text-xs leading-relaxed text-muted-foreground">Test sends only a short greeting and uses your provider's allowance. It does not read or change business records.</p>
-          <button type="button" onClick={test} disabled={testing || !aiReady(cfg)} className="btn-primary">
-            {testing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-            Test connection
+          <p className="mr-auto max-w-sm text-xs leading-relaxed text-muted-foreground">Testing saves these settings and sends a short greeting. Provider usage limits apply.</p>
+          <button type="button" onClick={() => void run("save")} disabled={!!busy || !dirty} className="btn-ghost rounded-full">
+            {busy === "save" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}Save changes
+          </button>
+          <button type="button" onClick={() => void run("test")} disabled={!!busy || !ready} className="btn-primary rounded-full">
+            {busy === "test" ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {busy === "test" ? "Testing connection…" : "Test connection"}
           </button>
         </>}>
         <div className="space-y-2">
-          <label className="label" htmlFor="ai-model">Model</label>
-          <div className="flex flex-wrap gap-2">
-            <input id="ai-model" className="input min-w-0 flex-1 basis-48" value={cfg.model} onChange={(e) => update({ model: e.target.value })}
-              placeholder={local ? "Enter an installed model ID" : "Enter the provider's model ID"} />
-            {local && <button type="button" className="btn-ghost" disabled={finding} onClick={() => void findModels()}>
-              <RefreshCw size={15} className={finding ? "animate-spin" : ""} />
-              {finding ? "Finding models…" : "Find local models"}
-            </button>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="label mb-0" htmlFor="ai-api-key">API key{local ? " (optional)" : ""}</label>
+            {savedKey && !keyChanged && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check size={13} />{desktop ? "Key saved securely" : "Key available until reload"}</span>}
           </div>
-          {local && modelMessage && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{modelMessage}</p>}
-          {local && models.length > 0 && <SelectMenu ariaLabel="Available local models" value={models.includes(cfg.model) ? cfg.model : ""}
-            onChange={(model) => update({ model })} options={[{ value: "", label: "Choose a local model" }, ...models.map((model) => ({ value: model, label: model }))]} />}
-        </div>
-
-        <div className="space-y-2">
-          <label className="label" htmlFor="ai-api-key">API key{local ? " (optional)" : ""}</label>
-          <div className="flex gap-2">
-            <input id="ai-api-key" className="input min-w-0 flex-1" type="password" autoComplete="off" value={cfg.apiKey}
-              onChange={(e) => update({ apiKey: e.target.value })} placeholder={local ? "Only if your local server requires a token" : "Your provider's API key"} />
-            {cfg.apiKey && <button type="button" onClick={() => update({ apiKey: "" }, true)} className="btn-ghost shrink-0">Clear key</button>}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1 basis-48">
+              <input id="ai-api-key" className="input w-full pr-11" type={showKey ? "text" : "password"} autoComplete="off" spellCheck={false}
+                disabled={!!busy} value={cfg.apiKey} onChange={event => update({ apiKey: event.target.value })}
+                placeholder={savedKey && !keyChanged ? "Saved key · enter a new key to replace" : local ? "Only if server authentication is enabled" : "Paste your provider's API key"} />
+              <button type="button" className="absolute right-1 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                disabled={!cfg.apiKey || !!busy} aria-label={showKey ? "Hide API key" : "Show API key"} aria-pressed={showKey} onClick={() => setShowKey(!showKey)}>
+                {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {(cfg.apiKey || savedKey) && <button type="button" disabled={!!busy} onClick={() => update({ apiKey: "" })} className="btn-ghost rounded-full">Clear key</button>}
           </div>
-          {local && <p className="text-xs leading-relaxed text-muted-foreground">Leave blank for local Ollama or LM Studio with authentication disabled.</p>}
+          <p className="text-xs leading-relaxed text-muted-foreground">{keyChanged && !cfg.apiKey ? "Save changes to remove this provider's saved key." : local ? "Leave blank if your local server does not require authentication." : "Use a developer API key from the selected provider. A chat subscription may not include API access."}</p>
           {keyNotice && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{keyNotice}</p>}
         </div>
 
+        <div className="space-y-2">
+          <label className="label" htmlFor="ai-model">Model</label>
+          <div className="flex flex-wrap gap-2">
+            <input id="ai-model" className="input min-w-0 flex-1 basis-48" disabled={!!busy} value={cfg.model} onChange={event => update({ model: event.target.value })}
+              placeholder={local ? "Enter an installed model ID" : "Enter a model ID or find models"} />
+            <button type="button" className="btn-ghost rounded-full" disabled={!!busy || !aiEndpoint(cfg.baseUrl) || (!local && !keyAvailable)} onClick={() => void run("models")}>
+              <RefreshCw size={15} className={busy === "models" ? "animate-spin" : ""} />
+              {busy === "models" ? "Finding models…" : local ? "Find local models" : "Find models"}
+            </button>
+          </div>
+          {modelMessage && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{modelMessage}</p>}
+          {models.length > 0 && <select className="input" aria-label={local ? "Available local models" : "Available models"} disabled={!!busy} value={models.includes(cfg.model) ? cfg.model : ""}
+            onChange={event => update({ model: event.target.value })}>
+            <option value="" disabled>Choose a model</option>
+            {models.map(model => <option key={model}>{model}</option>)}
+          </select>}
+          <p className="text-xs leading-relaxed text-muted-foreground">Choose a model with tool calling for business actions and vision for document images.</p>
+        </div>
+
         <details className="group border-t border-border pt-2">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0">Advanced connection details{!preset && <span className="mt-1 block break-all text-xs font-normal text-muted-foreground">{cfg.baseUrl || "No endpoint set"}</span>}</span>
-            <ChevronDown size={15} className="shrink-0 group-open:rotate-180" />
+          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-lg text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <span>Advanced connection details</span><ChevronDown size={15} className="shrink-0 transition-transform group-open:rotate-180" />
           </summary>
           <div className="space-y-4 pt-3">
             <div className="space-y-2">
-              <label className="label">Provider API</label>
-              <SelectMenu ariaLabel="Provider API" value={cfg.provider} onChange={(v) => {
-                const provider = v as AiProvider;
-                update({ provider, baseUrl: PROVIDER_DEFAULT_URL[provider] });
-              }} options={[{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic (Claude)" }]} />
+              <label className="label" htmlFor="ai-protocol">API format</label>
+              <select id="ai-protocol" className="input" disabled={!!busy} value={cfg.provider} onChange={event => {
+                const provider = event.target.value as AiProvider;
+                const selected = PRESETS.find(p => p.provider === provider);
+                update({ provider, baseUrl: PROVIDER_DEFAULT_URL[provider], model: selected?.model ?? "" });
+              }}><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic (Claude)</option></select>
             </div>
             <div className="space-y-2">
               <label className="label" htmlFor="ai-base-url">API base URL</label>
-              <input id="ai-base-url" className="input" value={cfg.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" />
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {cfg.provider === "anthropic"
-                  ? "Anthropic-compatible Messages endpoint. Custom gateway URLs are supported."
-                  : "Any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, Together, local Ollama…)."}
-              </p>
+              <input id="ai-base-url" className="input" disabled={!!busy} value={cfg.baseUrl} onChange={event => update({ baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" />
+              <p className="text-xs leading-relaxed text-muted-foreground">Use the base URL from your provider, without /chat/completions or /messages.</p>
             </div>
           </div>
         </details>
+        {result && <div role={result.ok ? "status" : "alert"} className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-sm leading-relaxed ${result.ok ? "border-border bg-muted/40 text-foreground" : "border-destructive/30 bg-destructive/5 text-destructive"}`}>
+          {result.ok ? <Check size={17} className="mt-0.5 shrink-0" /> : <CircleAlert size={17} className="mt-0.5 shrink-0" />}
+          <p className="min-w-0 break-words">{result.text}</p>
+        </div>}
       </SettingsSection>
 
-      <SettingsSection title="Privacy & storage" description="Connection changes save automatically in this browser or desktop profile.">
-        <p className="text-[13px] leading-relaxed text-muted-foreground">AI keys are stored in this browser or desktop profile, without application-level encryption. Requests go to your selected provider.</p>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">Local model inference can stay on your device; enabled web and integration tools still make their own network requests.</p>
+      <SettingsSection title="Privacy & storage" description={desktop ? "Saved securely on this device." : "Keys stay in this browser session."}>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{desktop ? "Keys are kept in your operating system's secure store, separately for each account and workspace." : "Browser keys stay in memory and are cleared on reload or sign-out. Use the desktop app to keep keys in your operating system's secure store."} Requests go to your selected provider.</p>
+        {!desktop && <p className="text-[13px] leading-relaxed text-muted-foreground">The localhost preview supports the listed hosted providers. A deployed browser version requires the provider to allow browser requests; the desktop app also supports custom endpoints.</p>}
+        <p className="text-[13px] leading-relaxed text-muted-foreground">Downloaded local models need no provider key. Hosted free tiers require your own account and have usage limits.</p>
       </SettingsSection>
     </SettingsPanel>
   );

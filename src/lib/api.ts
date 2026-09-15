@@ -1,3 +1,4 @@
+import { clearLog } from "./log";
 import { defaultTaxRate, validateCountry, taxIdError } from "./taxRegimes";
 import { validateWorkItem, type WorkInput, type WorkItem } from "./workItems";
 import { invoke } from "@tauri-apps/api/core";
@@ -26,6 +27,8 @@ import {
 import { notifyDataChanged } from "./realtime";
 import { log } from "./log";
 import { withLocalTransaction } from "./localdb";
+import { loadModuleAccess } from "./moduleAccess";
+import { validateExpense, type ExpenseDetails } from "./expenseDetails";
 
 // ===== Types =====
 export interface Product {
@@ -135,6 +138,7 @@ export interface Expense {
   amount: number;
   expense_date: string;
   account_id?: number;
+  details?: ExpenseDetails | null;
 }
 export interface Txn {
   id: number;
@@ -525,6 +529,7 @@ let activeCacheOrg = "default";
 export function setCacheOrg(orgId?: string | null, userId?: string): void {
   const next = `${orgId?.trim() || "default"}${userId ? `:user:${userId}` : ""}`;
   if (next === activeCacheOrg) return;
+  clearLog();
   activeCacheOrg = next;
   if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:agent-storage"));
 }
@@ -717,6 +722,10 @@ async function readCached<T>(
 ): Promise<T> {
   assertWorkspaceCurrent();
   if (isLocalMode()) return run(); // local store is the source of truth
+  // Membership itself is loaded by a separate RPC, never this cache. Restricted
+  // staff always read through RLS so a former role's cached rows cannot leak.
+  const access = await loadModuleAccess();
+  if (!access.admin && access.modules !== null) return run();
   // Namespace the local cache by the active organization so data from
   // one org never bleeds into another on a shared device.
   const k = `${activeCacheOrg}:${key}`;
@@ -826,7 +835,13 @@ async function sList<T>(
   const remote = client != null || !isLocalMode();
   for (let offset = 0; ; offset += 500) {
     let q: any = (client ?? sb()).from(table).select(select);
-    for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
+    for (const o of order ?? []) {
+      // Offline IDs are random. "Newest first" must sort by creation time;
+      // keep id as the stable tie-breaker used by pagination.
+      if (o.col === "id" && !o.asc && !(order ?? []).some(entry => entry.col === "created_at"))
+        q = q.order("created_at", { ascending: false });
+      q = q.order(o.col, { ascending: o.asc });
+    }
     if (remote) {
       if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
       q = q.range(offset, offset + 499);
@@ -2074,7 +2089,8 @@ export const fin = {
     description: string | null,
     amount: number,
     expenseDate: string,
-    accountId: number | null
+    accountId: number | null,
+    details?: ExpenseDetails | null
   ) => {
     const row = {
       category,
@@ -2082,12 +2098,36 @@ export const fin = {
       amount,
       expense_date: expenseDate,
       account_id: accountId,
+      ...(details ? { details } : {}),
     };
     return online(async () => {
-      const id = await sInsert("expenses", row);
-      const targetId = accountId ?? (await findOrCreateExpenseAccount());
+      validateExpense(category, amount, expenseDate, details);
+      if (!isLocalMode()) {
+        const { data, error } = await sb().rpc("filey_record_expense", { p_expense: row });
+        if (error) throw new Error(["PGRST202", "42883", "42703"].includes(error.code) ? "Expense storage needs the latest database update. Apply the expense-entry migration before saving." : error.message);
+        return Number(data);
+      }
+      return withLocalTransaction(async client => {
+      if (details?.submission_id) {
+        const existing = (await sList<Expense>("expenses", undefined, "*", client)).find(expense => expense.details?.submission_id === details.submission_id);
+        if (existing) {
+          if (existing.amount !== amount || existing.category !== category || existing.expense_date !== expenseDate || JSON.stringify(existing.details) !== JSON.stringify(details))
+            throw new Error("This expense was already saved. Open it from Purchase to review the saved details.");
+          return existing.id;
+        }
+      }
+      if (details?.receipt) {
+        const file = await client.from("user_files").select("id").eq("id", details.receipt.id).single();
+        if (file.error || !file.data) throw new Error("The receipt could not be found. Attach it again before saving.");
+      }
+      const targetId = accountId ?? (await findOrCreateExpenseAccount(client));
+      const cashId = details?.payment_account_id ?? await findOrCreateCashAccount(client);
+      for (const [id, type] of [[targetId, "expense"], [cashId, "asset"]] as const) {
+        const account = await client.from("accounts").select("account_type").eq("id", id).single();
+        if (account.error || account.data?.account_type !== type) throw new Error(`Choose a valid ${type === "expense" ? "expense" : "cash or bank"} account.`);
+      }
+      const id = await sInsert("expenses", { ...row, account_id: targetId }, client);
       const ref = `Expense ${id}`;
-      if (targetId > 0) {
         await sInsert("transactions", {
           account_id: targetId,
           txn_type: "debit",
@@ -2096,12 +2136,10 @@ export const fin = {
           ref,
           source: "expense",
           txn_date: expenseDate,
-        });
-        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount));
+        }, client);
+        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount), client);
         // Contra leg — expense assumed paid from Cash/Bank, so the books stay
         // balanced (debit Expense, credit Cash). On-credit spend → manual AP entry.
-        const cashId = await findOrCreateCashAccount();
-        if (cashId > 0) {
           await sInsert("transactions", {
             account_id: cashId,
             txn_type: "credit",
@@ -2110,17 +2148,33 @@ export const fin = {
             ref,
             source: "expense",
             txn_date: expenseDate,
-          });
-          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", amount));
-        }
-      }
+          }, client);
+          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", amount), client);
       return id;
+      });
     });
   },
+  getExpense: (id: number) => online(async () => {
+    const { data, error } = await sb().from("expenses").select("*").eq("id", id).single();
+    if (error) throw error;
+    return data as Expense;
+  }, false),
   deleteExpense: (expenseId: number) =>
-    write({ k: "delete", t: "expenses", id: expenseId }, () =>
-      sDelete("expenses", expenseId), undefined
-    ),
+    online(async () => {
+      if (!isLocalMode()) {
+        const { error } = await sb().rpc("filey_delete_expense", { p_id: expenseId });
+        if (error) throw error;
+        return;
+      }
+      await withLocalTransaction(async client => {
+        const expense = await client.from("expenses").select("id").eq("id", expenseId).single();
+        if (expense.error) throw expense.error;
+        const { data, error } = await client.from("transactions").select("*").eq("source", "expense").eq("ref", `Expense ${expenseId}`);
+        if (error) throw error;
+        await reverseTransactions(data as InvoiceTxn[], client);
+        await sDelete("expenses", expenseId, client);
+      });
+    }),
   transactions: () =>
     readCached<Txn[]>(
       "fin_transactions",
@@ -3159,24 +3213,8 @@ async function findOrCreateFxAccount(client: any = null): Promise<number> {
   );
 }
 
-async function findOrCreateExpenseAccount(): Promise<number> {
-  const { data } = await sb()
-    .from("accounts")
-    .select("id,name")
-    .eq("account_type", "expense");
-  const list = (data as { id: number; name: string }[] | null) ?? [];
-  const acct = list.find((a) => /operating|expense|general/i.test(a.name)) ?? list[0];
-  if (acct) return acct.id;
-  try {
-    return await sInsert("accounts", {
-      code: "5000",
-      name: "Operating Expenses",
-      account_type: "expense",
-      balance: 0,
-    });
-  } catch {
-    return -1;
-  }
+async function findOrCreateExpenseAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("expense", "5000", "Operating Expenses", /operating|expense|general/i, client);
 }
 
 async function findOrCreatePayrollAccount(client: any = null): Promise<number> {
@@ -4001,15 +4039,16 @@ export const billing = {
       )
     ),
   /** Team-share an invoice: with the whole org (all=true) or specific
-   *  members (merged into shared_with). Server validates author/admin. */
+   *  members (replaces shared_with). Server validates author/admin. */
   shareWithMembers: (docId: number, all: boolean, userIds: string[]) =>
     online(async () => {
-      const { error } = await sb().rpc("share_invoice", {
+      const { data, error } = await sb().rpc("share_invoice", {
         p_id: docId,
         p_all: all,
         p_user_ids: JSON.parse(JSON.stringify(userIds ?? [])),
       });
       if (error) throw error;
+      if (!data?.ok) throw new Error("Sharing was not saved. Check your permissions and selected members.");
     }),
   /** The invoice's current team-visibility state (author/admin reads directly). */
   sharingState: (docId: number) =>

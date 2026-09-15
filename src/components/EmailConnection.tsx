@@ -1,13 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Mail, RefreshCw } from "lucide-react";
 import { supabase, invokeFn } from "../lib/supabase";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "../lib/agentStorage";
 import { edgeErrorMessage } from "../lib/email";
 
 export default function EmailConnection() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let scope = agentStorageScope();
+    const changed = () => { if (scope !== agentStorageScope()) { scope = agentStorageScope(); setStatus(""); setBusy(false); } };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
+    return () => window.removeEventListener(AGENT_STORAGE_EVENT, changed);
+  }, []);
   const check = async () => {
+    const scope = agentStorageScope();
     setBusy(true);
     setStatus("");
     try {
@@ -18,6 +26,7 @@ export default function EmailConnection() {
         { body: { action: "status" } },
         0
       );
+      if (scope !== agentStorageScope()) return;
       if (error) throw new Error(await edgeErrorMessage(error));
       const result = data as { configured?: boolean; from?: string; error?: string };
       if (result?.error) throw new Error(result.error);
@@ -27,9 +36,9 @@ export default function EmailConnection() {
           : "The administrator needs to configure RESEND_API_KEY and EMAIL_FROM in Supabase secrets."
       );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      if (scope === agentStorageScope()) setStatus(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      if (scope === agentStorageScope()) setBusy(false);
     }
   };
   return (
@@ -63,7 +72,7 @@ export default function EmailConnection() {
       )}
       <p className="text-xs text-muted-foreground mt-3">
         Checking configuration sends no email. Resend free-tier quotas and Filey's daily
-        sending limits apply.
+        sending limits apply. The workspace administrator supplies and pays for the Resend account.
       </p>
     </section>
   );

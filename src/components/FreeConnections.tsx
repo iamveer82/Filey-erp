@@ -191,21 +191,6 @@ export default function FreeConnections() {
       <div className="grid md:grid-cols-2 gap-4">
         <section className="card">
           <MessageCircle size={18} className="mb-3" />
-          <h2 className="font-semibold text-sm">WhatsApp</h2>
-          <p className="text-sm text-muted-foreground mt-2 mb-4">
-            Open a contact, company or lead with an international phone number and select
-            WhatsApp to start a chat in your own account. You review and send the message.
-          </p>
-          <Link className="btn-secondary" to="/crm?view=contacts">
-            Open contacts <ArrowUpRight size={14} />
-          </Link>
-          <p className="text-xs text-muted-foreground mt-3">
-            Click-to-chat needs no paid API. Automated WhatsApp Business messages have
-            separate provider pricing.
-          </p>
-        </section>
-        <section className="card">
-          <MessageCircle size={18} className="mb-3" />
           <h2 className="font-semibold text-sm">Telegram</h2>
           <p className="text-sm text-muted-foreground mt-2 mb-4">
             Save a Telegram username on a contact, then use its Telegram action to open

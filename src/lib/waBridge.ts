@@ -9,6 +9,7 @@
 // brain, memory and tools all live in this app — nothing is sent to a server.
 import { invoke } from "@tauri-apps/api/core";
 import { log } from "./log";
+import { requireModuleAccess } from "./moduleAccess";
 import { listen } from "@tauri-apps/api/event";
 import { getCacheScope } from "./api";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
@@ -105,6 +106,8 @@ export async function startBridge(): Promise<BridgeState> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
   const account = accountScope();
   if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
+  await requireModuleAccess("integrations");
+  if (account !== accountScope()) throw new Error("Workspace changed before connecting WhatsApp.");
   const previous = localStorage.getItem(ACCOUNT_KEY);
   if (previous && previous !== account) boundAccount();
   const state = await invoke<BridgeState>("wa_bridge_start");
@@ -124,6 +127,8 @@ export async function resetBridge(): Promise<BridgeState> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
   const account = accountScope();
   if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
+  await requireModuleAccess("integrations");
+  if (account !== accountScope()) throw new Error("Workspace changed before pairing WhatsApp.");
   const state = await invoke<BridgeState>("wa_bridge_reset");
   if (account !== accountScope()) {
     await stopBridge();
@@ -181,14 +186,18 @@ export function onWaVoice(cb: (v: WaVoice) => void): () => void {
 /** Answer an incoming message — this is the local agent's reply channel. */
 export async function replyWa(id: string, text: string): Promise<void> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
-  boundAccount();
+  const account = boundAccount();
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
   await invoke("wa_bridge_reply", { id, text });
 }
 
 /** Send a proactive message to a specific JID (owner notifications). */
 export async function sendWa(to: string, text: string): Promise<void> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
-  boundAccount();
+  const account = boundAccount();
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
   await invoke("wa_bridge_send", { to, text });
 }
 
@@ -198,11 +207,13 @@ export async function sendWa(to: string, text: string): Promise<void> {
 export async function sendWaFile(
   to: string,
   file: { path: string; filename: string; mimetype?: string; caption?: string }
-): Promise<void> {
+): Promise<string> {
   if (!hasDesktop)
     throw new Error("Sending files over WhatsApp runs in the desktop app only.");
-  boundAccount();
-  await invoke("wa_bridge_send_file", {
+  const account = boundAccount();
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
+  return await invoke<string>("wa_bridge_send_file", {
     to,
     path: file.path,
     filename: file.filename,

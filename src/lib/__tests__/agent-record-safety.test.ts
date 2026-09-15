@@ -3,7 +3,7 @@ import { billing, erp, hr, quotes, pos, setCacheOrg, tools as settings } from ".
 import { runTool, TOOLS } from "../aiTools";
 import { setDataMode } from "../dataMode";
 import { setAgentMode } from "../agentMode";
-vi.mock("../log", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../log", async original => ({ ...await original<typeof import("../log")>(), log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 beforeEach(() => {
   localStorage.clear();

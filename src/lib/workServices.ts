@@ -106,9 +106,9 @@ export const WORK_SERVICES: readonly WorkService[] = [
     category: "AI",
     access: "local",
     description:
-      "Let Filey AI work with your Windows apps during a temporary session you enable.",
+      "Let Filey AI work with your Windows apps with temporary access started automatically for your in-app task.",
     limits:
-      "Requires the desktop app, an enabled session and a suitable model. The selected AI provider may charge for its inference.",
+      "Requires the Windows desktop app and a suitable model; temporary access starts for your task. The selected AI provider may charge for its inference.",
     docsUrl: "/docs?article=browser",
     route: "/agent",
   },

@@ -14,21 +14,26 @@ interface Item {
   file: File;
   thumb: string;
   pages: number;
+  error?: string;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 async function toItem(file: File): Promise<Item> {
+  let task: ReturnType<typeof safePdf.getDocument> | undefined;
+  const c = document.createElement("canvas");
   try {
     const data = new Uint8Array(await file.arrayBuffer());
-    const pdf = await safePdf.getDocument({ data }).promise;
+    task = safePdf.getDocument({ data });
+    const pdf = await task.promise;
     const p = await pdf.getPage(1);
-    const vp = p.getViewport({ scale: 0.4 });
-    const c = document.createElement("canvas");
+    const size = p.getViewport({ scale: 1 });
+    const vp = p.getViewport({ scale: Math.min(0.4, 400 / Math.max(size.width, size.height)) });
     c.width = vp.width;
     c.height = vp.height;
     const ctx = c.getContext("2d");
-    if (ctx) await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
+    if (!ctx) throw new Error("Preview is unavailable. Try reopening this tool.");
+    await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
     return {
       id: uid(),
       file,
@@ -37,7 +42,10 @@ async function toItem(file: File): Promise<Item> {
     };
   } catch (e) {
     console.warn("Failed to load PDF:", e);
-    return { id: uid(), file, thumb: "", pages: 0 };
+    return { id: uid(), file, thumb: "", pages: 0, error: e instanceof Error ? e.message : "Could not read this PDF." };
+  } finally {
+    c.width = c.height = 0;
+    await task?.destroy();
   }
 }
 
@@ -88,6 +96,7 @@ export default function MergeStudio({
 
   const merge = async () => {
     if (busy || loading) return;
+    if (items.some(item => item.error)) { toast.error("Remove unreadable PDFs before merging."); return; }
     if (!items.length) {
       toast.error("Add at least one PDF.");
       return;
@@ -177,7 +186,7 @@ export default function MergeStudio({
                   className="max-h-full max-w-full object-contain"
                 />
               ) : (
-                <Loader2 size={16} className="animate-spin text-brand-400" />
+                <span className="p-2 text-xs text-danger" role="alert">{it.error || "Preview unavailable"}</span>
               )}
             </div>
             <div className="mt-1.5 flex items-center gap-1">
@@ -213,9 +222,9 @@ export default function MergeStudio({
 
       <button
         onClick={merge}
-        disabled={busy || loading || items.length < 1}
+        disabled={busy || loading || items.length < 1 || items.some(item => !!item.error)}
         className="btn-primary mt-4 w-full"
-        aria-label="Merge and download PDF"
+        aria-label="Merge PDF"
       >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Combine size={15} />}
         {loading ? "Preparing files…" : `Merge ${items.length} file${items.length === 1 ? "" : "s"}`}

@@ -187,8 +187,8 @@ function BrowserWorkspace() {
         {supported
           ? "Websites open in separate Filey browser windows. Sign in yourself; your browser sessions stay with this account and workspace on this device. Local/cloud switching keeps those logins."
           : "The Windows app includes dedicated browser windows with separate workspace logins. This web preview opens websites in your own browser."}{" "}
-        Filey AI can operate a browser window after you enable temporary computer access
-        in the chat.
+        On Windows, Filey AI starts temporary computer access automatically for your task.
+        You can stop it from the chat at any time.
       </p>
       {supported && (
         <section

@@ -20,6 +20,8 @@ export async function pickFolder(): Promise<string | null> {
 export const getDataDir = () => invoke<string>("get_data_dir");
 export const setDataDir = (dir: string) => invoke<string>("set_data_dir", { dir });
 export const restartApp = () => invoke("restart_app");
+export const storageRecoveryStatus = () => invoke<string | null>("storage_recovery_status");
+export const cancelPendingStorage = () => invoke("cancel_pending_storage");
 
 // ---- document export folder (device-local setting) ----
 export const getExportDir = (): string =>
@@ -81,5 +83,6 @@ export const backupDb = (dest: string) => invoke<string>("backup_db", { dest });
 export const restoreDb = (src: string) => invoke("restore_db", { src });
 
 /** Full backup (DB + My Files blobs) into a folder, and restore from one. */
-export const backupAll = (dest: string) => invoke<string>("backup_all", { dest });
-export const restoreAll = (src: string) => invoke("restore_all", { src });
+export interface FullBackupResult { path: string; recoveryCode: string }
+export const backupAll = (dest: string) => invoke<FullBackupResult>("backup_all", { dest });
+export const restoreAll = (src: string, recoveryCode?: string) => invoke("restore_all", { src, recoveryCode: recoveryCode?.trim() || null });

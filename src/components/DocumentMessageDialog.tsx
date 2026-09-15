@@ -2,15 +2,17 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Download, FileText, Link2, Loader2, MessageCircle, Send, Share2, Sparkles, Square } from "lucide-react";
 import { Modal, ErrorBanner } from "./ui";
 import { cn, errMsg } from "../lib/format";
-import { bridgeState, hasDesktop, onBridgeState, sendWaFile } from "../lib/waBridge";
+import { bridgeState, hasDesktop, onBridgeState } from "../lib/waBridge";
 import { internationalPhone, openMessageDraft, prepareWhatsAppDocument, saveDocumentPdf, type MessageChannel } from "../lib/documentMessage";
 import { agentStorageScope, AGENT_STORAGE_EVENT, requireAgentStorageScope } from "../lib/agentStorage";
 import { computerUseSupported } from "../lib/computerUse";
+import { beginMessage, finishMessage, sendPairedDocument, messageJobs, blocksMessage, OUTBOX_EVENT, type MessageJob } from "../lib/messageOutbox";
 import { waLogAdd, waLogList, type WaLogEntry } from "../lib/waLog";
 const PdfCanvas = lazy(() => import("./PdfCanvas"));
 
 export interface DocumentMessageProps {
   documentKey?: string;
+  documentVersion?: string;
   title: string;
   phone: string;
   message: string;
@@ -19,7 +21,7 @@ export interface DocumentMessageProps {
   createLink?: () => Promise<string>;
 }
 
-export default function DocumentMessageDialog({ documentKey, title, phone: initialPhone, message: initialMessage, channel: initialChannel, loadPdf, createLink, onClose }: DocumentMessageProps & { onClose: () => void }) {
+export default function DocumentMessageDialog({ documentKey, documentVersion, title, phone: initialPhone, message: initialMessage, channel: initialChannel, loadPdf, createLink, onClose }: DocumentMessageProps & { onClose: () => void }) {
   const [channel, setChannel] = useState(initialChannel);
   const [phone, setPhone] = useState(initialPhone);
   const [message, setMessage] = useState(initialMessage);
@@ -30,14 +32,15 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [acceptedRecipients, setAcceptedRecipients] = useState<Set<string>>(() => new Set());
-  const [computerAttempts, setComputerAttempts] = useState<Set<string>>(() => new Set());
+  const [jobs, setJobs] = useState<MessageJob[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
   const [computerRunning, setComputerRunning] = useState(false);
   const [link, setLink] = useState("");
   const [savedPath, setSavedPath] = useState("");
   const [scope] = useState(agentStorageScope);
   const [preview, setPreview] = useState(false);
   const historyKey = documentKey || title;
+  const version = documentVersion || historyKey;
   const recentShares = () => waLogList({ limit: 200 }).filter(entry => entry.document?.key === historyKey).slice(-5).reverse();
   const [history, setHistory] = useState(recentShares);
   const remember = (outcome: NonNullable<WaLogEntry["document"]>["outcome"], recipient = phone) => {
@@ -81,8 +84,7 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
   useEffect(() => {
     let active = true;
     computerAbort.current?.abort();
-    setPdfError(""); setFile(null); setSavedPath(""); setAcceptedRecipients(new Set());
-    setComputerAttempts(new Set());
+    setPdfError(""); setFile(null); setSavedPath("");
     void (async () => {
       requireAgentStorageScope(scope ?? "signed-out");
       const value = await loadPdf();
@@ -99,6 +101,16 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
     const stop = onBridgeState((s) => setConnected(s.state === "connected"));
     return () => { active = false; stop(); };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => { void messageJobs(scope ?? "signed-out").then(rows => {
+      if (active) { setJobs(rows); setHistoryReady(true); }
+    }).catch(error => { if (active) { setHistoryReady(false); setError(errMsg(error)); } }); };
+    refresh();
+    window.addEventListener(OUTBOX_EVENT, refresh);
+    return () => { active = false; window.removeEventListener(OUTBOX_EVENT, refresh); };
+  }, [scope]);
 
   const body = link ? `${message}\n\n${link}` : message;
   const run = async (action: () => Promise<void>) => {
@@ -117,8 +129,9 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
   let computerAttempted = false;
   try {
     const recipient = internationalPhone(phone);
-    accepted = acceptedRecipients.has(recipient);
-    computerAttempted = computerAttempts.has(recipient);
+    const previous = jobs.filter(job => job.documentKey === historyKey && job.version === version && job.recipient === recipient && blocksMessage(job));
+    accepted = previous.some(job => job.outcome === "accepted" || job.outcome === "observed_sent");
+    computerAttempted = previous.some(job => job.outcome === "sending" || job.outcome === "unknown");
   } catch { /* The input is still being edited. */ }
   const savePdf = async () => {
     if (!file) throw new Error("The invoice PDF is not ready.");
@@ -169,19 +182,21 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
           <div className="flex items-center gap-2 text-[13px] font-medium"><Sparkles size={16} /> Let Filey AI send it</div>
           <p id="whatsapp-computer-disclosure" className="mt-2 text-xs text-muted-foreground leading-relaxed">
             {computerSupported
-              ? "Filey AI checks the number, attaches this PDF and sends your exact message. Clicking Send allows mouse and keyboard control of its WhatsApp window and file picker for up to five minutes. Screenshots go to your selected AI model."
+              ? "Filey AI checks the number, attaches this PDF and sends your exact message. Clicking Send allows mouse and keyboard control of its WhatsApp window and file picker until this task finishes or you stop it. Screenshots go to your selected AI model."
               : "Automatic sending runs in the installed Windows app. In this localhost/browser preview, use the sharing options below."}
           </p>
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">Sign in to WhatsApp in Filey Browser. Use a vision-capable local model or your own AI provider. Filey stops if login is needed.</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button type="button" className="btn-primary" aria-describedby="whatsapp-computer-disclosure"
-              disabled={!computerSupported || busy || stale || !file || !message.trim() || accepted || computerAttempted}
+              disabled={!computerSupported || !historyReady || busy || stale || !file || !message.trim() || accepted || computerAttempted}
               onClick={() => void run(async () => {
                 const recipient = internationalPhone(phone);
                 const controller = new AbortController();
                 computerAbort.current = controller;
                 setComputerRunning(true);
+                let job: MessageJob | undefined;
                 try {
+                  job = await beginMessage({documentKey:historyKey, version, file:file!, filename:file!.name, recipient, text:body, method:"computer"}, scope ?? "signed-out");
                   const { sendWhatsAppWithComputer } = await import("../lib/whatsappComputerSend");
                   assertCurrent();
                   const result = await sendWhatsAppWithComputer({
@@ -192,14 +207,16 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
                       if (controller.signal.aborted) return;
                       setNotice(progress.message);
                       if (progress.path) setSavedPath(progress.path);
-                      if (progress.sendAttempted) setComputerAttempts(previous => new Set(previous).add(recipient));
                     },
                   });
+                  await finishMessage(job, result.sendAttempted ? (result.status === "sent" ? "observed_sent" : "unknown") : "not_sent");
                   assertCurrent();
                   if (result.path) setSavedPath(result.path);
-                  if (result.sendAttempted) setComputerAttempts(previous => new Set(previous).add(recipient));
                   setNotice(result.message);
                   if (result.sendAttempted) remember(result.status === "sent" ? "observed_sent" : "unknown", recipient);
+                } catch (error) {
+                  if (job) await finishMessage(job, "unknown");
+                  throw error;
                 } finally {
                   if (computerAbort.current === controller) computerAbort.current = null;
                   if (mounted.current) setComputerRunning(false);
@@ -223,8 +240,9 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
             ? "Choose Share PDF, then WhatsApp and the recipient in your device's share sheet. The phone field above applies to text drafts and paired sending."
             : "Choose Prepare WhatsApp + PDF, then Attach → Document and select the saved invoice. On Windows, the chat opens in Filey's browser."}</p>
           <p className="mt-2">{computerSupported ? "For automatic sending, use Filey AI above or pair WhatsApp in Integrations → WhatsApp (QR)." : "The Windows app supports automatic sending with Filey AI or a paired WhatsApp connection."}</p>
-          <a className="inline-block underline mt-2" href="#/integrations" onClick={onClose}>WhatsApp setup</a>
+          <a className="inline-block underline mt-2" href="#/integrations?tab=free" onClick={onClose}>WhatsApp setup</a>
         </div>}
+        {(accepted || computerAttempted) && <p className="help">This version already has a send attempt. <a className="underline" href="#/comms" onClick={onClose}>Review message history in Comms</a> before sending another copy.</p>}
         {error && <ErrorBanner message={error} />}
         {notice && <p role="status" className="text-[13px] rounded-md bg-muted px-3 py-2">{notice}</p>}
         {savedPath && <div className="text-xs leading-relaxed"><p className="font-medium">Saved PDF</p><p className="mt-1 break-all select-all text-muted-foreground">{savedPath}</p></div>}
@@ -253,17 +271,16 @@ export default function DocumentMessageDialog({ documentKey, title, phone: initi
             setNotice(draft.draftOpened ? "PDF saved and WhatsApp draft opened. Nothing sent. Attach the PDF, review the recipient and message, then send in WhatsApp." : "PDF saved. The WhatsApp draft could not be opened; nothing was sent.");
             if (draft.draftOpened) remember("draft");
           })}><MessageCircle size={14} /> Prepare WhatsApp + PDF</button>}
-          {pairedSend && <button className={computerSupported ? "btn-ghost" : "btn-primary"} disabled={busy || stale || !file || accepted || computerAttempted} onClick={() => void run(async () => {
+          {pairedSend && <button className={computerSupported ? "btn-ghost" : "btn-primary"} disabled={!historyReady || busy || stale || !file || accepted || computerAttempted} onClick={() => void run(async () => {
             const recipient = internationalPhone(phone);
             if ((await bridgeState()).state !== "connected") throw new Error("WhatsApp disconnected. Reconnect in Integrations or open a draft instead.");
             assertCurrent();
             const saved = await savePdf();
             if (!saved.path) throw new Error("Save the PDF before sending it.");
-            try { await sendWaFile(`${recipient.slice(1)}@s.whatsapp.net`, { path: saved.path, filename: file!.name, mimetype: "application/pdf", caption: body }); }
+            try { await sendPairedDocument({documentKey:historyKey,version,file:file!,recipient,text:body,path:saved.path},scope ?? "signed-out"); }
             catch (e) { if (agentStorageScope() === scope) remember("unknown", recipient); throw e; }
             assertCurrent();
             remember("accepted", recipient);
-            setAcceptedRecipients((previous) => new Set(previous).add(recipient));
             setNotice("WhatsApp accepted the PDF attachment and message. Check WhatsApp for delivered or read status; Filey has no delivery receipt yet.");
           })}><Send size={14} /> {accepted ? "PDF accepted by WhatsApp" : "Send PDF via paired WhatsApp"}</button>}
         </div>

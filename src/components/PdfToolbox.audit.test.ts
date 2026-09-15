@@ -167,6 +167,7 @@ describe("Tools registry", () => {
     console.info(
       `[tools-audit] passed=${passed.length} skipped=${skipped.length} failed=${failures.length}`
     );
+    if (skipped.length) console.info("[tools-audit] not covered by jsdom (require separate runtime checks):\n  " + skipped.join("\n  "));
     if (failures.length) console.info("[tools-audit] failures:\n  " + failures.join("\n  "));
     expect(failures).toEqual([]);
   }, 120_000);

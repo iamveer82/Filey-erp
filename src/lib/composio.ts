@@ -1,11 +1,15 @@
 /* Composio bridge (frontend side).
  *
  * Every call goes through the Rust backend (Tauri commands in
- * modules/composio.rs), which holds the API key in the encrypted store. The key
+ * modules/composio.rs), which holds the API key in the OS secure store. The key
  * is only ever PASSED to Rust once, when the user saves it; it is never read
  * back into the browser or used for API calls from here. Desktop-only.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { getCacheScope } from "./api";
+import { assertWorkspaceCurrent } from "./dataMode";
+import { saveCredential, flushCredentials } from "./credentialStore";
+import { requireModuleAccess } from "./moduleAccess";
 import {
   platformCall,
   platformAvailable,
@@ -18,9 +22,28 @@ import {
 export const hasDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-const KEY = "composio_api_key";
-/** Single-tenant desktop: one Composio entity for this install. */
-export const COMPOSIO_USER = "default";
+function currentScope(): string {
+  assertWorkspaceCurrent();
+  const scope = getCacheScope();
+  if (!scope) throw new Error("Sign in before using integrations.");
+  return scope;
+}
+async function nativeCall<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  const scope = currentScope();
+  const result = await invoke<T>(command, { ...args, scope });
+  if (currentScope() !== scope) throw new Error("Your workspace changed. Reopen integrations.");
+  return result;
+}
+
+async function request<T>(action: string, command: string, cloudArgs: Record<string, unknown> = {}, nativeArgs = cloudArgs): Promise<T> {
+  const scope = currentScope();
+  await requireModuleAccess("integrations");
+  const own = await usingOwnKey();
+  if (currentScope() !== scope) throw new Error("Your workspace changed. Reopen integrations.");
+  const result = own ? await nativeCall<T>(command, nativeArgs) : await platformCall<T>("composio", action, cloudArgs);
+  if (currentScope() !== scope) throw new Error("Your workspace changed. Reopen integrations.");
+  return result;
+}
 
 /** Toolkits we surface on the Integrations page. */
 /* The apps offered on the Integrations page. Chosen for what an SMB running
@@ -44,22 +67,21 @@ export const COMPOSIO_TOOLKITS = [
   { slug: "mailchimp", name: "Mailchimp", desc: "Sync audiences and campaigns" },
 ] as const;
 
-export async function getComposioKey(): Promise<string> {
-  if (!hasDesktop) return "";
-  try {
-    return (await invoke<string | null>("cache_get", { key: KEY })) ?? "";
-  } catch {
-    return "";
-  }
+export async function hasOwnComposioKey(): Promise<boolean> {
+  if (!hasDesktop) return false;
+  const scope = currentScope();
+  await flushCredentials();
+  if (scope !== currentScope()) throw new Error("Your workspace changed. Reopen integrations.");
+  return nativeCall<boolean>("composio_has_key");
 }
 
-/** Save the customer's own key. Desktop puts it in the encrypted store and
+/** Save the customer's own key. Desktop puts it in the OS secure store and
  *  calls Composio directly; a browser has nowhere safe for a secret, so it goes
  *  to the cloud instead (write-only to the client — see saveCloudKey) and the
  *  proxy spends it on their behalf. */
 export async function setComposioKey(value: string): Promise<void> {
   if (hasDesktop) {
-    await invoke("cache_set", { key: KEY, value: value.trim() });
+    await saveCredential("composio", value.trim());
     return;
   }
   await saveCloudKey("composio", value);
@@ -67,7 +89,7 @@ export async function setComposioKey(value: string): Promise<void> {
 
 export async function clearComposioKey(): Promise<void> {
   if (hasDesktop) {
-    await invoke("cache_set", { key: KEY, value: "" });
+    await saveCredential("composio", null);
     return;
   }
   await clearCloudKey("composio");
@@ -77,7 +99,7 @@ export async function clearComposioKey(): Promise<void> {
  *  platform proxy. A cloud-stored key is deliberately NOT "own" here: the call
  *  still goes through the proxy, which is the only party that can read it. */
 export async function usingOwnKey(): Promise<boolean> {
-  return !!(await getComposioKey()).trim();
+  return hasOwnComposioKey();
 }
 
 /** The customer is on their own key, wherever it happens to live. */
@@ -105,16 +127,11 @@ export interface ConnectLink {
   error?: { message: string };
 }
 
-/** Start connecting a toolkit; returns an OAuth redirect URL for the user.
- *  Omit `userId` to use this install's stable entity (multi-tenant seam — one
- *  platform key, one entity per customer). Pass it to target a specific tenant. */
+/** Start connecting a toolkit for the signed-in account and workspace. */
 export async function composioConnect(
-  toolkit: string,
-  userId?: string
+  toolkit: string
 ): Promise<ConnectLink> {
-  if (!(await usingOwnKey()))
-    return platformCall<ConnectLink>("composio", "connect", { toolkit });
-  return invoke<ConnectLink>("composio_connect", { toolkit, userId });
+  return request("connect", "composio_connect", { toolkit });
 }
 
 export interface ConnectionStatus {
@@ -127,24 +144,31 @@ export interface ConnectionStatus {
 export async function composioStatus(
   connectedAccountId: string
 ): Promise<ConnectionStatus> {
-  if (!(await usingOwnKey()))
-    return platformCall<ConnectionStatus>("composio", "status", {
-      connected_account_id: connectedAccountId,
-    });
-  return invoke<ConnectionStatus>("composio_connection_status", {
-    connectedAccountId,
-  });
+  return request("status", "composio_connection_status", { connected_account_id: connectedAccountId }, { connectedAccountId });
 }
 
 export interface ConnectionList {
   items?: ConnectionStatus[];
   error?: { message: string };
+  next_cursor?: string | null;
 }
 
 export async function composioList(): Promise<ConnectionList> {
-  if (!(await usingOwnKey()))
-    return platformCall<ConnectionList>("composio", "list");
-  return invoke<ConnectionList>("composio_list_connections");
+  const scope = currentScope();
+  const items: ConnectionStatus[] = [];
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    if (currentScope() !== scope) throw new Error("Your workspace changed. Reopen integrations.");
+    const page: ConnectionList = await request("list", "composio_list_connections", { cursor });
+    if (page.error) throw new Error(page.error.message);
+    if (!Array.isArray(page.items)) throw new Error("Invalid connection list.");
+    items.push(...page.items);
+    cursor = page.next_cursor || null;
+    if (cursor && (cursors.has(cursor) || cursors.size >= 100)) throw new Error("The provider could not complete the connection list. Try refreshing.");
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+  return { items };
 }
 
 export interface ToolkitInfo {
@@ -160,18 +184,7 @@ export async function composioSearchToolkits(
   query: string,
   limit = 20
 ): Promise<ToolkitInfo[]> {
-  const res = await (usingOwnKey()
-    .then((own) =>
-      own
-        ? invoke<{ items?: ToolkitInfo[] }>("composio_search_toolkits", {
-            query,
-            limit,
-          })
-        : platformCall<{ items?: ToolkitInfo[] }>("composio", "toolkits", {
-            query,
-            limit,
-          })
-    ));
+  const res = await request<{ items?: ToolkitInfo[] }>("toolkits", "composio_search_toolkits", {query,limit});
   return res.items ?? [];
 }
 
@@ -190,15 +203,7 @@ export async function composioTools(
   toolkits?: string,
   limit = 40
 ): Promise<{ items?: ToolInfo[] }> {
-  if (!(await usingOwnKey()))
-    return platformCall<{ items?: ToolInfo[] }>("composio", "tools", {
-      toolkits,
-      limit,
-    });
-  return invoke<{ items?: ToolInfo[] }>("composio_list_tools", {
-    toolkits: toolkits ?? null,
-    limit,
-  });
+  return request("tools", "composio_list_tools", { toolkits: toolkits ?? null, limit });
 }
 
 export interface ExecuteResult {
@@ -207,21 +212,10 @@ export interface ExecuteResult {
   error?: { message: string } | string;
 }
 
-/** Run a connected Composio tool (e.g. GMAIL_SEND_EMAIL). Omit `userId` to use
- *  this install's stable entity. */
+/** Run a connected tool for the signed-in account and workspace. */
 export async function composioExecute(
   toolSlug: string,
-  args: Record<string, unknown>,
-  userId?: string
+  args: Record<string, unknown>
 ): Promise<ExecuteResult> {
-  if (!(await usingOwnKey()))
-    return platformCall<ExecuteResult>("composio", "execute", {
-      tool_slug: toolSlug,
-      arguments: args,
-    });
-  return invoke<ExecuteResult>("composio_execute", {
-    toolSlug,
-    arguments: args,
-    userId,
-  });
+  return request("execute", "composio_execute", { tool_slug: toolSlug, arguments: args }, { toolSlug, arguments: args });
 }

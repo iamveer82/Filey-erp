@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../../lib/api";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import AiSettings from "../AiSettings";
@@ -8,7 +9,7 @@ vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast }) }));
 
 const local: AiConfig = { provider: "openai", baseUrl: "http://localhost:11434/v1", model: "local-model", apiKey: "" };
 const reply = () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }), { status: 200 });
-beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
+beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("test-org", "test-user"); vi.clearAllMocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it("allows keyless loopback models without treating remote or misleading hosts as local", () => {
@@ -98,11 +99,79 @@ it("lets the user select a discovered local model without starting inference", a
   vi.stubGlobal("fetch", fetchMock);
   render(<AiSettings />);
   fireEvent.click(screen.getByRole("button", { name: "Find local models" }));
-  const models = await screen.findByRole("button", { name: "Available local models" });
-  fireEvent.click(models);
-  fireEvent.click(screen.getByRole("menuitem", { name: "installed-qwen" }));
+  const models = await screen.findByRole("combobox", { name: "Available local models" });
+  fireEvent.change(models, { target: { value: "installed-qwen" } });
   expect(screen.getByLabelText("Model")).toHaveValue("installed-qwen");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeEnabled();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledWith("http://localhost:11434/v1/models", expect.objectContaining({ method: "GET" }));
+});
+
+it("tests the just-entered hosted key, masks it after saving, and keeps it out of storage", async () => {
+  const fetchMock = vi.fn(async () => reply());
+  vi.stubGlobal("fetch", fetchMock);
+  render(<AiSettings />);
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "  fixture-openai-key  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  await screen.findByText("Connected to gpt-4o-mini. Your model returned a text response.");
+  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("https://api.openai.com/v1/chat/completions");
+  expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture-openai-key");
+  expect(JSON.parse(String(init.body)).max_tokens).toBe(2048);
+  expect(screen.getByLabelText("API key")).toHaveValue("");
+  expect(screen.getByText("Key available until reload")).toBeInTheDocument();
+  expect(JSON.stringify(localStorage)).not.toContain("fixture-openai-key");
+});
+
+it("keeps each provider's saved key when switching and does not save a draft key to another host", async () => {
+  setAiConfig({ ...local, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "fixture-original-key" });
+  render(<AiSettings />);
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-unsaved-key" } });
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Groq" } });
+  expect(screen.getByLabelText("API key")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Settings saved. Test the connection to verify your model.");
+  expect(getAiConfig().apiKey).toBe("fixture-original-key");
+});
+
+it("discovers hosted models with the draft key without overwriting the active connection", async () => {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: "chat-model" }] })));
+  vi.stubGlobal("fetch", fetchMock);
+  setAiConfig(local);
+  render(<AiSettings />);
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Groq" } });
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-groq-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Find models" }));
+  await screen.findByRole("combobox", { name: "Available models" });
+  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("https://api.groq.com/openai/v1/models");
+  expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture-groq-key");
+  expect(getAiConfig().baseUrl).toBe(local.baseUrl);
+});
+
+it("shows an actionable inline authentication failure without echoing the key", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { message: "Invalid key: fixture-invalid-key" } }), { status: 401 })));
+  render(<AiSettings />);
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-invalid-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  const error = await screen.findByRole("alert");
+  expect(error).toHaveTextContent("API key rejected");
+  expect(error).not.toHaveTextContent("fixture-invalid-key");
+  expect(screen.getByRole("button", { name: "Test connection" })).toBeEnabled();
+});
+
+it("only removes a saved key after Save changes and then disables hosted inference", async () => {
+  setAiConfig({ ...local, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "fixture-remove-key" });
+  render(<AiSettings />);
+  fireEvent.click(screen.getByRole("button", { name: "Clear key" }));
+  expect(getAiConfig().apiKey).toBe("fixture-remove-key");
+  expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Settings saved. Test the connection to verify your model.");
+  expect(getAiConfig().apiKey).toBe("");
+  expect(aiReady()).toBe(false);
 });

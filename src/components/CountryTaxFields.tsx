@@ -85,6 +85,7 @@ export default function CountryTaxFields({
       <p className="text-xs text-brand-500">
         Use 0 if no tax is charged. Suggested rates need review for your goods, services
         and customer. Cross-border treatment is entered per document.
+        {" "}<a className="underline underline-offset-2" href="#/docs?article=international-business">View country capabilities</a>.
       </p>
     </div>
   );

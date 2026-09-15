@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTool, setToolConfirm, approvalArgs, redactArgs } from "../aiTools";
 import { isOwnerNumber } from "../waAgent";
 import { setDataMode } from "../dataMode";
@@ -46,7 +46,7 @@ describe("runTool confirm override", () => {
       undefined,
       controller.signal
     );
-    await Promise.resolve();
+    await vi.waitFor(() => expect(approve).toBeTypeOf("function"));
     controller.abort();
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
     approve(true);

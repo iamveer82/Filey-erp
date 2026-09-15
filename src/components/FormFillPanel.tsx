@@ -168,7 +168,7 @@ export default function FormFillPanel({
       <div className="mt-5 flex items-center gap-3">
         <button className="btn-primary" onClick={apply} disabled={running || !fields?.length}>
           {running ? <Loader2 size={14} className="animate-spin" /> : null}
-          {running ? "Filling…" : "Fill and download"}
+          {running ? "Filling…" : "Create filled PDF"}
         </button>
         <span className="text-[12.5px] text-muted-foreground">
           {(fields ?? []).length} field{(fields ?? []).length === 1 ? "" : "s"} in this PDF

@@ -7,6 +7,11 @@ import { localClient, journalSnapshot, journalVersion, journalCommit, replaceCol
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
 
+// Stable fixture IDs keep these journal/transport checks readable. The real
+// cross-device allocator is exercised in record-id.test and localdb.test.
+vi.mock("./recordId", () => ({ nextLocalId: (rows: { id: number }[]) =>
+  rows.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1 }));
+
 // syncNow only runs in local mode.
 beforeEach(() => {
   localStorage.clear();
@@ -78,7 +83,13 @@ function fakeCloud(opts?: {
         return { data: { session }, error: null };
       },
     },
-    async rpc(name: string) {
+    async rpc(name: string, args?: any) {
+      if (name === "sync_record") {
+        calls.push({ table: args.p_table, op: args.p_delete ? "delete" : "upsert", payload: [args.p_row], ids: [args.p_row.id] });
+        return opts?.failTables?.includes(args.p_table)
+          ? { data: null, error: { message: "boom" } }
+          : { data: { ok: true, revision: (args.p_expected ?? 0) + 1 }, error: null };
+      }
       calls.push({ table: "(rpc)", op: name });
       return { data: null, error: null };
     },
@@ -236,9 +247,8 @@ describe("syncNow", () => {
     await syncNow(client);
 
     const ups = calls.filter((c) => c.table === "products" && c.op === "upsert");
-    expect(ups[0].payload).toHaveLength(2);
-    expect(ups[1].payload).toHaveLength(1);
-    expect(ups[1].payload[0].name).toBe("A2");
+    expect(ups).toHaveLength(3);
+    expect(ups.map(call => call.payload[0].name)).toEqual(["A", "B", "A2"]);
   });
 
   it("keeps rows that failed to push marked for retry", async () => {
@@ -277,7 +287,7 @@ describe("syncNow", () => {
     const { client, calls } = fakeCloud({ failTables: ["invoice_payments"] });
     const row = { id: 4, invoice_id: 19, amount: 100 };
     expect(await pushCollection(client, "invoice_payments", [row])).toEqual([4]);
-    expect(calls.map((call) => call.payload)).toEqual([[row], row]);
+    expect(calls.map((call) => call.payload)).toEqual([[row]]);
   });
 
   it("does nothing without a session", async () => {
@@ -320,12 +330,12 @@ describe("syncNow", () => {
 });
 
 describe("org sharing", () => {
-  it("flags business rows shared for real-org members, never in org 'default'", async () => {
+  it("keeps new business rows private, including real-org members", async () => {
     await localClient.from("products").insert({ name: "A" });
     const team = fakeCloud({ uid: "uid-team", org: "team-1" });
     await syncNow(team.client);
     const up = team.calls.find((c) => c.table === "products" && c.op === "upsert");
-    expect(up?.payload[0].shared).toBe(true);
+    expect(up?.payload[0].shared).toBe(false);
 
     // SECURITY: org 'default' is where every solo account lives — sharing
     // there would leak rows to unrelated users.

@@ -7,6 +7,14 @@ import { getAgentMode } from "../lib/agentMode";
 import { downloadText } from "../lib/localPaths";
 import { useUI } from "../lib/ui";
 
+const COUNTRY_COVERAGE = [
+  ["UAE", "Invoices, quotes, POs and receipts; AED and foreign-currency documents", "Editable VAT and TRN fields; PINT-AE export", "AED ledger; WPS export fields", "No verified government-gateway submission or filing"],
+  ["India", "Invoices, quotes, POs and receipts; INR and other currencies", "GSTIN format and editable tax; country snapshot", "AED ledger; no localized statutory payroll", "No split GST, place-of-supply engine, IRN, e-way bills or returns"],
+  ["EU member states", "Individual country selection; EUR and non-euro currencies", "VAT-ID labels and editable line tax", "AED ledger; no national payroll", "No VIES, OSS/IOSS, national e-invoice gateways or returns"],
+  ["Saudi Arabia", "Country-aware documents; SAR and other currencies", "Editable VAT and tax-ID fields", "AED ledger; no localized statutory payroll", "No verified government-gateway submission or filing"],
+  ["Other countries", "General documents and supported currencies", "Manually configured tax and identifiers", "AED ledger; generic people/pay records", "Country-specific validation, payroll and filings require separate implementation"],
+];
+
 export const GUIDES = [
   {
     id: "international-business", category: "Getting started", title: "Business country, currency and taxes", to: "/settings?section=company",
@@ -442,6 +450,11 @@ export default function KnowledgeCenter() {
                   </li>
                 ))}
               </ol>
+              {article.id === "international-business" && <section className="mt-7" aria-label="Country capability matrix">
+                <h3 className="text-lg font-semibold">Country coverage</h3><p className="help mb-3">Current implementation · ledger amounts remain AED. Country-aware documents do not provide complete national accounting or filing support.</p>
+                <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr>{["Region","Documents","Tax handling","Accounting & payroll","Not included"].map(heading=><th key={heading} className="border-b border-border px-3 py-2 font-medium">{heading}</th>)}</tr></thead><tbody>{COUNTRY_COVERAGE.map(row=><tr key={row[0]}>{row.map((cell,index)=><td key={index} className="min-w-40 border-b border-border px-3 py-3 align-top">{cell}</td>)}</tr>)}</tbody></table></div>
+                <p className="help mt-3">English, Arabic and Hindi interfaces use English fallbacks where untranslated. PDF output depends on the selected layout and available fonts. Project and helpdesk owner names are labels; they do not send assignment notifications.</p>
+              </section>}
               <Link className="btn-primary mt-7" to={article.to}>
                 Open section
                 <ArrowUpRight size={14} />

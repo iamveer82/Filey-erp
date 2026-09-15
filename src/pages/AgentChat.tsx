@@ -20,16 +20,12 @@ import {
   Copy,
   Check,
   Square,
-  Cpu,
-  Users,
-  Package,
-  BarChart3,
+  Settings2,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
-import ComputerUseControls from "../components/ComputerUseControls";
-import { disableComputerUse } from "../lib/computerUse";
+import { enableComputerUse, disableComputerUse, computerUseSupported } from "../lib/computerUse";
 import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
@@ -50,7 +46,6 @@ import {
   AiError,
   buildSystemPrompt,
   getPersona,
-  getAiConfig,
   type AiMessage,
   type AiImage,
 } from "../lib/ai";
@@ -96,19 +91,6 @@ import {
 
 const SYSTEM =
   "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval. Never invent data — look it up. Be concise and practical.";
-
-/** Four things the agent is genuinely good at, phrased the way an owner would
- *  ask. Kept short enough to fit one row on a laptop. */
-const STARTERS = [
-  {
-    label: "Review this month's sales",
-    prompt: "What did I invoice this month?",
-    icon: BarChart3,
-  },
-  { label: "Find unpaid invoices", prompt: "Who owes me money?", icon: Users },
-  { label: "Prepare an invoice", prompt: "Draft an invoice", icon: FileText },
-  { label: "Check low stock", prompt: "What's running low in stock?", icon: Package },
-];
 
 /** Width both halves of the conversation share — messages and the composer sit
  *  on one measure so long replies don't stretch wider than where you type. */
@@ -218,11 +200,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     });
     setListening(!!dictationRef.current);
   };
-  // Read fresh every render: frozen-at-mount values kept showing a stale model
-  // chip (and a stale "connect first" gate) after the key changed in Settings.
-  // These are cheap localStorage reads.
+  // Read fresh so changes in Settings are reflected when sending.
   const ready = aiReady();
-  const model = getAiConfig().model;
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
   /** The tools run so far this turn ("Looking up customers…"), shown as a chip
    *  trail while the agent works so a long turn reads as work, not a hang. */
@@ -239,6 +218,18 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const topRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const computerStartup = useRef<Promise<number> | null>(null);
+
+  useEffect(() => {
+    if (!scope || !computerUseSupported()) return;
+    const pending = enableComputerUse();
+    computerStartup.current = pending;
+    // Setup failures are reported if a task actually needs computer control.
+    void pending.catch(() => {}).finally(() => {
+      if (computerStartup.current === pending) computerStartup.current = null;
+    });
+    return () => { void disableComputerUse().catch(() => {}); computerStartup.current = null; };
+  }, [scope]);
 
   // Attach a file + build an image preview (revoking the previous one).
   /** Attach one or more files. Several at once is the point: "merge these"
@@ -444,6 +435,22 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
      *  stop or error — so they always land with THIS message and never leak
      *  into whichever turn ends next. */
     let made: FileOutput[] = [];
+    let computerSessionId: number | undefined;
+    const computerSession = async () => {
+      ctl.signal.throwIfAborted();
+      if (!scope || scope !== agentStorageScope())
+        throw new DOMException("Workspace changed. Computer access stopped.", "AbortError");
+      // Reuse the chat's default grant. The task still passes owner, capability
+      // and approval gates; Stop cannot silently re-enable this task's grant.
+      if (computerStartup.current) await computerStartup.current;
+      ctl.signal.throwIfAborted();
+      computerSessionId ??= await enableComputerUse();
+      if (ctl.signal.aborted) {
+        await disableComputerUse(computerSessionId);
+        ctl.signal.throwIfAborted();
+      }
+      return computerSessionId;
+    };
     const trace: NonNullable<ChatTurn["run"]> = { plan: [], actions: [] };
     try {
       let reply = "";
@@ -467,7 +474,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         { role: "user", text: goalText, images },
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
-      const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096 };
+      const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096, computerSession };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
         : aiAgentStream(messages, options);
@@ -564,6 +571,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           }));
       }
     } finally {
+      ctl.abort();
       endTurn(turnId); // no-op when already drained above — never leaks
       abortRef.current = null;
       streamedRef.current = "";
@@ -608,13 +616,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
   const empty = chat.turns.length === 0;
   const activeMode = AGENT_MODES.find((item) => item.id === mode)!;
-  const status = pendingConfirm
-    ? "Waiting for approval"
-    : busy
-      ? "Working…"
-      : ready
-        ? "Model configured"
-        : "Setup needed";
 
   return (
     <div
@@ -650,10 +651,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         )}
 
-        <header className="sticky top-0 z-30 mb-3 border-b border-border bg-page pb-3 pt-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 basis-48">
-              <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-foreground">
+        <header className="sticky top-0 z-30 mb-3 bg-page pb-3 pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg font-semibold leading-tight text-foreground">
                 Filey AI
               </h1>
               {!empty && (
@@ -665,75 +666,45 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 </p>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
               <button
                 type="button"
                 onClick={openHistory}
                 aria-label="Chat history"
                 title="Chat history"
-                className="btn-ghost"
+                className="btn-ghost w-10 !px-0"
               >
                 <History size={15} />
-                <span className="hidden sm:inline">History</span>
               </button>
               <button
                 type="button"
                 onClick={openMemory}
                 aria-label="Agent memory"
                 title="Agent memory"
-                className="btn-ghost"
+                className="btn-ghost w-10 !px-0"
               >
                 <Brain size={15} />
-                <span className="hidden sm:inline">Memory</span>
               </button>
+              <button type="button" onClick={() => setCapsOpen(true)} disabled={busy}
+                className="btn-ghost w-10 !px-0 sm:w-auto sm:!px-3" aria-label="Agent access" title={activeMode.description}>
+                <SlidersHorizontal size={15} />
+                <span className="hidden sm:inline">Access: {activeMode.name}</span>
+              </button>
+              <Link to="/settings?section=ai" className="btn-ghost w-10 !px-0" aria-label="AI settings" title="AI settings">
+                <Settings2 size={15} />
+              </Link>
               <button
                 type="button"
                 onClick={startNew}
                 disabled={busy}
-                className="btn-primary"
+                aria-label="New chat"
+                className="btn-primary w-10 !px-0 sm:w-auto sm:!px-3"
               >
                 <Plus size={15} />
-                New chat
+                <span className="hidden sm:inline">New chat</span>
               </button>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Link
-              to="/settings?section=ai"
-              className="btn-ghost min-w-0 max-w-full"
-              title="Choose or configure your AI model"
-            >
-              <Cpu size={15} className="shrink-0" />
-              <span className="max-w-[230px] truncate">
-                {ready ? model : "Choose a model"}
-              </span>
-            </Link>
-            <button
-              type="button"
-              onClick={() => setCapsOpen(true)}
-              disabled={busy}
-              className="btn-ghost"
-              aria-label="Agent access"
-              title={activeMode.description}
-            >
-              <SlidersHorizontal size={15} />
-              Access: {activeMode.name}
-            </button>
-            <span
-              role="status"
-              className="ml-auto inline-flex items-center gap-2 px-1 text-xs text-muted-foreground"
-            >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  busy ? "bg-primary-400" : "bg-muted-foreground/60"
-                )}
-              />
-              {status}
-            </span>
-          </div>
-          <ComputerUseControls onStop={stop} />
         </header>
 
         {/* The conversation and composer share one readable measure. */}
@@ -741,7 +712,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           className={cn(
             COLUMN,
             "pt-2",
-            empty && !busy ? "space-y-3 pb-2" : "flex-1 space-y-7 pb-8"
+            empty && !busy ? "flex flex-1 flex-col justify-center space-y-3 py-10 sm:py-16" : "flex-1 space-y-7 pb-8"
           )}
           aria-label="Conversation"
         >
@@ -750,44 +721,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               {/* The empty chat is where the bot has room to be itself, so this
                   one animates: it breathes, blinks and looks around while it
                   waits for a first question. */}
-              <div className="mx-auto mb-2 grid h-12 w-12 place-items-center">
+              <div className="mx-auto mb-4 grid h-12 w-12 place-items-center">
                 <BloubBot size={48} state="idle" label="Filey AI" ambient />
               </div>
-              <h2 className="text-[22px] font-semibold leading-tight text-foreground tracking-tight">
-                What would you like to get done?
+              <h2 className="text-2xl font-medium leading-tight text-foreground tracking-tight">
+                How can I help?
               </h2>
-              <p className="mx-auto mt-2 max-w-lg text-[13px] leading-relaxed text-muted-foreground">
-                Work with your records, documents and connected apps.
-              </p>
-              {/* Openers, not decoration: a blank box gives no clue that this
-                  agent can draft documents and chase payments, not just chat. */}
-              <div className="mx-auto mt-3 grid max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">
-                {STARTERS.map(({ label, prompt, icon: Icon }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setInput(prompt);
-                      textareaRef.current?.focus();
-                    }}
-                    className="btn-ghost !justify-start"
-                  >
-                    <Icon size={15} className="shrink-0 text-muted-foreground" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {!ready && (
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  Connect a local model or your own provider to begin.{" "}
-                  <Link
-                    className="font-medium text-foreground underline underline-offset-4"
-                    to="/settings?section=ai"
-                  >
-                    Open AI settings
-                  </Link>
-                </p>
-              )}
             </div>
           ) : (
             // Turns separate by spacing alone: ChatTurn carries no timestamp
@@ -815,14 +754,13 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           <div ref={endRef} />
         </div>
 
-        {/* A new chat stays in normal flow so a short viewport cannot pin the
-            composer over its starters. Once there are messages, keep it handy. */}
+        {/* Keep the composer in flow on a short screen, sticky during a chat. */}
         <div
           className={cn("z-20 mt-auto bg-page pb-3 pt-2", !empty && "sticky bottom-0")}
         >
           <div className={COLUMN}>
             {/* A stable composer keeps Stop readable while a reply is running. */}
-            <div className="rounded-xl border border-border bg-card p-3 transition-colors focus-within:border-muted-foreground/60">
+            <div className="rounded-3xl border border-border bg-card p-3 transition-colors focus-within:border-muted-foreground/60">
               {/* Attachment chips — one tile per file, remove always visible
                   (hover-only removal hides the affordance on touch). Several
                   files at once is the merge flow: the order shown is the order
@@ -909,7 +847,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                  * click - a yellow box around the thing you type in. Focus is
                  * still shown, by the wrapper's border darkening.
                  */
-                className="max-h-[160px] min-h-[48px] w-full resize-none bg-transparent px-1 py-1 text-[14px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
+                className="max-h-[160px] min-h-[48px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
                 autoFocus
               />
 
@@ -925,7 +863,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     aria-label="Add to message"
                     aria-expanded={plusOpen}
                     title="Add files, repos, skills — Ctrl+U for files"
-                    className="btn-ghost w-10 !px-0"
+                    className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover"
                   >
                     <Paperclip size={16} />
                   </button>
@@ -990,6 +928,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     <MenuSep />
 
                     {/* Group 3: live toggles */}
+                    <MenuItemRow icon={<Zap size={14} />} label="Autonomous mode" checked={auto}
+                      onClick={() => { setAuto(v => !v); setPlusOpen(false); }} />
                     <MenuItemRow
                       icon={<Globe size={14} />}
                       label="Web research"
@@ -1016,9 +956,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   }}
                 />
                 {/* Autonomous changes how a task runs, not its access permissions. */}
-                <button
+                {auto && <button
                   type="button"
-                  onClick={() => setAuto((v) => !v)}
+                  onClick={() => setAuto(false)}
                   disabled={busy}
                   aria-label="Autonomous mode"
                   aria-pressed={auto}
@@ -1038,7 +978,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     )}
                   />
                   Autonomous
-                </button>
+                </button>}
                 <div className="flex-1" />
                 {/* One button, three states — empty ghost, ready amber,
                     streaming stop — exactly like the reference input. Stop is
@@ -1082,7 +1022,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     aria-pressed={listening}
                     title={listening ? "Stop dictation" : "Dictate (speech-to-text)"}
                     className={cn(
-                      "btn-ghost w-10 !px-0 shrink-0",
+                      "btn-ghost w-10 !border-transparent !px-0 shrink-0",
                       listening
                         ? "bg-danger/15 text-danger animate-pulse"
                         : "text-muted-foreground hover:bg-hover hover:text-foreground"
@@ -1093,16 +1033,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 )}
               </div>
             </div>
-            <div className="mt-2 space-y-1 px-1 text-[11.5px] leading-relaxed text-muted-foreground">
-              <p>
-                {auto ? "Autonomous works through multiple steps. " : ""}
-                {activeMode.description}
-              </p>
-              <p id="filey-message-hint">
-                Enter to send · Shift+Enter for a new line. Attach PDFs or images with the
-                paperclip.
-              </p>
-            </div>
+            <p id="filey-message-hint" className="mt-2 px-1 text-center text-[11px] text-muted-foreground">
+              Enter to send · Shift+Enter for a new line
+            </p>
           </div>
         </div>
 

@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../api";
 // {{secret:NAME}} substitution — see fillSecrets in secretStore.ts.
 //
 // The property that matters: a credential reaches the wire without ever being
@@ -19,7 +20,7 @@ const store: Record<string, string> = {
 };
 const lookup = (n: string) => (n in store ? store[n] : null);
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("test-org", "test-user"); });
 
 describe("fillSecrets", () => {
   it("substitutes a reference and reports the name, not the value", () => {
@@ -85,18 +86,18 @@ describe("hasSecretRef", () => {
 });
 
 describe("the store itself", () => {
-  it("saves, recalls, lists and deletes by name", () => {
-    saveSecret("k1", "v1");
-    saveSecret("k2", "v2");
-    expect(recallSecret("k1")).toBe("v1");
+  it("saves, recalls, lists and deletes by name", async () => {
+    await saveSecret("k1", "v1");
+    await saveSecret("k2", "v2");
+    expect(await recallSecret("k1")).toBe("v1");
     expect(listSecrets().sort()).toEqual(["k1", "k2"]);
-    deleteSecret("k1");
-    expect(recallSecret("k1")).toBeNull();
+    await deleteSecret("k1");
+    expect(await recallSecret("k1")).toBeNull();
     expect(listSecrets()).toEqual(["k2"]);
   });
 
-  it("defaults fillSecrets to the real store", () => {
-    saveSecret("live_one", "zzz");
+  it("defaults fillSecrets to the real store", async () => {
+    await saveSecret("live_one", "zzz");
     expect(fillSecrets("x={{secret:live_one}}").text).toBe("x=zzz");
   });
 });

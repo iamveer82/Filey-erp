@@ -1,3 +1,4 @@
+import { invoiceMessageVersion } from "../lib/messageOutbox";
 import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
 import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
 import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/documentMessage";
@@ -434,21 +435,21 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const isCapError = (e: unknown) => errMsg(e).includes("Free plan limit reached");
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(false);
-  const loadDocs = () => {
+  const loadDocs = useCallback(() => {
     setDocsLoading(true);
     return billing
       .listDocs(mode)
       .then((rows) => { setDocs(rows); setDocsError(false); })
       .catch(() => { setDocsError(true); toast.error("Failed to load documents"); })
       .finally(() => setDocsLoading(false));
-  };
-  const loadRecurs = () =>
+  }, [mode, toast]);
+  const loadRecurs = useCallback(() =>
     recurrences
       .list()
       .then(setRecurs)
-      .catch(() => toast.error("Failed to load recurrences"));
+      .catch(() => toast.error("Failed to load recurrences")), [toast]);
 
-  const reload = () => {
+  const reload = useCallback(() => {
     billing
       .getCompany()
       .then(setCompany)
@@ -456,8 +457,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     loadDocFormats().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
-  };
-  useEffect(reload, []);
+  }, [loadDocs, loadRecurs, toast]);
+  useEffect(reload, [reload]);
   useLiveSync(reload);
 
   // Generate any due recurring invoices once on load.
@@ -602,7 +603,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
     }
-  }, [toast]);
+  }, [toast, isPurchase]);
 
   useEffect(() => {
     if (!params.has("open") || !company) return;
@@ -976,6 +977,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       if (kind === "whatsapp" || kind === "sms") {
         setMessageDialog({
           documentKey: `invoice:${d.id}`,
+          documentVersion: await invoiceMessageVersion(doc),
           title: subject,
           phone,
           message: text,
@@ -1724,7 +1726,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
 
 /* ---------------- Payments ---------------- */
 
-function PaymentsModal({
+export function PaymentsModal({
   doc,
   onClose,
   onSaved,
@@ -1740,21 +1742,31 @@ function PaymentsModal({
   const [paidAt, setPaidAt] = useState(todayYmd());
   const [busy, setBusy] = useState(false);
 
-  const load = () => {
-    if (!doc) return;
-    billing
-      .payments(doc.id)
-      .then(setRows)
-      .catch(() => setRows([]));
-  };
-  useEffect(load, [doc?.id]);
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const paymentRequest = useRef(0);
+  const documentId = doc?.id;
+  const selectedDocument = useRef(documentId);
+  selectedDocument.current = documentId;
+  const load = useCallback(() => {
+    const generation = ++paymentRequest.current;
+    if (selectedDocument.current !== documentId) return;
+    setRows([]); setPaymentError(""); setPaymentsLoading(true);
+    if (!documentId) return;
+    const current = () => generation === paymentRequest.current && selectedDocument.current === documentId;
+    void billing.payments(documentId)
+      .then(rows => { if (current()) setRows(rows); })
+      .catch(error => { if (current()) setPaymentError("Could not load payments: " + errMsg(error)); })
+      .finally(() => { if (current()) setPaymentsLoading(false); });
+  }, [documentId]);
+  useEffect(() => { load(); }, [load]);
 
   const total = doc?.total ?? 0;
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
   const balance = Math.max(0, total - paid);
 
   const add = async () => {
-    if (!doc || amount <= 0) return;
+    if (!doc || amount <= 0 || busy || paymentsLoading || paymentError) return;
     setBusy(true);
     try {
       await billing.addPayment(doc.id, amount, method || null, paidAt);
@@ -1790,6 +1802,7 @@ function PaymentsModal({
   const ccy = doc.currency || "AED";
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments - ${doc.number}`}>
+      {paymentError && <div className="mb-3 space-y-2"><ErrorBanner message={paymentError} /><button className="btn-secondary" onClick={load}>Reload payments</button></div>}
       <div className="grid grid-cols-3 joined-kpis mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Total</p>
@@ -1800,13 +1813,13 @@ function PaymentsModal({
         <div className="rounded-xl bg-success/10 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Paid</p>
           <p className="font-medium font-medium text-success tabular-nums">
-            {money(paid, ccy)}
+            {paymentsLoading || paymentError ? "—" : money(paid, ccy)}
           </p>
         </div>
         <div className="rounded-xl bg-primary-100 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Balance</p>
           <p className="font-medium font-medium text-ink tabular-nums">
-            {money(balance, ccy)}
+            {paymentsLoading || paymentError ? "—" : money(balance, ccy)}
           </p>
         </div>
       </div>
@@ -1859,7 +1872,7 @@ function PaymentsModal({
             ]}
           />
         </Field>
-        <button className="btn-primary" disabled={busy || amount <= 0} onClick={add}>
+        <button className="btn-primary" disabled={busy || paymentsLoading || !!paymentError || amount <= 0} onClick={add}>
           <Plus size={15} /> Add
         </button>
       </div>
@@ -1892,7 +1905,7 @@ function InventoryImportModal({
         .products()
         .then(setProducts)
         .catch(() => toast.error("Failed to load products"));
-  }, [open]);
+  }, [open, toast]);
   const filtered = products.filter(
     (p) =>
       p.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -2406,7 +2419,7 @@ function Editor({
             disabled={downloading}
             title="Download PDF (Ctrl+P)"
           >
-            <Download size={15} /> {downloading ? "Exporting…" : "PDF"}
+            <Download size={15} /> {downloading ? "Exporting…" : "Download PDF"}
           </button>
           <button
             className="btn-primary"
@@ -2525,7 +2538,7 @@ function Editor({
                   className="btn-ghost text-xs"
                   onClick={() => setViewAll((v) => !v)}
                 >
-                  {viewAll ? "Show less" : "View all templates"}
+                  {viewAll ? "Close templates" : "Browse templates"}
                 </button>
                 <button
                   className="btn-ghost text-xs flex items-center gap-1"
@@ -3857,7 +3870,7 @@ function Step({ title, subtitle, action, children, collapsed = false }: {
       <div className="border-t border-border p-5">{action && <div className="mb-4 flex justify-end">{action}</div>}{children}</div>
     </details>
   );
-  return <section className="rounded-xl border border-border bg-card"><div className="flex flex-wrap items-center gap-3 px-5 py-3">{heading}{action}</div><div className="px-5 pb-5">{children}</div></section>;
+  return <section className="rounded-xl border border-border bg-card"><div className="flex flex-col items-start gap-3 px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center">{heading}{action}</div><div className="px-5 pb-5">{children}</div></section>;
 }
 
 /* ---------------- Customer modal (UAE FTA) ---------------- */

@@ -31,16 +31,21 @@ import {
   getDataDir,
   setDataDir,
   restartApp,
+  storageRecoveryStatus,
+  cancelPendingStorage,
   getExportDir,
   setExportDir,
   clearExportDir,
   openFolder,
   backupAll,
   restoreAll,
+  type FullBackupResult,
 } from "../../lib/localPaths";
 import { todayYmd } from "../../lib/format";
 import { pendingCloudWrites } from "../../lib/api";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import SyncConflictReview from "../../components/SyncConflictReview";
+import { Modal } from "../../components/ui";
 
 // Cloud sync card (local mode only): connect a cloud account and this device
 // syncs both ways — local changes upload within a second, and edits from your
@@ -117,7 +122,7 @@ function CloudSyncCard() {
   const uploadAll = async () => {
     if (
       !window.confirm(
-        "Upload ALL local data to the cloud now? Cloud copies of the same records are overwritten - this device wins."
+        "Upload all local data now? Filey will preserve conflicting cloud records and ask you to review them."
       )
     )
       return;
@@ -155,7 +160,7 @@ function CloudSyncCard() {
       <p className="text-sm leading-relaxed text-muted-foreground">
         Keep working offline on this device; changes upload to your cloud account within
         seconds, and edits from your other devices or teammates download automatically.
-        Review transfers before enabling sync; local edits replace matching cloud records.
+        Conflicting edits stay on this device until you review which version to keep.
       </p>
 
       {connected ? (
@@ -202,6 +207,7 @@ function CloudSyncCard() {
           >
             {statusLine}
           </p>
+          <SyncConflictReview />
         </>
       ) : (
         <>
@@ -293,32 +299,30 @@ export default function DataModePanel() {
   const [exportDir, setExportDirState] = useState(getExportDir());
   const [pendingWrites, setPendingWrites] = useState(0);
   const [progress, setProgress] = useState("");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     if (hasTauri)
-      getDataDir()
-        .then(setDataDirState)
-        .catch(() => {});
+      void Promise.all([getDataDir(), storageRecoveryStatus()])
+        .then(([directory, recovery]) => { if (active) { setDataDirState(directory); setRecoveryError(recovery); } })
+        .catch(error => { if (active) setErr(String(error?.message ?? error)); });
     void pendingCloudWrites()
-      .then((rows) => setPendingWrites(rows.length))
+      .then((rows) => { if (active) setPendingWrites(rows.length); })
       .catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const changeDataDir = async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    if (
-      !window.confirm(
-        `Move the Filey database to:\n${dir}\n\nThe app will restart. Your current data is copied to the new location.`
-      )
-    )
-      return;
+    if (storageBusy) return;
+    setStorageBusy(true); setErr("");
     try {
+      const dir = await pickFolder();
+      if (!dir || !window.confirm(`Copy the Filey database and saved files to:\n${dir}\n\nChoose an empty folder. Filey will verify the copy and restart. The original folder is preserved.`)) return;
       await setDataDir(dir);
       await restartApp();
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    }
+    } catch (error) { setErr(error instanceof Error ? error.message : String(error)); }
+    finally { setStorageBusy(false); }
   };
 
   const changeExportDir = async () => {
@@ -329,6 +333,11 @@ export default function DataModePanel() {
   };
 
   const [backupMsg, setBackupMsg] = useState("");
+  const [backupResult, setBackupResult] = useState<FullBackupResult | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [restoreSource, setRestoreSource] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [storageBusy, setStorageBusy] = useState(false);
   const [emirateMsg, setEmirateMsg] = useState("");
 
   const runEmirateFix = async () => {
@@ -346,33 +355,44 @@ export default function DataModePanel() {
   };
 
   const runBackup = async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    const dest = `${dir}/filey-backup-${todayYmd()}`;
-    setBackupMsg("");
+    if (storageBusy) return;
+    setStorageBusy(true);
     try {
-      const path = await backupAll(dest);
-      setBackupMsg(`Full backup saved (database + files): ${path}`);
+      const dir = await pickFolder();
+      if (!dir) return;
+      const dest = `${dir}/filey-backup-${todayYmd()}-${Date.now().toString(36)}`;
+      setBackupMsg("");
+      const result = await backupAll(dest);
+      setBackupResult(result);
+      setShowRecovery(false);
+      setBackupMsg(`Verified backup saved (database + files): ${result.path}`);
     } catch (e: any) {
       setBackupMsg(`Backup failed: ${e?.message ?? e}`);
-    }
+    } finally { setStorageBusy(false); }
   };
 
   const runRestore = async () => {
-    const src = await pickFolder();
-    if (!src) return;
-    if (
-      !window.confirm(
-        `Restore the full backup in:\n${src}\n\nThis REPLACES all data AND files on this device. The app will restart. Make a backup first if unsure.`
-      )
-    )
-      return;
+    if (storageBusy) return;
+    setStorageBusy(true);
     try {
-      await restoreAll(src);
+      const src = await pickFolder();
+      if (!src) return;
+      setRestoreSource(src);
+      setRecoveryCode("");
+      setBackupMsg("");
+    } catch (error) { setBackupMsg(String(error)); }
+    finally { setStorageBusy(false); }
+  };
+  const confirmRestore = async () => {
+    if (!restoreSource || storageBusy) return;
+    setStorageBusy(true);
+    try {
+      await restoreAll(restoreSource, recoveryCode);
+      setRecoveryCode("");
       await restartApp();
     } catch (e: any) {
       setBackupMsg(`Restore failed: ${e?.message ?? e}`);
-    }
+    } finally { setStorageBusy(false); }
   };
 
   const { user } = useAuth();
@@ -648,7 +668,7 @@ export default function DataModePanel() {
               <code className="w-full rounded-lg bg-hover p-3 text-xs text-muted-foreground break-all">
                 {dataDir || "…"}
               </code>
-              <button className="btn-ghost shrink-0" onClick={changeDataDir}>
+              <button className="btn-ghost shrink-0" onClick={changeDataDir} disabled={storageBusy}>
                 Change folder
               </button>
               {dataDir && (
@@ -705,16 +725,22 @@ export default function DataModePanel() {
             title="Backup & restore"
             description="Protect your local workspace with a complete backup."
           >
+            {recoveryError && <div className="space-y-3 rounded-xl border border-warning/40 p-4" role="alert">
+              <p className="text-sm font-medium">The pending storage change could not finish</p>
+              <p className="text-sm break-words">{recoveryError}</p>
+              <p className="text-xs text-muted-foreground">Your existing workspace is open. You can cancel the pending change; its copied files will be preserved.</p>
+              <button className="btn-ghost" onClick={() => void cancelPendingStorage().then(() => setRecoveryError(null)).catch(error => setBackupMsg(String(error)))}>Cancel pending change</button>
+            </div>}
             <p className="text-sm leading-relaxed text-muted-foreground">
               Save a full copy - database <em>and</em> your files - into a backup folder,
               or restore from one. Your offline safety net; keep it somewhere safe (USB
               drive, synced folder).
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <button className="btn-ghost" onClick={runBackup}>
+              <button className="btn-ghost" onClick={runBackup} disabled={storageBusy}>
                 Export backup
               </button>
-              <button className="btn-ghost" onClick={runRestore}>
+              <button className="btn-ghost" onClick={runRestore} disabled={storageBusy}>
                 Restore backup
               </button>
             </div>
@@ -788,7 +814,7 @@ export default function DataModePanel() {
                 <p className="text-sm text-brand-500 mt-0.5">
                   Uploads everything on this device (invoices, customers, products,
                   files…) to your cloud account, so the web version shows the same data.
-                  Cloud records sharing an id are overwritten by this device's copy.
+                  Newer cloud edits are preserved as conflicts for you to review.
                 </p>
               </div>
               <button onClick={runPush} disabled={busy} className="btn-ghost">
@@ -807,6 +833,40 @@ export default function DataModePanel() {
           )}
         </SettingsSection>
       )}
+      <Modal open={!!backupResult} onClose={() => { setBackupResult(null); setShowRecovery(false); }} title="Save your recovery code">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Your database and files have been backed up. Keep this code in your password manager, separately from the backup folder. You will need it after reinstalling your operating system or moving to another account.</p>
+          <label className="block text-sm font-medium">
+            Recovery code
+            <input className="input mt-2 w-full font-mono text-xs" readOnly type={showRecovery ? "text" : "password"} value={backupResult?.recoveryCode ?? ""} autoComplete="off" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-ghost" onClick={() => setShowRecovery(value => !value)}>{showRecovery ? "Hide code" : "Show code"}</button>
+            <button className="btn-ghost" onClick={() => {
+              if (backupResult) void navigator.clipboard.writeText(backupResult.recoveryCode)
+                .then(() => setBackupMsg("Recovery code copied. Save it separately from the backup."))
+                .catch(() => setBackupMsg("Could not copy the code. Show it and copy it manually."));
+            }}>Copy code</button>
+          </div>
+          <p className="text-xs text-muted-foreground">The code protects recovery of encrypted files. The backup database itself contains readable business data; keep the folder private.</p>
+          <div className="flex justify-end"><button className="btn-primary" onClick={() => { setBackupResult(null); setShowRecovery(false); }}>Done</button></div>
+        </div>
+      </Modal>
+      <Modal open={!!restoreSource} onClose={() => { if (!storageBusy) { setRestoreSource(""); setRecoveryCode(""); } }} title="Restore a backup">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Filey will verify this backup and restart into the restored workspace. Your current data folder and the backup are preserved.</p>
+          <p className="rounded-xl bg-muted p-3 text-xs break-all">{restoreSource}</p>
+          <label className="block text-sm font-medium">Recovery code
+            <input className="input mt-2 w-full font-mono" type="password" value={recoveryCode} onChange={event => setRecoveryCode(event.target.value)} autoComplete="off" disabled={storageBusy} placeholder="Paste the code saved with your backup" />
+          </label>
+          <p className="text-xs text-muted-foreground">Optional on the original OS account. Older backups require the original device encryption key and cannot use a recovery code.</p>
+          {backupMsg && <p role="status" className="text-sm break-words">{backupMsg}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button className="btn-ghost" disabled={storageBusy} onClick={() => { setRestoreSource(""); setRecoveryCode(""); }}>Cancel</button>
+            <button className="btn-primary" disabled={storageBusy} onClick={() => void confirmRestore()}>{storageBusy ? "Verifying backup…" : "Restore and restart"}</button>
+          </div>
+        </div>
+      </Modal>
     </SettingsPanel>
   );
 }

@@ -135,4 +135,4 @@ test("PDF toolkit: every headless tool runs and produces valid output", async ()
     throw new Error("Failing tools:\n" + failures.map((f) => `  ${f.name}: ${f.err}`).join("\n"));
   }
   expect(failures).toEqual([]);
-}, 15_000); // Runs over 40 real operations, including crypto initialization under parallel load.
+}, 60_000); // Runs over 40 real operations, including crypto initialization under parallel load.

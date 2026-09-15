@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -247,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(p);
   };
 
-  const loadProfile = async (u: User, refreshed = false): Promise<void> => {
+  const loadProfile = useCallback(async function readProfile(u: User, refreshed = false): Promise<void> {
     if (!supabase) return;
     const { data, error } = await supabase
       .from("profiles")
@@ -265,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: renewed, error: refreshError } = await supabase.auth.refreshSession();
       if (refreshError) throw refreshError;
       if (renewed.session?.user.id !== u.id || loadedFor.current !== u.id) return;
-      return loadProfile(u, true);
+      return readProfile(u, true);
     }
     if (error) throw error;
     const prof = (data as Profile) ?? null;
@@ -274,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(prof);
     setProfileError(null);
     setProfileLoaded(true);
-  };
+  }, []);
 
   useEffect(() => {
     if (local) return; // no Supabase auth in local mode — synthetic user
@@ -352,7 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loadedFor.current = null;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [local, loadProfile]);
 
   // Live multi-client sync follows the session: open the channel once
   // signed in, close it on sign-out so the next user starts clean.
@@ -360,7 +361,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (local) return; // local mode is single-user, no live sync
     if (session?.user) void startRealtime();
     else stopRealtime();
-  }, [session]);
+  }, [session, local]);
 
   // Two-factor gate. Keyed on the USER, deliberately not on the access token:
   // a re-auth mid-session (the change-password screens sign in again to

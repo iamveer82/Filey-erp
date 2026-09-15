@@ -1,3 +1,4 @@
+import { lowStockRows } from "./reportExports";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
@@ -41,11 +42,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
   }, [data.products]);
 
   /* Low stock rows: qty <= reorder_level, sorted most-depleted first. */
-  const lowStock = useMemo(() => {
-    return data.products
-      .filter((p) => (Number(p.quantity) || 0) <= (Number(p.reorder_level) || 0))
-      .sort((a, b) => (Number(a.quantity) || 0) - (Number(b.quantity) || 0));
-  }, [data.products]);
+  const lowStock = useMemo(() => lowStockRows(data.products),[data.products]);
 
   /* Category distribution for the horizontal bar list. */
   const categoryDist = useMemo(() => {

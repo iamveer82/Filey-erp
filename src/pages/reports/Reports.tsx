@@ -4,7 +4,7 @@ import { LayoutDashboard, TrendingUp, Boxes, Wallet, Users, Truck, Download, Cha
 import { PageHeader, Spinner, ErrorBanner } from "../../components/ui";
 import { downloadCsv } from "../../lib/csv";
 import { cn, todayYmd } from "../../lib/format";
-import { isPostedStatus } from "../../lib/api";
+import { REPORT_EXPORT_LABELS, reportExportRows } from "./reportExports";
 import { useDisplayCurrency } from "../../lib/displayCurrency";
 import { useReportsData } from "./useReportsData";
 import DashboardTab from "./DashboardTab";
@@ -30,27 +30,16 @@ type TabId = (typeof TABS)[number]["id"];
 function FinancialReports({ tab }: { tab: Exclude<TabId, "insights"> }) {
   const data = useReportsData();
   const { currency } = useDisplayCurrency();
+  const rows = reportExportRows(tab,data,todayYmd());
   const exportCsv = () => {
-    const rows = [
-      { metric: "Invoiced revenue (AED)", amount: data.invoices.filter(i => isPostedStatus(i.status)).reduce((s, i) => s + (i.total || 0), 0) },
-      { metric: "Invoice payments (AED)", amount: data.invoicePayments.reduce((s, payment) => s + payment.amount, 0) },
-      { metric: "Receipt documents (AED)", amount: data.receiptList.reduce((s, r) => s + (Number(r.amount) || 0), 0) },
-      { metric: "Customers", amount: data.customers.length },
-      { metric: "Orders", amount: data.orders.length },
-      { metric: "Products", amount: data.products.length },
-      { metric: "Suppliers", amount: data.supplierList.length },
-    ];
-    downloadCsv(`filey-report-${todayYmd()}`, rows, [
-      { key: "metric", label: "Metric" },
-      { key: "amount", label: "Amount" },
-    ]).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
+    downloadCsv(`filey-${tab}-${todayYmd()}`,rows).catch(error => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
   };
   return <>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <p className="max-w-3xl text-xs text-muted-foreground">Amounts are displayed in {currency} from totals normalized to AED using saved document rates where available. CSV exports use AED. Invoice payments and independently recorded receipt documents are shown separately; adding them can double-count the same payment. Receipt documents include confirmed receipts only.</p>
       <div className="flex shrink-0 gap-2">
         <button className="btn-ghost" disabled={data.loading} onClick={data.reload}><RefreshCw size={14} /> Refresh</button>
-        <button className="btn-ghost" disabled={data.loading || !!data.error} onClick={exportCsv}><Download size={14} /> Export CSV</button>
+        <button className="btn-ghost" disabled={data.loading || !!data.error || !rows.length} onClick={exportCsv}><Download size={14} /> {REPORT_EXPORT_LABELS[tab]}</button>
       </div>
     </div>
     {data.error && <div className="mb-4"><ErrorBanner message={data.error} /></div>}

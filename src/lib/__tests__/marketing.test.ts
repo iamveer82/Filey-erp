@@ -220,3 +220,24 @@ describe("leadsToCsvRows", () => {
     expect(Object.values(rows[0]).every((v) => typeof v === "string")).toBe(true);
   });
 });
+
+
+it("keeps renamed customer history by ID, uses unique legacy company names and normalizes frozen FX", () => {
+  const customers = [customer({id:1,name:"New contact",company:"Renamed company"}),customer({id:2,name:"Second contact",company:"Legacy company"})];
+  const rows = [
+    invoice({customer_id:1,customer_name:"Old name",total:100,currency:"USD",fx_rate:4,balance:25,status:"sent",due_date:"2026-01-01"}),
+    invoice({customer_name:" Legacy company ",total:20,currency:"AED"}),
+    invoice({customer_id:1,customer_name:"Old name",total:900,status:"cancelled"}),
+    invoice({customer_id:999,customer_name:"Legacy company",total:900}),
+  ];
+  const leads=buildLeads(customers,rows,TODAY,{USD:3.6});
+  expect(leads.find(l=>l.customer.id===1)).toMatchObject({revenue:400,invoices:1,overdue:100});
+  expect(leads.find(l=>l.customer.id===2)).toMatchObject({revenue:20,invoices:1});
+  expect(rows[0]).toMatchObject({currency:"USD",total:100});
+});
+
+it("does not assign ambiguous legacy names and fails visibly for missing currency rates", () => {
+  const customers=[customer({id:1,name:"Same"}),customer({id:2,name:"Same"})];
+  expect(buildLeads(customers,[invoice({customer_name:"Same",total:100})],TODAY).every(l=>l.invoices===0)).toBe(true);
+  expect(()=>buildLeads(customers,[invoice({customer_id:1,total:100,currency:"XYZ"})],TODAY)).toThrow(/exchange rate/i);
+});

@@ -19,7 +19,7 @@ vi.mock("../../lib/agentStorage", () => ({
 }));
 
 vi.mock("../../lib/waBridge", () => ({
-  hasDesktop: true, bridgeState: vi.fn(), onBridgeState: () => () => {}, sendWaFile: vi.fn(async () => {}),
+  hasDesktop: true, bridgeState: vi.fn(), onBridgeState: () => () => {}, sendWaFile: vi.fn(async () => "provider-id"),
 }));
 vi.mock("../../lib/agentFiles", () => ({ deliverFile: vi.fn() }));
 vi.mock("../../lib/documentMessage", async (original) => ({
@@ -30,6 +30,7 @@ const file = new File(["%PDF-invoice"], "Invoice-123.pdf", { type: "application/
 Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF-invoice").buffer });
 const props = { title: "Invoice 123", phone: "+971501234567", message: "Your invoice", channel: "whatsapp" as const, loadPdf: async () => file, onClose: vi.fn() };
 beforeEach(() => {
+  localStorage.clear();
   identity.scope = "local:org:user";
   identity.computer = false;
   vi.mocked(bridgeState).mockResolvedValue({ state: "connected" });
@@ -105,7 +106,7 @@ it("explains manual attachments when WhatsApp is not paired and labels the text-
   render(<DocumentMessageDialog {...props} />);
   await screen.findByText(file.name);
   expect(screen.getByText(/Attach → Document/)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name:"WhatsApp setup" })).toHaveAttribute("href", "#/integrations");
+  expect(screen.getByRole("link", { name:"WhatsApp setup" })).toHaveAttribute("href", "#/integrations?tab=free");
   expect(screen.getByRole("button", { name:"Prepare WhatsApp + PDF" })).toHaveClass("btn-primary");
   expect(screen.queryByRole("button", { name:"Send PDF via paired WhatsApp" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name:"Open WhatsApp text draft" }));

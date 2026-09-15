@@ -78,6 +78,8 @@ function SectionInsights({ source }: { source: Source }) {
   }, [source]);
   useEffect(() => {
     void load();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => { request.current++; };
   }, [load]);
   useLiveSync(load);

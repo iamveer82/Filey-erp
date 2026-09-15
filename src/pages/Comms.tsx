@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Mail, Phone, Plus, Loader2, Trash2 } from "lucide-react";
+import { Mail, Phone, MessageCircle, Plus, Loader2, Trash2 } from "lucide-react";
 
 import { emailLog, callLog, type EmailMessage, type CallLog } from "../lib/api";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { fmtDate, errMsg, cn } from "../lib/format";
 import { Badge, Modal, Field, ErrorBanner, PageHeader } from "../components/ui";
+import MessageOutbox from "../components/MessageOutbox";
 import { SelectMenu } from "../components/ui-menu";
 
 /* Correspondence: what was emailed, and what was said on the phone.
@@ -28,7 +29,7 @@ const mmss = (secs: number) => {
 
 export default function Comms() {
   const { toast, confirm } = useUI();
-  const [tab, setTab] = useState<"email" | "calls">("email");
+  const [tab, setTab] = useState<"email" | "calls" | "whatsapp">("email");
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +78,7 @@ export default function Comms() {
       />
 
       <div className="mb-4 flex gap-1">
-        {(["email", "calls"] as const).map((t) => (
+        {(["email", "calls", "whatsapp"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -87,14 +88,14 @@ export default function Comms() {
               tab === t && "chip-active"
             )}
           >
-            {t === "email" ? <Mail size={13} /> : <Phone size={13} />}
-            {t === "email" ? `Email (${emails.length})` : `Calls (${calls.length})`}
+            {t === "email" ? <Mail size={13} /> : t === "calls" ? <Phone size={13} /> : <MessageCircle size={13} />}
+            {t === "email" ? `Email (${emails.length})` : t === "calls" ? `Calls (${calls.length})` : "WhatsApp invoices"}
           </button>
         ))}
       </div>
 
       {error && <div className="mb-4"><ErrorBanner message={`Could not load communication history: ${error}`} /><button className="btn-ghost mt-2" onClick={() => void load()}>Retry</button></div>}
-      {loading ? (
+      {tab === "whatsapp" ? <MessageOutbox /> : loading ? (
         <p className="flex items-center gap-2 py-6 text-[12.5px] text-brand-400">
           <Loader2 size={14} className="animate-spin" /> Loading…
         </p>

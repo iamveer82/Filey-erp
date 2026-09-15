@@ -1,3 +1,4 @@
+import { isLocalMode } from "../lib/dataMode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Send, Trash2, MessageSquare, Loader2, Reply } from "lucide-react";
 import { messages, org, type OrgMessage } from "../lib/api";
@@ -93,7 +94,7 @@ function MessageRow({
         <button
           aria-label="Delete message"
           onClick={() => onDelete(m.id)}
-          className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer self-start"
+          className="btn-ghost h-10 w-10 p-0 text-muted-foreground hover:text-danger shrink-0 self-start"
         >
           <Trash2 size={14} />
         </button>
@@ -132,11 +133,12 @@ export default function CompanyMessages({
   useEffect(load, [channel]);
   useLiveSync(load);
   useEffect(() => {
+    if (isLocalMode()) { setMembers([]); return; }
     org
       .members()
       .then((ms) => setMembers(ms.map((m) => ({ id: m.user_id, name: m.name }))))
       .catch(() => toast.error("Failed to load members"));
-  }, []);
+  }, [toast]);
 
   const roots = useMemo(
     () => all.filter((m) => !m.parent_id).sort((a, b) => b.id - a.id),
@@ -203,11 +205,13 @@ export default function CompanyMessages({
     >
       {/* composer */}
       <div className="flex items-center gap-2 mb-3">
-        <MentionInput
+        {isLocalMode() && <p className="text-xs text-muted-foreground">Local channels stay on this device. Team mentions are available in a cloud workspace.</p>}
+      <MentionInput
           value={text}
           onChange={setText}
           onEnter={() => post(text, null)}
           members={members}
+          label="Team update"
           placeholder="Share an update… type @ to mention"
         />
         <button
@@ -259,10 +263,12 @@ export default function CompanyMessages({
                           onChange={setReplyText}
                           onEnter={() => post(replyText, m.id)}
                           members={members}
+                          label={`Reply to ${m.author}`}
                           placeholder={`Reply to ${m.author}… type @ to mention`}
                         />
                         <button
-                          className="btn-primary shrink-0 !py-1.5"
+                          aria-label="Post reply"
+                          className="btn-primary shrink-0"
                           disabled={busy || !replyText.trim()}
                           onClick={() => post(replyText, m.id)}
                         >

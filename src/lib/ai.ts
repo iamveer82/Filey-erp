@@ -1,7 +1,7 @@
 /* Bring-your-own-key AI client.
  *
  * The user supplies their own provider + model + API key. The key is stored
- * ONLY in this browser (localStorage) and never sent to Filey's servers —
+ * in the OS secure store on desktop, or memory for a browser session —
  * every request goes straight from the browser to the chosen provider's API.
  *
  * Two transports cover essentially every model:
@@ -19,8 +19,10 @@ import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import { modeSystemNote } from "./agentMode";
 import { journalDigest, recordRun, failuresFrom } from "./agentJournal";
-import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig, openAiHeaders } from "./aiEndpoint";
+import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig, openAiHeaders, openAiGenerationOptions, anthropicGenerationOptions, type AiEffort, AI_DEV_ORIGINS } from "./aiEndpoint";
 import { agentStorageScope } from "./agentStorage";
+import { getCacheScope } from "./api";
+import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -33,6 +35,12 @@ export interface AiConfig {
 }
 
 const STORE_KEY = "filey.ai.config";
+export const aiCredentialName = (cfg: Pick<AiConfig, "baseUrl">): string => `ai:${aiEndpoint(cfg.baseUrl)?.origin ?? "invalid"}`;
+function configKey(expected?: string): string | null {
+  const scope = getCacheScope();
+  if (expected && scope !== expected) throw new Error("Your workspace changed. Reopen AI settings before saving.");
+  return scope ? `${STORE_KEY}:${encodeURIComponent(scope)}` : null;
+}
 
 /** localStorage writes throw where reads often don't (quota exceeded, storage
  *  blocked in private mode). Every write in this file goes through here so a
@@ -57,37 +65,61 @@ const DEFAULTS: AiConfig = {
 
 export function getAiConfig(): AiConfig {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const key = configKey();
+    const raw = key ? localStorage.getItem(key) : null;
     if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AiConfig>) };
+    const config = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AiConfig>) };
+    return { ...config, apiKey: peekCredential(aiCredentialName(config)) };
   } catch {
     console.error("Failed to parse AI config from localStorage");
     return { ...DEFAULTS };
   }
 }
 
-export function setAiConfig(patch: Partial<AiConfig>): AiConfig {
+export function setAiConfig(patch: Partial<AiConfig>, expectedScope?: string): AiConfig {
+  const key = configKey(expectedScope);
+  if (!key) throw new Error("Sign in before saving AI settings.");
   const next = mergeAiConfig(getAiConfig(), patch);
-  safeSetItem(STORE_KEY, JSON.stringify(next));
+  if (patch.apiKey !== undefined) void saveCredential(aiCredentialName(next), patch.apiKey.trim() || null);
+  const { apiKey: _secret, ...settings } = next;
+  if (!safeSetItem(key, JSON.stringify(settings))) throw new Error("AI settings could not be saved.");
   return next;
+}
+
+export async function getAiRequestConfig(): Promise<AiConfig> {
+  const scope = getCacheScope();
+  if (!scope) throw new Error("Sign in before using AI.");
+  const cfg = getAiConfig();
+  return { ...cfg, apiKey: await readCredential(aiCredentialName(cfg), scope) ?? "" };
 }
 
 export function aiReady(cfg: AiConfig = getAiConfig()): boolean {
   return !!aiEndpoint(cfg.baseUrl) && !!cfg.model.trim() &&
-    (!!cfg.apiKey.trim() || isLocalAiEndpoint(cfg));
+    (!!cfg.apiKey.trim() || hasCredential(aiCredentialName(cfg)) || isLocalAiEndpoint(cfg));
 }
 
 /** Read the local server's catalogue without running a model or sending business data. */
 export async function listLocalAiModels(cfg: AiConfig = getAiConfig()): Promise<string[]> {
   if (!isLocalAiEndpoint(cfg)) throw new AiError("Choose a local Ollama or LM Studio endpoint first.");
+  return listAiModels(cfg);
+}
+
+/** Uses the selected provider's catalogue, never a hard-coded model list. */
+export async function listAiModels(cfg: AiConfig = getAiConfig(), signal?: AbortSignal, useSavedKey = true): Promise<string[]> {
+  if (!aiEndpoint(cfg.baseUrl)) throw new AiError("Enter a valid API base URL first.");
+  const scope = getCacheScope();
+  if (!scope) throw new AiError("Sign in before finding models.");
+  const apiKey = cfg.apiKey || (useSavedKey ? await readCredential(aiCredentialName(cfg), scope) : "") || "";
+  if (scope !== getCacheScope()) throw new AiError("Your workspace changed. Reopen AI settings.");
+  if (!apiKey && !isLocalAiEndpoint(cfg)) throw new AiError("Enter this provider's API key first.");
   const response = await aiFetch(`${cfg.baseUrl.trim().replace(/\/+$/, "")}/models`, {
     method: "GET",
-    headers: openAiHeaders(cfg.apiKey),
-    signal: AbortSignal.timeout(8000),
+    headers: cfg.provider === "anthropic" ? anthropicHeaders(apiKey) : openAiHeaders(apiKey),
+    signal: signal ?? AbortSignal.timeout(15000),
   }, { retries: 0 });
   const body: unknown = await response.json();
   if (!body || typeof body !== "object" || !("data" in body) || !Array.isArray(body.data))
-    throw new AiError("The local server returned an invalid model list.");
+    throw new AiError("The provider returned an invalid model list. Enter the model ID manually.");
   return [...new Set(body.data.flatMap((item: unknown) =>
     item && typeof item === "object" && "id" in item && typeof item.id === "string" && item.id.trim()
       ? [item.id.trim()] : []))].sort();
@@ -230,10 +262,17 @@ export interface AiMessage {
   images?: AiImage[];
 }
 
-export class AiError extends Error {}
+export class AiError extends Error {
+  /** HTTP status when the failure came from a response, so callers can map
+   *  codes instead of matching on the human message. */
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
 
 interface ChatOpts {
   maxTokens?: number;
+  effort?: AiEffort;
   temperature?: number;
   signal?: AbortSignal;
 }
@@ -257,13 +296,14 @@ interface AgentOpts extends ChatOpts {
   /** The chat turn this run belongs to — scopes per-turn file state (the
    *  attachment, produced files) to this run alone. */
   turnId?: string;
+  computerSession?: () => Promise<number>;
 }
 
 export async function aiChat(
   messages: AiMessage[],
   opts: ChatOpts = {}
 ): Promise<string> {
-  const cfg = getAiConfig();
+  const cfg = await getAiRequestConfig();
   if (!aiReady(cfg))
     throw new AiError(
       "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
@@ -293,9 +333,8 @@ async function openaiChat(
 ): Promise<string> {
   const url = `${cfg.baseUrl.trim().replace(/\/+$/, "")}/chat/completions`;
   const body = {
-    model: cfg.model,
-    max_tokens: opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0.4,
+    model: cfg.model.trim(),
+    ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.4, opts.effort),
     messages: messages.map((m) => ({
       role: m.role,
       content: m.images?.length
@@ -337,6 +376,11 @@ async function openaiChat(
   return text.trim();
 }
 
+export function anthropicHeaders(apiKey: string): Record<string, string> {
+  return { "content-type": "application/json", "x-api-key": apiKey.trim(),
+    "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
+}
+
 async function anthropicChat(
   cfg: AiConfig,
   messages: AiMessage[],
@@ -369,16 +413,10 @@ async function anthropicChat(
     }));
   const res = await aiFetch(`${base}/messages`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": cfg.apiKey,
-      "anthropic-version": "2023-06-01",
-      // lets the browser call the API directly (BYOK, no proxy)
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers: anthropicHeaders(cfg.apiKey),
     body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: opts.maxTokens ?? 1024,
+      model: cfg.model.trim(),
+      ...anthropicGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.effort),
       system: system || undefined,
       messages: turns,
     }),
@@ -393,12 +431,19 @@ async function anthropicChat(
 }
 
 async function errText(res: Response): Promise<string> {
+  const hint: Record<number, string> = {
+    401: "API key rejected. Check that this key belongs to the selected provider.",
+    402: "This provider requires credit. Check its billing or choose an available free model.",
+    403: "Access denied. Check the key's permissions and model access.",
+    404: "Model or endpoint not found. Refresh models or check the API base URL.",
+    429: "Provider quota or rate limit reached. Check your allowance and try again later.",
+  };
   try {
     const j = await res.json();
-    return j?.error?.message || j?.message || `AI request failed (${res.status})`;
+    const detail = j?.error?.message || j?.message;
+    return [hint[res.status] ?? `AI request failed (${res.status}).`, typeof detail === "string" ? detail : ""].filter(Boolean).join(" ");
   } catch {
-    console.error("Failed to parse error response JSON");
-    return `AI request failed (${res.status})`;
+    return hint[res.status] ?? `AI request failed (${res.status}).`;
   }
 }
 
@@ -406,9 +451,6 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-/** Origin of the OpenCode Zen gateway. */
-const ZEN_ORIGIN = "https://opencode.ai";
 
 /** Reject the moment `signal` fires, whatever `p` is still doing. */
 function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
@@ -437,24 +479,16 @@ function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
  *  on a bill. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
   if (!isTauri) {
-    // OpenCode Zen serves no CORS headers, so a cross-origin call from a
-    // browser dies as "Failed to fetch" before auth. The dev server proxies
-    // /zen/v1/* to the gateway (vite.config.ts), so in a plain browser the
-    // absolute URL is swapped for its same-origin path and CORS never
-    // applies. Under Tauri the native proxy needs no such detour.
-    if (
-      input.startsWith(ZEN_ORIGIN) &&
-      typeof window !== "undefined" &&
-      /^https?:$/.test(window.location.protocol)
-    ) {
-      return fetch(input.slice(ZEN_ORIGIN.length), init);
+    if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+      const url = aiEndpoint(input);
+      const index = url ? AI_DEV_ORIGINS.indexOf(url.origin) : -1;
+      if (index >= 0 && url) return fetch(`/__filey_ai/${index}${url.pathname}${url.search}`, init);
     }
     return fetch(input, init);
   }
   const { invoke } = await import("@tauri-apps/api/core");
   const headers: Record<string, string> = {};
-  const h = init.headers as Record<string, string> | undefined;
-  if (h) for (const k of Object.keys(h)) headers[k] = h[k];
+  new Headers(init.headers).forEach((value, key) => { headers[key] = value; });
   const r = await withAbort(
     invoke<{ status: number; body: string }>("ai_proxy", {
       method: (init.method ?? "GET").toString().toUpperCase(),
@@ -493,20 +527,29 @@ export async function aiFetch(
       const res = await transportFetch(input, init);
       if (res.ok) return res;
       if (!RETRYABLE.has(res.status) || attempt === retries)
-        throw new AiError(await errText(res));
+        throw new AiError(redactAiError(await errText(res), init.headers).slice(0, 1000), res.status);
       const ra = Number(res.headers.get("retry-after"));
       await withAbort(sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt), init.signal);
     } catch (e) {
       if (e instanceof AiError) throw e; // non-retryable HTTP status
       if ((e as Error)?.name === "AbortError") throw e; // user cancelled
+      if (init.signal?.aborted || (e as Error)?.name === "TimeoutError")
+        throw new AiError("The provider took too long to respond. Check your connection or try another model.");
       lastErr = e; // network failure
       if (attempt === retries) break;
       await withAbort(sleep(base * 2 ** attempt), init.signal);
     }
   }
   throw new AiError(
-    lastErr instanceof Error ? lastErr.message : "AI request failed after retries"
+    redactAiError(`${lastErr instanceof Error ? lastErr.message : typeof lastErr === "string" ? lastErr : "AI request failed after retries"}. ${isTauri ? "Check the API URL and your network connection." : "Check the API URL and network. Some providers block browser requests; use the Filey desktop app for those providers."}`, init.headers)
   );
+}
+
+function redactAiError(message: string, headers?: HeadersInit): string {
+  const values = new Headers(headers);
+  const secrets = [values.get("authorization")?.replace(/^Bearer\s+/i, ""), values.get("x-api-key")];
+  return secrets.filter((value): value is string => !!value).reduce((text, value) =>
+    text.split(value).join("[REDACTED]").split(encodeURIComponent(value)).join("[REDACTED]"), message);
 }
 
 /* ── Agentic chat: the model can call the read/draft tools in lib/aiTools ──── */
@@ -533,7 +576,7 @@ export async function* aiAgentStream(
   messages: AiMessage[],
   opts: AgentOpts = {}
 ): AsyncGenerator<AgentEvent, string, void> {
-  const cfg = getAiConfig();
+  const cfg = await getAiRequestConfig();
   if (!aiReady(cfg))
     throw new AiError("No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
   const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
@@ -601,6 +644,7 @@ export async function* aiAutonomousStream(
     turnId?: string;
     /** Recent conversation for follow-ups such as 'continue' or a correction. */
     history?: AiMessage[];
+    computerSession?: () => Promise<number>;
   } = {}
 ): AsyncGenerator<AgentEvent, string, void> {
   if (!goal.trim()) throw new AiError("No goal provided.");
@@ -627,6 +671,7 @@ export async function* aiAutonomousStream(
     isOwner: opts.isOwner,
     confirm: opts.confirm,
     turnId: opts.turnId,
+    computerSession: opts.computerSession,
   });
 
   return yield* stream;

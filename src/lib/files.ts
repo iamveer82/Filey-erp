@@ -176,6 +176,14 @@ export async function listFiles(): Promise<SavedFile[]> {
   }
 }
 
+/** Read one linked receipt without downloading the user's whole file library. */
+export async function getSavedFile(id: string): Promise<SavedFile> {
+  const { data, error } = await sb().from("user_files").select("*").eq("id", id).single();
+  if (error || !data) throw new Error("This attachment is unavailable or you do not have access to it.");
+  return { id: data.id, name: data.name, mime: data.mime, size: Number(data.size), storagePath: data.storage_path,
+    tool: data.tool ?? null, folderId: data.folder_id ?? null, createdAt: Date.parse(data.created_at) };
+}
+
 /* ---------------- User folders ---------------- */
 
 export async function listFolders(): Promise<UserFolder[]> {
@@ -325,6 +333,7 @@ export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
   { key: "receipt", label: "Payment Receipts", route: "/payment-receipts" },
   { key: "challan", label: "Delivery Challans", route: "/delivery-challans" },
   { key: "lpo", label: "Purchase Orders", route: "/purchase-orders" },
+  { key: "expense-receipt", label: "Expense Receipts", route: "/purchase" },
   { key: "declaration", label: "Declaration Letters", route: "/declaration" },
 ];
 
@@ -334,7 +343,7 @@ export function folderOf(f: SavedFile): string {
 }
 
 /** Upload a user-selected file directly to My Files. */
-export async function uploadUserFile(file: File, tool?: string): Promise<void> {
+export async function uploadUserFile(file: File, tool?: string): Promise<string> {
   const uid = await userId();
   if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
@@ -358,6 +367,7 @@ export async function uploadUserFile(file: File, tool?: string): Promise<void> {
     await sb().storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
+  return id;
 }
 
 export async function deleteFile(f: SavedFile): Promise<void> {

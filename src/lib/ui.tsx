@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useRef,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -87,7 +88,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
     [dismiss]
   );
 
-  const toast = {
+  const toast = useMemo(() => ({
     success: (m: string) => add({ kind: "success", message: m }),
     error: (m: string) => add({ kind: "error", message: m }),
     info: (m: string) => add({ kind: "info", message: m }),
@@ -102,7 +103,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
         },
         6000
       ),
-  };
+  }), [add]);
 
   const confirm = useCallback(
     (opts: ConfirmOpts) =>
@@ -140,9 +141,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
   };
 
   const TOAST_STYLE: Record<ToastKind, string> = {
-    success: "text-success bg-white border-success/30",
-    error: "text-danger bg-white border-danger/30",
-    info: "text-brand-700 bg-white border-brand-200",
+    success: "text-success bg-card border-success/30",
+    error: "text-danger bg-card border-danger/30",
+    info: "text-foreground bg-card border-border",
   };
   const TOAST_ICON: Record<ToastKind, ReactNode> = {
     success: <CheckCircle2 size={16} className="text-success" />,
@@ -150,8 +151,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
     info: <Info size={16} className="text-brand-500" />,
   };
 
+  const value = useMemo(() => ({toast, confirm, prompt, notice}), [toast, confirm, prompt, notice]);
   return (
-    <Ctx.Provider value={{ toast, confirm, prompt, notice }}>
+    <Ctx.Provider value={value}>
       {children}
 
       {/* toasts */}

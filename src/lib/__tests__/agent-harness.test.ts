@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiAgentStream, setAiConfig } from "../ai";
 import type { AgentEvent } from "../agentHarness";
@@ -14,7 +15,7 @@ import { headroomReset } from "../headroom";
  *     other, and nothing failed until a user noticed the agent giving up early.
  */
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); setDataMode("local"); setCacheOrg(null); setCacheOrg("test-org", "test-user"); });
 afterEach(() => vi.unstubAllGlobals());
 
 /** A big enough result that headroom engages (>1500 chars on the wire). */
@@ -214,7 +215,7 @@ describe("agent harness", () => {
     expect(http.final).toMatch(/model call failed/);
   });
 
-  it("sends temperature to Anthropic and stops re-sending old images", async () => {
+  it("omits unsupported temperature for current Claude and stops re-sending old images", async () => {
     setAiConfig({
       provider: "anthropic",
       baseUrl: "https://api.anthropic.com/v1",
@@ -249,7 +250,7 @@ describe("agent harness", () => {
     );
 
     const first = JSON.parse(String(calls[0].body));
-    expect(first.temperature).toBe(0.3);
+    expect(first).not.toHaveProperty("temperature");
     expect(JSON.stringify(first.messages)).toContain("AAAA");
     // Round two must not carry the base64 payload again — the text survives.
     const second = JSON.parse(String(calls[1].body));

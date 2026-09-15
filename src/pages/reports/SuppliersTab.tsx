@@ -16,13 +16,14 @@ import {
   useTopSuppliers,
   usePayablesAging,
   paidByPo,
+  supplierBillBalances,
 } from "./useReportsData";
 
 export default function SuppliersTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
-  const topSuppliers = useTopSuppliers(data.poList, data.supplierList);
-  const aging = usePayablesAging(data.poList, data.poPayments);
+  const topSuppliers = useTopSuppliers(data.poList);
+  const aging = usePayablesAging(data.purchaseInvoices);
 
   const tooltipStyle = cs.tooltipStyle;
 
@@ -35,24 +36,12 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
     { name: "90+", value: aging.d90p },
   ];
 
-  /* Supplier-level open PO totals, net of payments already made against them. */
-  const supplierBalances = useMemo(() => {
+  const supplierBalances = useMemo(() => supplierBillBalances(data.purchaseInvoices).slice(0,10), [data.purchaseInvoices]);
+  const commitments = useMemo(() => {
     const paid = paidByPo(data.poPayments);
-    const g = new Map<string, { name: string; open: number; poCount: number }>();
-    for (const p of data.poList) {
-      if (["paid", "cancelled", "draft"].includes(p.status)) continue;
-      const open = (p.total || 0) - (paid.get(p.id) ?? 0);
-      if (open <= 0) continue;
-      const name = p.supplier_name || "—";
-      const row = g.get(name) || { name, open: 0, poCount: 0 };
-      row.open += open;
-      row.poCount += 1;
-      g.set(name, row);
-    }
-    return Array.from(g.values())
-      .sort((a, b) => b.open - a.open)
-      .slice(0, 10);
-  }, [data.poList, data.poPayments]);
+    return data.poList.filter(po => !["draft","cancelled","received","completed","paid"].includes(po.status))
+      .reduce((sum,po) => sum + Math.max(0,po.total-(paid.get(po.id)||0)),0);
+  },[data.poList,data.poPayments]);
 
   const totalPayables = aging.current + aging.d30 + aging.d60 + aging.d90 + aging.d90p;
   const totalSuppliers = data.supplierList.length;
@@ -67,12 +56,12 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
     {
       label: "Open Payables",
       value: aed(totalPayables),
-      hint: "across all open POs",
+      hint: "posted supplier bills, net of payments",
     },
     {
-      label: "Total POs",
-      value: num(data.poList.length),
-      hint: `${data.poList.filter((p) => p.status === "draft").length} draft`,
+      label: "PO commitments",
+      value: aed(commitments),
+      hint: "unreceived orders, net of PO payments",
     },
   ];
 
@@ -106,7 +95,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             Top suppliers by PO value
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            From all purchase orders
+            Confirmed purchase orders · separate from supplier bills
           </div>
           {topSuppliers.length === 0 ? (
             <div className="h-[280px] mt-3 grid place-items-center text-[12.5px] text-muted-foreground">
@@ -164,11 +153,11 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             Payables aging
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Open purchase orders by age bucket
+            Unpaid supplier bills by due date
           </div>
           <div className="h-[280px] mt-3">
             {allZero(agingData, "value") ? (
-              <ChartEmpty hint="Open purchase orders sit here once you raise one." />
+              <ChartEmpty hint="Posted supplier bills appear here while a balance is due." />
             ) : (
             <ChartFrame height={280}>
               <BarChart
@@ -214,7 +203,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             Supplier open balances
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Top 10 suppliers with open purchase orders
+            Top 10 suppliers with unpaid bills
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -222,7 +211,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             <thead>
               <tr className="text-left text-muted-foreground border-b border-border">
                 <th className="px-5 py-2.5 font-medium text-[12px]">Supplier</th>
-                <th className="px-5 py-2.5 font-medium text-[12px] text-right">Open POs</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] text-right">Open bills</th>
                 <th className="px-5 py-2.5 font-medium text-[12px] text-right">Open Total</th>
                 <th className="px-5 py-2.5 font-medium text-[12px] text-right">% of Total</th>
               </tr>
@@ -231,7 +220,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
               {supplierBalances.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">
-                    No open purchase orders
+                    No unpaid supplier bills
                   </td>
                 </tr>
               )}
@@ -242,7 +231,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                 >
                   <td className="px-5 py-3 text-foreground">{s.name}</td>
                   <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
-                    {s.poCount}
+                    {s.billCount}
                   </td>
                   <td className="px-5 py-3 text-right text-foreground tabular-nums font-medium">
                     {aed(s.open)}

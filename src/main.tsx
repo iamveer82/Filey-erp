@@ -24,6 +24,7 @@ import { autoStartBridge } from "./lib/waBridge";
 import { startWaAgent } from "./lib/waAgent";
 import { startProactiveAgent } from "./lib/proactiveAgent";
 import { seedDefaultSkills } from "./lib/defaultSkills";
+import { quarantineLegacyCredentials } from "./lib/credentialStore";
 
 applyTheme();
 applyAccent();
@@ -43,6 +44,7 @@ startWaAgent();
 startProactiveAgent();
 // Seed the default business-skill pack once, so the agent starts capable.
 seedDefaultSkills();
+void quarantineLegacyCredentials().catch(() => console.warn("Legacy credential migration is pending; open AI settings to retry."));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

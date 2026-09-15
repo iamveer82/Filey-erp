@@ -132,7 +132,7 @@ export interface Tool {
     | "redact"
     | "rotate"
     | "fill-form";
-  run: (files: File[], p: Record<string, string>) => Promise<OutFile[]>;
+  run: (files: File[], p: Record<string, string>, context?: pdf.ConversionContext) => Promise<OutFile[]>;
   /** Optional explicit input→output label, e.g. { from: "DOCX", to: "PDF" }.
    * When omitted it is inferred from `accept`, `cat` and `name` by
    * `toolFlow()`. Used to render the "FROM → TO" chip on each tool card so
@@ -336,10 +336,11 @@ export const PDF_TOOLS: Tool[] = [
         ],
       },
     ],
-    run: (f, p) =>
+    run: (f, p, context) =>
       pdf.pdfToImageFormat(
         f[0],
-        (p.imgOutFmt as "png" | "jpeg" | "webp" | "bmp") || "png"
+        (p.imgOutFmt as "png" | "jpeg" | "webp" | "bmp") || "png",
+        2, context
       ),
   },
   {
@@ -477,7 +478,11 @@ export const PDF_TOOLS: Tool[] = [
     cat: "From PDF",
     accept: "application/pdf",
     fields: [],
-    run: async (f) => [await pdf.pdfToText(f[0])],
+    run: async (f) => {
+      const output = await pdf.pdfToText(f[0]);
+      if (!new TextDecoder().decode(output.bytes).trim()) throw new Error("This PDF has no selectable text. Use OCR to Text for a scanned document.");
+      return [output];
+    },
   },
   {
     id: "txt2pdf",

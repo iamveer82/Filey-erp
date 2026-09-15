@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
+import { requireModuleAccess } from "./moduleAccess";
 
 export interface ComputerUseState { enabled: boolean; expiresAt: number | null; busy: boolean }
-type Grant = { sessionToken: string; expiresAt: number; scope: string };
+type Grant = { sessionToken: string; expiresAt: number | null; scope: string; windowId?: string };
 let grant: Grant | null = null;
 let current: ComputerUseState = { enabled: false, expiresAt: null, busy: false };
 let generation = 0;
@@ -22,32 +23,38 @@ export function subscribeComputerUse(listener: () => void): () => void {
 }
 function publish(state: ComputerUseState) { current = state; for (const listener of listeners) listener(); }
 
-/** Called only by an explicit owner UI action, never exposed as an agent tool.
+/** Available by default in the signed-in chat. Actions still pass their approval checks.
  * The token is kept in this module, outside prompts, tool results and storage. */
-export async function enableComputerUse(durationSeconds = 300, windowId?: string): Promise<number> {
+export async function enableComputerUse(durationSeconds: number | null = null, windowId?: string): Promise<number> {
   if (!computerUseSupported()) throw new Error("Computer control requires the Windows desktop app.");
   const scope = agentStorageScope();
   if (!scope) throw new Error("Sign in before enabling computer access.");
-  if (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 900)
+  if (durationSeconds !== null && (!Number.isInteger(durationSeconds) || durationSeconds < 60 || durationSeconds > 900))
     throw new Error("Choose a computer session between 60 and 900 seconds.");
   if (windowId !== undefined && !/^[1-9]\d{0,19}$/.test(windowId))
     throw new Error("Choose a Filey browser window for this task.");
+  if (durationSeconds === null && grant?.expiresAt === null && grant.scope === scope && grant.windowId === windowId)
+    return generation;
   if (starting) throw new Error("Computer access is already starting.");
-  await disableComputerUse();
+  const stopping = disableComputerUse();
   starting = true;
   const version = ++generation;
   publish({ enabled: false, expiresAt: null, busy: true });
   try {
-    const result = await invoke<{ sessionToken: string; expiresAt: number }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}) });
-    if (!result || typeof result.sessionToken !== "string" || !Number.isFinite(result.expiresAt))
+    await stopping;
+    await requireModuleAccess("browser", true);
+    if (version !== generation || scope !== agentStorageScope()) throw new Error("Workspace changed before computer access started.");
+    const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}) });
+    if (!result || typeof result.sessionToken !== "string" || (result.expiresAt !== null && !Number.isFinite(result.expiresAt)))
       throw new Error("The native computer permission response was invalid.");
     if (version !== generation || scope !== agentStorageScope()) {
       await invoke("computer_stop", { sessionToken: result.sessionToken });
       throw new Error("Computer permission was canceled or the workspace changed.");
     }
-    grant = { ...result, scope };
+    grant = { ...result, scope, windowId };
     publish({ enabled: true, expiresAt: result.expiresAt, busy: false });
-    expiryTimer = setTimeout(() => { void disableComputerUse().catch(() => {}); }, Math.max(0, result.expiresAt - Date.now()));
+    if (result.expiresAt !== null)
+      expiryTimer = setTimeout(() => { void disableComputerUse().catch(() => {}); }, Math.max(0, result.expiresAt - Date.now()));
     return version;
   } finally {
     if (version === generation) { starting = false; if (!grant) publish({ enabled: false, expiresAt: null, busy: false }); }
@@ -68,7 +75,7 @@ export async function disableComputerUse(sessionId?: number): Promise<void> {
 
 /** A task can act only through its own grant; replacing it ends that task. */
 export function computerUseSessionActive(sessionId: number): boolean {
-  return generation === sessionId && !!grant && grant.expiresAt > Date.now()
+  return generation === sessionId && !!grant && (grant.expiresAt === null || grant.expiresAt > Date.now())
     && grant.scope === agentStorageScope();
 }
 
@@ -115,9 +122,9 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
     throw new DOMException("This computer session ended or was replaced.", "AbortError");
   const request = validate(args);
   const permission = grant;
-  if (!permission || permission.expiresAt <= Date.now() || permission.scope !== agentStorageScope()) {
+  if (!permission || (permission.expiresAt !== null && permission.expiresAt <= Date.now()) || permission.scope !== agentStorageScope()) {
     await disableComputerUse();
-    throw new Error("Computer access is off or expired. Enable it in Filey AI first.");
+    throw new Error("Computer access is off or expired. Start a new task in Filey AI to use it.");
   }
   if (current.busy) throw new Error("A computer action is running. Wait or stop it before continuing.");
   if (signal?.aborted) { await disableComputerUse(); throw new DOMException("Computer action canceled", "AbortError"); }
@@ -126,6 +133,9 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
   signal?.addEventListener("abort", abort, { once: true });
   publish({ ...current, busy: true });
   try {
+    try { await requireModuleAccess("browser", true); }
+    catch (error) { await disableComputerUse(version); throw error; }
+    if (signal?.aborted || generation !== version || permission.scope !== agentStorageScope()) throw new DOMException("Computer action canceled", "AbortError");
     const result = await invoke<Record<string, unknown>>("computer_command", { sessionToken: permission.sessionToken, request });
     if (signal?.aborted || generation !== version) throw new DOMException("Computer action canceled", "AbortError");
     if (permission.scope !== agentStorageScope()) { await disableComputerUse(); throw new Error("Workspace changed. Computer access stopped."); }

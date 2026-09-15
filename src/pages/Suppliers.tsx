@@ -310,7 +310,7 @@ export default function Suppliers() {
                 <TH label="Supplier" k="name" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Category" k="category" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Contact" k="contact" sortBy={sortBy} onSort={toggleSort} />
-                <TH label="Open balance" k="balance" sortBy={sortBy} onSort={toggleSort} right />
+                <TH label="PO remainder" k="balance" sortBy={sortBy} onSort={toggleSort} right />
                 <th className="th w-10" />
               </tr>
             </thead>

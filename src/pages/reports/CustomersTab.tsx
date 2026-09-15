@@ -1,3 +1,4 @@
+import { customerBalanceRows } from "./reportExports";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
@@ -21,7 +22,7 @@ import {
 export default function CustomersTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
-  const topCustomers = useTopCustomers(data.invoices, data.customers);
+  const topCustomers = useTopCustomers(data.invoices);
   const aging = useReceivablesAging(data.invoices);
 
   const tooltipStyle = cs.tooltipStyle;
@@ -36,22 +37,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
   ];
 
   /* Customer-level outstanding balances */
-  const customerBalances = useMemo(() => {
-    const g = new Map<string, { name: string; outstanding: number; invoiceCount: number }>();
-    for (const i of data.invoices) {
-      if (["paid", "draft", "cancelled"].includes(i.status)) continue;
-      const balance = i.balance ?? i.total ?? 0;
-      if (balance <= 0) continue;
-      const name = i.customer_name || "—";
-      const row = g.get(name) || { name, outstanding: 0, invoiceCount: 0 };
-      row.outstanding += balance;
-      row.invoiceCount += 1;
-      g.set(name, row);
-    }
-    return Array.from(g.values())
-      .sort((a, b) => b.outstanding - a.outstanding)
-      .slice(0, 10);
-  }, [data.invoices]);
+  const customerBalances = useMemo(() => customerBalanceRows(data.invoices),[data.invoices]);
 
   const totalOutstanding = aging.current + aging.d30 + aging.d60 + aging.d90 + aging.d90p;
   const totalCustomers = data.customers.length;

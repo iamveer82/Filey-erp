@@ -26,12 +26,13 @@ function seedTemplate() {
 }
 
 describe("document template browser", () => {
-  it("keeps a selected layout outside the first four visible without writing templates on mount", async () => {
+  it("keeps the selected layout visible in a compact strip without writing templates on mount", async () => {
     seedTemplate();
     const original = localStorage.getItem("localdb:app_settings");
     const change = vi.fn();
     const view = render(<UIProvider><DocTemplateGallery value={custom.id} onChange={change} onDesign={() => {}} docType="invoice" /></UIProvider>);
-    expect(await view.findByRole("button", { name: "Use Studio letterhead template" })).toHaveAttribute("aria-pressed", "true");
+    expect(await view.findByRole("button", { name: "Preview Studio letterhead template" })).toBeVisible();
+    expect(view.queryByRole("button", { name: "Use Classic template" })).toBeNull();
     expect(localStorage.getItem("localdb:app_settings")).toBe(original);
     expect(change).not.toHaveBeenCalled();
   });
@@ -58,6 +59,7 @@ describe("document template browser", () => {
   it("previews a design without selecting it until the explicit Use action", async () => {
     const change = vi.fn();
     const view = render(<UIProvider><DocTemplateGallery value="minimal" onChange={change} onDesign={() => {}} docType="invoice" /></UIProvider>);
+    fireEvent.click(view.getByRole("button", { name: "Browse templates" }));
     fireEvent.click(view.getByRole("button", { name: "Preview Classic template" }));
     const dialog = within(await view.findByRole("dialog", { name: "Classic" }));
     expect(change).not.toHaveBeenCalled();
@@ -74,6 +76,7 @@ describe("document template browser", () => {
       return <DocTemplateGallery value={value} onChange={(next) => { change(next); setValue(next); }} onDesign={() => {}} docType="receipt" />;
     }
     const view = render(<UIProvider><Gallery /></UIProvider>);
+    fireEvent.click(view.getByRole("button", { name: "Browse templates" }));
     fireEvent.click(await view.findByRole("button", { name: "Delete template Studio letterhead" }));
     expect(loadCustomTemplates()).toHaveLength(1);
     fireEvent.click(within(await view.findByRole("dialog", { name: "Delete template" })).getByRole("button", { name: "Delete" }));
@@ -86,6 +89,7 @@ describe("document template browser", () => {
     seedTemplate();
     const change = vi.fn();
     const view = render(<UIProvider><DocTemplateGallery value={custom.id} onChange={change} onDesign={() => {}} docType="invoice" /></UIProvider>);
+    fireEvent.click(view.getByRole("button", { name: "Browse templates" }));
     await view.findByRole("button", { name: "Delete template Studio letterhead" });
     const original = Storage.prototype.setItem;
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {

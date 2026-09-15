@@ -1,3 +1,4 @@
+import { todayYmd } from "../../lib/format";
 import { reportMoney } from "../../lib/reportMoney";
 import { getExchangeRates } from "../../lib/exchange-rates";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -40,15 +41,14 @@ export interface ReportsData {
   txns: Txn[];
   expenses: Expense[];
   invoices: InvoiceDocSummary[];
+  purchaseInvoices: InvoiceDocSummary[];
   /** Dated customer invoice payments in AED, separate from receipt documents. */
   invoicePayments: InvoicePayment[];
   customers: CrmCustomer[];
   receiptList: ReceiptSummary[];
   supplierList: Supplier[];
   poList: PoSummary[];
-  /** Payments recorded against POs. Payables are PO total MINUS these — a PO
-   *  keeps its full total until it is marked paid, so without them every
-   *  payables figure here counts money that has already gone out. */
+  /** PO payments belong to commitments/accruals, separate from supplier bills. */
   poPayments: { po_id: number; amount: number }[];
   loading: boolean;
   error: string;
@@ -62,6 +62,7 @@ export function useReportsData(): ReportsData {
   const [txns, setTxns] = useState<Txn[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [purchaseInvoices, setPurchaseInvoices] = useState<InvoiceDocSummary[]>([]);
   const [invoicePayments, setInvoicePayments] = useState<InvoicePayment[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [receiptList, setReceiptList] = useState<ReceiptSummary[]>([]);
@@ -77,7 +78,7 @@ export function useReportsData(): ReportsData {
     setError("");
     setLoading(true);
     try {
-      const [p, o, a, t, e, i, c, r, su, po, pay, invoicePay, rates] = await Promise.all([
+      const [p, o, a, t, e, i, c, r, su, po, pay, invoicePay, rates, bills] = await Promise.all([
         erp.products(),
         erp.orders(),
         fin.accounts(),
@@ -91,10 +92,12 @@ export function useReportsData(): ReportsData {
         pos.allPayments(),
         billing.allPayments(),
         getExchangeRates(),
+        billing.listDocs("purchase"),
       ]);
       const invoices = i.map((row) =>
         reportMoney(row, ["total", "paid", "balance"], rates)
       );
+      const purchaseInvoices = bills.map(row => reportMoney(row, ["total", "paid", "balance"], rates));
       const receiptRows = r.filter(row => row.status === "paid").map((row) => reportMoney(row, ["amount"], rates));
       const invoicePaymentRows = invoicePaymentsInAed(invoicePay, i, rates);
       const purchaseRows = po.map((row) => reportMoney(row, ["total"], rates));
@@ -117,6 +120,7 @@ export function useReportsData(): ReportsData {
       setTxns(t);
       setExpenses(e);
       setInvoices(invoices);
+      setPurchaseInvoices(purchaseInvoices);
       setInvoicePayments(invoicePaymentRows);
       setCustomers(c);
       setReceiptList(receiptRows);
@@ -135,6 +139,8 @@ export function useReportsData(): ReportsData {
 
   useEffect(() => {
     void load();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => { request.current++; };
   }, [load]);
   useLiveSync(load);
@@ -146,6 +152,7 @@ export function useReportsData(): ReportsData {
     txns,
     expenses,
     invoices,
+    purchaseInvoices,
     invoicePayments,
     customers,
     receiptList,
@@ -282,7 +289,7 @@ export function useFinancials(
 }
 
 /** Top customers by invoice revenue. */
-export function useTopCustomers(invoices: InvoiceDocSummary[], customers: CrmCustomer[]) {
+export function useTopCustomers(invoices: InvoiceDocSummary[]) {
   return useMemo(() => {
     const g = new Map<string, { name: string; total: number; count: number }>();
     for (const i of invoices) {
@@ -296,41 +303,48 @@ export function useTopCustomers(invoices: InvoiceDocSummary[], customers: CrmCus
     return Array.from(g.values())
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [invoices, customers]);
-}
-
-/** Receivables aging — outstanding invoices grouped by age bucket. */
-export function useReceivablesAging(invoices: InvoiceDocSummary[]) {
-  return useMemo(() => {
-    const now = Date.now();
-    const DAY = 86400000;
-    const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
-    for (const i of invoices) {
-      if (i.status === "paid" || i.status === "draft" || i.status === "cancelled")
-        continue;
-      const balance = i.balance ?? i.total ?? 0;
-      if (balance <= 0) continue;
-      const due = i.due_date ? +new Date(i.due_date) : 0;
-      if (!due) {
-        buckets.current += balance;
-        continue;
-      }
-      const age = Math.floor((now - due) / DAY);
-      if (age <= 0) buckets.current += balance;
-      else if (age <= 30) buckets.d30 += balance;
-      else if (age <= 60) buckets.d60 += balance;
-      else if (age <= 90) buckets.d90 += balance;
-      else buckets.d90p += balance;
-    }
-    return buckets;
   }, [invoices]);
 }
 
+/** Outstanding posted documents, aged by due date in calendar days. Input
+ * amounts have already been normalized with the document's frozen FX rate. */
+export function invoiceAging(invoices: InvoiceDocSummary[], today = todayYmd()) {
+  const now = Date.parse(today + "T00:00:00Z");
+  const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
+  for (const invoice of invoices) {
+    if (!isPostedStatus(invoice.status) || invoice.status === "paid") continue;
+    const balance = Math.max(0,invoice.balance ?? (invoice.total - (invoice.paid || 0)));
+    if (!balance) continue;
+    const due = invoice.due_date ? Date.parse(invoice.due_date.slice(0,10) + "T00:00:00Z") : NaN;
+    const age = Number.isFinite(due) ? Math.floor((now-due)/86400000) : 0;
+    const bucket = age <= 0 ? "current" : age <= 30 ? "d30" : age <= 60 ? "d60" : age <= 90 ? "d90" : "d90p";
+    buckets[bucket] += balance;
+  }
+  return buckets;
+}
+export function useReceivablesAging(invoices: InvoiceDocSummary[]) {
+  return useMemo(() => invoiceAging(invoices), [invoices]);
+}
+export const usePayablesAging = useReceivablesAging;
+
+export function supplierBillBalances(bills: InvoiceDocSummary[]) {
+  const balances = new Map<string,{name:string;open:number;billCount:number}>();
+  for (const bill of bills) {
+    if (!isPostedStatus(bill.status) || bill.status === "paid" || !(Number(bill.balance) > 0)) continue;
+    const name = bill.customer_name || "Unnamed supplier";
+    const key = bill.customer_id ? "id:" + bill.customer_id : name.trim().toLowerCase();
+    const row = balances.get(key) || {name,open:0,billCount:0};
+    row.open += bill.balance!; row.billCount++; balances.set(key,row);
+  }
+  return [...balances.values()].sort((a,b)=>b.open-a.open);
+}
+
 /** Top suppliers by PO total. */
-export function useTopSuppliers(poList: PoSummary[], supplierList: Supplier[]) {
+export function useTopSuppliers(poList: PoSummary[]) {
   return useMemo(() => {
     const g = new Map<string, { name: string; total: number; count: number }>();
     for (const p of poList) {
+      if (["draft","cancelled"].includes(p.status)) continue;
       const name = p.supplier_name || "—";
       const row = g.get(name) || { name, total: 0, count: 0 };
       row.total += p.total || 0;
@@ -340,7 +354,7 @@ export function useTopSuppliers(poList: PoSummary[], supplierList: Supplier[]) {
     return Array.from(g.values())
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
-  }, [poList, supplierList]);
+  }, [poList]);
 }
 
 /** Sum of payments recorded against each PO. */
@@ -351,38 +365,4 @@ export function paidByPo(
   for (const p of poPayments)
     m.set(p.po_id, (m.get(p.po_id) ?? 0) + (Number(p.amount) || 0));
   return m;
-}
-
-/** Payables aging — open POs grouped by age bucket, net of payments made.
- *  A partly paid PO keeps its full total and its non-paid status, so counting
- *  p.total here billed the whole order as still owed. The Suppliers page and
- *  supplier detail have always netted payments off; this now agrees with them. */
-export function usePayablesAging(
-  poList: PoSummary[],
-  poPayments: { po_id: number; amount: number }[] = []
-) {
-  return useMemo(() => {
-    const now = Date.now();
-    const DAY = 86400000;
-    const paid = paidByPo(poPayments);
-    const buckets = { current: 0, d30: 0, d60: 0, d90: 0, d90p: 0 };
-    for (const p of poList) {
-      if (p.status === "paid" || p.status === "cancelled" || p.status === "draft")
-        continue;
-      const open = (p.total || 0) - (paid.get(p.id) ?? 0);
-      if (open <= 0) continue;
-      const due = p.expected_date ? +new Date(p.expected_date) : 0;
-      if (!due) {
-        buckets.current += open;
-        continue;
-      }
-      const age = Math.floor((now - due) / DAY);
-      if (age <= 0) buckets.current += open;
-      else if (age <= 30) buckets.d30 += open;
-      else if (age <= 60) buckets.d60 += open;
-      else if (age <= 90) buckets.d90 += open;
-      else buckets.d90p += open;
-    }
-    return buckets;
-  }, [poList, poPayments]);
 }

@@ -1,32 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Paperclip } from "lucide-react";
+import { Link } from "react-router-dom";
 import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, num, errMsg, todayYmd } from "../lib/format";
-import { PageHeader, Badge, ErrorBanner, Modal, Field, MetricCard } from "../components/ui";
-import { SelectMenu } from "../components/ui-menu";
+import { aed, fmtDate, num, errMsg } from "../lib/format";
+import { PageHeader, Badge, ErrorBanner, MetricCard } from "../components/ui";
 import { useUI } from "../lib/ui";
 
-const CATEGORIES = [
-  "Rent", "Utilities", "Salaries", "Office Supplies", "Travel",
-  "Marketing", "Maintenance", "Fuel", "Logistics", "Insurance",
-  "Professional Fees", "Bank Charges", "Miscellaneous",
-];
-
 export default function Purchase() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
+  const [removing, setRemoving] = useState<number | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    category: "Rent",
-    description: "",
-    amount: "",
-    expense_date: todayYmd(),
-  });
-  const [saving, setSaving] = useState(false);
-
   const load = () => {
     setError("");
     return fin
@@ -73,46 +59,16 @@ export default function Purchase() {
 
   const avgEntry = expenses.length ? totalSpend / expenses.length : 0;
 
-  const save = async () => {
-    if (saving) return;
-    const amt = Number(form.amount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
-    setSaving(true);
-    try {
-      await fin.createExpense(
-        form.category,
-        form.description || null,
-        amt,
-        form.expense_date,
-        null
-      );
-      toast.success("Expense logged");
-      setOpen(false);
-      setForm({
-        category: "Rent",
-        description: "",
-        amount: "",
-        expense_date: todayYmd(),
-      });
-      load();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const remove = async (id: number) => {
+    if (removing !== null || !await confirm({ title: "Delete this expense?", message: "This also reverses its accounting entries. The receipt remains in My Files.", confirmLabel: "Delete expense", danger: true })) return;
+    setRemoving(id);
     try {
       await fin.deleteExpense(id);
       toast.success("Expense deleted");
       load();
     } catch (e) {
       toast.error(errMsg(e));
-    }
+    } finally { setRemoving(null); }
   };
 
   return (
@@ -121,9 +77,9 @@ export default function Purchase() {
         title="Purchase"
         subtitle="Log and track company expenses"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
+          <Link className="btn-primary" to="/purchase/new">
             <Plus size={16} /> Log expense
-          </button>
+          </Link>
         }
       />
 
@@ -239,14 +195,16 @@ export default function Purchase() {
                       <Badge tone="info">{e.category}</Badge>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground truncate max-w-[200px]">
-                      {e.description || "—"}
+                      <Link className="font-medium text-foreground hover:underline" to={`/purchase/${e.id}`}>{e.details?.vendor || e.description || e.category}</Link>
+                      {e.details?.receipt && <Paperclip size={13} className="ml-2 inline" aria-label="Receipt attached" />}
                     </td>
                     <td className="px-5 py-3 text-right text-foreground tabular-nums font-medium">
                       {aed(Number(e.amount) || 0)}
                     </td>
                     <td className="px-5 py-3">
                       <button
-                        onClick={() => remove(e.id)}
+                        onClick={() => void remove(e.id)}
+                        disabled={removing !== null}
                         aria-label={`Delete ${e.category} expense from ${fmtDate(e.expense_date)}`}
                         className="btn-ghost w-10 !px-0 text-danger"
                       >
@@ -261,68 +219,7 @@ export default function Purchase() {
         </div>
       </div>
 
-      {/* Add expense modal */}
-      <Modal
-        open={open}
-        onClose={() => { if (!saving) setOpen(false); }}
-        title="Log expense"
-      >
-        <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
-          <Field label="Category">
-            <SelectMenu
-              ariaLabel="Expense category"
-              value={form.category}
-              onChange={(v) => setForm({ ...form, category: v })}
-              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
-            />
-          </Field>
-          <Field label="Description">
-            <input
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Optional note"
-              className="input"
-            />
-          </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Amount (AED)">
-              <input
-                type="number"
-                required
-                min="0.01"
-                step="0.01"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                placeholder="0.00"
-                className="input"
-              />
-            </Field>
-            <Field label="Date">
-              <input
-                type="date"
-                required
-                value={form.expense_date}
-                onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
-                className="input"
-              />
-            </Field>
-          </div>
-          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-            <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn-primary"
-              type="submit"
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Log expense"}
-            </button>
-          </div>
-        </fieldset>
-        </form>
-      </Modal>
+
     </div>
   );
 }

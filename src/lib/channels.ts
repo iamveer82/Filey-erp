@@ -57,11 +57,14 @@ async function ghFetch(url: string): Promise<string> {
     return (await httpFetch(url)).body;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/\(404\)/.test(msg))
+    // AiError carries the status; the message is provider-flavoured ("Model or
+    // endpoint not found") and must never reach a GitHub user.
+    const status = (e as { status?: number }).status;
+    if (status === 404 || /\(404\)/.test(msg))
       throw new ReachError(
         `Not found — the repo/file does not exist, or it is private (private repos need the gh CLI, which the agent can run on desktop).`
       );
-    if (/\(403\)/.test(msg))
+    if (status === 403 || status === 429 || /\(403\)/.test(msg))
       throw new ReachError(`GitHub API rate limit hit (60/hr unauthenticated). Try again later.`);
     throw e;
   }

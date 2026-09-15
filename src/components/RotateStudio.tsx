@@ -22,32 +22,36 @@ export default function RotateStudio({
   toastRef.current = toast;
 
   const [pageImg, setPageImg] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const [aspect, setAspect] = useState<{ w: number; h: number } | null>(null);
   const [angle, setAngle] = useState(0); // 0 | 90 | 180 | 270
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let dead = false;
+    let task: ReturnType<typeof safePdf.getDocument> | undefined;
+    const c = document.createElement("canvas");
+    setPageImg(""); setPreviewError("");
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await safePdf.getDocument({ data }).promise;
+        task = safePdf.getDocument({ data });
+        const pdf = await task.promise;
         const p = await pdf.getPage(1);
         const pt = p.getViewport({ scale: 1 });
         if (dead) return;
         setAspect({ w: pt.width, h: pt.height });
-        const scale = RENDER_W / pt.width;
+        const scale = Math.min(RENDER_W / pt.width, 1600 / pt.height);
         const vp = p.getViewport({ scale });
-        const c = document.createElement("canvas");
         c.width = vp.width;
         c.height = vp.height;
         const ctx = c.getContext("2d");
-        if (!ctx) return;
+        if (!ctx) throw new Error("Preview is unavailable. Try reopening this tool.");
         await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
         if (!dead) setPageImg(c.toDataURL("image/png"));
       } catch (e) {
-        if (!dead) toastRef.current.error(e instanceof Error ? e.message : String(e));
-      }
+        if (!dead) setPreviewError(e instanceof Error ? e.message : String(e));
+      } finally { c.width = c.height = 0; await task?.destroy(); }
     })();
     return () => {
       dead = true;
@@ -122,13 +126,13 @@ export default function RotateStudio({
             />
           </div>
         ) : (
-          <Loader2 size={22} className="animate-spin text-brand-400" />
+          previewError ? <p role="alert" className="text-sm text-danger">{previewError}</p> : <Loader2 size={22} className="animate-spin text-brand-400" />
         )}
       </div>
 
       <button
         onClick={apply}
-        disabled={saving || angle === 0}
+        disabled={saving || !pageImg || angle === 0}
         className="btn-primary mt-4 w-full"
         aria-label="Rotate PDF"
       >

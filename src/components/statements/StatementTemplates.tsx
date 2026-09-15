@@ -105,19 +105,19 @@ function kindLabels(kind: StatementPartyKind) {
       }
     : {
         partyNoun: "Supplier",
-        journalTitle: "Purchases & Payments Journal Statement",
-        ledgerTitle: "Supplier Ledger",
-        debitTotal: "Total billed",
+        journalTitle: "Purchase Orders & Payments",
+        ledgerTitle: "Purchase Order Statement",
+        debitTotal: "Order value",
         creditTotal: "Payments made",
-        balance: "Amount payable",
-        debitCol: "Billed",
+        balance: "PO remainder",
+        debitCol: "Ordered",
         creditCol: "Paid",
         refCol: "PO #",
         docsNoun: "Purchase orders",
         paymentsNoun: "Payments made",
         vatLabel: "Total VAT",
-        netLabel: "Net purchases",
-        terms: "Please contact accounts for any reconciliation queries.",
+        netLabel: "Net order value",
+        terms: "Purchase orders and their payments only. For posted supplier bills and accounts payable, use Reports → Suppliers.",
         gratitude:
           "With gratitude for your continued partnership — settlement follows the agreed terms",
       };
@@ -657,7 +657,7 @@ export function ModernStatementTemplate({ data, page }: StatementTemplateProps) 
           <div className="w-1.5 h-16 bg-blue-500 rounded-full"></div>
           <div className="flex-1">
             <div className="text-[10px] uppercase tracking-widest text-blue-600 font-semibold">
-              Statement of Account
+              {data.party.kind === "supplier" ? "Purchase Order Statement" : "Statement of Account"}
             </div>
             <div className="text-[22px] font-bold tracking-tight">
               {data.party.name}
@@ -805,7 +805,7 @@ export function ElegantStatementTemplate({ data, page }: StatementTemplateProps)
 
           <div className="text-center py-4">
             <div className="text-[16px] tracking-[0.35em] uppercase text-amber-800">
-              Statement of Account
+              {data.party.kind === "supplier" ? "Purchase Order Statement" : "Statement of Account"}
             </div>
             <div className="italic text-neutral-700 mt-1">
               Period {data.period.from} – {data.period.to}
@@ -951,7 +951,7 @@ export function CorporateStatementTemplate({ data, page }: StatementTemplateProp
           </div>
           <div className="text-right">
             <div className="text-[13px] font-semibold uppercase tracking-widest">
-              Statement of Account
+              {data.party.kind === "supplier" ? "Purchase Order Statement" : "Statement of Account"}
             </div>
             <div className="text-neutral-300">
               Period {data.period.from} – {data.period.to}

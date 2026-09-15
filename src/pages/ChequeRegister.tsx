@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   Plus,
   Check,
   Paperclip,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { log } from "../lib/log";
+import { nextLocalId } from "../lib/recordId";
 import { aed, fmtDate, numInput, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
@@ -70,22 +70,14 @@ function loadCheques(): Cheque[] {
     return [];
   }
 }
-function saveCheques(c: Cheque[]) {
-  const key = cacheKey();
-  if (!key) throw new Error("Sign in to this workspace before saving cheques.");
-  try {
-    localStorage.setItem(key, JSON.stringify(c));
-  } catch (e) {
-    console.warn("Failed to save cheques", e);
-  }
-  // Write-through to app_settings: bare localStorage never syncs across
-  // devices and the desktop backup doesn't include it (same as challans).
-  void tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(c)).catch((e) =>
-    // Local storage already holds it, so nothing is lost here — but a failed
-    // write-through means other devices never see it. Surface that in
-    // Settings -> Diagnostics instead of dropping it on the floor.
-    log.warn("sync", "cheques did not reach app_settings", e)
-  );
+async function saveCheques(rows: Cheque[], expectedKey: string | null) {
+  if (!expectedKey || cacheKey() !== expectedKey) throw new Error("Workspace changed. Reopen this section before saving.");
+  await tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(rows));
+  if (cacheKey() !== expectedKey) throw new Error("Workspace changed while saving. Reopen this section to review the result.");
+  // The durable store is authoritative. Failure of its disposable mirror does
+  // not turn a completed write into a failed save.
+  try { localStorage.setItem(expectedKey, JSON.stringify(rows)); }
+  catch { /* Rebuilt from app_settings on the next load. */ }
 }
 
 /** Pull cheques saved on the user's other devices; remote wins when present. */
@@ -117,6 +109,18 @@ const statusTone = (s: string) => {
 export default function ChequeRegister() {
   const { toast, confirm } = useUI();
   const [cheques, setCheques] = useState<Cheque[]>([]);
+  const [screenScope] = useState(cacheKey);
+  const writing = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const persist = async (next: Cheque[], message: string): Promise<boolean> => {
+    if (writing.current) return false;
+    writing.current = true; setSaving(true);
+    try {
+      await saveCheques(next, screenScope);
+      setCheques(next); toast.success(message); return true;
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); return false; }
+    finally { writing.current = false; setSaving(false); }
+  };
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Cheque | null>(null);
   const [q, setQ] = useState("");
@@ -165,18 +169,14 @@ export default function ChequeRegister() {
     });
     if (!ok) return;
     const next = cheques.filter((x) => x.id !== c.id);
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Deleted.");
+    void persist(next, "Deleted.");
   };
 
   const markCleared = (c: Cheque) => {
     const next = cheques.map((x) =>
       x.id === c.id ? { ...x, status: "cleared" as const } : x
     );
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Marked as cleared.");
+    void persist(next, "Marked as cleared.");
   };
 
   const editCheque = (c: Cheque) => {
@@ -187,13 +187,11 @@ export default function ChequeRegister() {
   const duplicate = (c: Cheque) => {
     const copy: Cheque = {
       ...c,
-      id: Date.now(),
+      id: nextLocalId(cheques),
       created_at: new Date().toISOString(),
     };
     const next = [...cheques, copy];
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Cheque duplicated.");
+    void persist(next, "Cheque duplicated.");
   };
 
   // Cheques are device-local records with no public link or stored contact,
@@ -370,18 +368,16 @@ export default function ChequeRegister() {
         <ChequeModal
           open={open}
           edit={edit}
-          onClose={() => setOpen(false)}
-          onSaved={(c) => {
+          saving={saving}
+          onClose={() => { if (!saving) setOpen(false); }}
+          onSaved={async (c) => {
             const next = edit
               ? cheques.map((x) => (x.id === c.id ? c : x))
               : [
                   ...cheques,
-                  { ...c, id: Date.now(), created_at: new Date().toISOString() },
+                  { ...c, id: nextLocalId(cheques), created_at: new Date().toISOString() },
                 ];
-            setCheques(next);
-            saveCheques(next);
-            setOpen(false);
-            toast.success(edit ? "Updated." : "Cheque added.");
+            if (await persist(next, edit ? "Updated." : "Cheque added.")) setOpen(false);
           }}
         />
       )}
@@ -438,10 +434,12 @@ function ChequeModal({
   edit,
   onClose,
   onSaved,
+  saving,
 }: {
   open: boolean;
   edit: Cheque | null;
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
+  saving: boolean;
   onSaved: (c: Cheque) => void;
 }) {
   const [f, setF] = useState<Omit<Cheque, "id" | "created_at">>(
@@ -551,10 +549,10 @@ function ChequeModal({
         </button>
         <button
           className="btn-primary"
-          disabled={!valid}
-          onClick={() => onSaved(f as Cheque)}
+          disabled={!valid || saving}
+          onClick={() => void onSaved(f as Cheque)}
         >
-          {edit ? "Save changes" : "Create cheque"}
+          {saving ? "Saving…" : edit ? "Save changes" : "Create cheque"}
         </button>
       </div>
     </Modal>

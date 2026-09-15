@@ -28,7 +28,7 @@ it("keeps drafts across horizontal tabs and follows keyboard and URL navigation"
     <Settings /><LocationControls />
   </MemoryRouter>);
   expect(screen.getByRole("tablist", { name: "Settings sections" })).toHaveAttribute("aria-orientation", "horizontal");
-  fireEvent.change(screen.getByLabelText("Unsaved company name"), { target: { value: "Unsaved draft" } });
+  fireEvent.change(await screen.findByLabelText("Unsaved company name"), { target: { value: "Unsaved draft" } });
   const appearance = screen.getByRole("tab", { name: "Appearance" });
   fireEvent.mouseDown(appearance, { button: 0, ctrlKey: false });
   expect(screen.getByTestId("location")).toHaveTextContent("section=appearance");

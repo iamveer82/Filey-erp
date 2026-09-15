@@ -19,7 +19,7 @@ export const CAPABILITIES: Capability[] = [
     id: "computer",
     name: "Computer use",
     description:
-      "Open isolated browser windows and use Windows apps during a temporary computer-access session you enable",
+      "Open isolated browser windows and use Windows apps with computer access available automatically while Filey AI is open",
     tools: ["computer_use", "workspace_browser"],
   },
   {

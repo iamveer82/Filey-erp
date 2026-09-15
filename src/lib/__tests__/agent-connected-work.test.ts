@@ -9,19 +9,21 @@ import { setDataMode } from "../dataMode";
 import { reactToPdfBytes } from "../reactPdf";
 import { deliverFile } from "../agentFiles";
 import { desktopBrowserCommand } from "../desktopBrowser";
+import { runComputerUse } from "../computerUse";
 import { bridgeState, sendWaFile } from "../waBridge";
 import { waLogAdd } from "../waLog";
 import { log } from "../log";
 import * as zernio from "../zernio";
 import { getCountryMarketData, getPublicHolidays, listHolidayCountries, searchCreativeAssets, WORK_SERVICES } from "../workServices";
 
-vi.mock("../log", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../log", async original => ({ ...await original<typeof import("../log")>(), log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../reactPdf", () => ({ reactToPdfBytes: vi.fn() }));
 vi.mock("../../components/InvoiceExportSheet", () => ({ default: () => null }));
 vi.mock("../../components/StampSignatureSettings", () => ({ loadCompanyStampSig: async () => ({}), EMPTY_STAMP_SIG: {} }));
 vi.mock("../../components/BankDetails", () => ({ loadBankInfo: async () => ({}), EMPTY_BANK: {} }));
 vi.mock("../agentFiles", () => ({ deliverFile: vi.fn() }));
 vi.mock("../desktopBrowser", () => ({ desktopBrowserSupported: () => true, desktopBrowserCommand: vi.fn() }));
+vi.mock("../computerUse", () => ({ runComputerUse: vi.fn(async () => ({ windows: [] })) }));
 vi.mock("../waBridge", () => ({ hasDesktop: true, bridgeState: vi.fn(), sendWaFile: vi.fn() }));
 vi.mock("../waLog", () => ({ waLogAdd: vi.fn() }));
 vi.mock("../workServices", () => ({
@@ -75,7 +77,7 @@ beforeEach(() => {
     loading: true, window_id: "42", canGoBack: false, canGoForward: false,
   } });
   vi.mocked(bridgeState).mockReset().mockResolvedValue({ state: "connected" });
-  vi.mocked(sendWaFile).mockReset().mockResolvedValue();
+  vi.mocked(sendWaFile).mockReset().mockResolvedValue("provider-id");
   vi.spyOn(zernio, "listAccounts").mockResolvedValue([{ id: "social-1", platform: "instagram" }]);
   vi.spyOn(zernio, "createPost").mockResolvedValue({ id: "post-1", status: "published" });
 });
@@ -142,7 +144,7 @@ describe("invoice WhatsApp tools", () => {
   });
 
   it("keeps acceptance but avoids another workspace's ledger after the provider responds", async () => {
-    vi.mocked(sendWaFile).mockImplementationOnce(async () => { setCacheOrg("another-org", "another-user"); });
+    vi.mocked(sendWaFile).mockImplementationOnce(async () => { setCacheOrg("another-org", "another-user"); return "provider-id"; });
     expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ ok: true, status: "accepted", warning: expect.stringMatching(/workspace changed/i) });
     expect(billing.setStatus).not.toHaveBeenCalled();
     expect(waLogAdd).not.toHaveBeenCalled();
@@ -183,6 +185,26 @@ describe("invoice WhatsApp tools", () => {
 });
 
 describe("connected work discovery and permissions", () => {
+  it("starts in-app computer access only after owner, capability, mode and approval checks", async () => {
+    const session = vi.fn(async () => 42);
+    const args = { action: "list_windows" };
+    const run = (approve = true, owner = true) => runTool("computer_use", args, () => approve, owner, "test-turn", undefined, session);
+    expect(await run(true, false)).toHaveProperty("error");
+    setCapabilityEnabled("computer", false);
+    expect(await run()).toHaveProperty("error");
+    setCapabilityEnabled("computer", true);
+    setAgentMode("plan");
+    expect(await run()).toHaveProperty("error");
+    setAgentMode("auto");
+    expect(await run(false)).toHaveProperty("error");
+    expect(session).not.toHaveBeenCalled();
+    expect(await run()).toEqual({ windows: [] });
+    expect(session).toHaveBeenCalledOnce();
+    expect(runComputerUse).toHaveBeenCalledWith(args, undefined, 42);
+    vi.mocked(runComputerUse).mockClear();
+    expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/Remote and scheduled tasks/) });
+    expect(runComputerUse).not.toHaveBeenCalled();
+  });
   const sensitive = ["prepare_invoice_whatsapp", "send_invoice_whatsapp", "workspace_browser"];
   const offered = (isOwner = true) => offeredTools({ isOwner }, new Set(["messaging", "web"])).map((tool) => tool.name);
 

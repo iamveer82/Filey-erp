@@ -858,7 +858,7 @@ export default function PaymentReceipt() {
                     onClick={downloadPdf}
                     title="Download PDF (Ctrl+P)"
                   >
-                    <Download size={15} /> PDF
+                    <Download size={15} /> Download PDF
                   </button>
                   <button className="btn-ghost" onClick={duplicate} title="Duplicate as a new draft">
                     <Copy size={15} /> Duplicate
@@ -1127,7 +1127,7 @@ export default function PaymentReceipt() {
                 <Modal open onClose={() => setViewOpen(false)} title={form.number || "Receipt preview"} size="full">
             <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
 
-              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
             <div className="min-w-0 overflow-auto">
                         <div className="mx-auto max-w-5xl">

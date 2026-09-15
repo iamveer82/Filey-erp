@@ -3,10 +3,12 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import MergeStudio from "../MergeStudio";
 const merge = vi.hoisted(() => vi.fn());
+const destroy = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pdfTools", () => ({ mergePdfs: merge }));
 vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { error: vi.fn() } }) }));
 vi.mock("../../lib/pdfjsSafe", () => ({
   getDocument: () => ({
+    destroy,
     promise: Promise.resolve({
       numPages: 1,
       getPage: async () => ({
@@ -60,6 +62,7 @@ it("keeps the chosen merge order when adding and removing files", async () => {
   await waitFor(() =>
     expect(view.queryByRole("button", { name: "Remove first.pdf" })).toBeNull()
   );
-  fireEvent.click(view.getByRole("button", { name: "Merge and download PDF" }));
+  fireEvent.click(view.getByRole("button", { name: "Merge PDF" }));
   await waitFor(() => expect(merge).toHaveBeenCalledWith([second, third]));
+  expect(destroy).toHaveBeenCalledTimes(3);
 });

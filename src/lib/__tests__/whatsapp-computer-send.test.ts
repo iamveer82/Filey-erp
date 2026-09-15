@@ -79,7 +79,7 @@ it("sends one exact PDF/caption through the scoped browser and verifies the outg
   const onProgress = vi.fn();
   expect(await run({ onProgress })).toMatchObject({ status: "sent", sendAttempted: true, path });
   expect(desktopBrowserCommand).toHaveBeenCalledWith({ action: "open", url: "https://web.whatsapp.com/send?phone=971501234567" }, expect.any(AbortSignal));
-  expect(enableComputerUse).toHaveBeenCalledWith(300, "42");
+  expect(enableComputerUse).toHaveBeenCalledWith(null, "42");
   const actions = vi.mocked(runComputerUse).mock.calls.map(([args]) => args);
   expect(actions.filter(a => a.action === "type").map(a => a.text)).toEqual([path, input.text]);
   expect(actions.filter(a => a.action === "click" && a.x === 400)).toHaveLength(1);

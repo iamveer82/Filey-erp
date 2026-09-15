@@ -70,6 +70,25 @@ describe.each(ledgers)("live $name", ({ Page, key, setting, row, text, add, fiel
     expect(mock.setSetting).not.toHaveBeenCalled();
   });
 
+  it("keeps the entered draft and original cache when the durable save fails", async () => {
+    const originalKey=cacheKey(key);localStorage.setItem(originalKey,"[]");
+    const view=wrap(<Page />);
+    await waitFor(()=>expect(mock.settings).toHaveBeenCalledOnce());
+    fireEvent.click(view.getByRole("button",{name:add}));
+    fireEvent.change(view.getByRole("textbox",{name:field}),{target:{value:"Unsaved fixture"}});
+    if (setting==="bank_accounts") fireEvent.change(view.getByRole("textbox",{name:"Account Name *"}),{target:{value:"Operating"}});
+    else {
+      fireEvent.change(view.getByRole("textbox",{name:"Cheque Number *"}),{target:{value:"FIXTURE-1"}});
+      fireEvent.change(view.getByRole("spinbutton",{name:/Amount/}),{target:{value:"25"}});
+    }
+    mock.setSetting.mockRejectedValue(new Error("Fixture disk full"));
+    fireEvent.click(view.getByRole("button",{name:setting==="bank_accounts"?"Create account":"Create cheque"}));
+    await waitFor(()=>expect(mock.setSetting).toHaveBeenCalledOnce());
+    expect(await view.findByText("Fixture disk full")).toBeTruthy();
+    expect(view.getByDisplayValue("Unsaved fixture")).toBeTruthy();
+    expect(localStorage.getItem(originalKey)).toBe("[]");
+  });
+
   it("discards a pending settings response after the account changes", async () => {
     let resolve!: (rows: { key: string; value: string }[]) => void;
     mock.settings.mockReturnValue(new Promise((done) => { resolve = done; }));

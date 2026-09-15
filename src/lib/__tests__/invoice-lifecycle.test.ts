@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { billing, erp, fin } from "../api";
 import { setDataMode } from "../dataMode";
-import { localClient } from "../localdb";
+import { localClient, replaceColl } from "../localdb";
 
 vi.mock("../exchange-rates", async (importOriginal) => ({
   ...await importOriginal<typeof import("../exchange-rates")>(),
@@ -103,6 +103,9 @@ it("can identify an older receipt without removing the other legacy payment", as
   const first = await pay(id, 30);
   await pay(id, 70);
   await localClient.from("transactions").update({ ref: "Invoice INV-LIFE Payment" }).eq("source", "payment");
+  // Legacy postings predate random offline IDs and were stored in sequence order.
+  const legacyRows = (await localClient.from("transactions").select()).data;
+  await replaceColl("transactions", legacyRows.map((row: Record<string, unknown>, index: number) => ({ ...row, id: index + 1 })));
   await billing.removePayment(first!);
   expect(await balance(/sales revenue/i)).toBe(100);
   expect(await balance(/cash|bank/i)).toBe(70);

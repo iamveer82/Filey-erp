@@ -1,0 +1,17 @@
+.composer-control { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 5px 8px; border-radius: 999px; font-size: 12px; line-height: 1.3; transition: background-color 160ms ease; }
+.composer-control:hover, .composer-control[data-state="open"] { background: var(--hover); }
+.composer-control:disabled { opacity: .5; cursor: not-allowed; }
+.effort-slider { position: relative; height: 30px; }
+.effort-track { position: absolute; inset: 3px 0; overflow: hidden; border-radius: 999px; background: var(--hover); }
+.effort-fill { position: relative; height: 100%; width: var(--effort-fill); overflow: hidden; border-radius: inherit; background: #ffd600; transition: width 180ms ease-out; }
+.effort-fill i { position: absolute; left: 8%; top: 45%; width: 3px; height: 3px; background: #856500; border-radius: 50%; animation: effort-flow 2.6s linear infinite; }
+.effort-fill i:nth-child(2) { top: 25%; animation-delay: -.8s; }
+.effort-fill i:nth-child(3) { top: 70%; animation-delay: -1.7s; }
+.effort-slider input { position: relative; display: block; width: 100%; height: 30px; margin: 0; appearance: none; background: transparent; cursor: pointer; border-radius: 999px; }
+.effort-slider input::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 1px solid #a3a3a3; }
+.effort-slider input::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 1px solid #a3a3a3; }
+.effort-slider input:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.effort-change { animation: effort-change 220ms ease-out; }
+@keyframes effort-flow { from { transform: translateX(0); opacity: 0; } 20% { opacity: .8; } to { transform: translateX(200px); opacity: 0; } }
+@keyframes effort-change { from { transform: scale(.7) rotate(-18deg); } to { transform: scale(1) rotate(0); } }
+@media (prefers-reduced-motion: reduce) { .effort-fill, .composer-control { transition: none; } .effort-fill i, .effort-change { animation: none; } }

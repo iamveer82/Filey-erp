@@ -35,6 +35,7 @@ export function MenuPopover({
   side = "bottom",
   align = "start",
   closeOnScroll = false,
+  role = "menu",
   className,
   style,
   children,
@@ -48,6 +49,7 @@ export function MenuPopover({
   align?: "end" | "start";
   /** Tables scroll under their menus — close instead of following. */
   closeOnScroll?: boolean;
+  role?: "menu" | "presentation";
   className?: string;
   /** Extra inline styles merged over the computed position (e.g. minWidth). */
   style?: CSSProperties;
@@ -133,7 +135,7 @@ export function MenuPopover({
   return createPortal(
     <div
       ref={panelRef}
-      role="menu"
+      role={role}
       style={{ ...pos, ...style }}
       className={cn(
         // Every menu scrolls within the viewport and keeps its wheel events to

@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
+import { nextLocalId } from "./recordId";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -296,9 +297,6 @@ export function replaceColl(
   });
 }
 
-const nextId = (rows: Row[]): number =>
-  rows.reduce((m, r) => (typeof r.id === "number" && r.id > m ? r.id : m), 0) + 1;
-
 // ---- sync journal ----------------------------------------------------------
 // Records which collections changed — per row: changed ids + deleted ids —
 // since the last cloud push, so sync.ts uploads only the rows that moved.
@@ -310,7 +308,7 @@ const nextId = (rows: Row[]): number =>
 
 export type SyncJournal = {
   v: number;
-  tables: Record<string, { all?: boolean; changed: any[]; deleted: any[] }>;
+  tables: Record<string, { all?: boolean; changed: any[]; deleted: any[]; deletedRevisions?: Record<string, number | null> }>;
 };
 
 const JOURNAL_KEY = "syncjournal";
@@ -373,10 +371,18 @@ async function journalSave(j: SyncJournal): Promise<void> {
  *  scheduler in a hot retry loop. No-op for collections the cloud doesn't take. */
 export async function journalMark(
   coll: string,
-  opts?: { changed?: any[]; deleted?: any[]; all?: boolean; silent?: boolean }
+  opts?: { changed?: any[]; deleted?: any[]; deletedRevisions?: Record<string, number | null>; all?: boolean; silent?: boolean }
 ): Promise<void> {
   if (!PUSH_SET.has(coll)) return;
   const j = await journalLoad();
+  markJournal(j, coll, opts);
+  await journalSave(j);
+  if (!opts?.silent && typeof window !== "undefined")
+    window.dispatchEvent(new Event("filey:local-write"));
+}
+
+function markJournal(j: SyncJournal, coll: string, opts: Parameters<typeof journalMark>[1]): void {
+  if (!PUSH_SET.has(coll)) return;
   j.v++;
   const entry = (j.tables[coll] ??= { changed: [], deleted: [] });
   if (opts?.all || (!opts?.changed && !opts?.deleted)) entry.all = true;
@@ -394,9 +400,7 @@ export async function journalMark(
   };
   push(entry.changed, opts?.changed ?? []);
   push(entry.deleted, opts?.deleted ?? []);
-  await journalSave(j);
-  if (!opts?.silent && typeof window !== "undefined")
-    window.dispatchEvent(new Event("filey:local-write"));
+  if (opts?.deletedRevisions) entry.deletedRevisions = { ...entry.deletedRevisions, ...opts.deletedRevisions };
 }
 
 /** A COPY of the journal, isolated from writes that land afterwards.
@@ -417,7 +421,7 @@ export async function journalSnapshot(): Promise<SyncJournal> {
   const tables: SyncJournal["tables"] = {};
   for (const t of Object.keys(j.tables)) {
     const e = j.tables[t];
-    tables[t] = { ...e, changed: [...e.changed], deleted: [...e.deleted] };
+    tables[t] = { ...e, changed: [...e.changed], deleted: [...e.deleted], ...(e.deletedRevisions ? { deletedRevisions: { ...e.deletedRevisions } } : {}) };
   }
   return { v: j.v, tables };
 }
@@ -427,6 +431,55 @@ export async function journalSnapshot(): Promise<SyncJournal> {
  *  ids after a bulk import. */
 export async function journalVersion(): Promise<number> {
   return (await journalLoad()).v;
+}
+
+/** Remember a successful upload without overwriting edits made during the request. */
+export function rememberSyncRevision(coll: string, id: string | number, revision: number): Promise<void> {
+  return serializeWrite(async () => {
+    const rows = await loadColl(coll);
+    if (rows.some(row => row.id === id))
+      await saveColl(coll, rows.map(row => row.id === id ? { ...row, sync_revision: revision } : row));
+    const j = await journalSnapshot();
+    if (j.tables[coll]?.deleted.includes(id)) {
+      j.tables[coll].deletedRevisions = { ...j.tables[coll].deletedRevisions, [String(id)]: revision };
+      await journalSave(j);
+    }
+  });
+}
+
+/** Apply an explicit conflict choice. A subsequent push still compares revisions. */
+export function resolveLocalSyncConflict(coll: string, id: string | number, remote: Row | null, keepLocal: boolean, reviewedLocal: Row | null): Promise<void> {
+  return serializeWrite(async () => {
+    const rows = await loadColl(coll);
+    if (JSON.stringify(rows.find(row => row.id === id) ?? null) !== JSON.stringify(reviewedLocal))
+      throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
+    const original = await journalSnapshot();
+    const journal = structuredClone(original);
+    const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
+    let next = rows;
+    if (keepLocal) {
+      next = rows.map(row => row.id === id ? { ...row, sync_revision: remote?.sync_revision ?? null } : row);
+      if (entry.deleted.includes(id)) entry.deletedRevisions = { ...entry.deletedRevisions, [String(id)]: remote?.sync_revision ?? null };
+      else if (!entry.changed.includes(id)) entry.changed.push(id);
+    } else {
+      next = [...rows.filter(row => row.id !== id), ...(remote ? [remote] : [])];
+      if (entry.all) { entry.changed = rows.map(row => row.id); delete entry.all; }
+      entry.changed = entry.changed.filter(value => value !== id);
+      entry.deleted = entry.deleted.filter(value => value !== id);
+      if (entry.deletedRevisions) delete entry.deletedRevisions[String(id)];
+      if (!entry.changed.length && !entry.deleted.length) delete journal.tables[coll];
+    }
+    journal.v++;
+    try {
+      await saveColl(coll, next);
+      await journalSave(journal);
+    } catch (error) {
+      await saveColl(coll, rows);
+      await journalSave(original);
+      throw error;
+    }
+    window.dispatchEvent(new Event("filey:remote-update"));
+  });
 }
 
 /** Clear pushed tables from the journal — but only if nothing wrote since the
@@ -625,7 +678,9 @@ class LocalBuilder implements PromiseLike<Result> {
               continue;
             }
           }
-          if (row.id == null) row.id = nextId(rows);
+          if (row.id == null) row.id = nextLocalId(rows);
+          if (rows.some((existing) => existing.id === row.id))
+            throw new Error("A record with this ID already exists.");
           if (row.created_at == null) row.created_at = new Date().toISOString();
           rows.push(row);
           written.push(row);
@@ -651,7 +706,10 @@ class LocalBuilder implements PromiseLike<Result> {
         const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
         await (store?.save ?? saveColl)(this.coll, rows);
-        await (store?.mark ?? journalMark)(this.coll, { deleted: removed.map((r) => r.id) });
+        await (store?.mark ?? journalMark)(this.coll, {
+          deleted: removed.map((r) => r.id),
+          deletedRevisions: Object.fromEntries(removed.map((r) => [String(r.id), r.sync_revision ?? null])),
+        });
         result = null;
       }
 
@@ -682,8 +740,8 @@ class LocalBuilder implements PromiseLike<Result> {
 
 /** Stage a document's collection writes together, then publish one change event.
  *  Other writes wait; readers keep seeing committed records. Failed commits
- *  restore their original collections and journal. A process/power loss during
- *  commit still requires a native SQLite transaction for crash-atomicity. */
+ *  restore their original collections and journal. Desktop commits all rows and
+ *  the pending-change journal in one native SQLite transaction. */
 export function withLocalTransaction<T>(
   run: (client: Pick<typeof localClient, "from">) => Promise<T>,
 ): Promise<T> {
@@ -707,6 +765,24 @@ export function withLocalTransaction<T>(
     const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
     if (!staged.size) return result;
     const journal = await journalSnapshot();
+    if (hasTauri) {
+      const nextJournal = structuredClone(journal);
+      for (const [coll, opts] of changes) markJournal(nextJournal, coll, opts);
+      const entries: [string, string][] = [];
+      for (const [coll, rows] of staged) entries.push(["localdb:" + coll, await dehydrate(rows)]);
+      entries.push([JOURNAL_KEY, JSON.stringify(nextJournal)]);
+      try {
+        await invoke("cache_set_many", { entries });
+        for (const [coll, rows] of staged) memo.set(coll, { rows, json: entries.find(([key]) => key === "localdb:" + coll)![1] });
+        journalMemo = nextJournal;
+      } catch (error) {
+        for (const coll of staged.keys()) memo.delete(coll);
+        journalMemo = null;
+        throw error;
+      }
+      window.dispatchEvent(new Event("filey:local-write"));
+      return result;
+    }
     const committed: string[] = [];
     try {
       for (const [coll, rows] of staged) {
@@ -879,12 +955,8 @@ async function diskWrite(path: string, bytes: Uint8Array): Promise<void> {
   await invoke("blob_write", { path, bytes: Array.from(bytes) });
 }
 async function diskRead(path: string): Promise<Uint8Array | null> {
-  try {
-    const arr = await invoke<number[]>("blob_read", { path });
-    return arr ? Uint8Array.from(arr) : null;
-  } catch {
-    return null; // missing file
-  }
+  const arr = await invoke<number[] | null>("blob_read", { path });
+  return arr ? Uint8Array.from(arr) : null;
 }
 async function diskDelete(path: string): Promise<void> {
   try {

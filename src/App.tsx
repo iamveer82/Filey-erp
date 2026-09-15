@@ -38,6 +38,7 @@ const PortalView = lazy(() => import("./pages/PortalView"));
 const ModernOverview = lazy(() => import("./pages/ModernOverview"));
 const KnowledgeCenter = lazy(() => import("./pages/KnowledgeCenter"));
 const IntegrationConnect = lazy(() => import("./pages/IntegrationConnect"));
+const ExpenseEntry = lazy(() => import("./pages/ExpenseEntry"));
 
 function Splash() {
   return <FileyLoader />;
@@ -46,17 +47,19 @@ function Splash() {
 function ModuleDisabled({ name }: { name: string }) {
   return (
     <div className="card max-w-md mx-auto mt-10 text-center">
-      <p className="text-lg font-medium text-ink">{name} is disabled</p>
+      <p className="text-lg font-medium text-ink">{name} is unavailable</p>
       <p className="text-sm text-brand-500 mt-2">
-        Enable this module from <b>Settings → Apps</b> to use it.
+        Ask your workspace administrator to review your access and enabled apps.
       </p>
     </div>
   );
 }
 
 function AppRoutes() {
-  const { modules, isEnabled } = useModules();
+  const { modules, isEnabled, loading, error, retry } = useModules();
   const location = useLocation();
+  if (loading) return <Splash />;
+  if (error) return <div role="alert" className="card mx-auto mt-10 max-w-md space-y-3"><h1 className="text-lg font-semibold">Workspace access could not be loaded</h1><p className="text-sm text-muted-foreground">{error}</p><button className="btn-primary" onClick={retry}>Try again</button></div>;
   return (
     // Per-route boundary: a crash in one page shows a contained error in the
     // content area (sidebar/nav stay alive), and navigating away recovers.
@@ -79,14 +82,16 @@ function AppRoutes() {
         <Route path="/help" element={<KnowledgeCenter />} />
         <Route path="/docs" element={<KnowledgeCenter />} />
         <Route path="/my-files" element={<Navigate to="/files" replace />} />
+        <Route path="/purchase/new" element={isEnabled("purchase") ? <ExpenseEntry key="new-expense" /> : <ModuleDisabled name="Purchase" />} />
+        <Route path="/purchase/:id" element={isEnabled("purchase") ? <ExpenseEntry key={location.pathname} /> : <ModuleDisabled name="Purchase" />} />
         {/* declared after the module routes so /integrations itself still
             resolves to the directory page */}
-        <Route path="/integrations/:app" element={<IntegrationConnect />} />
-        <Route path="/customers/:id" element={<CustomerDetail />} />
-        <Route path="/suppliers/:id" element={<SupplierDetail />} />
+        <Route path="/integrations/:app" element={isEnabled("integrations") ? <IntegrationConnect /> : <ModuleDisabled name="Integrations" />} />
+        <Route path="/customers/:id" element={isEnabled("customers") ? <CustomerDetail /> : <ModuleDisabled name="Customers" />} />
+        <Route path="/suppliers/:id" element={isEnabled("suppliers") ? <SupplierDetail /> : <ModuleDisabled name="Suppliers" />} />
         {/* payslip is declared first so it isn't swallowed by /people/:id */}
-        <Route path="/people/:id/payslip" element={<PayslipPage />} />
-        <Route path="/people/:id" element={<EmployeeDetail />} />
+        <Route path="/people/:id/payslip" element={isEnabled("people") ? <PayslipPage /> : <ModuleDisabled name="People" />} />
+        <Route path="/people/:id" element={isEnabled("people") ? <EmployeeDetail /> : <ModuleDisabled name="People" />} />
         <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

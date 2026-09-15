@@ -553,10 +553,10 @@ export default function StampStudio({
           onClick={apply}
           disabled={saving || !stamp}
           className="btn-primary"
-          aria-label="Download PDF"
+          aria-label="Create PDF"
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
-          Download PDF
+          Create PDF
         </button>
       </div>
 
@@ -738,7 +738,7 @@ export default function StampStudio({
         {mode === "text"
           ? "Pick a badge, drag to place and resize, then "
           : `Upload or pick a saved ${noun}, drag to place and resize, then `}
-        <strong>Download PDF</strong>. Toggle “All pages” to apply to the whole document.
+        <strong>Create PDF</strong>. Toggle “All pages” to apply to the whole document.
       </p>
     </div>
   );

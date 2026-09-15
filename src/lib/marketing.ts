@@ -5,7 +5,9 @@
 // the same thing every time and is testable without mocking the data layer.
 
 import { companyDomainFromEmail, scoreLead, type LeadScore } from "./scout";
-import type { CrmCustomer, InvoiceDocSummary } from "./api";
+import { isPostedStatus, type CrmCustomer, type InvoiceDocSummary } from "./api";
+import { reportMoney } from "./reportMoney";
+import type { Rates } from "./exchange-rates";
 
 export interface Lead {
   customer: CrmCustomer;
@@ -25,7 +27,7 @@ export interface Lead {
 
 const daysBetween = (fromIso: string, toIso: string) =>
   Math.floor(
-    (new Date(`${toIso}T00:00:00`).getTime() -
+    (new Date(`${toIso}T00:00:00Z`).getTime() -
       new Date(`${fromIso}T00:00:00`).getTime()) /
       86_400_000
   );
@@ -37,22 +39,37 @@ const daysBetween = (fromIso: string, toIso: string) =>
 export function buildLeads(
   customers: CrmCustomer[],
   invoices: InvoiceDocSummary[],
-  today: string
+  today: string,
+  rates: Rates = {},
 ): Lead[] {
   // One pass over invoices — a per-customer filter would be O(customers × docs),
   // which is the kind of thing that only hurts once the ledger is real.
   const byCustomer = new Map<
-    string,
+    number,
     { count: number; revenue: number; overdue: number; latest: string }
   >();
-  for (const inv of invoices) {
-    if (inv.status === "draft") continue;
-    const key = (inv.customer_name || "").trim().toLowerCase();
-    if (!key) continue;
+  const normalize = (name: string) => name.trim().toLowerCase().replace(/\s+/g, " ");
+  const ids = new Set(customers.map(customer => customer.id));
+  const aliases = new Map<string, number | null>();
+  for (const customer of customers) {
+    for (const name of [customer.name, customer.company]) {
+      const alias = normalize(name || "");
+      if (!alias) continue;
+      aliases.set(alias, aliases.has(alias) && aliases.get(alias) !== customer.id ? null : customer.id);
+    }
+  }
+  for (const row of invoices) {
+    if (!isPostedStatus(row.status)) continue;
+    // A saved identifier takes precedence over mutable names. Legacy names must be unambiguous.
+    const key = row.customer_id != null
+      ? (ids.has(row.customer_id) ? row.customer_id : null)
+      : aliases.get(normalize(row.customer_name || ""));
+    if (key == null) continue;
+    const inv = reportMoney(row, ["total", "paid", "balance"], rates);
     const agg = byCustomer.get(key) ?? { count: 0, revenue: 0, overdue: 0, latest: "" };
     agg.count += 1;
     agg.revenue += Number(inv.total) || 0;
-    const balance = Number(inv.balance) || 0;
+    const balance = inv.balance == null ? Math.max(0, Number(inv.total) - Number(inv.paid || 0)) : Number(inv.balance);
     const due = inv.due_date ?? "";
     if (balance > 0 && due && due < today && inv.status !== "paid")
       agg.overdue += balance;
@@ -62,7 +79,7 @@ export function buildLeads(
   }
 
   const leads = customers.map((customer): Lead => {
-    const agg = byCustomer.get((customer.name || "").trim().toLowerCase());
+    const agg = byCustomer.get(customer.id);
     const daysSinceActivity = agg?.latest
       ? Math.max(0, daysBetween(agg.latest, today))
       : null;
@@ -128,9 +145,9 @@ export function leadsToCsvRows(leads: Lead[]): Record<string, string>[] {
     Domain: l.domain ?? "",
     Score: String(l.score),
     Reasons: l.reasons.join("; "),
-    Invoiced: String(l.revenue),
+    "Invoiced (AED)": String(l.revenue),
     Invoices: String(l.invoices),
-    Overdue: String(l.overdue),
+    "Overdue (AED)": String(l.overdue),
     "Days since last invoice":
       l.daysSinceActivity == null ? "" : String(l.daysSinceActivity),
   }));

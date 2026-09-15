@@ -1,7 +1,7 @@
 import FreeConnections from "../components/FreeConnections";
 import WorkServices from "../components/WorkServices";
 import EmailConnection from "../components/EmailConnection";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Calculator,
@@ -38,7 +38,7 @@ import {
   composioStatus,
   composioKeySource,
   composioSearchToolkits,
-  getComposioKey,
+  hasOwnComposioKey,
   setComposioKey,
   clearComposioKey,
   COMPOSIO_TOOLKITS,
@@ -67,6 +67,7 @@ import {
   type BridgeConfig,
   type BridgeState,
 } from "../lib/waBridge";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "../lib/agentStorage";
 import { waLogList } from "../lib/waLog";
 
 /* ── Integrations ──────────────────────────────────────────────────────────
@@ -148,40 +149,51 @@ export default function Integrations() {
   const reachOn = reachReady();
   const [socialOn, setSocialOn] = useState(false);
 
+  const requestGeneration = useRef(0);
+  const current = (scope: string | null) => scope === agentStorageScope();
   const refresh = useCallback(async () => {
+    const scope = agentStorageScope();
+    const generation = ++requestGeneration.current;
+    const valid = () => generation === requestGeneration.current && scope === agentStorageScope();
     try {
       const keySource = await composioKeySource();
+      if (!valid()) return;
       setSource(keySource);
       if (keySource === "none") {
         setActive(new Set());
-        setMsg(
-          "Configure Composio in Provider setup to connect third-party apps. Built-in connections are available now."
-        );
-        return;
+        setMsg("Configure Composio in Provider setup to connect API apps. Built-in services have their own setup below.");
+      } else {
+        const list = await composioList();
+        if (!valid()) return;
+        setActive(new Set((list.items ?? []).filter(c => c.status?.toUpperCase() === "ACTIVE" && c.toolkit?.slug).map(c => c.toolkit!.slug!)));
+        setMsg("");
       }
-      const list = await composioList();
-      const on = new Set<string>();
-      for (const c of list.items ?? [])
-        if ((c.status ?? "").toUpperCase() === "ACTIVE" && c.toolkit?.slug)
-          on.add(c.toolkit.slug);
-      setActive(on);
+      const accounts = await listAccounts().catch(() => []);
+      if (valid()) setSocialOn(accounts.length > 0);
     } catch (e) {
-      setMsg(
-        "Could not refresh connected apps: " +
-          (e instanceof Error ? e.message : String(e))
-      );
+      if (!valid()) return;
+      setActive(new Set()); setSocialOn(false);
+      setMsg("Could not verify connected apps: " + (e instanceof Error ? e.message : String(e)));
     }
   }, []);
 
   useEffect(() => {
-    void composioKeySource().then(setSource);
-    void listAccounts()
-      .then((accounts) => setSocialOn(accounts.length > 0))
-      .catch(() => setSocialOn(false));
+    let scope = agentStorageScope();
+    const changed = () => {
+      if (scope === agentStorageScope()) return;
+      scope = agentStorageScope();
+      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setConnecting(null); setSearching(false);
+      void refresh();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
     void refresh();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { ++requestGeneration.current; window.removeEventListener(AGENT_STORAGE_EVENT, changed); };
   }, [refresh]);
 
   const runSearch = async () => {
+    const scope = agentStorageScope();
     const q = search.trim();
     if (!q) return setFound([]);
     if (source === "none") {
@@ -193,19 +205,22 @@ export default function Integrations() {
     setSearching(true);
     setMsg("");
     try {
-      setFound(await composioSearchToolkits(q, 12));
+      const results = await composioSearchToolkits(q, 12);
+      if (current(scope)) setFound(results);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
     } finally {
-      setSearching(false);
+      if (current(scope)) setSearching(false);
     }
   };
 
   const connect = async (slug: string) => {
+    const scope = agentStorageScope();
     setConnecting(slug);
     setMsg("");
     try {
       const link = await composioConnect(slug);
+      if (!current(scope)) return;
       if (link.error) throw new Error(link.error.message);
       if (!link.redirect_url || !link.connected_account_id)
         throw new Error("Composio did not return a connection link.");
@@ -219,7 +234,9 @@ export default function Integrations() {
       const id = link.connected_account_id;
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000));
-        const st = await composioStatus(id).catch(() => null);
+        if (!current(scope)) return;
+        const st = await composioStatus(id);
+        if (!current(scope)) return;
         if ((st?.status ?? "").toUpperCase() === "ACTIVE") {
           setActive((prev) => new Set(prev).add(slug));
           setMsg(`${slug} connected ✓ - the Filey AI agent can now use it.`);
@@ -227,9 +244,9 @@ export default function Integrations() {
         }
       }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
     } finally {
-      setConnecting(null);
+      if (current(scope)) setConnecting(null);
     }
   };
 
@@ -237,7 +254,7 @@ export default function Integrations() {
     const apps: Integration[] = COMPOSIO_TOOLKITS.map((tk) => ({
       key: `composio:${tk.slug}`,
       slug: tk.slug,
-      name: tk.name,
+      name: tk.slug === "whatsapp" ? "WhatsApp via Composio" : tk.name,
       desc: tk.desc,
       category: TOOLKIT_CATEGORY[tk.slug] ?? "Apps",
       connected: active.has(tk.slug),
@@ -254,6 +271,16 @@ export default function Integrations() {
         connected: active.has(tk.slug),
       }));
     const own: Integration[] = [
+      {
+        key: "whatsapp-qr",
+        name: "WhatsApp (QR)",
+        desc: "Pair WhatsApp in the desktop app to send messages and PDF attachments. No API key required.",
+        category: "Messaging",
+        icon: <BrandIcon name="whatsapp" className="h-5 w-5" />,
+        builtin: true,
+        to: "/integrations?tab=free",
+        action: "Set up WhatsApp",
+      },
       {
         key: "social",
         name: "Social publishing",
@@ -440,7 +467,7 @@ export default function Integrations() {
           </button>
         ))}
         <span className="ml-auto text-xs text-muted-foreground">
-          {connectedCount} connected · {builtinCount} built in
+          {connectedCount} API apps connected · {builtinCount} built-in features
         </span>
         <Link to="/docs?article=integrations" className="btn-ghost">
           Setup guide
@@ -449,6 +476,7 @@ export default function Integrations() {
       {tab === "services" && <WorkServices />}
       {tab === "free" && (
         <>
+          <WhatsAppBridgeProvider />
           <EmailConnection />
           <FreeConnections />
         </>
@@ -471,15 +499,17 @@ export default function Integrations() {
               Setup guide
             </Link>
           </section>
-          <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2">
             <ComposioProvider
               source={source}
               onSourceChange={setSource}
               onSaved={refresh}
             />
             <ZernioProvider />
-            <WhatsAppBridgeProvider />
           </div>
+          <Link className="btn-secondary mb-4" to="/integrations?tab=free">
+            Set up WhatsApp (QR)
+          </Link>
           <p className="text-xs text-muted-foreground">
             Your own keys use your provider account. Provider charges, quotas and app
             authorization still apply; Filey does not supply unlimited third-party access.
@@ -670,7 +700,7 @@ function ComposioProvider({
   useEffect(() => {
     // Desktop keeps the key on the device; the browser's lives in the cloud,
     // where it can be seen to exist but never read back.
-    (hasDesktop ? getComposioKey().then((k) => !!k.trim()) : hasCloudKey("composio"))
+    (hasDesktop ? hasOwnComposioKey() : hasCloudKey("composio"))
       .then(setHasKey)
       .catch(() => setHasKey(false));
   }, []);
@@ -936,11 +966,21 @@ function WhatsAppBridgeProvider() {
   // What the bridge actually saw, newest first — "is it receiving my
   // messages, is it answering" answered by evidence instead of guesswork.
   const [activity, setActivity] = useState(() => waLogList({ limit: 4 }).reverse());
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
 
   useEffect(() => {
     if (!desktop) return;
-    void bridgeState().then(setSt);
-    return onBridgeState(setSt); // QR + connection changes arrive from Rust
+    let current = true;
+    let receivedEvent = false;
+    const unlisten = onBridgeState((state) => {
+      receivedEvent = true;
+      if (current) setSt(state);
+    });
+    void bridgeState().then((state) => {
+      if (current && !receivedEvent) setSt(state);
+    });
+    return () => { current = false; unlisten(); };
   }, [desktop]);
 
   // Refresh the activity trail whenever the bridge speaks or the card mounts.
@@ -954,6 +994,9 @@ function WhatsAppBridgeProvider() {
   const locked = !desktop;
 
   const run = async (fn: () => Promise<unknown>) => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
     setMsg("");
     try {
       await fn();
@@ -961,6 +1004,9 @@ function WhatsAppBridgeProvider() {
       setCfg(getBridgeConfig());
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      pending.current = false;
+      setBusy(false);
     }
   };
 
@@ -971,7 +1017,7 @@ function WhatsAppBridgeProvider() {
     : {
         stopped: "Not running",
         starting: "Starting…",
-        connecting: "Waiting for QR scan",
+        connecting: st.qr ? "Waiting for QR scan" : "Connecting…",
         connected: "Connected",
         reconnecting: "Reconnecting…",
         logged_out: "Logged out — re-pair",
@@ -979,14 +1025,14 @@ function WhatsAppBridgeProvider() {
       };
 
   return (
-    <div className="bg-card p-5 flex flex-col">
+    <section aria-label="WhatsApp connection" className="card mb-5">
       <div className="flex items-start gap-3">
         <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
           <MessageCircle size={17} className="text-primary-500" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
+            <h2 className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</h2>
             <span
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -1010,16 +1056,17 @@ function WhatsAppBridgeProvider() {
               {label[st.state] ?? st.state}
             </span>
           </div>
-          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-            Pair your own number — chatting with your agent costs nothing per message.
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            Pair your number to send messages and PDF attachments from Filey. No API key
+            or per-message bridge fee; your AI provider may charge for model usage.
           </p>
         </div>
       </div>
 
       {locked && (
         <p className="mt-3 rounded-lg bg-hover px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground">
-          QR pairing runs in the Filey desktop app — open Integrations there and press
-          Connect to generate the QR.
+          This browser preview cannot run the WhatsApp bridge. Open the installed Filey
+          desktop app → Integrations → Built-in connections → Connect WhatsApp.
         </p>
       )}
 
@@ -1074,8 +1121,8 @@ function WhatsAppBridgeProvider() {
       )}
 
       {st.qr && (
-        <div className="mt-3 flex items-start gap-3 rounded-xl border border-border p-3">
-          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-32 w-32" />
+        <div className="mt-3 flex flex-wrap items-center gap-4 rounded-xl border border-border p-4">
+          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-48 w-48 shrink-0 rounded-lg bg-white p-2" />
           <p className="text-[12px] text-muted-foreground">
             On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a device,
             then scan.
@@ -1085,21 +1132,22 @@ function WhatsAppBridgeProvider() {
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
-          className="btn-secondary"
-          disabled={locked}
+          className="btn-primary"
+          disabled={locked || busy || pairing || connected || st.state === "reconnecting"}
           title={locked ? "Needs the desktop app" : undefined}
           onClick={() => run(startBridge)}
         >
-          {st.state === "stopped" ? "Connect" : "Restart"}
+          {busy || pairing ? <Loader2 size={14} className="animate-spin" /> : null}
+          {connected ? "WhatsApp connected" : pairing || busy ? "Connecting…" : st.state === "reconnecting" ? "Reconnecting…" : "Connect WhatsApp"}
         </button>
         {st.state !== "stopped" && (
-          <button className="btn-ghost" disabled={locked} onClick={() => run(stopBridge)}>
+          <button className="btn-ghost" disabled={locked || busy} onClick={() => run(stopBridge)}>
             Stop
           </button>
         )}
         <button
           className="btn-ghost"
-          disabled={locked}
+          disabled={locked || busy}
           title={
             locked
               ? "Needs the desktop app"
@@ -1119,7 +1167,7 @@ function WhatsAppBridgeProvider() {
         <label className="ml-auto flex items-center gap-2 text-[12px] text-muted-foreground">
           <input
             type="checkbox"
-            disabled={locked}
+            disabled={locked || busy}
             checked={cfg.autoStart}
             onChange={(e) => setCfg(setBridgeConfig({ autoStart: e.target.checked }))}
           />
@@ -1133,14 +1181,14 @@ function WhatsAppBridgeProvider() {
           className="input mt-1"
           placeholder="971501234567"
           inputMode="tel"
-          disabled={locked}
+          disabled={locked || busy}
           defaultValue={cfg.ownerNumber}
           onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
         />
         <span className="mt-1 block text-[11.5px] text-muted-foreground">
           The agent answers you and nobody else. Empty is right when you paired your own
-          phone. This drives a real account through an unofficial connection — use a
-          number you can afford to lose.
+          phone. This is an unofficial linked-device connection; WhatsApp may restrict
+          unsupported clients.
         </span>
       </label>
 
@@ -1149,6 +1197,6 @@ function WhatsAppBridgeProvider() {
           {msg || st.error}
         </p>
       )}
-    </div>
+    </section>
   );
 }

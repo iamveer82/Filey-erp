@@ -12,6 +12,10 @@ const invoke = vi.fn(async (cmd: string, args: any) => {
     store.set(args.key, args.value);
     return null;
   }
+  if (cmd === "cache_set_many") {
+    for (const [key, value] of args.entries) store.set(key, value);
+    return null;
+  }
   return null;
 });
 

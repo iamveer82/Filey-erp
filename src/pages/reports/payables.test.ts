@@ -1,6 +1,3 @@
-// Payables must be net of what has already been paid. A PO keeps its full
-// total and a non-paid status until it is settled, so reading p.total straight
-// off the list bills the whole order as still owed.
 import { describe, it, expect } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { usePayablesAging, paidByPo } from "./useReportsData";
@@ -21,12 +18,14 @@ describe("paidByPo", () => {
 });
 
 describe("usePayablesAging", () => {
-  const po = (over: Partial<any> = {}) => ({
+  const bill = (over: Partial<any> = {}) => ({
     id: 1,
-    po_number: "PO-1",
-    supplier_name: "Acme",
+    number: "BILL-1",
+    customer_name: "Acme",
     status: "sent",
     total: 1000,
+    balance: 1000,
+    paid: 0,
     items_count: 1,
     order_date: daysAgo(60),
     updated_at: daysAgo(60),
@@ -35,18 +34,14 @@ describe("usePayablesAging", () => {
 
   it("counts only the unpaid remainder", () => {
     const { result } = renderHook(() =>
-      usePayablesAging([po({ expected_date: daysAgo(10) })] as any, [
-        { po_id: 1, amount: 400 },
-      ])
+      usePayablesAging([bill({ due_date: daysAgo(10), balance:600, paid:400 })] as any)
     );
     expect(result.current.d30).toBe(600);
   });
 
-  it("drops a PO that is fully paid but not yet marked paid", () => {
+  it("drops a bill that is fully paid but not yet marked paid", () => {
     const { result } = renderHook(() =>
-      usePayablesAging([po({ expected_date: daysAgo(10) })] as any, [
-        { po_id: 1, amount: 1000 },
-      ])
+      usePayablesAging([bill({ due_date: daysAgo(10), balance:0, paid:1000 })] as any)
     );
     const total =
       result.current.current +
@@ -57,17 +52,16 @@ describe("usePayablesAging", () => {
     expect(total).toBe(0);
   });
 
-  it("buckets by how far past the expected date it is", () => {
+  it("buckets by how far past the due date it is", () => {
     const { result } = renderHook(() =>
       usePayablesAging(
         [
-          po({ id: 1, expected_date: daysAgo(-5) }), // not due yet
-          po({ id: 2, expected_date: daysAgo(15) }),
-          po({ id: 3, expected_date: daysAgo(45) }),
-          po({ id: 4, expected_date: daysAgo(75) }),
-          po({ id: 5, expected_date: daysAgo(200) }),
-        ] as any,
-        []
+          bill({ id: 1, due_date: daysAgo(-5) }), // not due yet
+          bill({ id: 2, due_date: daysAgo(15) }),
+          bill({ id: 3, due_date: daysAgo(45) }),
+          bill({ id: 4, due_date: daysAgo(75) }),
+          bill({ id: 5, due_date: daysAgo(200) }),
+        ] as any
       )
     );
     expect(result.current).toEqual({
@@ -79,15 +73,14 @@ describe("usePayablesAging", () => {
     });
   });
 
-  it("still ignores draft, cancelled and paid orders", () => {
+  it("still ignores draft, cancelled and paid bills", () => {
     const { result } = renderHook(() =>
       usePayablesAging(
         [
-          po({ id: 1, status: "draft" }),
-          po({ id: 2, status: "cancelled" }),
-          po({ id: 3, status: "paid" }),
-        ] as any,
-        []
+          bill({ id: 1, status: "draft" }),
+          bill({ id: 2, status: "cancelled" }),
+          bill({ id: 3, status: "paid" }),
+        ] as any
       )
     );
     expect(result.current.current).toBe(0);

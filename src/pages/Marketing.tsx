@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Copy, Download, Globe, Sparkles, UserSearch } from "lucide-react";
 
-import { crm, billing, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
+import { crm, billing, getCacheScope, type CrmCustomer } from "../lib/api";
 import {
   buildLeads,
   leadStats,
@@ -11,6 +11,8 @@ import {
   HOT_SCORE,
   type Lead,
 } from "../lib/marketing";
+import { getExchangeRates } from "../lib/exchange-rates";
+import { getDataMode } from "../lib/dataMode";
 import { downloadCsv } from "../lib/csv";
 import CampaignsPanel from "../components/CampaignsPanel";
 import OptOutsPanel from "../components/OptOutsPanel";
@@ -30,9 +32,7 @@ import {
   MetricCard,
 } from "../components/ui";
 
-/* Marketing: who to contact next, ranked from the books. The scoring is
- * deterministic (lib/marketing → lib/scout); the only network call on this page
- * is the optional per-lead enrichment, which reads a company's own website. */
+/* Rankings use the same frozen document exchange rates as Reports. */
 
 const tone = (score: number) =>
   score >= HOT_SCORE ? "success" : score >= 30 ? "warn" : "info";
@@ -40,8 +40,8 @@ const tone = (score: number) =>
 export default function Marketing() {
   const { toast, confirm } = useUI();
   const nav = useNavigate();
-  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const request = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -49,24 +49,31 @@ export default function Marketing() {
   const [enrichFor, setEnrichFor] = useState<Lead | null>(null);
   const [tab, setTab] = useState<"leads" | "campaigns" | "optouts">("leads");
 
-  const load = () => {
+  const load = useCallback(async () => {
+    const version = ++request.current;
+    const scope = getCacheScope();
+    const mode = getDataMode();
+    const current = () => version === request.current && scope === getCacheScope() && mode === getDataMode();
+    setLoading(true);
     setError("");
-    return Promise.all([
-      crm.customers().then(setCustomers),
-      billing.listDocs("sales").then(setInvoices),
-    ])
-      .catch((e) => setError(`Could not load leads: ${errMsg(e)}`))
-      .finally(() => setLoading(false));
-  };
-  useEffect(() => {
-    load();
+    try {
+      const [customers, invoices, rates] = await Promise.all([crm.customers(), billing.listDocs("sales"), getExchangeRates()]);
+      const next = buildLeads(customers, invoices, todayYmd(), rates);
+      if (current()) setLeads(next);
+    } catch (error) {
+      if (current()) { setLeads([]); setError(`Could not load leads: ${errMsg(error)}`); }
+    } finally {
+      if (current()) setLoading(false);
+    }
   }, []);
+  useEffect(() => {
+    void load();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { request.current++; };
+  }, [load]);
   useLiveSync(load);
 
-  const leads = useMemo(
-    () => buildLeads(customers, invoices, todayYmd()),
-    [customers, invoices]
-  );
   const stats = useMemo(() => leadStats(leads), [leads]);
   const duplicates = useMemo(() => findDuplicates(leads), [leads]);
 
@@ -208,7 +215,7 @@ export default function Marketing() {
             pageSize={10}
             rowKey={(l) => l.customer.id}
             empty={
-              customers.length === 0
+              leads.length === 0
                 ? "No customers yet - add one and they'll be ranked here"
                 : "No leads match your search or filters"
             }

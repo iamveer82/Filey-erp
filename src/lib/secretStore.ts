@@ -1,27 +1,24 @@
-// Owner-only secret store: credentials the owner gives the agent (API keys,
-// portal logins) so it can use them later. Stored in localStorage, keyed by
-// name. The tools are ownerOnly, so a customer can never read or write these.
-const PREFIX = "filey.secret.";
-
-export function saveSecret(name: string, value: string): void {
-  localStorage.setItem(PREFIX + name, value);
+import { credentialNames, peekCredential, readCredential, saveCredential } from "./credentialStore";
+const PREFIX = "agent:";
+function validName(name: string): string {
+  if (!/^[A-Za-z0-9_.-]{1,128}$/.test(name)) throw new Error("Use a secret name containing letters, numbers, dots, underscores or hyphens.");
+  return PREFIX + name;
 }
 
-export function recallSecret(name: string): string | null {
-  return localStorage.getItem(PREFIX + name);
+export function saveSecret(name: string, value: string): Promise<void> {
+  return saveCredential(validName(name), value);
+}
+
+export function recallSecret(name: string): Promise<string | null> {
+  return readCredential(validName(name));
 }
 
 export function listSecrets(): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith(PREFIX)) out.push(k.slice(PREFIX.length));
-  }
-  return out;
+  return credentialNames().filter(name => name.startsWith(PREFIX)).map(name => name.slice(PREFIX.length));
 }
 
-export function deleteSecret(name: string): void {
-  localStorage.removeItem(PREFIX + name);
+export function deleteSecret(name: string): Promise<void> {
+  return saveCredential(validName(name), null);
 }
 
 /** `{{secret:NAME}}` — a reference to a stored credential. */
@@ -50,7 +47,7 @@ export interface FilledSecrets {
  */
 export function fillSecrets(
   text: string,
-  lookup: (name: string) => string | null = recallSecret
+  lookup: (name: string) => string | null = name => peekCredential(validName(name)) || null
 ): FilledSecrets {
   const used = new Set<string>();
   const missing = new Set<string>();
@@ -64,6 +61,19 @@ export function fillSecrets(
     return v;
   });
   return { text: out, used: [...used], missing: [...missing] };
+}
+
+/** Resolve only the referenced names; the returned redactor stays inside the
+ * tool closure and removes provider echoes before they enter the transcript. */
+export async function secretSubstitutions(texts: string[]) {
+  const names = [...new Set(texts.flatMap(text => [...text.matchAll(SECRET_REF)].map(match => match[1])))];
+  const stored = new Map(await Promise.all(names.map(async name => [name, await recallSecret(name)] as const)));
+  const variants = [...new Set([...stored.values()].filter((value): value is string => !!value)
+    .flatMap(value => [value, encodeURIComponent(value), JSON.stringify(value).slice(1,-1)]))].sort((a,b) => b.length-a.length);
+  return {
+    fill: (text: string) => fillSecrets(text, name => stored.get(name) ?? null),
+    redact: (text: string) => variants.reduce((out, value) => out.split(value).join("[REDACTED]"), text),
+  };
 }
 
 /** Does this text reference any secret? Cheap pre-check for callers that want

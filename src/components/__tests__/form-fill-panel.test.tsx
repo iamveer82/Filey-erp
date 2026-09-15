@@ -14,7 +14,7 @@ it("sends empty text when clearing a saved field and discards old values when th
   const view = render(<FormFillPanel file={first} onDone={onDone} />);
   const input = await view.findByRole("textbox", { name: "Customer" });
   fireEvent.change(input, { target: { value: "" } });
-  fireEvent.click(view.getByRole("button", { name: "Fill and download" }));
+  fireEvent.click(view.getByRole("button", { name: "Create filled PDF" }));
   await waitFor(() => expect(engine.fill).toHaveBeenCalledWith(first, '{"Customer":""}'));
   expect(onDone).toHaveBeenCalledOnce();
 

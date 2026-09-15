@@ -39,11 +39,11 @@ export default function OrganizeStudio({
   onApply: (outs: OutFile[]) => void;
 }) {
   const { toast } = useUI();
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
 
   const [thumbs, setThumbs] = useState<Thumb[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewError, setPreviewError] = useState("");
+  const [focusError, setFocusError] = useState("");
   const [order, setOrder] = useState<number[]>([]);
   const [rotated, setRotated] = useState<Record<number, number>>({});
   const [deleted, setDeleted] = useState<Set<number>>(new Set());
@@ -56,52 +56,77 @@ export default function OrganizeStudio({
   const dragIdx = useRef<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
 
-  // Render all page thumbnails and full-size previews.
+  // Render only thumbnails up front; large PDFs must not retain a full-size bitmap per page.
   useEffect(() => {
     let dead = false;
+    let task: ReturnType<typeof safePdf.getDocument> | undefined;
     setLoading(true);
+    setPreviewError(""); setThumbs([]); setOrder([]); setFocusPage(null);
+    setRotated({}); setDeleted(new Set()); setSelected(new Set()); setCuts(new Set());
     (async () => {
       try {
         const data = new Uint8Array(await file.arrayBuffer());
-        const pdf = await safePdf.getDocument({ data }).promise;
+        task = safePdf.getDocument({ data });
+        const pdf = await task.promise;
         const out: Thumb[] = [];
-        const fulls: Record<number, string> = {};
         for (let n = 1; n <= pdf.numPages; n++) {
           if (dead) return;
           const p = await pdf.getPage(n);
           // thumbnail
-          const tvp = p.getViewport({ scale: 0.35 });
+          const dimensions = p.getViewport({ scale: 1 });
+          const tvp = p.getViewport({ scale: Math.min(0.35, 400 / Math.max(dimensions.width, dimensions.height)) });
           const tc = document.createElement("canvas");
           tc.width = tvp.width;
           tc.height = tvp.height;
           const tctx = tc.getContext("2d");
-          if (tctx)
+          try {
+            if (!tctx) throw new Error("Page previews are unavailable. Reopen this tool to try again.");
             await p.render({ canvas: tc, canvasContext: tctx, viewport: tvp }).promise;
-          out.push({ index: n - 1, thumb: tctx ? tc.toDataURL("image/png") : "" });
-          // full preview
-          const fvp = p.getViewport({ scale: 1.2 });
-          const fc = document.createElement("canvas");
-          fc.width = fvp.width;
-          fc.height = fvp.height;
-          const fctx = fc.getContext("2d");
-          if (fctx)
-            await p.render({ canvas: fc, canvasContext: fctx, viewport: fvp }).promise;
-          fulls[n - 1] = fctx ? fc.toDataURL("image/png") : "";
+            out.push({ index: n - 1, thumb: tc.toDataURL("image/png") });
+          } finally { tc.width = tc.height = 0; p.cleanup(); }
         }
         if (dead) return;
         setThumbs(out);
-        setFullImgs(fulls);
         setOrder(out.map((t) => t.index));
       } catch (e) {
-        toastRef.current.error(e instanceof Error ? e.message : String(e));
+        if (!dead) setPreviewError(e instanceof Error ? e.message : String(e));
       } finally {
+        await task?.destroy().catch(() => {});
         if (!dead) setLoading(false);
       }
     })();
     return () => {
       dead = true;
+      void task?.destroy().catch(() => {});
     };
   }, [file]);
+
+  useEffect(() => {
+    let dead = false;
+    let task: ReturnType<typeof safePdf.getDocument> | undefined;
+    setFullImgs({}); setFocusError("");
+    if (focusPage === null) return;
+    const canvas = document.createElement("canvas");
+    void (async () => {
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
+        if (dead) return;
+        task = safePdf.getDocument({ data });
+        const pdf = await task.promise;
+        const page = await pdf.getPage(focusPage + 1);
+        const dimensions = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(1.2, 1600 / Math.max(dimensions.width, dimensions.height)) });
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Page preview is unavailable.");
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        if (!dead) setFullImgs({ [focusPage]: canvas.toDataURL("image/png") });
+        page.cleanup();
+      } catch (error) { if (!dead) setFocusError(error instanceof Error ? error.message : String(error)); }
+      finally { canvas.width = canvas.height = 0; await task?.destroy().catch(() => {}); }
+    })();
+    return () => { dead = true; void task?.destroy().catch(() => {}); };
+  }, [file, focusPage]);
 
   const thumbFor = (i: number) => thumbs.find((t) => t.index === i)?.thumb ?? "";
   const fullFor = (i: number) => fullImgs[i] ?? "";
@@ -132,6 +157,7 @@ export default function OrganizeStudio({
   };
 
   const apply = async () => {
+    if (busy || loading || previewError || !thumbs.length) return;
     setBusy(true);
     try {
       let outs: OutFile[];
@@ -180,7 +206,7 @@ export default function OrganizeStudio({
       ? `Split into ${parts} files`
       : action === "extract"
         ? `Extract ${selected.size} page${selected.size === 1 ? "" : "s"}`
-        : "Download PDF";
+        : "Create PDF";
 
   const focusIdx = focusPage != null ? display.indexOf(focusPage) : -1;
 
@@ -227,7 +253,7 @@ export default function OrganizeStudio({
             />
           ) : (
             <div className="grid h-64 place-items-center">
-              <Loader2 size={20} className="animate-spin text-brand-400" />
+              {focusError ? <p role="alert" className="p-4 text-sm text-danger">{focusError}</p> : <Loader2 size={20} className="animate-spin text-brand-400" />}
             </div>
           )}
           {isDel && (
@@ -295,7 +321,7 @@ export default function OrganizeStudio({
     <div>
       <p className="mb-3 text-xs font-medium text-brand-500">{hint}</p>
 
-      {loading ? (
+      {previewError ? <p role="alert" className="rounded-xl border border-border p-4 text-sm text-danger">{previewError}</p> : loading ? (
         <div className="grid h-72 place-items-center text-sm text-brand-400">
           <Loader2 size={20} className="animate-spin" />
         </div>
@@ -419,7 +445,7 @@ export default function OrganizeStudio({
 
       <button
         onClick={apply}
-        disabled={busy || loading}
+        disabled={busy || loading || !!previewError || !thumbs.length || (action === "extract" && !selected.size) || (action === "split" && !cuts.size)}
         className="btn-primary mt-4 w-full"
         aria-label={applyLabel}
       >

@@ -9,9 +9,18 @@
 // chat model key — an image key is a spending credential like any other and
 // does not belong in synced settings.
 
-import { aiFetch, getAiConfig } from "./ai";
+import { aiFetch, getAiConfig, aiCredentialName } from "./ai";
+import { aiEndpoint, isLocalAiEndpoint, openAiHeaders } from "./aiEndpoint";
+import { getCacheScope } from "./api";
+import { hasCredential, peekCredential, readCredential, saveCredential } from "./credentialStore";
 
 const STORE_KEY = "filey.ai.image";
+function configKey(expected?: string): string | null {
+  const scope = getCacheScope();
+  if (expected && scope !== expected) throw new Error("Your workspace changed. Reopen image settings.");
+  return scope ? `${STORE_KEY}:${encodeURIComponent(scope)}` : null;
+}
+const imageCredential = (cfg: Pick<ImageConfig,"baseUrl">) => `image:${aiEndpoint(cfg.baseUrl || getAiConfig().baseUrl)?.origin ?? "invalid"}`;
 /** Image generation can legitimately take a while; the download of a
  *  provider-hosted result should not. */
 const GENERATE_TIMEOUT_MS = 180_000;
@@ -39,21 +48,24 @@ const DEFAULTS: ImageConfig = {
 
 export function getImageConfig(): ImageConfig {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const key = configKey();
+    const raw = key ? localStorage.getItem(key) : null;
     if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ImageConfig>) };
+    const cfg = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ImageConfig>) };
+    return { ...cfg, apiKey: peekCredential(imageCredential(cfg)) };
   } catch {
     return { ...DEFAULTS };
   }
 }
 
-export function setImageConfig(patch: Partial<ImageConfig>): ImageConfig {
+export function setImageConfig(patch: Partial<ImageConfig>, expectedScope?: string): ImageConfig {
+  const key = configKey(expectedScope);
+  if (!key) throw new Error("Sign in before saving image settings.");
   const next = { ...getImageConfig(), ...patch };
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(next));
-  } catch (e) {
-    console.error("Failed to save image config", e);
-  }
+  if (patch.apiKey !== undefined) void saveCredential(imageCredential(next), patch.apiKey.trim() || null);
+  const { apiKey: _secret, ...settings } = next;
+  localStorage.setItem(key, JSON.stringify(settings));
+  next.apiKey = peekCredential(imageCredential(next));
   return next;
 }
 
@@ -70,11 +82,13 @@ export function resolveImageEndpoint(): {
   const img = getImageConfig();
   const chat = getAiConfig();
   const baseUrl = (img.baseUrl || chat.baseUrl || "").replace(/\/+$/, "");
-  const apiKey = img.apiKey || chat.apiKey || "";
+  const sameOrigin = aiEndpoint(baseUrl)?.origin === aiEndpoint(chat.baseUrl)?.origin;
+  const apiKey = img.apiKey || (sameOrigin ? chat.apiKey : "") || "";
   const model = img.model || DEFAULTS.model;
-  if (!apiKey)
+  if (!apiKey && !hasCredential(imageCredential(img)) && !(sameOrigin && hasCredential(aiCredentialName(chat))) &&
+      !isLocalAiEndpoint({ provider: "openai", baseUrl }))
     return { baseUrl, apiKey, model, usable: false, why: "No API key set." };
-  if (/anthropic\.com/.test(baseUrl))
+  if (aiEndpoint(baseUrl)?.hostname === "api.anthropic.com")
     return {
       baseUrl,
       apiKey,
@@ -116,6 +130,14 @@ export async function generateImage(
   if (!text) throw new ImageError("An image needs a prompt.");
   const ep = resolveImageEndpoint();
   if (!ep.usable) throw new ImageError(ep.why ?? "Image generation isn't configured.");
+  const scope = getCacheScope();
+  if (!scope) throw new ImageError("Sign in before generating images.");
+  const img = getImageConfig();
+  const chat = getAiConfig();
+  ep.apiKey = await readCredential(imageCredential(img), scope) ??
+    (aiEndpoint(ep.baseUrl)?.origin === aiEndpoint(chat.baseUrl)?.origin ? await readCredential(aiCredentialName(chat), scope) : null) ?? "";
+  if (!ep.apiKey && !isLocalAiEndpoint({ provider: "openai", baseUrl: ep.baseUrl }))
+    throw new ImageError("The image provider needs its own API key.");
   const size = opts.size || getImageConfig().size || DEFAULTS.size;
 
   // Through the shared AI transport, not raw fetch: on the desktop that is the
@@ -125,10 +147,7 @@ export async function generateImage(
     `${ep.baseUrl}/images/generations`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${ep.apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: openAiHeaders(ep.apiKey),
       body: JSON.stringify({
         model: opts.model || ep.model,
         prompt: text,

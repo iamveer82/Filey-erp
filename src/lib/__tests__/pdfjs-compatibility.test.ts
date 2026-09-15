@@ -84,6 +84,18 @@ beforeAll(async () => {
 });
 afterAll(() => vi.unstubAllGlobals());
 
+it("does not enlarge already optimized PDFs and gives scanned text exports an OCR recovery path", async () => {
+  const tools = await import("../pdfTools");
+  const { toolById } = await import("../../components/PdfToolbox");
+  const blank = await PDFDocument.create(); blank.addPage([200, 300]);
+  const file = new File([new Uint8Array(await blank.save())], "scan.pdf", { type: "application/pdf" });
+  const compressed = await tools.compressPdf(file);
+  expect(compressed.bytes.length).toBeLessThanOrEqual(file.size);
+  expect((await PDFDocument.load(compressed.bytes)).getPageCount()).toBe(1);
+  await expect(toolById("pdf2txt")!.run([file], {})).rejects.toThrow("OCR to Text");
+  await expect(tools.pdfToJsonText(file)).rejects.toThrow("OCR to PDF");
+});
+
 const asFile = (out: { name: string; bytes: Uint8Array }) =>
   new File([out.bytes.slice()], out.name, { type: "application/pdf" });
 

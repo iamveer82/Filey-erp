@@ -1341,7 +1341,7 @@ function Editor({
             <Maximize2 size={15} /> Preview
           </button>
           <button className="btn-ghost" onClick={downloadPdf} title="Download PDF (Ctrl+P)">
-            <Download size={15} /> PDF
+            <Download size={15} /> Download PDF
           </button>
           <button className="btn-ghost" onClick={duplicate}>
             <Copy size={15} /> Duplicate
@@ -2140,7 +2140,7 @@ function Editor({
                       <Save size={14} /> {saving ? "Saving…" : "Save"}
                     </button>
                     <button className="btn-ghost" onClick={downloadPdf}>
-                      <Download size={14} /> PDF
+                      <Download size={14} /> Download PDF
                     </button>
                   </DocumentPreviewControls>
             </div>
@@ -2231,7 +2231,7 @@ function Editor({
               <span className="text-xs text-muted-foreground tabular-nums">Page {viewPage} of {viewPageCount}</span>
               <button className="btn-ghost" disabled={viewPage >= viewPageCount} onClick={() => setViewPage(p => Math.min(viewPageCount, p + 1))} aria-label="Next preview page">Next</button>
             </div>}
-              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
             <div className="min-w-0 overflow-auto">
               <div className="mx-auto max-w-5xl">

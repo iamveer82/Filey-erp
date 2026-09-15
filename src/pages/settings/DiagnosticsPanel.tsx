@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Copy, Check, Trash2 } from "lucide-react";
 import {
   clearLog,
-  logAsText,
+  supportSummary,
   logEntries,
   onLog,
   type LogEntry,
@@ -102,6 +102,7 @@ export default function DiagnosticsPanel() {
   const [entries, setEntries] = useState<LogEntry[]>(() => logEntries());
   const [scope, setScope] = useState("");
   const [level, setLevel] = useState<LogLevel | "">("");
+  const [copyError, setCopyError] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => onLog(() => setEntries(logEntries())), []);
@@ -127,7 +128,7 @@ export default function DiagnosticsPanel() {
     <SettingsPanel>
       <SettingsSection
         title="Diagnostics"
-        description="Activity from Filey AI, WhatsApp and sync during this session. Copy relevant entries when reporting a problem; these logs clear when Filey closes."
+        description="Activity from Filey AI, WhatsApp and sync during this session. Copy a redacted support summary with event IDs. Message contents, records and credentials are excluded. Local details clear when you change accounts or close Filey."
         stacked
       >
         <div className="flex flex-wrap items-center gap-2">
@@ -157,19 +158,21 @@ export default function DiagnosticsPanel() {
             <button
               className="btn-ghost"
               onClick={() => {
-                void navigator.clipboard?.writeText(logAsText(shown)).then(
+                setCopyError("");
+                if (!navigator.clipboard) { setCopyError("Clipboard is unavailable in this browser."); return; }
+                void navigator.clipboard.writeText(supportSummary(shown)).then(
                   () => {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1500);
                   },
                   () => {
-                    /* clipboard blocked — nothing useful to say */
+                    setCopyError("Could not copy. Check clipboard access and try again.");
                   }
                 );
               }}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? "Copied" : "Copy all"}
+              {copied ? "Copied" : "Copy support summary"}
             </button>
             <button
               className="btn-ghost"
@@ -189,6 +192,7 @@ export default function DiagnosticsPanel() {
           </div>
         </div>
 
+        {copyError && <p role="alert" className="text-sm text-danger">{copyError}</p>}
         {shown.length === 0 ? (
           <p className="rounded-xl bg-muted/50 p-6 text-center text-[12.5px] text-muted-foreground">
             Nothing recorded yet. Use the agent or WhatsApp and it will show up here.
@@ -201,7 +205,7 @@ export default function DiagnosticsPanel() {
                 className="flex flex-wrap gap-x-3 gap-y-1 border-b border-border px-3 py-3 text-[12px] last:border-b-0"
               >
                 <span className="shrink-0 font-mono text-muted-foreground">
-                  {time(e.at)}
+                  <span title={e.id}>{time(e.at)} · {e.id.slice(0,8)}</span>
                 </span>
                 <span className="w-20 shrink-0 truncate font-medium text-muted-foreground">
                   {e.scope}

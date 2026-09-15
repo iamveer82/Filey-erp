@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCacheScope } from "./api";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
+import { requireModuleAccess } from "./moduleAccess";
 
 export interface BrowserTab {
   id: string;
@@ -101,6 +102,7 @@ export async function desktopBrowserCommand(
   const version = generation;
   const profile = await profileKey(account);
   return enqueue(async () => {
+    if (!["close","close_all","stop"].includes(request.action)) await requireModuleAccess("browser", true);
     if (signal?.aborted || version !== generation || scope !== agentStorageScope())
       throw new DOMException("Browser action canceled or workspace changed", "AbortError");
     activeScope = scope;

@@ -19,7 +19,7 @@ const qtyOf = async (id: number): Promise<number> => {
 
 describe("stock adjustments", () => {
   it("round-trips through an oversell", async () => {
-    await localClient.from("products").insert({ name: "Widget", quantity: 3 });
+    await localClient.from("products").insert({ id: 1, name: "Widget", quantity: 3 });
 
     await erp.updateStock(1, -5, "Invoice INV-2026-0001"); // sold 5, held 3
     expect(await qtyOf(1)).toBe(-2); // owes 2, not 0
@@ -29,7 +29,7 @@ describe("stock adjustments", () => {
   });
 
   it("round-trips normally when stock covers the sale", async () => {
-    await localClient.from("products").insert({ name: "Widget", quantity: 10 });
+    await localClient.from("products").insert({ id: 1, name: "Widget", quantity: 10 });
 
     await erp.updateStock(1, -4, "sale");
     expect(await qtyOf(1)).toBe(6);
@@ -38,7 +38,7 @@ describe("stock adjustments", () => {
   });
 
   it("logs the true movement even when it goes negative", async () => {
-    await localClient.from("products").insert({ name: "Widget", quantity: 1 });
+    await localClient.from("products").insert({ id: 1, name: "Widget", quantity: 1 });
 
     await erp.updateStock(1, -3, "oversold");
 

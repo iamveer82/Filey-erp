@@ -196,8 +196,8 @@ export default function SupplierDetail() {
   const [savingNotes, setSavingNotes] = useState(false);
 
   useEffect(() => {
-    if (supplier) setNotesDraft(supplier.notes || "");
-  }, [supplier?.id]);
+    if (!editingNotes) setNotesDraft(supplier?.notes || "");
+  }, [supplier?.id, supplier?.notes, editingNotes]);
 
   const saveNotes = async () => {
     if (!supplier || !id || savingNotes) return;
@@ -222,7 +222,7 @@ export default function SupplierDetail() {
       orders.filter(
         (o) =>
           (supplier != null && o.supplier_id === supplier.id) ||
-          (supplier != null && o.supplier_name === supplier.name)
+          (supplier != null && !o.supplier_id && o.supplier_name === supplier.name)
       ),
     [orders, supplier]
   );
@@ -253,11 +253,22 @@ export default function SupplierDetail() {
     .filter((o) => st(o) === "received")
     .reduce((s, o) => s + o.total, 0);
 
+  /** Supplier currency: dominant across its POs, else the company default. */
+  const currency = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of myOrders) {
+      const c = (o.currency || "").trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return top || company?.currency || "AED";
+  }, [myOrders, company]);
+
   /** Live purchase orders only are statement debits (drafts and cancelled
    *  POs never hit the account) — the same rule the StatementModal applies. */
   const ledgerDocs = useMemo(
-    () => myOrders.filter((o) => st(o) !== "draft" && st(o) !== "cancelled"),
-    [myOrders]
+    () => myOrders.filter((o) => st(o) !== "draft" && st(o) !== "cancelled" && (o.currency || company?.currency || "AED") === currency),
+    [myOrders, company?.currency, currency]
   );
   const docKey = ledgerDocs.map((o) => o.id).join(",");
 
@@ -290,7 +301,7 @@ export default function SupplierDetail() {
         if (!alive) return;
         setStmtPayments(pays);
         setStmtAdvances(
-          advs
+          (currency === "AED" ? advs : [])
             // Negative rows are internal allocations, not new money.
             .filter((a) => Number(a.amount) > 0)
             .map((a) => ({
@@ -308,20 +319,9 @@ export default function SupplierDetail() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplier?.id, docKey]);
+  }, [supplier?.id, docKey, currency]);
 
-  /** Supplier currency: dominant across its POs, else the company default. */
-  const currency = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const o of ledgerDocs) {
-      const c = (o.currency || "").trim();
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    return top || company?.currency || "AED";
-  }, [ledgerDocs, company]);
-
-  /** The all-time payable statement — one derivation behind the KPI grid,
+  /** The all-time purchase-order statement — one derivation behind the KPI grid,
    *  the Purchases & Payments ledger, the download panel and the preview.
    *  (Suppliers have no standalone payment receipts — same as the modal.) */
   const built = useMemo(() => {
@@ -413,7 +413,7 @@ export default function SupplierDetail() {
   const emailStatement = () => {
     shareVia("email", {
       email: supplier?.email,
-      text: `Statement of account for ${supplier?.name || "Supplier"} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
+      text: `Purchase order statement for ${supplier?.name || "Supplier"} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
       url: `Statement of account - ${supplier?.name || "Supplier"}`,
     });
   };
@@ -623,6 +623,7 @@ export default function SupplierDetail() {
         </div>
       </div>
 
+      <p className="text-sm text-muted-foreground mb-4">Purchase orders and payments in {currency}. Other currencies are excluded from this statement. For posted bill balances and aging, open <Link className="underline" to="/reports?tab=suppliers">Reports → Suppliers</Link>.</p>
       {/* DEMO parity: joined 4-cell KPI grid - identity + statement metrics
           sharing hairline dividers; every figure derives from buildStatement. */}
       <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
@@ -678,7 +679,7 @@ export default function SupplierDetail() {
           }
         />
         <KpiCell
-          label="Net balance"
+          label="PO remainder"
           value={money(netBalance, currency)}
           valueClass={
             netBalance > 0.005
@@ -864,7 +865,7 @@ export default function SupplierDetail() {
           <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3 flex-wrap">
             <div>
               <div className="text-[14px] font-semibold text-foreground">
-                Download supplier statement
+                Download purchase order statement
               </div>
               <div className="text-[12.5px] text-muted-foreground">
                 Pick a template - preview updates instantly

@@ -1,3 +1,4 @@
+vi.mock("../moduleAccess", () => ({ requireModuleAccess: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { closeDesktopBrowserTabs, desktopBrowserCommand } from "../desktopBrowser";
