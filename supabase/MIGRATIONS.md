@@ -29,6 +29,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
 5. `2026-09-12-sync-conflict-protection.sql` — revision-checked sync RPC and offline ID sequence separation. Deploy before shipping the matching desktop update; the client deliberately refuses unsafe legacy upserts.
 6. `verify-rls.sql` — structural checks. Also run `npm run test:rls:local` against a disposable PostgreSQL cluster to verify denied writes/deletes and stale-write rejection; policy presence alone does not prove isolation.
 7. `2026-09-13-expense-entry.sql` — itemized expense details and receipt references, atomic expense/ledger save and deletion, and submission retry protection. Apply before shipping the purchase-entry page. Existing business rows are not rewritten.
+8. `2026-09-15-dodo-payments.sql` — `licenses.dodo_payment_id` plus the partial unique index the Dodo webhook uses for idempotency. Apply before deploying the `dodo` function, or a retried webhook can grant a second licence. See [Dodo Payments](../docs/dodo-payments.md).
 
 Applied to the configured Filey cloud project on 13 September 2026. Both expense RPCs were verified as SECURITY INVOKER with authenticated-only execution. Behavioral checks ran against a disposable PostgreSQL database; production business records were not changed for testing.
 

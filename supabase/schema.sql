@@ -1614,9 +1614,14 @@ create table if not exists licenses (
   user_id uuid not null references auth.users(id) on delete cascade,
   product text not null default 'filey-desktop',
   status text not null default 'active',            -- active | revoked
-  stripe_payment_intent text,
+  stripe_payment_intent text,                       -- legacy: Stripe-era purchases
+  dodo_payment_id text,                             -- current: Dodo Payments
   created_at timestamptz not null default now()
 );
+-- Idempotency for the Dodo webhook; NULL for Stripe-era and voucher licences.
+create unique index if not exists licenses_dodo_payment_id_key
+  on public.licenses (dodo_payment_id)
+  where dodo_payment_id is not null;
 
 create table if not exists license_devices (
   id uuid primary key default gen_random_uuid(),

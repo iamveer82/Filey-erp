@@ -7,7 +7,8 @@ import {
   activateThisDevice,
   redeemVoucher,
   deactivateDevice,
-  startLiteCheckout,
+  startFreedomCheckout,
+  claimPurchasedLicense,
   licenseOverview,
   listOrgDevices,
   releaseOrgDevice,
@@ -87,6 +88,36 @@ export default function LicensePanel() {
   };
   useEffect(refresh, []);
 
+  // Coming back from Dodo's checkout. The webhook is what actually grants the
+  // licence, so wait for it and activate this device — the buyer paid, they
+  // should not also have to find a button.
+  useEffect(() => {
+    const outcome = new URLSearchParams(location.hash.split("?")[1] ?? "").get("checkout");
+    if (!cloudConfigured || outcome !== "success") return;
+    let cancelled = false;
+    setBusy(true);
+    setMsg("Payment received — activating this device…");
+    claimPurchasedLicense()
+      .then((state) => {
+        if (cancelled) return;
+        if (state) {
+          setMsg("Freedom is active on this device.");
+          refresh();
+        } else {
+          setErr(
+            "We haven't seen the payment yet. It can take a moment — reopen this page, " +
+              "or contact support if it doesn't appear."
+          );
+        }
+      })
+      .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => !cancelled && setBusy(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const run = async (fn: () => Promise<unknown>, okMsg: string) => {
     setBusy(true);
     setErr("");
@@ -100,6 +131,19 @@ export default function LicensePanel() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Buy, then unlock. In the browser the page redirects to Dodo and the
+   *  effect above finishes the job on return; on desktop the checkout opens in
+   *  the system browser, so this window stays put and waits for the webhook. */
+  const buyFreedom = async () => {
+    if ((await startFreedomCheckout()) === "redirected") return;
+    setMsg("Finish the payment in your browser — this page unlocks by itself.");
+    const state = await claimPurchasedLicense(60, 5000);
+    if (!state)
+      throw new Error(
+        "No payment has arrived yet. When it completes, reopen this page and the licence activates."
+      );
   };
 
   const reasonText: Record<string, string> = {
@@ -269,7 +313,7 @@ export default function LicensePanel() {
               <button
                 className="btn-primary mt-3"
                 disabled={busy}
-                onClick={() => run(startLiteCheckout, "Redirecting to checkout…")}
+                onClick={() => run(buyFreedom, "Freedom is active on this device.")}
               >
                 <ShoppingCart size={15} /> Buy desktop license
               </button>

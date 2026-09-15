@@ -1,9 +1,13 @@
-// Desktop (Lite) license: one-time purchase, verified OFFLINE forever.
+// Desktop (Freedom) license: one-time purchase, verified OFFLINE forever.
 //
-// The stripe edge function signs a small JSON payload with a server-only
+// The dodo edge function signs a small JSON payload with a server-only
 // ECDSA P-256 private key at activation time; this module verifies it with
 // the embedded public key below on every launch — no network call. The
 // cloud (Pro) tier is the opposite: a live org-plan check (subscription.ts).
+//
+// Dodo Payments sells the licence and its webhook records the entitlement, so
+// buying is all the buyer does: claimPurchasedLicense() waits for the webhook
+// to land and activates this device by itself.
 //
 // Licensing preserves paid benefits. Core local storage and local invoicing
 // are free; hosted service quotas remain separately enforced.
@@ -148,7 +152,7 @@ export async function activateThisDevice(): Promise<LicenseState> {
   const device_name =
     (hasTauri ? "Desktop" : "Browser") +
     (typeof navigator !== "undefined" ? ` · ${navigator.platform}` : "");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
+  const { data, error } = (await invokeFn(supabase, "dodo", {
     body: { action: "license_activate", fingerprint, device_name },
   })) as { data: { token?: string; error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
@@ -183,7 +187,7 @@ export async function redeemVoucher(code: string): Promise<LicenseState> {
  *  The freed machine keeps working offline until it next re-activates. */
 export async function deactivateDevice(fingerprint: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
+  const { data, error } = (await invokeFn(supabase, "dodo", {
     body: { action: "license_deactivate", fingerprint },
   })) as { data: { error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
@@ -245,16 +249,56 @@ export async function releaseOrgDevice(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-/** Buy the one-time Lite license (Stripe Checkout; invoice emailed). */
-export async function startLiteCheckout(): Promise<void> {
+/** Buy the one-time Freedom licence (Dodo Payments hosted checkout — Dodo is
+ *  the merchant of record, so it handles tax and invoicing).
+ *
+ *  On desktop the checkout opens in the system browser: sending the Tauri
+ *  webview to Dodo would navigate the app itself away, and its return URL
+ *  lands on the website, not back inside the app. The caller polls with
+ *  claimPurchasedLicense() while the buyer pays in that browser window. */
+export async function startFreedomCheckout(): Promise<"redirected" | "browser"> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
-    body: { action: "checkout_lite" },
+  const { data, error } = (await invokeFn(supabase, "dodo", {
+    body: { action: "checkout" },
   })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (!data?.url) throw new Error("Checkout failed — no URL returned.");
+  if (hasTauri) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(data.url);
+    return "browser";
+  }
   window.location.href = data.url;
+  return "redirected";
+}
+
+/** Has the Dodo webhook recorded this account's purchase yet? */
+export async function licensePurchased(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = (await invokeFn(supabase, "dodo", {
+    body: { action: "license_status" },
+  })) as { data: { licensed?: boolean } | null; error: { message: string } | null };
+  if (error) throw new Error(error.message);
+  return !!data?.licensed;
+}
+
+/** Turn a completed payment into a working Freedom install, with no code to
+ *  paste and no button to find. The buyer comes back from Dodo's checkout and
+ *  this waits for the webhook — which usually lands first, but a card that
+ *  needs a bank prompt can take a few seconds — then activates this device.
+ *
+ *  Returns null when the payment never showed up, so the caller can tell the
+ *  buyer to reopen the page rather than silently leaving them on Free. */
+export async function claimPurchasedLicense(
+  attempts = 10,
+  delayMs = 3000
+): Promise<LicenseState | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (await licensePurchased()) return activateThisDevice();
+    if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
 }
 
 /* ---------------- tiers: free < lite (one-time) < pro (cloud) ---------------- */

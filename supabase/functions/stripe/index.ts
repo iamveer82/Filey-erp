@@ -1,4 +1,10 @@
-// Filey — Stripe billing edge function (Deno).
+// Filey — Stripe billing edge function (Deno). DEPRECATED.
+//
+// Dodo Payments sells the Freedom licence now (supabase/functions/dodo). This
+// function stays deployed only because apps shipped before 2.11.1 call it for
+// license_activate / license_deactivate; retire it once those installs are
+// gone. New work belongs in the dodo function, and licence issuing itself
+// lives in _shared/license.ts.
 //
 // One function, three jobs (routed by request shape):
 //   • POST { action: "checkout", plan }  → Stripe Checkout (subscription) URL
