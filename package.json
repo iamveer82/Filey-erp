@@ -10,13 +10,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rls": "node scripts/rls-test.mjs",
+    "test:rls:local": "node scripts/test-rls-local.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "tauri",
     "shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-desktop-shortcut.ps1",
-    "setup": "npm run tauri build && npm run shortcut"
+    "setup": "npm run tauri build && npm run shortcut",
+    "test:browser:tools": "node scripts/test-browser-tools.mjs",
+    "test:edge": "deno test --allow-env --allow-net --allow-read --lock=deno.lock --frozen supabase/functions/channel-webhook"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.7.1",
@@ -88,16 +91,17 @@
     "jsdom": "^25.0.1",
     "postcss": "^8.5.15",
     "prettier": "^3.8.3",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.1",
     "vite": "^8.0.16",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "form-data": ">=4.0.6",
-    "ws": ">=8.21.0"
+    "ws": ">=8.21.0",
+    "image-size": ">=2.0.4"
   },
   "license": "AGPL-3.0-only"
 }

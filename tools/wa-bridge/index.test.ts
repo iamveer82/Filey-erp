@@ -92,6 +92,8 @@ it("forwards a downloaded voice note with its sender, then confirms the reply", 
       type: "delivery",
       requestId: "r1",
       ok: true,
+      messageId: "accepted-id",
+      skipped: false,
     })
   );
   expect(transport.send).toHaveBeenCalledWith("971500000001@s.whatsapp.net", {

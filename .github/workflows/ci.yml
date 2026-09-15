@@ -14,14 +14,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # npm install (not ci): the lockfile is generated on Windows and
-      # can't carry the linux-only optional native/wasm deps (rolldown /
-      # @tailwindcss oxide / lightningcss pull @emnapi/*), which makes
-      # `npm ci` abort with "missing from lock file" on the linux runner.
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       # Bridge tests import its isolated Node dependencies, not the web bundle.
       - run: npm ci --prefix tools/wa-bridge --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      - run: npm run build
+      - run: npm run test:browser:tools
+      - run: node tools/wa-bridge/check-media.mjs
+      - run: npm audit --omit=dev --prefix tools/wa-bridge
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: npm run test:edge
+      - run: deno check --lock=deno.lock --frozen supabase/functions/integrations/index.ts
+      - run: npm run build -- --manifest
+      - run: node scripts/check-route-bundles.mjs

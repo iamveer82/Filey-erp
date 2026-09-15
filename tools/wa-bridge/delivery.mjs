@@ -34,4 +34,5 @@ export async function sendConfirmed(socket, command, remember = () => {}) {
       "WhatsApp did not confirm acceptance. Check the chat before retrying."
     );
   remember(result.key.id);
+  return result.key.id;
 }

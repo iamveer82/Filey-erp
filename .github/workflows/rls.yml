@@ -7,8 +7,11 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "supabase/schema.sql"
+      - "supabase/**/*.sql"
       - "scripts/rls-test.mjs"
+      - "scripts/test-rls-local.mjs"
+      - "scripts/fixtures/rls-*.sql"
+      - ".github/workflows/rls.yml"
 
 jobs:
   rls:
@@ -18,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: node scripts/test-rls-local.mjs
+      # Optional disposable hosted-project check. Local SQL tests always run.
       - run: node scripts/rls-test.mjs
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

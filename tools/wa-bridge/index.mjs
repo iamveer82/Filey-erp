@@ -105,10 +105,10 @@ async function sendTo(jid, text) {
 async function deliver(command) {
   try {
     // Empty replies deliberately release non-owner chats without sending anything.
-    if (command.type !== "reply" || command.text)
-      await sendConfirmed(connected ? activeSock : null, command, remember);
+    const skipped = command.type === "reply" && !command.text;
+    const messageId = skipped ? null : await sendConfirmed(connected ? activeSock : null, command, remember);
     if (command.requestId)
-      emit({ type: "delivery", requestId: command.requestId, ok: true });
+      emit({ type: "delivery", requestId: command.requestId, ok: true, messageId, skipped });
   } catch (e) {
     if (command.requestId)
       emit({
