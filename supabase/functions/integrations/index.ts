@@ -14,6 +14,7 @@
 // Bring-your-own-key still works and bypasses this entirely (see lib/composio,
 // lib/zernio) — that path is for offline installs and self-hosters.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
 
 const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
 const ZERNIO_BASE = "https://zernio.com/api/v1";
@@ -58,6 +59,11 @@ Deno.serve(async (req) => {
     const { data: auth, error: authError } = await supa.auth.getUser(jwt);
     if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
     const userId = auth.user.id;
+    const { data: profile, error: profileError } = await supa.from("profiles").select("org_id").eq("id",userId).maybeSingle();
+    if (profileError || !profile?.org_id) return json({error:"Workspace access could not be verified."},403);
+    const { data: member, error: memberError } = await supa.from("org_members").select("role,modules").eq("org_id",profile.org_id).eq("user_id",userId).maybeSingle();
+    if (memberError || !integrationAllowed(member,provider)) return json({error:"Your role does not have access to this integration."},403);
+    const entity = await integrationEntity(profile.org_id,userId);
 
     // A cloud user can bring their own key (integration_keys, service-role
     // readable only). When they have, this call spends their credits, not
@@ -71,7 +77,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
 
-    if (action === "status") return json({
+    if (action === "status" && !payload?.connected_account_id) return json({
       configured: !!ownKey || !!Deno.env.get(provider === "composio" ? "COMPOSIO_API_KEY" : "ZERNIO_API_KEY"),
     });
     if (BILLABLE.has(op) && !ownKey) {
@@ -117,7 +123,7 @@ Deno.serve(async (req) => {
 
     const result =
       provider === "composio"
-        ? await composio(action, payload ?? {}, userId, ownKey)
+        ? await composio(action, payload ?? {}, entity, ownKey)
         : provider === "zernio"
           ? await zernio(action, payload ?? {}, ownKey)
           : { status: 400, body: { error: `Unknown provider: ${provider}` } };
@@ -168,23 +174,33 @@ async function composio(
     return { status: 503, body: { error: "Integrations aren't configured yet." } };
   const headers = { "x-api-key": key, "Content-Type": "application/json" };
 
-  if (action === "list")
-    return callJson(
+  if (action === "list") {
+    const cursor = typeof payload.cursor === "string" ? payload.cursor : "";
+    const result = await callJson(
       // Scoped to the caller: without user_id this would return every
       // customer's connections on the platform account.
-      `${COMPOSIO_BASE}/connected_accounts?limit=50&user_id=${encodeURIComponent(userId)}`,
+      `${COMPOSIO_BASE}/connected_accounts?limit=100&user_ids=${encodeURIComponent(userId)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       { headers },
       "Could not list connections"
     );
+    if (result.status >= 400) return result;
+    const body = result.body as {items?:Record<string,unknown>[];next_cursor?:string};
+    if (!Array.isArray(body.items)) return {status:502,body:{error:"Invalid connection list."}};
+    try { return {status:200,body:{items:body.items.map(account => connectionSummary(account,userId)),next_cursor:body.next_cursor}}; }
+    catch { return {status:403,body:{error:"Connection ownership could not be verified."}}; }
+  }
 
   if (action === "status") {
     const id = String(payload.connected_account_id ?? "");
     if (!id) return { status: 400, body: { error: "connected_account_id required" } };
-    return callJson(
+    const result = await callJson(
       `${COMPOSIO_BASE}/connected_accounts/${encodeURIComponent(id)}`,
       { headers },
       "Could not read connection status"
     );
+    if (result.status >= 400) return result;
+    try { return {status:200,body:connectionSummary(result.body as Record<string,unknown>,userId)}; }
+    catch { return {status:403,body:{error:"Connection belongs to a different workspace."}}; }
   }
 
   if (action === "connect") {

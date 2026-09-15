@@ -24,7 +24,13 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
    - `2026-07-26-agent-memories.sql` — `agent_memories`: durable long-term memory for the channel agent (remember/recall tools), per-user RLS
    - `2026-07-26-payroll-paid-on.sql` — `payroll.paid_on`: the date a salary was actually paid (status alone couldn't say when); backfills paid rows from `updated_at`
    - `2026-07-26-crm-objects.sql` — CRM relational layer: `crm_people`, `crm_notes`, `crm_tasks` (org RLS like every app table); `customer_id`/`person_id`/`pipeline` on `crm_opportunities`; `target_type`/`target_id` on `crm_activities`; backfills deal→customer links and promotes contact names to people
-3. `verify-rls.sql` — run last to assert RLS is enabled everywhere (check, not a change).
+3. Apply all subsequent dated feature migrations in date order (see the deployment log).
+4. `2026-09-12-shared-record-permissions.sql` — apply after the feature migrations, including when re-running older policy migrations. Splits shared reads from owner/admin writes and scopes invoice sharing to the current organization. No record contents are changed.
+5. `2026-09-12-sync-conflict-protection.sql` — revision-checked sync RPC and offline ID sequence separation. Deploy before shipping the matching desktop update; the client deliberately refuses unsafe legacy upserts.
+6. `verify-rls.sql` — structural checks. Also run `npm run test:rls:local` against a disposable PostgreSQL cluster to verify denied writes/deletes and stale-write rejection; policy presence alone does not prove isolation.
+7. `2026-09-13-expense-entry.sql` — itemized expense details and receipt references, atomic expense/ledger save and deletion, and submission retry protection. Apply before shipping the purchase-entry page. Existing business rows are not rewritten.
+
+Applied to the configured Filey cloud project on 13 September 2026. Both expense RPCs were verified as SECURITY INVOKER with authenticated-only execution. Behavioral checks ran against a disposable PostgreSQL database; production business records were not changed for testing.
 
 ## Prod state — verified 2026-07-28
 
@@ -62,3 +68,7 @@ inserts failed in production with PostgREST `PGRST204` (`invoice-missing-columns
 
 A column referenced by the app but absent in the DB is a silent production failure
 — it does not show up in `npm run build` or local tests if local DB is ahead.
+
+## Staff access gate (2026-09-12; deployment pending)
+
+Apply `2026-09-12-module-access.sql` after shared-record and sync-conflict migrations and all feature migrations. Deploy the integrations edge function alongside the frontend. See [business permissions](../docs/business-permissions.md). Disposable PostgreSQL tests do not deploy production policies.

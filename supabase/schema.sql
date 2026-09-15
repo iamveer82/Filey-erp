@@ -176,6 +176,7 @@ create table if not exists expenses (
   amount numeric(14,2) not null default 0,
   expense_date date not null default current_date,
   account_id bigint,
+  details jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -1766,3 +1767,351 @@ create policy sync_state_own on sync_state for all
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+
+-- Shared records are readable, never writable, by ordinary recipients.
+-- Apply AFTER all feature migrations. No business rows are modified.
+begin;
+
+alter table public.invoice_docs
+  add column if not exists shared_with jsonb not null default '[]'::jsonb;
+
+do $$
+declare
+  t text;
+  p text;
+  can_read text;
+  can_write text;
+begin
+  foreach t in array array[
+    'products','orders','order_items','employees','attendance','payroll',
+    'accounts','expenses','transactions','crm_leads','crm_customers',
+    'crm_opportunities','crm_activities','crm_people','crm_notes','crm_tasks',
+    'invoice_docs','invoice_doc_items','invoice_payments','quotations',
+    'quotation_items','quotation_templates','tool_runs','suppliers',
+    'purchase_orders','purchase_order_items','stock_movements','advances',
+    'po_payments','payment_receipts','entity_links','campaigns','email_optouts',
+    'org_channels','email_messages','call_logs','invoice_recurrence'
+  ] loop
+    -- Optional feature tables may not have been installed yet.
+    if to_regclass('public.' || t) is null then continue; end if;
+    can_write := 'org_id = (select public.current_org()) and '
+      || '(user_id = (select auth.uid()) or (select public.is_org_admin()))';
+    can_read := 'org_id = (select public.current_org()) and '
+      || '(user_id = (select auth.uid()) or (select public.is_org_admin()) or shared = true';
+    if t = 'invoice_docs' then
+      can_read := can_read || ' or shared_with ? (select auth.uid())::text';
+    end if;
+    can_read := can_read || ')';
+
+    if t in ('invoice_doc_items', 'invoice_payments', 'invoice_recurrence') then
+      -- Child rows inherit the invoice's visibility, including targeted shares.
+      -- An unrelated member must not create a payment/item on a shared invoice.
+      can_read := format('org_id = (select public.current_org()) and exists '
+        || '(select 1 from public.invoice_docs d where d.id = %I.%I)',
+        t, case when t = 'invoice_recurrence' then 'base_invoice_id' else 'invoice_id' end);
+      can_write := can_write || format(' and exists '
+        || '(select 1 from public.invoice_docs d where d.id = %I.%I '
+        || 'and (d.user_id = (select auth.uid()) or (select public.is_org_admin())))',
+        t, case when t = 'invoice_recurrence' then 'base_invoice_id' else 'invoice_id' end);
+    end if;
+
+    foreach p in array array['_owner','_org','_access','_read','_write'] loop
+      execute format('drop policy if exists %I on public.%I', t || p, t);
+    end loop;
+    execute format('alter table public.%I enable row level security', t);
+    execute format('create policy %I on public.%I for select to authenticated using (%s)',
+      t || '_read', t, can_read);
+    execute format('create policy %I on public.%I for all to authenticated using (%s) with check (%s)',
+      t || '_write', t, can_write, can_write);
+  end loop;
+end $$;
+
+-- SECURITY DEFINER bypasses RLS: explicitly check both organization and owner.
+-- Replace the entire target list atomically, including turning whole-org sharing off.
+create or replace function public.share_invoice(
+  p_id bigint, p_all boolean, p_user_ids jsonb default '[]'::jsonb
+) returns json language plpgsql security definer set search_path = public as $$
+declare
+  v_uid uuid := auth.uid();
+  v_row public.invoice_docs;
+  v_targets jsonb := coalesce(p_user_ids, '[]'::jsonb);
+begin
+  if v_uid is null then
+    return json_build_object('ok', false, 'reason', 'not_signed_in');
+  end if;
+  select * into v_row from public.invoice_docs
+    where id = p_id and org_id = public.current_org() for update;
+  if v_row.id is null then
+    return json_build_object('ok', false, 'reason', 'not_found');
+  end if;
+  if v_row.user_id <> v_uid and not public.is_org_admin() then
+    return json_build_object('ok', false, 'reason', 'forbidden');
+  end if;
+  if jsonb_typeof(v_targets) <> 'array' then
+    return json_build_object('ok', false, 'reason', 'invalid_members');
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(v_targets) x
+    where jsonb_typeof(x) <> 'string' or not exists (
+      select 1 from public.org_members m
+      where m.org_id = v_row.org_id and m.user_id::text = (x #>> '{}')
+    )
+  ) then
+    return json_build_object('ok', false, 'reason', 'invalid_members');
+  end if;
+  update public.invoice_docs set shared = coalesce(p_all, false),
+    shared_with = case when p_all then '[]'::jsonb else v_targets end,
+    updated_at = now() where id = p_id;
+  return json_build_object('ok', true);
+end $$;
+revoke all on function public.share_invoice(bigint, boolean, jsonb) from public, anon;
+grant execute on function public.share_invoice(bigint, boolean, jsonb) to authenticated;
+
+notify pgrst, 'reload schema';
+commit;
+
+-- Version every synchronized row, including updates made directly by web clients.
+-- Existing IDs/content are preserved. Apply after shared-record-permissions.
+begin;
+create or replace function public.version_synced_record() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  new.sync_revision := case when TG_OP = 'INSERT' then 1 else old.sync_revision + 1 end;
+  return new;
+end $$;
+
+do $$ declare t text; begin
+  foreach t in array array[
+    'company_profile','app_settings','suppliers','crm_customers','products','orders','order_items',
+    'invoice_docs','invoice_doc_items','work_items','invoice_payments','invoice_recurrence',
+    'quotations','quotation_items','quotation_templates','purchase_orders','purchase_order_items',
+    'po_payments','payment_receipts','accounts','expenses','transactions','advances','stock_movements',
+    'employees','attendance','payroll','crm_leads','crm_people','crm_opportunities','crm_activities',
+    'crm_notes','crm_tasks','follow_ups','entity_links','org_channels','org_messages','email_messages',
+    'call_logs','tool_runs','user_folders','user_files','user_assets','email_optouts','campaigns'
+  ] loop
+    if to_regclass('public.' || t) is null then continue; end if;
+    execute format('alter table public.%I add column if not exists sync_revision bigint not null default 1',t);
+    execute format('drop trigger if exists sync_revision on public.%I',t);
+    execute format('create trigger sync_revision before insert or update on public.%I for each row execute function public.version_synced_record()',t);
+  end loop;
+end $$;
+
+-- SECURITY INVOKER retains all table/RLS permissions. No service-role bypass.
+-- Lock/read/compare/write is one transaction, not a racing browser preflight.
+create or replace function public.sync_record(
+  p_table text, p_row jsonb, p_expected bigint default null, p_delete boolean default false
+) returns jsonb language plpgsql security invoker set search_path = public as $$
+declare
+  current_row jsonb;
+  saved jsonb;
+  normalized jsonb;
+  payload jsonb := p_row - array['sync_revision','user_id','org_id'];
+  columns_sql text;
+  values_sql text;
+begin
+  if auth.uid() is null then raise insufficient_privilege; end if;
+  if p_table <> all(array[
+    'company_profile','app_settings','suppliers','crm_customers','products','orders','order_items',
+    'invoice_docs','invoice_doc_items','work_items','invoice_payments','invoice_recurrence',
+    'quotations','quotation_items','quotation_templates','purchase_orders','purchase_order_items',
+    'po_payments','payment_receipts','accounts','expenses','transactions','advances','stock_movements',
+    'employees','attendance','payroll','crm_leads','crm_people','crm_opportunities','crm_activities',
+    'crm_notes','crm_tasks','follow_ups','entity_links','org_channels','org_messages','email_messages',
+    'call_logs','tool_runs','user_folders','user_files','user_assets','email_optouts','campaigns'
+  ]) or jsonb_typeof(payload) <> 'object' or payload->>'id' is null then
+    raise exception 'Invalid sync record';
+  end if;
+  -- Comparing typed IDs keeps the primary-key index usable for bigint and UUID tables.
+  execute format('select to_jsonb(r) from public.%1$I r where id = '
+    || '(jsonb_populate_record(null::public.%1$I,$1)).id for update',p_table)
+    into current_row using payload;
+  if p_delete then
+    if current_row is null then return jsonb_build_object('ok',true); end if;
+    if p_expected is null or (current_row->>'sync_revision')::bigint <> p_expected then
+      return jsonb_build_object('ok',false,'conflict',true);
+    end if;
+    execute format('delete from public.%1$I where id = (jsonb_populate_record(null::public.%1$I,$1)).id returning to_jsonb(%1$I)',p_table)
+      into saved using payload;
+    if saved is null then raise insufficient_privilege; end if;
+    return jsonb_build_object('ok',true);
+  end if;
+  if current_row is not null then
+    if p_expected is null or (current_row->>'sync_revision')::bigint <> p_expected then
+      -- A lost response is safe to retry only when the complete submitted values
+      -- still match. New-row retries also require the same creation timestamp.
+      execute format('select to_jsonb(jsonb_populate_record(null::public.%I,$1))',p_table) into normalized using payload;
+      if not exists(select 1 from jsonb_object_keys(payload - array['updated_at','revision']) k
+        where normalized->k is distinct from current_row->k)
+        and (p_expected is not null or (payload ? 'created_at' and normalized->'created_at' = current_row->'created_at')) then
+        return jsonb_build_object('ok',true,'revision',current_row->'sync_revision');
+      end if;
+      return jsonb_build_object('ok',false,'conflict',true);
+    end if;
+    payload := payload - array['id','created_at'];
+  elsif p_expected is not null then
+    return jsonb_build_object('ok',false,'conflict',true);
+  end if;
+  -- Reject unknown/generated fields instead of silently dropping saved data.
+  if exists(select 1 from jsonb_object_keys(payload) k where not exists(
+    select 1 from pg_attribute where attrelid=to_regclass('public.'||p_table)
+      and attname=k and attnum>0 and not attisdropped and attgenerated=''
+  )) then raise exception 'Sync schema is out of date'; end if;
+  select string_agg(format('%I',k),','), string_agg(format('x.%I',k),',')
+    into columns_sql, values_sql from jsonb_object_keys(payload) k;
+  if current_row is null then
+    begin
+      execute format('insert into public.%1$I (%2$s) select %3$s from jsonb_populate_record(null::public.%1$I,$1) x returning to_jsonb(%1$I)',p_table,columns_sql,values_sql)
+        into saved using payload;
+    exception when unique_violation then
+      -- Another device won the insert race, or the ID belongs to an invisible row.
+      return jsonb_build_object('ok',false,'conflict',true);
+    end;
+  else
+    execute format('update public.%1$I set (%2$s) = (select %3$s from jsonb_populate_record(null::public.%1$I,$1) x) '
+      || 'where id = (jsonb_populate_record(null::public.%1$I,$2)).id returning to_jsonb(%1$I)',p_table,columns_sql,values_sql)
+      into saved using payload,p_row;
+    if saved is null then raise insufficient_privilege; end if;
+  end if;
+  return jsonb_build_object('ok',true,'revision',saved->'sync_revision');
+end $$;
+revoke all on function public.sync_record(text,jsonb,bigint,boolean) from public,anon;
+grant execute on function public.sync_record(text,jsonb,bigint,boolean) to authenticated;
+
+-- Random offline IDs occupy the upper half of JS's safe integer range.
+-- Never advance a cloud sequence into that range (or beyond Number.MAX_SAFE_INTEGER).
+create or replace function public.sync_bump_sequences() returns void
+language plpgsql security definer set search_path = public as $$
+declare t record; seq text; mx bigint;
+begin
+  for t in select table_name from information_schema.columns
+    where table_schema='public' and column_name='sync_revision' loop
+    seq := pg_get_serial_sequence('public.' || quote_ident(t.table_name),'id');
+    if seq is null then continue; end if;
+    execute format('select coalesce(max(id),0) from public.%I where id < 4503599627370496',t.table_name) into mx;
+    if mx > 0 then
+      execute format('select setval(%L,greatest(last_value,$1)) from %s',seq,seq) using mx;
+    end if;
+  end loop;
+end $$;
+revoke all on function public.sync_bump_sequences() from public,anon;
+grant execute on function public.sync_bump_sequences() to authenticated;
+notify pgrst, 'reload schema';
+commit;
+
+
+-- Staff module permissions (2026-09-12)
+-- Apply after shared-record permissions and all feature migrations.
+-- Module gates intersect existing organization/ownership policies; they never
+-- grant access to another user's private rows. No business records are changed.
+begin;
+
+create or replace function public.filey_module_access() returns jsonb
+language sql stable security definer set search_path = public, pg_temp as $$
+  select coalesce((select jsonb_build_object('allowed',true,
+      'admin',m.role in ('owner','admin'),'modules',m.modules)
+    from public.org_members m
+    where m.org_id=public.current_org() and m.user_id=auth.uid() limit 1),
+    jsonb_build_object('allowed',false,'admin',false,'modules','[]'::jsonb))
+$$;
+create or replace function public.filey_can_use(p_module text) returns boolean
+language sql stable security definer set search_path = public, pg_temp as $$
+  select exists(select 1 from public.org_members m
+    where m.org_id=public.current_org() and m.user_id=auth.uid()
+      and (m.role in ('owner','admin') or m.modules is null or p_module=any(m.modules)))
+$$;
+revoke all on function public.filey_module_access(), public.filey_can_use(text) from public, anon;
+grant execute on function public.filey_module_access(), public.filey_can_use(text) to authenticated;
+
+do $$ declare item record; begin
+  for item in select * from (values
+    ('products','inventory'),('stock_movements','inventory'),
+    ('orders','orders'),('order_items','orders'),
+    ('employees','people'),('attendance','people'),('payroll','people'),('advances','people'),
+    ('accounts','accounting'),('expenses','accounting'),('transactions','accounting'),
+    ('crm_customers','customers'),('crm_leads','crm'),('crm_people','crm'),
+    ('crm_opportunities','crm'),('crm_activities','crm'),('crm_notes','crm'),('crm_tasks','crm'),
+    ('quotations','quoting'),('quotation_items','quoting'),('quotation_templates','quoting'),
+    ('suppliers','suppliers'),('purchase_orders','purchase-orders'),('purchase_order_items','purchase-orders'),('po_payments','purchase-orders'),
+    ('payment_receipts','payment-receipts'),('follow_ups','follow-ups'),
+    ('tool_runs','tools'),('user_files','files'),('user_folders','files'),('user_assets','files'),
+    ('campaigns','marketing'),('email_optouts','marketing'),
+    ('org_channels','team'),('org_messages','team'),('email_messages','comms'),('call_logs','comms'),
+    ('sms_templates','sms-templates'),('sms_providers','integrations')
+  ) as modules(table_name,module_id) loop
+    if to_regclass('public.'||item.table_name) is null then continue; end if;
+    execute format('drop policy if exists filey_module_gate on public.%I',item.table_name);
+    execute format('create policy filey_module_gate on public.%I as restrictive for all to authenticated using ((select public.filey_can_use(%L))) with check ((select public.filey_can_use(%L)))',item.table_name,item.module_id,item.module_id);
+  end loop;
+end $$;
+
+drop policy if exists filey_module_gate on public.invoice_docs;
+create policy filey_module_gate on public.invoice_docs as restrictive for all to authenticated
+  using (public.filey_can_use(case when doc_type='purchase' then 'purchase-invoices' else 'invoicing' end))
+  with check (public.filey_can_use(case when doc_type='purchase' then 'purchase-invoices' else 'invoicing' end));
+-- Existing child policies select the visible parent invoice. This also prevents
+-- entering payments/items for an invoice in a forbidden document module.
+
+do $$ begin
+  if to_regclass('public.work_items') is not null then
+    execute 'drop policy if exists filey_module_gate on public.work_items';
+    execute $policy$create policy filey_module_gate on public.work_items as restrictive for all to authenticated
+      using (public.filey_can_use(case when kind='ticket' then 'helpdesk' else 'projects' end))
+      with check (public.filey_can_use(case when kind='ticket' then 'helpdesk' else 'projects' end))$policy$;
+  end if;
+end $$;
+
+-- Edges can reveal labels/IDs from another module; require both endpoints.
+create or replace function public.filey_can_use_entity(p_type text) returns boolean
+language sql stable security invoker set search_path=public,pg_temp as $$
+  select public.filey_can_use(case p_type when 'invoice' then 'invoicing'
+    when 'quotation' then 'quoting' when 'purchase_order' then 'purchase-orders'
+    when 'customer' then 'customers' when 'supplier' then 'suppliers'
+    when 'product' then 'inventory' when 'lead' then 'crm'
+    when 'follow_up' then 'follow-ups' when 'receipt' then 'payment-receipts'
+    when 'expense' then 'accounting' else '__unknown__' end)
+$$;
+revoke all on function public.filey_can_use_entity(text) from public,anon;
+grant execute on function public.filey_can_use_entity(text) to authenticated;
+drop policy if exists filey_module_gate on public.entity_links;
+create policy filey_module_gate on public.entity_links as restrictive for all to authenticated
+  using (public.filey_can_use_entity(from_type) and public.filey_can_use_entity(to_type))
+  with check (public.filey_can_use_entity(from_type) and public.filey_can_use_entity(to_type));
+
+-- The sharing RPC needs no RLS bypass: its owner/admin checks remain, and the
+-- invoker must now also be allowed to access the invoice's business module.
+alter function public.share_invoice(bigint,boolean,jsonb) security invoker;
+
+-- Some existing tools keep their records in JSON settings. Those rows are
+-- business data too; hiding their pages must not expose the settings payload.
+create or replace function public.filey_setting_access(p_key text,p_write boolean default false) returns boolean
+language sql stable security definer set search_path=public,pg_temp as $$
+  select exists(select 1 from public.org_members m
+    where m.user_id=auth.uid() and m.org_id=public.current_org() and
+      (m.role in ('owner','admin') or
+        case when p_key in ('bank_accounts','cheque_register','declaration_letters','delivery_challans') then
+          m.modules is null or (case p_key when 'bank_accounts' then 'bank-accounts'
+            when 'cheque_register' then 'cheques' when 'declaration_letters' then 'declaration'
+            when 'delivery_challans' then 'delivery-challans' end)=any(m.modules)
+        else not p_write and (m.modules is null or p_key in
+          ('modules.disabled','company_letterhead','company_stamp','company_signature','company_bank','doc_presets','custom_templates')
+          or p_key like 'custom_fields_%' or p_key like 'number_format_%' or p_key like 'notify.%') end))
+$$;
+revoke all on function public.filey_setting_access(text,boolean) from public,anon;
+grant execute on function public.filey_setting_access(text,boolean) to authenticated;
+do $$ declare command text; begin
+  if to_regclass('public.app_settings') is not null then
+    foreach command in array array['select','insert','update','delete'] loop
+      execute format('drop policy if exists %I on public.app_settings','filey_setting_'||command);
+      if command='select' then
+        execute 'create policy filey_setting_select on public.app_settings as restrictive for select to authenticated using (public.filey_setting_access(key,false))';
+      elsif command='insert' then
+        execute 'create policy filey_setting_insert on public.app_settings as restrictive for insert to authenticated with check (public.filey_setting_access(key,true))';
+      else
+        execute format('create policy %I on public.app_settings as restrictive for %s to authenticated using (public.filey_setting_access(key,true))', 'filey_setting_'||command,command);
+      end if;
+    end loop;
+  end if;
+end $$;
+notify pgrst,'reload schema';
+commit;
