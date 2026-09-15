@@ -14,8 +14,9 @@ Business data stays scoped to the signed-in workspace. In-app and desktop
 WhatsApp actions follow the selected approval mode: **Accept edits** asks before
 sensitive actions, **Manual** asks before writes, **Plan** blocks writes, and
 **Auto** pre-approves enabled tools. Hosted channels have their own owner checks
-and confirmation codes. [Computer access](computer-use.md) also requires an
-explicit temporary grant in the Windows app, regardless of mode.
+and confirmation codes. [Computer access](computer-use.md) starts automatically
+when the signed-in Windows desktop chat opens. Actions still follow the same approval checks.
+It has no five-minute expiry and stays available across chat turns until Stop, chat exit, sign-out or app closure. Remote and scheduled runs cannot start it.
 
 ---
 

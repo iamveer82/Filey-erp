@@ -4,7 +4,7 @@ Implemented 6 September 2026. Open Invoicing → a row's Send → WhatsApp or SM
 
 ## Send with Filey AI — 12 September 2026
 
-The invoice sharing dialog now offers **Send with Filey AI** in the installed Windows app. Review the recipient and message, then click this button once. Its disclosure authorizes a computer session limited to the newly opened Filey Browser WhatsApp window and its owned file picker, for at most five minutes. Computer use and Messaging must be enabled in AI Access; Plan mode remains read-only. The separate QR bridge is not required for this option.
+The invoice sharing dialog now offers **Send with Filey AI** in the installed Windows app. Review the recipient and message, then click this button once. Its disclosure authorizes a computer session limited to the newly opened Filey Browser WhatsApp window and its owned file picker until the task completes or is stopped, without a five-minute expiry. Computer use and Messaging must be enabled in AI Access; Plan mode remains read-only. The separate QR bridge is not required for this option.
 
 The task saves the existing invoice PDF, opens the requested WhatsApp chat, reads the recipient's full international number, attaches the saved PDF through the file picker, inserts the exact reviewed caption, verifies the preview, clicks Send once and checks the outgoing document bubble. It verifies the full file path before opening the attachment and the filename/caption before sending. Multiline captions use Shift+Enter rather than bare Enter. No invoice or payment status is changed by this UI task.
 
@@ -34,8 +34,8 @@ The dialog prioritizes paired PDF sending, native Share PDF, or Prepare WhatsApp
 
 ## One-step Filey AI sending
 
-In the installed desktop app, pair WhatsApp once from Integrations → WhatsApp
-(QR). The bridge starts automatically with the app. Then ask Filey AI to “send
+In the installed desktop app, pair WhatsApp once from Integrations → Built-in connections → Connect
+WhatsApp. The bridge starts automatically with the app. Then ask Filey AI to “send
 invoice INV-001 to the customer on WhatsApp”. The `send_invoice_whatsapp` action
 finds the invoice and the matching CRM phone, renders the current invoice
 template, saves the PDF in the configured export folder (or Desktop), and sends one WhatsApp

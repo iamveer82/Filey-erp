@@ -1,4 +1,20 @@
-# Filey Tools reliability check — 8 September 2026
+# Filey Tools reliability updates
+
+## PDFCraft-inspired Tools update — 13 September 2026
+
+The catalogue now opens with all 88 existing tools, grouped by purpose, with search, horizontal category filters, popular tools and favourites. Existing GoFiley covers and pill controls remain consistent with the app. Search and category selections survive tool navigation; favourite tool IDs are scoped to the current workspace, with a separate guest list.
+
+The shared flow is upload, edit or configure, then review results. Downloads are explicit, and multiple outputs can be downloaded together as a ZIP. Compatible results can pass directly into another tool without uploading again. Adjusting an output retains editor state. Replacing inputs or switching account/data mode invalidates unfinished work so a late result cannot appear against another file or workspace.
+
+Processing stays on the device. Running a tool no longer automatically archives files, logs a tool run, uploads outputs or evicts stored files to make room. Cloud storage is available only through the explicit **Save to My Files** action. This behavior supersedes any earlier automatic-save behavior. Customer records are unchanged.
+
+ZIP output preserves Unicode names, sanitizes path separators and unsafe characters, and resolves duplicate names without losing files. Merge, rotate and organize previews release PDF.js workers and canvas resources; unreadable files show errors instead of indefinite loading. Creating an output and downloading it now have distinct button labels.
+
+Validation: the production TypeScript/Vite build and route bundle checks passed. Thirty-two checks across ten focused test files passed, followed by fourteen targeted checks that include an additional stale-editor regression and three download checks (36 distinct checks overall). Six Chromium fixture checks passed. Live browser QA verified CSV → JSON → CSV with actual downloaded contents and a four-page PDF → four PNGs → ZIP, reopening the ZIP and checking every PNG signature. Desktop, dark mode and 390px layouts were checked; mobile results had no horizontal overflow.
+
+This update reuses Filey's conversion engines and adds no API-key requirement or converter dependency. It implements the catalogue and sequential file workflow inspired by PDFCraft, not its complete tool inventory or visual workflow builder. The format and packaged-desktop verification limits documented below still apply.
+
+## Reliability check — 8 September 2026
 
 This update changes local tool execution and UI handoffs. It does not change customer records or require an API key.
 

@@ -46,3 +46,29 @@ Broader competitor readiness is tracked in [platform-readiness.md](platform-read
 ## Validation
 
 143 test files / 983 tests passed. After the final legacy-PO read correction, the 10 focused country and purchase-accounting tests passed again. TypeScript and the final production build passed. Lint across the changed files reported 0 errors and 125 warnings. Browser review confirmed the shared country selector, India's GSTIN/state fields and removal of UAE-only WPS fields without saving changes to the real company. Cloud writes, national gateway submission and a packaged desktop release were not validated.
+
+## Capability matrix (September 2026)
+
+The same matrix is available in Filey under Documentation → Business country,
+currency and taxes, linked beside country settings. Countries describe document
+support, not certification or complete ERP parity.
+
+| Region | Documents and currency | Tax handling | Ledger and payroll | Filing limits |
+| --- | --- | --- | --- | --- |
+| UAE | Invoices, quotes, POs, receipts; AED or supported foreign currency | Editable VAT/TRN; PINT-AE export | AED ledger; WPS export fields | No verified gateway submission or filing |
+| India | Country snapshots; INR and other supported document currencies | GSTIN format, editable tax | AED ledger; no localized statutory payroll | No split GST, place-of-supply engine, IRN, e-way bill or returns |
+| EU member countries | Individual country selection; EUR and other document currencies | VAT identifier labels, editable line tax | AED ledger; no national payroll | No VIES, OSS/IOSS or national e-invoice/filing gateways |
+| Saudi Arabia | SAR and other supported document currencies | Editable tax and identifiers | AED ledger; no localized statutory payroll | No verified gateway submission or filing |
+| Other countries | General documents and supported currencies | Manual tax and identifiers | AED ledger; generic people/pay records | Country validation and filings require separate implementation |
+
+Arabic text fields in document templates use automatic text direction; the form
+and table layout remain in the selected application language. The browser fixture
+renders an Arabic customer, address, item and note through InvoiceExportSheet and
+the real PDF exporter. This is representative layout coverage, not a review of
+all 52 templates or every installed system font. English fallback remains on
+untranslated screens.
+
+Next depth work should follow confirmed customer needs: one jurisdiction's
+reviewed accounting/payroll/filing workflow, then real team assignments, duplicate
+merging, warehouse transfers and CRM automation. Those are product work beyond
+this defect-remediation release; they are not presented as shipped features.

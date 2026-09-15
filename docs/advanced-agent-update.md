@@ -17,14 +17,14 @@ model weights or rewrite Filey's code.
 ## Computer access
 
 The Windows desktop build has a native tool for window listing, screenshots,
-clicks, typing, scrolling and a limited set of keyboard keys. Enable it explicitly
-for five minutes in Filey AI. Each input is tied to a recent, single-use screenshot.
-Stop, expiry, leaving the chat or changing workspace revokes access.
+clicks, typing, scrolling and a limited set of keyboard keys. An active Filey AI
+chat task starts a five-minute session on demand after its approval checks. Each input is tied to a recent, single-use screenshot.
+Task completion, Stop, expiry, leaving the chat or changing workspace revokes access.
 
 Screenshots are sent as image input to the selected model and removed from later
 requests after observation. Image bytes are not saved in chat history or the run
 journal. This requires a model that understands images and tools. Browser builds
-explain the desktop requirement and leave the enable control disabled.
+explain the desktop requirement. No separate enable button is needed.
 
 See [computer access setup and limits](computer-use.md).
 
