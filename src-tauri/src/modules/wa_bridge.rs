@@ -49,7 +49,7 @@ struct Supervisor {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     state: BridgeState,
-    deliveries: HashMap<String, mpsc::Sender<Result<(), String>>>,
+    deliveries: HashMap<String, mpsc::Sender<Result<String, String>>>,
 }
 
 static BRIDGE: Mutex<Option<Supervisor>> = Mutex::new(None);
@@ -273,7 +273,7 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
                                     let result = if v.get("ok").and_then(|ok| ok.as_bool())
                                         == Some(true)
                                     {
-                                        Ok(())
+                                        if v.get("skipped").and_then(|value| value.as_bool()) == Some(true) { Ok(String::new()) } else { v.get("messageId").and_then(|id| id.as_str()).filter(|id| !id.is_empty()).map(String::from).ok_or_else(|| "WhatsApp acceptance had no message ID. Check the conversation before retrying.".to_string()) }
                                     } else {
                                         Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("WhatsApp did not confirm delivery. Check the conversation before retrying.").to_string())
                                     };
@@ -336,14 +336,14 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
 /// reply that was written nowhere. Failing loudly is what lets the UI say
 /// "the bridge dropped" instead of "the agent is broken".
 #[tauri::command]
-pub async fn wa_bridge_reply(id: String, text: String) -> Result<(), String> {
+pub async fn wa_bridge_reply(id: String, text: String) -> Result<String, String> {
     send_command(serde_json::json!({ "type": "reply", "id": id, "text": text })).await
 }
 
 /// Send a proactive WhatsApp message to a specific JID (owner notifications —
 /// daily summary, low-stock and overdue alerts).
 #[tauri::command]
-pub async fn wa_bridge_send(to: String, text: String) -> Result<(), String> {
+pub async fn wa_bridge_send(to: String, text: String) -> Result<String, String> {
     send_command(serde_json::json!({ "type": "send", "to": to, "text": text })).await
 }
 
@@ -357,7 +357,7 @@ pub async fn wa_bridge_send_file(
     filename: String,
     mimetype: String,
     caption: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     // The path is the contract: it must exist NOW, before the sidecar races to
     // read it. A missing file is an error here rather than a silent no-send.
     if !std::path::Path::new(&path).exists() {
@@ -375,7 +375,7 @@ pub async fn wa_bridge_send_file(
 }
 
 /// Wait for provider acceptance, not just a successful write into the pipe.
-async fn send_command(mut payload: serde_json::Value) -> Result<(), String> {
+async fn send_command(mut payload: serde_json::Value) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
         payload["requestId"] = serde_json::Value::String(id.clone());

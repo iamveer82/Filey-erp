@@ -1,66 +1,47 @@
-//! Composio bridge — managed third-party integrations (Gmail, Slack, Telegram…).
-//!
-//! The Composio API key is a master credential for every connected account, so
-//! it lives ONLY in the encrypted desktop store (kv_cache) and is read here in
-//! the Rust backend — never handed to the WebView. All Composio HTTP happens in
-//! this process; the frontend calls these commands and never sees the key.
-
+//! Composio calls use an OS credential scoped to the signed-in account/org.
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use super::credentials;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::State;
 
 const BASE: &str = "https://backend.composio.dev/api/v3";
-const KEY_NAME: &str = "composio_api_key";
-const USER_NAME: &str = "composio_user_id";
-
-/// Read the stored Composio API key from the encrypted kv_cache. This is the
-/// PLATFORM key (one key serves every connected entity) — not a per-end-user key.
-fn api_key(db: &State<Db>) -> AppResult<String> {
-    let conn = db.inner().0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
-    conn.query_row(
-        "SELECT value FROM kv_cache WHERE key = ?1",
-        [KEY_NAME],
-        |r| r.get::<_, String>(0),
-    )
-    .ok()
-    .filter(|k| !k.trim().is_empty())
-    .ok_or_else(|| {
-        AppError::Composio("Composio API key not set (Settings → Integrations).".into())
-    })
+fn api_key(scope: &str) -> AppResult<String> {
+    credentials::read(scope, "composio")?.filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| AppError::Composio("Add your Composio key in Integrations.".into()))
+}
+fn entity_id(scope: &str) -> String { format!("filey-{:x}", Sha256::digest(scope)) }
+fn slug(value: &str) -> AppResult<&str> {
+    if value.is_empty() || value.len() > 256 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return Err(AppError::Composio("Invalid integration identifier".into()));
+    }
+    Ok(value)
+}
+fn query_url(path: &str, params: &[(&str, String)]) -> AppResult<String> {
+    let mut url = tauri::Url::parse(&format!("{BASE}/{path}")).map_err(|e| AppError::Composio(e.to_string()))?;
+    url.query_pairs_mut().extend_pairs(params.iter().map(|(k,v)| (*k,v.as_str())));
+    Ok(url.into())
+}
+fn public_account(account: &Value, uid: &str) -> AppResult<Value> {
+    if account.get("user_id").and_then(Value::as_str) != Some(uid) {
+        return Err(AppError::Composio("This connection belongs to a different workspace.".into()));
+    }
+    Ok(json!({ "id": account.get("id"), "status": account.get("status"), "toolkit": { "slug": account.pointer("/toolkit/slug") } }))
 }
 
-/// Stable per-install Composio entity id. One platform key serves many of these
-/// — this is the seam for "Composio as a service": each customer becomes their
-/// own `user_id` under the same key, so connections stay isolated. Generated
-/// once and persisted; an explicit `user_id` from the app overrides it (e.g.
-/// later, the signed-in customer's account id).
-fn entity_id(db: &State<Db>) -> AppResult<String> {
-    let conn = db.inner().0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
-    let existing: Option<String> = conn
-        .query_row("SELECT value FROM kv_cache WHERE key = ?1", [USER_NAME], |r| {
-            r.get(0)
-        })
-        .ok()
-        .filter(|v: &String| !v.trim().is_empty());
-    if let Some(v) = existing {
-        return Ok(v);
+// Preserve unscoped legacy keys in a recovery vault; never assign them to
+// whichever account signs in next. Business records are untouched.
+#[tauri::command]
+pub async fn composio_has_key(db: State<'_, Db>, scope: String) -> AppResult<bool> {
+    let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
+    let legacy: Option<String> = conn.query_row("SELECT value FROM kv_cache WHERE key='composio_api_key'", [], |row| row.get(0)).optional()?;
+    if let Some(value) = legacy.filter(|v| !v.is_empty()) {
+        credentials::quarantine("composio_api_key", &value)?;
+        conn.execute("UPDATE kv_cache SET value='' WHERE key='composio_api_key' AND value=?1", [&value])?;
     }
-    let id = format!("filey-{}", uuid::Uuid::new_v4());
-    conn.execute(
-        "INSERT INTO kv_cache (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-        [USER_NAME, id.as_str()],
-    )?;
-    Ok(id)
-}
-
-/// Use the caller-supplied entity if given, else the stable per-install one.
-fn resolve_user(db: &State<Db>, user_id: Option<String>) -> AppResult<String> {
-    match user_id {
-        Some(u) if !u.trim().is_empty() => Ok(u),
-        _ => entity_id(db),
-    }
+    Ok(credentials::read(&scope,"composio")?.is_some_and(|v| !v.trim().is_empty()))
 }
 
 /// One Composio HTTP call. Returns the parsed JSON body on success AND on HTTP
@@ -84,9 +65,7 @@ fn call(key: &str, method: &str, url: &str, body: Option<Value>) -> AppResult<Va
             .into_json::<Value>()
             .map_err(|e| AppError::Composio(format!("bad response: {e}"))),
         // HTTP 4xx/5xx — Composio still returns a JSON error body; surface it.
-        Err(ureq::Error::Status(_code, resp)) => resp
-            .into_json::<Value>()
-            .map_err(|e| AppError::Composio(format!("bad error response: {e}"))),
+        Err(ureq::Error::Status(code, _)) => Err(AppError::Composio(format!("Integration request failed (HTTP {code}). Check your key and connection."))),
         Err(e) => Err(AppError::Composio(e.to_string())),
     }
 }
@@ -96,13 +75,13 @@ fn call(key: &str, method: &str, url: &str, body: Option<Value>) -> AppResult<Va
 /// authorize, plus the `connected_account_id` to poll for status.
 #[tauri::command]
 pub async fn composio_connect(
-    db: State<'_, Db>,
+    scope: String,
     toolkit: String,
-    user_id: Option<String>,
 ) -> AppResult<Value> {
-    let key = api_key(&db)?;
-    let uid = resolve_user(&db, user_id)?;
+    let key = api_key(&scope)?;
+    let uid = entity_id(&scope);
 
+    slug(&toolkit)?;
     // Reuse an existing managed auth config for this toolkit, else create one.
     let existing = call(
         &key,
@@ -150,37 +129,40 @@ pub async fn composio_connect(
 /// Poll a connection's status (e.g. INITIATED → ACTIVE after the user authorizes).
 #[tauri::command]
 pub async fn composio_connection_status(
-    db: State<'_, Db>,
+    scope: String,
     connected_account_id: String,
 ) -> AppResult<Value> {
-    let key = api_key(&db)?;
-    call(
-        &key,
-        "GET",
-        &format!("{BASE}/connected_accounts/{connected_account_id}"),
-        None,
-    )
+    let key = api_key(&scope)?;
+    slug(&connected_account_id)?;
+    let account = call(&key, "GET", &format!("{BASE}/connected_accounts/{connected_account_id}"), None)?;
+    public_account(&account, &entity_id(&scope))
 }
 
-/// List all connected accounts (for the integrations status view).
+/// Read only this workspace's accounts and return no OAuth credential fields.
 #[tauri::command]
-pub async fn composio_list_connections(db: State<'_, Db>) -> AppResult<Value> {
-    let key = api_key(&db)?;
-    call(&key, "GET", &format!("{BASE}/connected_accounts?limit=50"), None)
+pub async fn composio_list_connections(scope: String, cursor: Option<String>) -> AppResult<Value> {
+    let key = api_key(&scope)?;
+    let uid = entity_id(&scope);
+    let mut query = vec![("limit", "100".into()), ("user_ids", uid.clone())];
+    if let Some(cursor) = cursor.filter(|value| !value.is_empty()) { query.push(("cursor", cursor)); }
+    let response = call(&key, "GET", &query_url("connected_accounts", &query)?, None)?;
+    let items = response.get("items").and_then(Value::as_array).ok_or_else(|| AppError::Composio("Invalid connection list".into()))?;
+    let accounts = items.iter().map(|item| public_account(item, &uid)).collect::<AppResult<Vec<_>>>()?;
+    Ok(json!({ "items": accounts, "next_cursor": response.get("next_cursor") }))
 }
 
 /// Search the whole app catalogue. The shortlist on screen is a starting point,
 /// not the limit of what a customer may connect.
 #[tauri::command]
 pub async fn composio_search_toolkits(
-    db: State<'_, Db>,
+    scope: String,
     query: Option<String>,
     limit: Option<u32>,
 ) -> AppResult<Value> {
-    let key = api_key(&db)?;
+    let key = api_key(&scope)?;
     let n = limit.unwrap_or(20).min(50);
     let url = match query.as_deref().filter(|s| !s.is_empty()) {
-        Some(q) => format!("{BASE}/toolkits?limit={n}&search={q}"),
+        Some(q) => query_url("toolkits", &[("limit", n.to_string()), ("search", q.into())])?,
         None => format!("{BASE}/toolkits?limit={n}"),
     };
     call(&key, "GET", &url, None)
@@ -190,14 +172,14 @@ pub async fn composio_search_toolkits(
 /// it may do instead of being shipped a fixed list that goes stale.
 #[tauri::command]
 pub async fn composio_list_tools(
-    db: State<'_, Db>,
+    scope: String,
     toolkits: Option<String>,
     limit: Option<u32>,
 ) -> AppResult<Value> {
-    let key = api_key(&db)?;
+    let key = api_key(&scope)?;
     let n = limit.unwrap_or(40).min(100);
     let url = match toolkits.as_deref().filter(|s| !s.is_empty()) {
-        Some(slugs) => format!("{BASE}/tools?limit={n}&toolkit_slug={slugs}"),
+        Some(slugs) => query_url("tools", &[("limit", n.to_string()), ("toolkit_slug", slugs.into())])?,
         None => format!("{BASE}/tools?limit={n}"),
     };
     call(&key, "GET", &url, None)
@@ -206,17 +188,36 @@ pub async fn composio_list_tools(
 /// Execute a Composio tool (e.g. GMAIL_SEND_EMAIL) for a user's connected account.
 #[tauri::command]
 pub async fn composio_execute(
-    db: State<'_, Db>,
+    scope: String,
     tool_slug: String,
     arguments: Value,
-    user_id: Option<String>,
 ) -> AppResult<Value> {
-    let key = api_key(&db)?;
-    let uid = resolve_user(&db, user_id)?;
+    let key = api_key(&scope)?;
+    let uid = entity_id(&scope);
+    slug(&tool_slug)?;
     call(
         &key,
         "POST",
         &format!("{BASE}/tools/execute/{tool_slug}"),
         Some(json!({ "arguments": arguments, "user_id": uid })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn account_scope_and_safe_connection_projection() {
+        let first = entity_id("org:a:user:one");
+        assert_ne!(first, entity_id("org:a:user:two"));
+        assert_ne!(first, entity_id("org:b:user:one"));
+        let account = json!({"id":"ca_test","user_id":first,"status":"ACTIVE","toolkit":{"slug":"gmail"},"state":{"access_token":"fixture-secret"}});
+        let visible = public_account(&account, &first).unwrap();
+        assert_eq!(visible["id"], "ca_test");
+        assert!(!visible.to_string().contains("fixture-secret"));
+        assert!(public_account(&account,"other").is_err());
+        assert!(slug("gmail?user_ids=other").is_err());
+        let query = query_url("toolkits", &[("search","gmail&user_ids=other".into())]).unwrap();
+        assert!(query.contains("gmail%26user_ids%3Dother"));
+    }
 }

@@ -21,13 +21,12 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            modules::storage::recover_storage_startup(app.handle());
             // DB lives in the user-chosen folder (or the default app-data dir).
             let db_path = modules::storage::resolve_db_path(app.handle());
             if let Some(parent) = db_path.parent() {
                 std::fs::create_dir_all(parent).ok();
             }
-            // Apply a queued restore (if any) before the DB is opened.
-            modules::storage::apply_pending_restore(app.handle());
             let conn = Connection::open(&db_path).expect("open db");
             db::init(&conn).expect("init db");
             app.manage(Db(Mutex::new(conn)));
@@ -46,6 +45,10 @@ pub fn run() {
                 // Offline cache / sync outbox
                 modules::sync::cache_get,
                 modules::sync::cache_set,
+                modules::sync::cache_set_many,
+                modules::credentials::credential_read,
+                modules::credentials::credential_write,
+                modules::credentials::credential_quarantine,
                 modules::sync::outbox_add,
                 modules::sync::outbox_list,
                 modules::sync::outbox_remove,
@@ -56,6 +59,7 @@ pub fn run() {
                 modules::email::send_email,
                 // Composio (managed integrations: Gmail/Slack/Telegram…)
                 modules::composio::composio_connect,
+                modules::composio::composio_has_key,
                 modules::composio::composio_connection_status,
                 modules::composio::composio_list_connections,
                 modules::composio::composio_list_tools,
@@ -64,6 +68,8 @@ pub fn run() {
                 // Storage locations + backup/restore
                 modules::storage::get_data_dir,
                 modules::storage::set_data_dir,
+                modules::storage::storage_recovery_status,
+                modules::storage::cancel_pending_storage,
                 modules::storage::restart_app,
                 modules::storage::write_doc_file,
                 modules::storage::blob_write,

@@ -1,4 +1,4 @@
-//! Explicit, short-lived computer access over Tauri IPC. No network listener,
+//! Workspace-bound computer access over Tauri IPC. No network listener,
 //! persisted permission, arbitrary script, executable, or shell command input.
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ struct Snapshot {
 }
 struct Session {
     token: String,
-    expires: Instant,
+    expires: Option<Instant>,
     windows: HashMap<String, u64>,
     snapshot: Option<Snapshot>,
     root_window: Option<String>,
@@ -68,14 +68,14 @@ pub fn window_closed(label: &str) {
 #[tauri::command]
 pub fn computer_start(
     window: WebviewWindow,
-    duration_seconds: u64,
+    duration_seconds: Option<u64>,
     window_id: Option<String>,
 ) -> Result<Value, String> {
     check_window(&window)?;
     if !cfg!(windows) {
         return Err("Native computer control currently requires Windows.".into());
     }
-    if !(60..=900).contains(&duration_seconds) {
+    if duration_seconds.is_some_and(|seconds| !(60..=900).contains(&seconds)) {
         return Err("Computer access must last between 60 and 900 seconds.".into());
     }
     if let Some(ref id) = window_id {
@@ -103,16 +103,16 @@ pub fn computer_start(
     let token = uuid::Uuid::new_v4().to_string();
     current.session = Some(Session {
         token: token.clone(),
-        expires: Instant::now() + Duration::from_secs(duration_seconds),
+        expires: duration_seconds.map(|seconds| Instant::now() + Duration::from_secs(seconds)),
         windows: HashMap::new(),
         snapshot: None,
         root_window: window_id,
     });
-    let expires_at = SystemTime::now()
+    let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
-        .as_millis() as u64
-        + duration_seconds * 1000;
+        .as_millis() as u64;
+    let expires_at = duration_seconds.map(|seconds| now_ms + seconds * 1000);
     Ok(json!({"sessionToken": token, "expiresAt": expires_at}))
 }
 
@@ -136,7 +136,7 @@ fn session<'a>(current: &'a mut State, token: &str) -> Result<&'a mut Session, S
     if current
         .session
         .as_ref()
-        .is_some_and(|s| s.expires <= Instant::now())
+        .is_some_and(|s| s.expires.is_some_and(|expiry| expiry <= Instant::now()))
     {
         revoke(current);
     }
@@ -507,7 +507,7 @@ mod tests {
     fn active() -> Session {
         Session {
             token: "session".into(),
-            expires: Instant::now() + Duration::from_secs(300),
+            expires: None,
             windows: HashMap::from([("123".into(), 456)]),
             root_window: None,
             snapshot: Some(Snapshot {
@@ -516,6 +516,14 @@ mod tests {
                 data: json!({"window_id":"123", "process_id":456, "width":800, "height":400, "bounds":{"x":-108,"y":12,"width":1616,"height":816}, "capture_bounds":{"x":-100,"y":20,"width":1600,"height":800}}),
             }),
         }
+    }
+    #[test]
+    fn default_access_has_no_deadline_but_requires_its_token_and_can_be_revoked() {
+        let mut current = State { session: Some(active()), job: None };
+        assert!(session(&mut current, "wrong-token").is_err());
+        assert!(session(&mut current, "session").unwrap().expires.is_none());
+        revoke(&mut current);
+        assert!(session(&mut current, "session").is_err());
     }
     #[test]
     fn validates_targets_and_consumes_snapshots_without_executing_any_input() {
@@ -540,7 +548,7 @@ mod tests {
         assert_eq!(capture["process_id"], 456);
         assert!(listed.snapshot.is_none());
         let mut expired = active();
-        expired.expires = Instant::now() - Duration::from_secs(1);
+        expired.expires = Some(Instant::now() - Duration::from_secs(1));
         let mut expired_state = State {
             session: Some(expired),
             job: None,

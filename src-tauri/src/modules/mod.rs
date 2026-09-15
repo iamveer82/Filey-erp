@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod composio;
+pub mod credentials;
 pub mod email;
 pub mod shortcut;
 pub mod storage;
