@@ -30,6 +30,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
 6. `verify-rls.sql` — structural checks. Also run `npm run test:rls:local` against a disposable PostgreSQL cluster to verify denied writes/deletes and stale-write rejection; policy presence alone does not prove isolation.
 7. `2026-09-13-expense-entry.sql` — itemized expense details and receipt references, atomic expense/ledger save and deletion, and submission retry protection. Apply before shipping the purchase-entry page. Existing business rows are not rewritten.
 8. `2026-09-15-dodo-payments.sql` — `licenses.dodo_payment_id` plus the partial unique index the Dodo webhook uses for idempotency. Apply before deploying the `dodo` function, or a retried webhook can grant a second licence. See [Dodo Payments](../docs/dodo-payments.md).
+9. `2026-09-16-cloud-subscription.sql` — `organizations.dodo_customer_id` / `dodo_subscription_id` for the $1/month Cloud plan, with a unique index on the subscription and UPDATE revoked from app users (same rule as `billing-columns-lockdown.sql`). No plan values change: every "is this paid?" check already reads `plan <> 'free'` with a live status.
 
 Applied to the configured Filey cloud project on 13 September 2026. Both expense RPCs were verified as SECURITY INVOKER with authenticated-only execution. Behavioral checks ran against a disposable PostgreSQL database; production business records were not changed for testing.
 

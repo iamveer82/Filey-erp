@@ -14,6 +14,9 @@ describe("FREE_LIMITS", () => {
 describe("resolveTier", () => {
   it("returns pro for any paid plan with a live/grace status", () => {
     for (const status of ["active", "trialing", "past_due"]) {
+      // "cloud" is the plan sold today; past_due matters because a failed $1
+      // renewal must not lock someone out mid-retry.
+      expect(resolveTier(false, "cloud", status)).toBe("pro");
       expect(resolveTier(false, "pro", status)).toBe("pro");
       expect(resolveTier(false, "enterprise", status)).toBe("pro");
       expect(resolveTier(false, "business", status)).toBe("pro");
@@ -49,14 +52,21 @@ describe("planCardFor", () => {
     expect(planCardFor(null).id).toBe("free");
   });
 
-  it("sells exactly two plans: Free, and Freedom as a one-time licence", () => {
-    expect(PLANS.map((p) => p.id)).toEqual(["free", "lite"]);
+  it("maps the Cloud plan to its own card", () => {
+    expect(planCardFor("cloud").id).toBe("cloud");
+  });
+
+  it("sells three plans: Free, Cloud monthly, and Freedom as a one-time licence", () => {
+    expect(PLANS.map((p) => p.id)).toEqual(["free", "cloud", "lite"]);
+    expect(PLANS.find((p) => p.id === "cloud")?.kind).toBe("subscription");
     expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 
-  it("carries the current prices (AED)", () => {
+  it("carries the current prices", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
+    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$1");
+    expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
     expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 1,499");
   });
 });

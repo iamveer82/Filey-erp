@@ -4,13 +4,14 @@ import {
   getSubscription,
   startCheckout,
   openBillingPortal,
+  awaitCloudPlan,
   planCardFor,
   PLANS,
   type PlanCard,
   type Subscription,
 } from "../../lib/subscription";
+import { startFreedomCheckout, claimPurchasedLicense } from "../../lib/license";
 import { Check } from "lucide-react";
-import FreedomContactModal from "../../components/FreedomContactModal";
 import { billing, erp, crm, quotes } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
@@ -27,7 +28,6 @@ export default function BillingPanel() {
   const [sub, setSub] = useState<Subscription>({ plan: "free" });
   const [subLoading, setSubLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [leadOpen, setLeadOpen] = useState(false);
 
   useEffect(() => {
     let failed = false;
@@ -72,6 +72,11 @@ export default function BillingPanel() {
       // Strip the param so leaving Settings and coming back doesn't re-toast.
       params.delete("checkout");
       window.history.replaceState(null, "", `?${params.toString()}`);
+      // The webhook, not this redirect, is what switches the plan on — so wait
+      // for it rather than showing Free to someone who just paid.
+      awaitCloudPlan(12, 2500)
+        .then((s) => s && setSub(s))
+        .catch(() => {});
     } else if (c === "cancel") {
       toast.info("Checkout canceled.");
       params.delete("checkout");
@@ -81,19 +86,38 @@ export default function BillingPanel() {
   }, []);
 
   const buy = async (p: PlanCard) => {
-    // Freedom is sold by conversation while Stripe is out of the loop — the
-    // button collects a name and a number and emails us, rather than opening a
-    // checkout that cannot take the money.
-    if (p.kind === "license") {
-      setLeadOpen(true);
-      return;
-    }
+    if (p.id === "free") return;
     setBusy(p.id);
     try {
-      if (p.kind === "subscription") await startCheckout(p.id as "pro");
-      else if (p.kind === "contact") window.location.href = ENTERPRISE_MAILTO;
+      if (p.kind === "contact") {
+        window.location.href = ENTERPRISE_MAILTO;
+        return;
+      }
+      if (p.kind === "license") {
+        // Freedom: one-time. On desktop the checkout opens in the system
+        // browser, so this window waits for the webhook instead of redirecting.
+        if ((await startFreedomCheckout()) === "redirected") return;
+        toast.info("Finish the payment in your browser — this page unlocks by itself.");
+        const state = await claimPurchasedLicense(60, 5000);
+        toast[state ? "success" : "info"](
+          state
+            ? "Freedom is active on this device."
+            : "No payment yet. When it completes, reopen this page and it activates."
+        );
+        return;
+      }
+      if ((await startCheckout("cloud")) === "redirected") return;
+      toast.info("Finish the payment in your browser — this page unlocks by itself.");
+      const updated = await awaitCloudPlan();
+      if (updated) {
+        setSub(updated);
+        toast.success("Cloud is active on this workspace.");
+      } else {
+        toast.info("No subscription yet. When it completes, reopen this page.");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
       setBusy(null);
     }
   };
@@ -286,8 +310,6 @@ export default function BillingPanel() {
           </div>
         </SettingsSection>
       </SettingsPanel>
-
-      <FreedomContactModal open={leadOpen} onClose={() => setLeadOpen(false)} />
     </>
   );
 }

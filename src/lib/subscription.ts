@@ -1,18 +1,18 @@
 import { supabase, invokeFn } from "./supabase";
 
-/* Client side of Stripe billing. Reads the org's plan (RLS scopes it to the
- * member's own org) and invokes the `stripe` edge function for checkout /
- * the billing portal. Live once the function is deployed and keys are set. */
+/* Client side of billing. Reads the org's plan (RLS scopes it to the member's
+ * own org) and invokes the `dodo` edge function for checkout and the customer
+ * portal. Dodo Payments is the merchant of record; Stripe is retired. */
 
-export type Plan = "free" | "pro" | "business" | "enterprise";
+export type Plan = "free" | "cloud" | "pro" | "business" | "enterprise";
 
-/** How a plan card is sold: monthly subscription via Stripe, one-time
- * offline license via the license checkout, or contact-sales only. */
+/** How a plan card is sold: monthly subscription, one-time offline licence, or
+ * contact-sales only. */
 export type PlanKind = "subscription" | "license" | "contact";
 
 export interface PlanCard {
   /** Card identity; also the org plan value for subscription plans. */
-  id: "free" | "lite" | "pro" | "enterprise";
+  id: "free" | "cloud" | "lite" | "pro" | "enterprise";
   kind: PlanKind;
   name: string;
   price: string;
@@ -38,7 +38,22 @@ export const PLANS: PlanCard[] = [
     ],
   },
   {
-    // id stays "lite" — Stripe products and issued licence tokens key off it.
+    id: "cloud",
+    kind: "subscription",
+    name: "Cloud",
+    price: "$1",
+    period: " / month",
+    blurb: "Your workspace everywhere, for a dollar a month.",
+    features: [
+      "Everything in Free",
+      "Unlimited hosted invoices — no monthly cap",
+      "Sync across every device you sign in on",
+      "Team members share one workspace",
+      "Cancel any time from Billing",
+    ],
+  },
+  {
+    // id stays "lite" — issued licence tokens key off it.
     id: "lite",
     kind: "license",
     name: "Freedom",
@@ -93,23 +108,56 @@ export async function getSubscription(): Promise<Subscription> {
   };
 }
 
-async function invokeStripe(body: Record<string, unknown>): Promise<string> {
+async function invokeDodo(body: Record<string, unknown>): Promise<string> {
   if (!supabase) throw new Error("Not configured");
-  const { data, error } = (await invokeFn(supabase, "stripe", { body })) as {
+  const { data, error } = (await invokeFn(supabase, "dodo", { body })) as {
     data: { url?: string; error?: string } | null;
     error: { message: string } | null;
   };
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   if (!data?.url)
-    throw new Error("Billing isn't set up yet. Add Stripe keys to the edge function.");
+    throw new Error("Billing isn't set up yet. Add the Dodo Payments keys to the edge function.");
   return data.url as string;
 }
 
-export async function startCheckout(plan: Plan): Promise<void> {
-  window.location.href = await invokeStripe({ action: "checkout", plan });
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/** Open a Dodo URL wherever it actually works: a new page in the browser, the
+ *  system browser on desktop — sending the Tauri webview to Dodo would
+ *  navigate the app away from itself. */
+async function openBilling(url: string): Promise<"redirected" | "browser"> {
+  if (hasTauri) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+    return "browser";
+  }
+  window.location.href = url;
+  return "redirected";
 }
 
-export async function openBillingPortal(): Promise<void> {
-  window.location.href = await invokeStripe({ action: "portal" });
+/** Subscribe to the Cloud plan. The webhook sets the org's plan; the caller
+ *  refreshes the subscription afterwards to show it. */
+export async function startCheckout(plan: Plan = "cloud"): Promise<"redirected" | "browser"> {
+  if (plan !== "cloud") throw new Error(`No checkout for the ${plan} plan.`);
+  return openBilling(await invokeDodo({ action: "checkout_cloud" }));
+}
+
+/** Dodo's customer portal: change card, download invoices, cancel. */
+export async function openBillingPortal(): Promise<"redirected" | "browser"> {
+  return openBilling(await invokeDodo({ action: "portal" }));
+}
+
+/** Poll the org's plan until the webhook has switched it on, for the desktop
+ *  flow where the buyer pays in a separate browser window and this one waits. */
+export async function awaitCloudPlan(
+  attempts = 60,
+  delayMs = 5000
+): Promise<Subscription | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const sub = await getSubscription();
+    if (sub.plan !== "free" && sub.plan_status !== "pending") return sub;
+    if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
 }
