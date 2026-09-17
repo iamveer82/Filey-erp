@@ -1,4 +1,5 @@
 import { supabase, invokeFn } from "./supabase";
+import { clearEntitlementCache } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
  * own org) and invokes the `dodo` edge function for checkout and the customer
@@ -28,11 +29,11 @@ export const PLANS: PlanCard[] = [
     kind: "subscription",
     name: "Free",
     price: "AED 0",
-    blurb: "Core business tools, free on your device.",
+    blurb: "The whole ERP on your device, up to 5 invoices a month.",
     features: [
       "Core ERP & CRM, all modules",
-      "Unlimited local invoices; hosted cloud: 5/month",
-      "Local storage and backups; optional cloud connection",
+      "5 invoices per month",
+      "Local storage and backups on this device",
       "“Made with Filey” on documents",
       "Bring-your-own AI key",
     ],
@@ -45,10 +46,10 @@ export const PLANS: PlanCard[] = [
     period: " / month",
     blurb: "Your workspace everywhere, for a dollar a month.",
     features: [
-      "Everything in Free",
-      "Unlimited hosted invoices — no monthly cap",
-      "Sync across every device you sign in on",
+      "Full cloud: sync every device you sign in on",
+      "Unlimited invoices — no monthly cap",
       "Team members share one workspace",
+      "Backed up off your machine",
       "Cancel any time from Billing",
     ],
   },
@@ -60,14 +61,14 @@ export const PLANS: PlanCard[] = [
     price: "AED 1,499",
     period: " one-time",
     recommended: true,
-    blurb: "Own it outright. Yours, on your machine.",
+    blurb: "Own it outright. Full local Filey, yours on your machine.",
     features: [
       "Unlimited invoices, no monthly cap",
-      "Paid edition works offline after device activation",
-      "Cloud sync on demand, whenever you want it",
+      "Works fully offline — verified without a network",
       "2 device slots",
       "Free updates included",
       "No watermark",
+      "Add Cloud for $1/month if you want sync too",
     ],
   },
 ];
@@ -156,7 +157,12 @@ export async function awaitCloudPlan(
 ): Promise<Subscription | null> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const sub = await getSubscription();
-    if (sub.plan !== "free" && sub.plan_status !== "pending") return sub;
+    if (sub.plan !== "free" && sub.plan_status !== "pending") {
+      // Tier and cloud access are cached; without this the app keeps refusing
+      // to sync for someone whose subscription just went live.
+      clearEntitlementCache();
+      return sub;
+    }
     if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
   }
   return null;

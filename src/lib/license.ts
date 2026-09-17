@@ -295,7 +295,13 @@ export async function claimPurchasedLicense(
   delayMs = 3000
 ): Promise<LicenseState | null> {
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (await licensePurchased()) return activateThisDevice();
+    if (await licensePurchased()) {
+      const state = await activateThisDevice();
+      // The cached tier still says "free" until this is dropped, so the caps
+      // would keep firing for someone who just paid.
+      clearEntitlementCache();
+      return state;
+    }
     if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
   }
   return null;
@@ -362,18 +368,102 @@ export function currentTier(): Tier {
   return cachedTier ?? "free";
 }
 
+/* ---------------- who may use the cloud ---------------- */
+
+/** Why an account can (or cannot) write to the cloud. "grandfathered" is an
+ *  org that was already syncing when cloud became a paid plan. */
+export type CloudReason = "unenforced" | "paid" | "grandfathered" | "none";
+export interface CloudAccess {
+  allowed: boolean;
+  reason: CloudReason;
+}
+
+/** MUST agree with public.filey_cloud_access() in
+ *  supabase/2026-09-16-cloud-access.sql. If the two ever disagree, the app
+ *  either offers a Sync button that the database then refuses, or hides one
+ *  that would have worked. */
+export function resolveCloudAccess(
+  plan: string | null | undefined,
+  planStatus: string | null | undefined,
+  grandfathered: boolean | null | undefined,
+  enforced: boolean = ENFORCE_LICENSING
+): CloudAccess {
+  if (!enforced) return { allowed: true, reason: "unenforced" };
+  if (
+    plan &&
+    plan !== "free" &&
+    (planStatus === "active" || planStatus === "trialing" || planStatus === "past_due")
+  )
+    return { allowed: true, reason: "paid" };
+  if (grandfathered) return { allowed: true, reason: "grandfathered" };
+  return { allowed: false, reason: "none" };
+}
+
+let cachedCloud: CloudAccess | null = null;
+let cloudRefresh: Promise<CloudAccess> | null = null;
+
+/** The last known answer, without waiting for the network.
+ *
+ *  Hot paths (every sync tick) must not block on a plan lookup: awaiting one
+ *  inside sync's critical section held its lock across a round trip and made
+ *  every other caller report "a sync is already running". Unknown reads as
+ *  allowed and a refresh is kicked off for next time — the database is the
+ *  real gate, so the worst case is one refused push with a clear error. */
+export function cloudAccessNow(): CloudAccess {
+  if (!cachedCloud && !cloudRefresh) cloudRefresh = cloudAccess().finally(() => (cloudRefresh = null));
+  return cachedCloud ?? { allowed: true, reason: "unenforced" };
+}
+
+/** The signed-in org's cloud entitlement. Unknown (offline, signed out) is
+ *  treated as allowed: refusing to sync because we could not read the plan
+ *  would strand someone who is paying. The database is the real gate. */
+export async function cloudAccess(force = false): Promise<CloudAccess> {
+  if (cachedCloud && !force) return cachedCloud;
+  if (!ENFORCE_LICENSING) return (cachedCloud = { allowed: true, reason: "unenforced" });
+  if (!supabase) return { allowed: true, reason: "unenforced" };
+  try {
+    const { data } = await supabase
+      .from("organizations")
+      .select("plan, plan_status, cloud_grandfathered")
+      .limit(1)
+      .maybeSingle();
+    if (!data) return { allowed: true, reason: "unenforced" };
+    cachedCloud = resolveCloudAccess(
+      data.plan as string | null,
+      data.plan_status as string | null,
+      data.cloud_grandfathered as boolean | null
+    );
+    return cachedCloud;
+  } catch {
+    return { allowed: true, reason: "unenforced" };
+  }
+}
+
+/** Drop the cached plan/tier answers — call after a purchase lands. */
+export function clearEntitlementCache(): void {
+  cachedTier = null;
+  cachedCloud = null;
+}
+
 /** Free-tier invoice cap: throws a friendly error when a NEW invoice would
  *  exceed this month's allowance. No-op unless licensing is enforced. */
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
-  if (!ENFORCE_LICENSING || isLocalMode()) return;
+  if (!ENFORCE_LICENSING) return;
+  // Free is a LOCAL tier now, so the cap has to hold on this device too —
+  // it used to skip local mode entirely, back when local was the paid thing.
+  // Freedom (lite) buys unlimited local; Cloud (pro) buys unlimited hosted.
   if ((await entitlement()) !== "free") return;
+  // An org grandfathered into free cloud was never capped in practice, and
+  // dropping it to five invoices a month is the same broken promise as
+  // cutting it off. Mirrors enforce_free_invoice_cap() in the database.
+  if (!isLocalMode() && (await cloudAccess()).reason === "grandfathered") return;
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth)
     throw new Error(
       `Free plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Upgrade to Filey Freedom (one-time) or Pro in Settings → Billing.`
+        `Filey Cloud is $1/month, or buy Freedom once for unlimited local use — Settings → Billing.`
     );
 }
 

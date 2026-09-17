@@ -9,12 +9,14 @@ Two things are for sale:
 
 | Plan | Price | What it is | How it is enforced |
 |------|-------|-----------|--------------------|
-| **Cloud** | $1 / month | Unlimited hosted invoices and sync across devices | `organizations.plan = 'cloud'`, set by subscription webhooks |
-| **Freedom** | AED 1,499 once | Own it outright; works offline on two devices | A signed ECDSA token the desktop verifies with no network |
+| **Free** | AED 0 | The whole ERP on one device, 5 invoices a month | Client-side cap in `checkFreeInvoiceCap()`; the cloud refuses its writes |
+| **Cloud** | $1 / month | Full cloud: sync every device, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
+| **Freedom** | AED 1,499 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
 
-Free is untouched: the whole ERP locally, cloud sync included, capped at 5
-hosted invoices a month. Cloud lifts the cap rather than unlocking the cloud —
-nobody signed in today loses anything.
+One line decides which you need: work on this machine, or work everywhere.
+Free is a real tier — every module, your own data, five invoices a month — not
+a trial. Cloud sells sync; Freedom sells owning the local app outright. Buy
+both if you want both.
 
 What the buyer sees, either way: click buy, pay on Dodo's hosted page, and the
 app is on the new plan. No licence code, no email, no support ticket.
@@ -41,6 +43,33 @@ entitlement is already there and the device activates.
 
 The licence token itself is unchanged: an ECDSA P-256 signature the desktop
 verifies offline forever, issued by `_shared/license.ts`.
+
+## How cloud access is enforced
+
+`public.filey_cloud_access()` (see `2026-09-16-cloud-access.sql`) is the real
+gate: a restrictive policy on every business table that lets INSERT, UPDATE and
+DELETE through only for an org with a live paid plan — or one that is
+grandfathered. `resolveCloudAccess()` in `src/lib/license.ts` mirrors it
+exactly, and `cloud-access.test.ts` pins the pair together. If they ever
+disagree, the app offers a Sync button the database then refuses.
+
+Three deliberate properties:
+
+- **SELECT is never gated.** Someone who stops paying keeps reading and
+  exporting every row they already made. Only new cloud writes stop. Their
+  books are not hostage to a dollar.
+- **Everyone already syncing is grandfathered**, flagged once at migration
+  time. They signed up when cloud was free; taking it away from a working
+  business to sell them a plan is not a trade worth making. A grandfathered org
+  is uncapped too, in the database and in the client, because it was uncapped
+  in practice before.
+- **The whole gate sits behind `platform_config.licensing_enforced`**, the same
+  switch the invoice cap already uses. Until that reads `'true'`, this
+  migration changes nothing — so it can ship long before you decide to charge.
+
+Note the client constant `ENFORCE_LICENSING` in `src/lib/license.ts` is
+separate and already `true`: the app caps free invoices and hides sync on its
+own. The database flag is what makes the server agree.
 
 ## How the subscription differs
 
