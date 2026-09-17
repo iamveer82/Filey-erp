@@ -80,11 +80,17 @@ supabase functions deploy channel-webhook --no-verify-jwt
 ## 5. Set Secrets
 
 ```bash
-# Stripe billing
+# Dodo Payments — sells both plans (see docs/dodo-payments.md)
+supabase secrets set DODO_PAYMENTS_API_KEY=xxx
+supabase secrets set DODO_PAYMENTS_WEBHOOK_KEY=whsec_xxx
+supabase secrets set DODO_PAYMENTS_ENVIRONMENT=test_mode   # live_mode when you are ready to charge
+supabase secrets set DODO_PRODUCT_FREEDOM=pdt_xxx          # one-time Freedom licence
+supabase secrets set DODO_PRODUCT_CLOUD=pdt_xxx            # $1/month Cloud subscription
+
+# Stripe — DEPRECATED. Keep set only while apps older than 2.11.1 are in the
+# wild: they still call the stripe function to activate a licence.
 supabase secrets set STRIPE_SECRET_KEY=sk_live_xxx
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_xxx
-supabase secrets set STRIPE_PRICE_PRO=price_xxx
-supabase secrets set STRIPE_PRICE_BUSINESS=price_xxx
 supabase secrets set STRIPE_PRICE_LITE=price_xxx        # one-time Offline (desktop) license price
 
 # Licensing — ECDSA P-256 PRIVATE key (PEM) used by the stripe edge function

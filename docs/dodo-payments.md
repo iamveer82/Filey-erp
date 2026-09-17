@@ -94,6 +94,19 @@ paying org from ever being marked paid.
 
 ## One-time setup
 
+Test-mode products and the webhook endpoint already exist — created
+2026-09-17 against business `bus_0Nniaqqt…`:
+
+| Thing | Id |
+|---|---|
+| Freedom, one-time AED 1,499 | `pdt_0NnmhtUadaYNc1xddfHT0` |
+| Cloud, $1/month subscription | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
+| Webhook → `…functions.supabase.co/dodo` | `ep_3JRoU69y6y8qshDvaZxyrzDyiQb` |
+
+Recreate them per environment; **live mode needs its own products, its own API
+key and its own webhook secret.** The steps below are what made them, and what
+you repeat when going live:
+
 1. **Products.** Dodo dashboard → Products → create two:
    - a **one-time** product for the Freedom licence at AED 1,499, and
    - a **subscription** product for Cloud at $1 / month.
