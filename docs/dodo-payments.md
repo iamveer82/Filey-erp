@@ -94,18 +94,22 @@ paying org from ever being marked paid.
 
 ## One-time setup
 
-Test-mode products and the webhook endpoint already exist — created
-2026-09-17 against business `bus_0Nniaqqt…`:
+Both environments are already provisioned. Test and live share nothing — separate
+keys, products, webhooks, customers and payments — so each column below was
+created independently.
 
-| Thing | Id |
-|---|---|
-| Freedom, one-time AED 1,499 | `pdt_0NnmhtUadaYNc1xddfHT0` |
-| Cloud, $1/month subscription | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
-| Webhook → `…functions.supabase.co/dodo` | `ep_3JRoU69y6y8qshDvaZxyrzDyiQb` |
+| Thing | Live (in use) | Test |
+|---|---|---|
+| Freedom, one-time AED 1,499 | `pdt_0NnqAUlBQ5P8F8IERLZOF` | `pdt_0NnmhtUadaYNc1xddfHT0` |
+| Cloud, $1/month subscription | `pdt_0NnqAUoNM0pPYUuGHkiR5` | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
+| Webhook → `…functions.supabase.co/dodo` | `ep_3JU1WZmbOqNWso8U0CYFo2PPTPx` | `ep_3JRoU69y6y8qshDvaZxyrzDyiQb` |
 
-Recreate them per environment; **live mode needs its own products, its own API
-key and its own webhook secret.** The steps below are what made them, and what
-you repeat when going live:
+The project's secrets point at **live mode** as of 2026-09-18. Switching back to
+test means setting the test key, the test webhook secret, both test product ids
+and `DODO_PAYMENTS_ENVIRONMENT=test_mode` together — a live key with a test
+product id fails, and a mismatched webhook secret rejects every delivery.
+
+The steps below are what created each environment:
 
 1. **Products.** Dodo dashboard → Products → create two:
    - a **one-time** product for the Freedom licence at AED 1,499, and
@@ -163,13 +167,28 @@ card. Then check, in order:
 - cancelling in that portal returns the org to `plan = 'free'` on the next
   `subscription.cancelled` event.
 
-## Going live
+## Going live — done 2026-09-18
 
-Swap the API key for the live one and set
-`DODO_PAYMENTS_ENVIRONMENT=live_mode`. A live webhook endpoint has its own
-signing secret, so update `DODO_PAYMENTS_WEBHOOK_KEY` too. The environment
-variable defaults to `test_mode` when unset, deliberately: a missing variable
-must never mean "charge real cards".
+The project now runs on live credentials: live key, live webhook secret, live
+product ids, `DODO_PAYMENTS_ENVIRONMENT=live_mode`. Verified after the cutover
+by signing a webhook with the live secret (accepted, routed, nothing written)
+and with the old test secret (rejected, "No matching signature found"), and by
+building a live checkout session against `checkout.dodopayments.com`.
+
+The environment variable still defaults to `test_mode` when unset, deliberately:
+a missing variable must never mean "charge real cards".
+
+**Rotating the API key.** The key is only used to *create* checkout sessions,
+so a revoked key breaks new purchases while webhooks keep working — their
+signing secret is separate. After issuing a replacement:
+
+```bash
+supabase secrets set --project-ref voyrjqgaypiylwskkwpr DODO_PAYMENTS_API_KEY=<new key>
+supabase functions deploy dodo --no-verify-jwt --project-ref voyrjqgaypiylwskkwpr
+```
+
+The redeploy matters: the client is built once at module load, so a warm worker
+keeps the old key until it is recycled.
 
 ## What is left of Stripe
 
