@@ -44,6 +44,42 @@ entitlement is already there and the device activates.
 The licence token itself is unchanged: an ECDSA P-256 signature the desktop
 verifies offline forever, issued by `_shared/license.ts`.
 
+## Buying from the website, before you have an account
+
+The pricing page sells both plans directly. Nobody is signed in there, so the
+only thing it collects is an email:
+
+```
+gofiley.com  ──{action:"public_checkout", plan, email}──►  dodo fn  ──►  Dodo checkout
+                                                                            │
+buyer pays  ◄───────────────────────────────────────────────────────────────┘
+     │
+     ├─► webhook: no user_id, but an email
+     │        ├─ that email already has a Filey account  → granted immediately
+     │        └─ it does not                             → parked in pending_entitlements
+     │
+     └─► /thanks — "sign in to Filey with the address you paid with"
+                   │
+                   └─► app signs in → filey_claim_entitlements() → licence or plan
+```
+
+`public_checkout` is the one unauthenticated action on the function, so it is
+written to be boring: it validates the email, picks the product id from a
+two-item map rather than anything the caller sends, and rate-limits to five
+attempts an hour per address. It grants nothing on its own — only the webhook
+does, and only after signature verification.
+
+**Claiming is safe because Supabase has already verified the email** of whoever
+is signed in, so only the real owner of an address can collect a purchase made
+against it. `pending_entitlements` has RLS on and *no policies at all*: no
+client can read it, however authenticated. The claim runs through a SECURITY
+DEFINER function that only ever looks at the caller's own address.
+
+A buyer who mistypes their email gifts the purchase to whoever owns the address
+they typed. That risks giving value away — never taking it from someone — which
+is the right way round for this to fail, and why `/thanks` leads with the
+address they paid with.
+
 ## How cloud access is enforced
 
 `public.filey_cloud_access()` (see `2026-09-16-cloud-access.sql`) is the real

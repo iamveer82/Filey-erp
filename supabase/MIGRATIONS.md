@@ -32,8 +32,33 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
 8. `2026-09-15-dodo-payments.sql` — `licenses.dodo_payment_id` plus the partial unique index the Dodo webhook uses for idempotency. Apply before deploying the `dodo` function, or a retried webhook can grant a second licence. See [Dodo Payments](../docs/dodo-payments.md).
 9. `2026-09-16-cloud-subscription.sql` — `organizations.dodo_customer_id` / `dodo_subscription_id` for the $1/month Cloud plan, with a unique index on the subscription and UPDATE revoked from app users (same rule as `billing-columns-lockdown.sql`). No plan values change: every "is this paid?" check already reads `plan <> 'free'` with a live status.
 10. `2026-09-16-cloud-access.sql` — makes cloud the paid tier: `filey_cloud_access()` plus restrictive INSERT/UPDATE/DELETE policies on every business table, `organizations.cloud_grandfathered` (backfilled true for every org that exists when it runs), and the invoice cap exempting grandfathered orgs. SELECT is deliberately never gated, and the whole gate is inert until `platform_config.licensing_enforced = 'true'`. Apply last, after every other migration. See [Dodo Payments](../docs/dodo-payments.md).
+11. `2026-09-18-pending-entitlements.sql` — lets someone buy on the website before they have an account: the webhook parks the purchase against their email in `pending_entitlements` (RLS on, zero policies, service-role only) and `filey_claim_entitlements()` turns it into a licence or a paid plan at first sign-in, using the caller's own Supabase-verified email. Also adds `filey_users_by_email`, a two-column view of auth.users granted to service_role alone.
 
 Applied to the configured Filey cloud project on 13 September 2026. Both expense RPCs were verified as SECURITY INVOKER with authenticated-only execution. Behavioral checks ran against a disposable PostgreSQL database; production business records were not changed for testing.
+
+## Prod state — verified 2026-09-18
+
+Migrations 4 through 11 are **applied** to `voyrjqgaypiylwskkwpr`, through the
+management API, and verified by reading the live catalogue back rather than by
+trusting the exit codes:
+
+- F01 is fixed where it matters: each business table now carries `<table>_read`
+  (SELECT, allowing `shared` and `shared_with`) separately from `<table>_write`
+  (ALL, owner-or-admin only), so a member can no longer edit or delete another
+  member's shared record.
+- `sync_record`, `filey_cloud_access`, `filey_can_use`, `filey_module_access`,
+  `filey_record_expense` and `filey_claim_entitlements` all exist.
+- 43 tables carry the restrictive `filey_cloud_*` gates.
+- All 11 organisations have `cloud_grandfathered = true` — nobody using the
+  cloud today loses it.
+- The website purchase path was exercised end to end against production and the
+  test rows were removed afterwards: parked by email, claimed at sign-in into a
+  real licence row, replay refused by the unique index, a second claim a no-op,
+  and a purchase for one email left untouched by a different account.
+
+**`platform_config.licensing_enforced` is `'true'`,** so the cloud write gate is
+live. That predates this work; the grandfather flag is what keeps existing orgs
+unaffected.
 
 ## Prod state — verified 2026-07-28
 
@@ -72,6 +97,9 @@ inserts failed in production with PostgREST `PGRST204` (`invoice-missing-columns
 A column referenced by the app but absent in the DB is a silent production failure
 — it does not show up in `npm run build` or local tests if local DB is ahead.
 
-## Staff access gate (2026-09-12; deployment pending)
+## Staff access gate (applied 2026-09-17)
 
-Apply `2026-09-12-module-access.sql` after shared-record and sync-conflict migrations and all feature migrations. Deploy the integrations edge function alongside the frontend. See [business permissions](../docs/business-permissions.md). Disposable PostgreSQL tests do not deploy production policies.
+`2026-09-12-module-access.sql` is applied, and the `integrations` edge function
+is deployed alongside it. See [business permissions](../docs/business-permissions.md).
+Disposable PostgreSQL tests do not prove production policy state — re-read
+`pg_policies` when in doubt.

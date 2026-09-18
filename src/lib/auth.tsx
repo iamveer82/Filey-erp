@@ -12,7 +12,7 @@ import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
-import { registerCloudDevice, entitlement } from "./license";
+import { registerCloudDevice, entitlement, claimWebsitePurchases } from "./license";
 import { mfaRequired } from "./mfa";
 import {
   assertLocalAccount,
@@ -334,12 +334,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfileError(null);
         setProfileLoaded(false);
         setTimeout(() => {
-          if (active)
-            void loadProfile(u).catch((err) => {
-              if (!active || loadedFor.current !== u.id) return;
-              console.error("[auth] loadProfile failed:", err);
-              setProfileError(err?.message ?? String(err));
-            });
+          if (!active) return;
+          void loadProfile(u).catch((err) => {
+            if (!active || loadedFor.current !== u.id) return;
+            console.error("[auth] loadProfile failed:", err);
+            setProfileError(err?.message ?? String(err));
+          });
+          // Someone can buy on the website before Filey is on their machine.
+          // That purchase waits on their email; this is where it is collected,
+          // now that Supabase has verified the address. Deferred with the
+          // profile load for the same reason: no awaited Supabase call may run
+          // while onAuthStateChange holds the auth lock.
+          void claimWebsitePurchases()
+            .then((claimed) => {
+              if (claimed) window.dispatchEvent(new Event("filey:entitlement"));
+            })
+            .catch(() => {});
         }, 0);
       } else {
         loadedFor.current = null;

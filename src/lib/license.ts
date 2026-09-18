@@ -445,6 +445,30 @@ export function clearEntitlementCache(): void {
   cachedCloud = null;
 }
 
+/** Turn a purchase made on the website into real access on this account.
+ *
+ *  Someone can buy from gofiley.com before Filey exists on their machine. That
+ *  payment is parked against the email they typed; this is what collects it,
+ *  once they have signed in and Supabase has verified that address. Safe to
+ *  call on every sign-in: it claims nothing when there is nothing to claim.
+ *
+ *  Returns true when something was claimed, so the caller can refresh the UI
+ *  rather than leaving a paying customer looking at the Free plan. */
+export async function claimWebsitePurchases(): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { data, error } = await supabase.rpc("filey_claim_entitlements");
+    if (error) return false;
+    const claimed = !!(data as { claimed?: boolean } | null)?.claimed;
+    if (claimed) clearEntitlementCache();
+    return claimed;
+  } catch {
+    // Offline, or the migration has not been applied yet. Nothing to do — the
+    // purchase stays parked and the next sign-in tries again.
+    return false;
+  }
+}
+
 /** Free-tier invoice cap: throws a friendly error when a NEW invoice would
  *  exceed this month's allowance. No-op unless licensing is enforced. */
 export async function checkFreeInvoiceCap(

@@ -113,6 +113,12 @@ Deno.serve(async (req) => {
 
   try {
     const supa = admin();
+
+    // PUBLIC: buying from the website, where there is no account yet. The
+    // purchase is parked against the email and claimed at first sign-in, so
+    // this grants nothing by itself and needs no session.
+    if (action === "public_checkout") return await publicCheckout(supa, payload);
+
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data: u } = await supa.auth.getUser(jwt);
     const user = u?.user;
@@ -198,6 +204,79 @@ Deno.serve(async (req) => {
   }
 });
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** Checkout for someone who has no Filey account yet (the pricing page).
+ *
+ *  Unauthenticated on purpose, so it is written to be boring: it validates the
+ *  email, picks the product from a two-item map rather than anything the
+ *  caller sends, and rate-limits per address. Nothing it does grants access —
+ *  the webhook parks the purchase and the app claims it at first sign-in. */
+async function publicCheckout(
+  supa: ReturnType<typeof admin>,
+  payload: Record<string, unknown>
+): Promise<Response> {
+  if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
+  const plan = String(payload.plan ?? "");
+  const email = String(payload.email ?? "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email) || email.length > 320)
+    return json({ error: "Enter a valid email address." }, 400);
+
+  const product = plan === "cloud" ? PRODUCT_CLOUD : plan === "freedom" ? PRODUCT_FREEDOM : "";
+  if (!product) return json({ error: `Unknown plan: ${plan}` }, 400);
+
+  // An open endpoint that creates sessions upstream needs a ceiling. Keyed by
+  // the email, which is the only identity a stranger has here.
+  const allowed = await rateLimit(supa, `web:${email}`, "dodo_public_checkout", 5, 3600);
+  if (!allowed) return json({ error: "Too many attempts — try again later." }, 429);
+  await logAction(supa, `web:${email}`, "dodo_public_checkout", { plan });
+
+  const base = SITE_URL || "";
+  const session = await dodo.checkoutSessions.create({
+    product_cart: [{ product_id: product, quantity: 1 }],
+    customer: { email },
+    // No user_id: the webhook parks this against the email instead.
+    metadata: { type: plan === "cloud" ? "cloud_subscription" : "freedom_license", email, source: "website" },
+    return_url: base ? `${base}/thanks?plan=${plan}` : undefined,
+    cancel_url: base ? `${base}/#pricing` : undefined,
+  });
+  if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
+  return json({ url: session.checkout_url, session_id: session.session_id });
+}
+
+/** Park a website purchase against the buyer's email, or grant it outright if
+ *  that email already belongs to a Filey account. */
+async function parkOrGrant(
+  supa: ReturnType<typeof admin>,
+  kind: "cloud" | "freedom",
+  email: string,
+  refs: { payment_id?: string; subscription_id?: string; customer_id?: string }
+): Promise<string> {
+  const { data: user } = await supa
+    .from("filey_users_by_email")
+    .select("id")
+    .eq("email", email.toLowerCase())
+    .maybeSingle();
+
+  if (user?.id && kind === "freedom" && refs.payment_id) {
+    const outcome = await grantLicense(supa, String(user.id), refs.payment_id);
+    if (outcome !== "duplicate") return `granted to existing account (${outcome})`;
+    return "duplicate";
+  }
+
+  const { error } = await supa.from("pending_entitlements").insert({
+    email: email.toLowerCase(),
+    kind,
+    dodo_payment_id: refs.payment_id ?? null,
+    dodo_subscription_id: refs.subscription_id ?? null,
+    dodo_customer_id: refs.customer_id ?? null,
+  });
+  // A duplicate delivery hits the unique index; that is the idempotency, not
+  // an error worth retrying.
+  if (error && !/duplicate key/i.test(error.message)) throw new Error(error.message);
+  return error ? "already parked" : "parked for first sign-in";
+}
+
 /** Dodo → us. Verified with the Standard Webhooks signature before anything is
  *  read out of the body; an unverified payload is an attacker's licence. */
 async function handleWebhook(req: Request): Promise<Response> {
@@ -232,10 +311,18 @@ async function handleWebhook(req: Request): Promise<Response> {
   // own that plan, so this path only handles the one-time licence.
   if (meta.type === "cloud_subscription")
     return json({ received: true, ignored: "subscription payment" });
-  if (meta.type !== "freedom_license" || !meta.user_id || !data.payment_id)
+  if (meta.type !== "freedom_license" || !data.payment_id)
     return json({ received: true, ignored: "not a Freedom licence purchase" });
 
   try {
+    // Bought from the website: no account yet, so park it against the email.
+    if (!meta.user_id) {
+      if (!meta.email) return json({ received: true, ignored: "purchase with no buyer" });
+      const outcome = await parkOrGrant(admin(), "freedom", meta.email, {
+        payment_id: data.payment_id,
+      });
+      return json({ received: true, outcome });
+    }
     const outcome = await grantLicense(admin(), meta.user_id, data.payment_id);
     return json({ received: true, outcome });
   } catch (e) {
@@ -281,7 +368,20 @@ async function handleSubscription(payload: unknown): Promise<Response> {
       .maybeSingle();
     orgId = (found?.id as string) ?? "";
   }
-  if (!orgId) return json({ received: true, ignored: "no organisation for this subscription" });
+  if (!orgId) {
+    // A website subscription has no org yet. Park it against the email so the
+    // first sign-in switches that workspace on — but only while the
+    // subscription is one that grants something; a cancellation for an
+    // unclaimed purchase has nothing to park.
+    if (meta.email && planPatchFor(status, nextBilling, CLOUD_PLAN).plan !== "free") {
+      const outcome = await parkOrGrant(supa, "cloud", meta.email, {
+        subscription_id: subscriptionId,
+        customer_id: customer.customer_id,
+      });
+      return json({ received: true, outcome });
+    }
+    return json({ received: true, ignored: "no organisation for this subscription" });
+  }
 
   const patch = planPatchFor(status, nextBilling, CLOUD_PLAN);
   const { error } = await supa
