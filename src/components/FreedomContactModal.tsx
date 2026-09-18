@@ -41,7 +41,7 @@ export default function FreedomContactModal({
     <Modal open={open} onClose={onClose} title="Get Filey Freedom">
       <div className="space-y-3">
         <p className="text-[13px] text-muted-foreground">
-          AED 1,499, paid once, yours for good. Leave your details and we'll get
+          $100, paid once, yours for good. Leave your details and we'll get
           in touch to set it up.
         </p>
         <Field label="Your name">

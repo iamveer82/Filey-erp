@@ -85,7 +85,7 @@ supabase secrets set DODO_PAYMENTS_API_KEY=xxx
 supabase secrets set DODO_PAYMENTS_WEBHOOK_KEY=whsec_xxx
 supabase secrets set DODO_PAYMENTS_ENVIRONMENT=test_mode   # live_mode when you are ready to charge
 supabase secrets set DODO_PRODUCT_FREEDOM=pdt_xxx          # one-time Freedom licence
-supabase secrets set DODO_PRODUCT_CLOUD=pdt_xxx            # $1/month Cloud subscription
+supabase secrets set DODO_PRODUCT_CLOUD=pdt_xxx            # $5/month Cloud subscription
 
 # Stripe — DEPRECATED. Keep set only while apps older than 2.11.1 are in the
 # wild: they still call the stripe function to activate a licence.

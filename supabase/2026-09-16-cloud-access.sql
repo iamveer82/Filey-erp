@@ -3,7 +3,7 @@
 -- The model this enforces:
 --   • no plan      → local only, 5 invoices a month (the client caps locally;
 --                    the cloud simply refuses their writes)
---   • Cloud $1/mo  → full cloud: sync, unlimited hosted invoices
+--   • Cloud $5/mo  → full cloud: sync, unlimited hosted invoices
 --   • Freedom      → full local: unlimited, offline, verified without a network
 --
 -- Two safety rails, both deliberate:
@@ -17,7 +17,7 @@
 --      you decide to charge.
 --
 -- Everyone already using the cloud is grandfathered. They signed up when cloud
--- was free, and taking it away from a working business to sell them a dollar
+-- was free, and taking it away from a working business to sell them a paid
 -- plan is not a trade worth making.
 
 begin;
@@ -48,7 +48,7 @@ language sql stable security definer set search_path = public, pg_temp as $$
         and (
           o.cloud_grandfathered
           -- Same test as resolveTier() in the app: any plan other than free,
-          -- with a live or grace status. past_due stays in so a failed $1
+          -- with a live or grace status. past_due stays in so a failed $5
           -- renewal does not lock a business out mid-retry.
           or (o.plan is not null and o.plan <> 'free'
               and o.plan_status in ('active', 'trialing', 'past_due'))
@@ -157,7 +157,7 @@ begin
     and created_at >= date_trunc('month', now());
 
   if v_count >= 5 then
-    raise exception 'Free plan limit reached (5 invoices this month). Filey Cloud is $1/month, or buy Freedom once for unlimited local use.'
+    raise exception 'Free plan limit reached (5 invoices this month). Filey Cloud is $5/month, or buy Freedom once for unlimited local use.'
       using errcode = 'P0001';
   end if;
   return new;

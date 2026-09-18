@@ -24,9 +24,9 @@ export interface PlanPatch {
 /** The plan an org lands on for a given subscription status.
  *
  *  `past_due` and `on_hold` both keep the cloud working: a card that failed on
- *  a $1 renewal is a card problem, not a decision to stop using the product,
+ *  a $5 renewal is a card problem, not a decision to stop using the product,
  *  and locking someone out of their own invoices over it costs more than the
- *  dollar. resolveTier() in the app already treats past_due as entitled, which
+ *  charge. resolveTier() in the app already treats past_due as entitled, which
  *  is why on_hold is reported as past_due rather than inventing a status the
  *  client would not recognise.
  *

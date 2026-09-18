@@ -10,8 +10,8 @@ Two things are for sale:
 | Plan | Price | What it is | How it is enforced |
 |------|-------|-----------|--------------------|
 | **Free** | AED 0 | The whole ERP on one device, 5 invoices a month | Client-side cap in `checkFreeInvoiceCap()`; the cloud refuses its writes |
-| **Cloud** | $1 / month | Full cloud: sync every device, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
-| **Freedom** | AED 1,499 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
+| **Cloud** | $5 / month | Full cloud: sync every device, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
+| **Freedom** | $100 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
 
 One line decides which you need: work on this machine, or work everywhere.
 Free is a real tier — every module, your own data, five invoices a month — not
@@ -57,7 +57,7 @@ Three deliberate properties:
 
 - **SELECT is never gated.** Someone who stops paying keeps reading and
   exporting every row they already made. Only new cloud writes stop. Their
-  books are not hostage to a dollar.
+  books are not hostage to one missed renewal.
 - **Everyone already syncing is grandfathered**, flagged once at migration
   time. They signed up when cloud was free; taking it away from a working
   business to sell them a plan is not a trade worth making. A grandfathered org
@@ -81,8 +81,8 @@ onto the org's plan through `_shared/billing.ts` and writes it.
 Two deliberate choices there, both covered by `billing.test.ts`:
 
 - **`past_due` and `on_hold` keep the cloud working.** A card that failed on a
-  $1 renewal is a card problem, not a decision to stop. Locking someone out of
-  their own invoices over a dollar costs more than the dollar.
+  $5 renewal is a card problem, not a decision to stop. Locking someone out of
+  their own invoices over one failed charge costs more than the charge.
 - **An unknown future status fails closed** to free, rather than falling
   through as paid.
 
@@ -100,8 +100,8 @@ created independently.
 
 | Thing | Live (in use) | Test |
 |---|---|---|
-| Freedom, one-time AED 1,499 | `pdt_0NnqAUlBQ5P8F8IERLZOF` | `pdt_0NnmhtUadaYNc1xddfHT0` |
-| Cloud, $1/month subscription | `pdt_0NnqAUoNM0pPYUuGHkiR5` | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
+| Freedom, one-time $100 | `pdt_0NnqAUlBQ5P8F8IERLZOF` | `pdt_0NnmhtUadaYNc1xddfHT0` |
+| Cloud, $5/month subscription | `pdt_0NnqAUoNM0pPYUuGHkiR5` | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
 | Webhook → `…functions.supabase.co/dodo` | `ep_3JU1WZmbOqNWso8U0CYFo2PPTPx` | `ep_3JRoU69y6y8qshDvaZxyrzDyiQb` |
 
 The project's secrets point at **live mode** as of 2026-09-18. Switching back to
@@ -112,8 +112,8 @@ product id fails, and a mismatched webhook secret rejects every delivery.
 The steps below are what created each environment:
 
 1. **Products.** Dodo dashboard → Products → create two:
-   - a **one-time** product for the Freedom licence at AED 1,499, and
-   - a **subscription** product for Cloud at $1 / month.
+   - a **one-time** product for the Freedom licence at $100, and
+   - a **subscription** product for Cloud at $5 / month.
 
    Copy both ids (`pdt_…`).
 2. **API key.** Developer → API keys. Start in **test mode**.

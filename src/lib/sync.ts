@@ -304,7 +304,7 @@ export async function syncNow(
   // race that ordering exists to close.
   if (!cloudAccessNow().allowed)
     return stop(
-      "Syncing to the cloud needs the Filey Cloud plan ($1/month) — Settings → Billing. " +
+      "Syncing to the cloud needs the Filey Cloud plan ($5/month) — Settings → Billing. " +
         "Your work stays safe on this device either way.",
     );
 

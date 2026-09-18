@@ -463,7 +463,7 @@ export async function checkFreeInvoiceCap(
   if (used >= FREE_LIMITS.invoicesPerMonth)
     throw new Error(
       `Free plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Filey Cloud is $1/month, or buy Freedom once for unlimited local use — Settings → Billing.`
+        `Filey Cloud is $5/month, or buy Freedom once for unlimited local use — Settings → Billing.`
     );
 }
 

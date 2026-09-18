@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// The buyer pays $1 in a browser window and this poll is what turns the app on.
+// The buyer pays $5 in a browser window and this poll is what turns the app on.
 // It must not settle on "free" while the webhook is still in flight, and must
 // not spin forever when the payment never happens.
 const plan = { value: "free", status: null as string | null, reads: 0 };

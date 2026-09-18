@@ -62,7 +62,7 @@ function CloudSyncCard() {
   const [info, setInfo] = useState("");
   /** Sign-in failed in the way that usually means "no cloud account yet". */
   const [offerSignup, setOfferSignup] = useState(false);
-  /** Cloud is the $1/month plan. Null until checked; the database is the real
+  /** Cloud is the $5/month plan. Null until checked; the database is the real
    *  gate, so this only decides what the card says. */
   const [cloudPlan, setCloudPlan] = useState<CloudAccess | null>(null);
 
@@ -171,7 +171,7 @@ function CloudSyncCard() {
 
       {cloudPlan && !cloudPlan.allowed && (
         <div className="rounded-lg border border-border bg-hover p-4 text-sm">
-          <p className="font-medium text-foreground">Syncing needs Filey Cloud — $1/month.</p>
+          <p className="font-medium text-foreground">Syncing needs Filey Cloud — $5/month.</p>
           <p className="mt-1 text-muted-foreground">
             Everything you have made so far stays on this device and keeps working. Buy
             Cloud in Settings → Billing and syncing switches on by itself, or stay local

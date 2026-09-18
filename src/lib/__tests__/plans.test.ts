@@ -14,7 +14,7 @@ describe("FREE_LIMITS", () => {
 describe("resolveTier", () => {
   it("returns pro for any paid plan with a live/grace status", () => {
     for (const status of ["active", "trialing", "past_due"]) {
-      // "cloud" is the plan sold today; past_due matters because a failed $1
+      // "cloud" is the plan sold today; past_due matters because a failed $5
       // renewal must not lock someone out mid-retry.
       expect(resolveTier(false, "cloud", status)).toBe("pro");
       expect(resolveTier(false, "pro", status)).toBe("pro");
@@ -63,11 +63,15 @@ describe("planCardFor", () => {
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 
+  // These are the prices charged by the live Dodo products. A card that says
+  // one number while the checkout charges another is the worst kind of bug to
+  // find out about from a customer.
   it("carries the current prices", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
-    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$1");
+    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$5");
     expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 1,499");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("$100");
+    expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 });
 
