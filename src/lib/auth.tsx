@@ -12,7 +12,7 @@ import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
-import { registerCloudDevice, entitlement, collectPurchases } from "./license";
+import { registerCloudDevice, entitlement, collectPurchases, clearEntitlementCache } from "./license";
 import { mfaRequired } from "./mfa";
 import {
   assertLocalAccount,
@@ -239,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The user id whose profile is currently loaded — lets us ignore token
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
+  const profileReadRevision = useRef(0);
 
   const completeLocalSignIn = (u: User) => {
     const p = localProfile();
@@ -250,6 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async function readProfile(u: User, refreshed = false): Promise<void> {
     if (!supabase) return;
+    const revision = ++profileReadRevision.current;
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
@@ -270,12 +272,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (error) throw error;
     const prof = (data as Profile) ?? null;
-    if (loadedFor.current !== u.id) return;
+    if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
     setCacheOrg(prof?.org_id, u.id);
     setProfile(prof);
     setProfileError(null);
     setProfileLoaded(true);
   }, []);
+
+  // An invitation or a switch on another device changes the server profile.
+  // Unmount the old workspace before reloading its identity and permissions.
+  useEffect(() => {
+    if (local || !user) return;
+    const changed = (event: Event) => {
+      const next = (event as CustomEvent<Profile>).detail;
+      if (next.org_id === profile?.org_id) return;
+      setCacheOrg(null,user.id);
+      clearEntitlementCache();
+      setProfileLoaded(false);
+      void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+    };
+    const transition = (event: Event) => {
+      if ((event as CustomEvent<boolean>).detail) {
+        setCacheOrg(null,user.id); clearEntitlementCache(); setProfileLoaded(false);
+      } else {
+        void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+      }
+    };
+    window.addEventListener("filey:cloud-profile",changed);
+    window.addEventListener("filey:workspace-transition",transition);
+    return () => { window.removeEventListener("filey:cloud-profile",changed); window.removeEventListener("filey:workspace-transition",transition); };
+  }, [local,user,profile?.org_id,loadProfile]);
 
   useEffect(() => {
     if (local) return; // no Supabase auth in local mode — synthetic user
@@ -320,6 +346,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       if (!active) return;
       authChanged = true;
+      if (loadedFor.current !== s?.user?.id) clearEntitlementCache();
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
@@ -395,13 +422,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session?.user || local) return;
     void retryDeviceRegistration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id]);
+  }, [session?.user?.id, profile?.org_id]);
 
   // Warm the tier cache (free/lite/pro) so render paths can read it
   // synchronously via currentTier(). Local mode resolves immediately.
   useEffect(() => {
     void entitlement(true).catch(() => {});
-  }, [session?.user?.id, local]);
+  }, [session?.user?.id, local, profile?.org_id]);
 
   // A payment made outside the app — on the website before Filey was even
   // installed, or in the browser tab a Buy button opened — becomes access
@@ -677,6 +704,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileError,
     reloadProfile: async () => {
       if (!user) return;
+      if (!local) { setProfileLoaded(false); setCacheOrg(null,user.id); clearEntitlementCache(); }
       setProfileError(null);
       try {
         await loadProfile(user);

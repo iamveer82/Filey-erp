@@ -380,11 +380,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         >
           <div className="max-w-md space-y-4">
             <h2 id="workspace-changed-title" className="text-lg font-semibold">
-              Storage changed in another tab
+              Workspace changed in another tab
             </h2>
             <p className="text-sm text-muted-foreground">
               This tab is paused to keep records in the correct workspace. Reload to use
-              the selected storage. Unsaved form changes in this tab will be discarded.
+              the current workspace. Unsaved form changes in this tab will be discarded.
             </p>
             <button
               className="btn-primary"

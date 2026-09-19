@@ -51,6 +51,8 @@ export async function startRealtime(): Promise<void> {
     channel = supabase
       .channel("filey-live-sync")
       .on("postgres_changes", { event: "*", schema: "public" }, payload => {
+        if (payload.table === "profiles" && "id" in payload.new && payload.new.id === data.session?.user.id)
+          window.dispatchEvent(new CustomEvent("filey:cloud-profile", {detail:payload.new}));
         const tables = payload.table ? [payload.table] : undefined;
         window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables } }));
         emit(tables);

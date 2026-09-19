@@ -20,6 +20,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run test:rls:local
       - run: npm run test:browser:tools
       - run: node tools/wa-bridge/check-media.mjs
       - run: npm audit --omit=dev --prefix tools/wa-bridge
@@ -28,5 +29,6 @@ jobs:
           deno-version: v2.x
       - run: npm run test:edge
       - run: deno check --lock=deno.lock --frozen supabase/functions/integrations/index.ts
+      - run: deno check --lock=deno.lock --frozen supabase/functions/team-invite/index.ts
       - run: npm run build -- --manifest
       - run: node scripts/check-route-bundles.mjs

@@ -2,8 +2,8 @@ import { clearLog } from "./log";
 import { defaultTaxRate, validateCountry, taxIdError } from "./taxRegimes";
 import { validateWorkItem, type WorkInput, type WorkItem } from "./workItems";
 import { invoke } from "@tauri-apps/api/core";
-import { sb, isConfigured, supabase } from "./supabase";
-import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
+import { sb, isConfigured, supabase, invokeFn } from "./supabase";
+import { isLocalMode, assertWorkspaceCurrent, setWorkspaceTransition } from "./dataMode";
 import { applyRoundOff, r2 } from "./money";
 import {
   splitItemMeta,
@@ -29,6 +29,7 @@ import { log } from "./log";
 import { withLocalTransaction } from "./localdb";
 import { loadModuleAccess } from "./moduleAccess";
 import { validateExpense, type ExpenseDetails } from "./expenseDetails";
+import { localWorkspaceOwner } from "./localAuth";
 
 // ===== Types =====
 export interface Product {
@@ -5745,7 +5746,13 @@ export interface Invitation {
   modules?: string[] | null;
   status: string;
   created_at: string;
+  expires_at: string;
+  email_status: "not_sent" | "sending" | "accepted" | "failed" | "unknown";
+  last_sent_at?: string | null;
+  email_error?: string | null;
+  workspace_name?: string;
 }
+export interface TeamWorkspace { id: string; name: string; role: string }
 
 // ===== Company message board =====
 export interface OrgMessage {
@@ -5760,6 +5767,45 @@ export interface OrgMessage {
 }
 
 export const messages = {
+  /** Page conversations rather than truncating replies away from their parent. */
+  page: async (channel: string, before?: number): Promise<{ rows: OrgMessage[]; next: number | null }> => {
+    if (isLocalMode()) {
+      const rows = (await sList<OrgMessage>("org_messages", [{ col: "id", asc: false }]))
+        .filter(m => (m.channel ?? "general") === channel);
+      const activity = new Map<number,number>();
+      rows.forEach(m => activity.set(m.parent_id || m.id, Math.max(activity.get(m.parent_id || m.id) || 0,m.id)));
+      const roots = rows.filter(m => !m.parent_id && (before == null || activity.get(m.id)! < before)).sort((a,b) => activity.get(b.id)!-activity.get(a.id)!).slice(0,30);
+      const ids = new Set(roots.map(m => m.id));
+      return {rows:rows.filter(m => ids.has(m.id) || ids.has(m.parent_id ?? -1)).map(localMessage),next:roots.length === 30 ? activity.get(roots[roots.length-1].id)! : null};
+    }
+    const [{data,error},members] = await Promise.all([
+      cdb().rpc("filey_message_page",{p_channel:channel,p_before:before ?? null,p_limit:30}), org.members(),
+    ]);
+    if (error) throw error;
+    const names = new Map(members.map(m => [m.user_id,m.name]));
+    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"})),next:data.next};
+  },
+  thread: async (channel: string, id: number): Promise<OrgMessage[]> => {
+    if (!Number.isSafeInteger(id) || id <= 0) return [];
+    if (isLocalMode()) return (await sList<OrgMessage>("org_messages")).filter(m => (m.channel ?? "general") === channel && (m.id === id || m.parent_id === id)).map(localMessage);
+    const [{data,error},members] = await Promise.all([
+      cdb().from("org_messages").select("*").eq("channel",channel).or(`id.eq.${id},parent_id.eq.${id}`).order("id"),org.members(),
+    ]);
+    if (error) throw error;
+    const names = new Map(members.map(m => [m.user_id,m.name]));
+    return ((data ?? []) as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"}));
+  },
+  unread: async (): Promise<Record<string,number>> => {
+    if (isLocalMode()) return {};
+    const {data,error} = await cdb().rpc("filey_unread_channels");
+    if (error) throw error;
+    return Object.fromEntries((data ?? []).map((r: {channel:string;unread:number}) => [r.channel,Number(r.unread)]));
+  },
+  markRead: async (channel: string, last: number) => {
+    if (isLocalMode()) return;
+    const {error} = await cdb().rpc("filey_mark_channel_read",{p_channel:channel,p_last:last});
+    if (error) throw error;
+  },
   /** Messages in one channel, or every channel when omitted. */
   list: (channel?: string) =>
     readCached<OrgMessage[]>(
@@ -5777,7 +5823,7 @@ export const messages = {
           : rows;
         return mine.slice(0, 200).map((r) => ({
           id: r.id,
-          user_id: r.user_id,
+          user_id: r.user_id ?? (isLocalMode() ? localWorkspaceOwner() || "local-user" : ""),
           body: r.body,
           author: byId.get(r.user_id)?.name ?? "Team member",
           parent_id: r.parent_id ?? null,
@@ -5787,8 +5833,14 @@ export const messages = {
       },
       []
     ),
-  post: (body: string, parentId?: number | null, channel = "general") => {
-    const row: Record<string, unknown> = { body, channel };
+  post: async (body: string, parentId?: number | null, channel = "general") => {
+    if (!body.trim() || body.trim().length > 10000) throw new Error("Messages must contain 1 to 10,000 characters.");
+    if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(channel)) throw new Error("Invalid channel name.");
+    if (parentId && isLocalMode()) {
+      const parents = await sList<OrgMessage>("org_messages");
+      if (!parents.some(m => m.id === parentId && !m.parent_id && (m.channel ?? "general") === channel)) throw new Error("Reply must belong to this channel.");
+    }
+    const row: Record<string, unknown> = { body:body.trim(), channel };
     if (parentId) row.parent_id = parentId;
     return write({ k: "insert", t: "org_messages", row }, () =>
       sInsert("org_messages", row).then(() => undefined), undefined
@@ -5799,6 +5851,10 @@ export const messages = {
       sDelete("org_messages", id), undefined
     ),
 };
+
+function localMessage(message: OrgMessage): OrgMessage {
+  return {...message,user_id:message.user_id || localWorkspaceOwner() || "local-user",author:message.author || "You",channel:message.channel || "general"};
+}
 
 // ===== Notifications (per-user inbox) =====
 export interface Notification {
@@ -5845,8 +5901,12 @@ export const org = {
     readCached<Organization | null>(
       "organization",
       async () => {
-        const rows = await sList<Organization>("organizations", undefined, "*", cdb());
-        return rows[0] ?? null;
+        const {data:id,error:orgError} = await cdb().rpc("current_org");
+        if (orgError) throw orgError;
+        if (!id || id === "default") return null;
+        const {data,error} = await cdb().from("organizations").select("*").eq("id",id).maybeSingle();
+        if (error) throw error;
+        return data as Organization | null;
       },
       null
     ),
@@ -5854,30 +5914,32 @@ export const org = {
     readCached<OrgMember[]>(
       "org_members",
       async () => {
-        const [mems, profs] = await Promise.all([
-          sList<any>("org_members", [{ col: "id", asc: true }], "*", cdb()),
-          sList<any>("profiles", undefined, "*", cdb()),
-        ]);
-        const byId = new Map(profs.map((p) => [p.id, p]));
-        return mems.map((m) => ({
-          id: m.id,
-          org_id: m.org_id,
-          user_id: m.user_id,
-          role: m.role,
-          modules: m.modules ?? null,
-          name: byId.get(m.user_id)?.name ?? "—",
-          email: byId.get(m.user_id)?.email ?? "",
-        })) as OrgMember[];
+        const {data,error} = await cdb().rpc("filey_team_members");
+        if (error) throw error;
+        return (data ?? []) as OrgMember[];
       },
       []
     ),
   /** Create a new organization; returns its id. */
   create: (name: string) =>
     online(async () => {
-      const id = await sInsert("organizations", { name }, cdb());
-      await sInsert("org_members", { org_id: String(id), role: "owner" }, cdb());
-      return String(id);
+      const {data,error} = await cdb().rpc("filey_create_workspace",{p_name:name});
+      if (error) throw error;
+      return data as string;
     }),
+  workspaces: () => online(async () => {
+    const {data,error} = await cdb().rpc("filey_workspaces");
+    if (error) throw error;
+    return (data ?? []) as TeamWorkspace[];
+  },false),
+  switchWorkspace: (id: string) => online(async () => {
+    const client = cdb();
+    setWorkspaceTransition(true);
+    try {
+      const {error} = await client.rpc("filey_switch_workspace",{p_id:id});
+      if (error) throw error;
+    } finally { setWorkspaceTransition(false); }
+  }),
   setRole: (memberId: number, role: string) =>
     write(
       { k: "update", t: "org_members", id: memberId, row: { role } },
@@ -5898,44 +5960,53 @@ export const org = {
   invites: () =>
     readCached<Invitation[]>(
       "invitations",
-      () =>
-        sList<Invitation>(
-          "invitations",
-          [{ col: "created_at", asc: false }],
-          "*",
-          cdb()
-        ),
+      async () => {
+        const {data:id,error:orgError} = await cdb().rpc("current_org");
+        if (orgError) throw orgError;
+        const {data,error} = await cdb().from("invitations").select("*").eq("org_id",id).eq("status","pending").order("created_at",{ascending:false});
+        if (error) throw error;
+        return (data ?? []) as Invitation[];
+      },
       []
     ),
   invite: (email: string, role: string, modules: string[] | null) =>
-    online(() =>
-      sInsert(
-        "invitations",
-        { email: email.trim().toLowerCase(), role, modules },
-        cdb()
-      ).then(() => undefined)
-    ),
+    online(() => sendTeamInvitation({email:email.trim().toLowerCase(),role,modules})),
+  resendInvite: (id: string, resend: boolean) => online(() => sendTeamInvitation({invite:id,resend})),
   revokeInvite: (id: string) =>
     online(async () => {
-      const { error } = await cdb().from("invitations").delete().eq("id", id);
+      const { error } = await cdb().rpc("filey_revoke_invitation",{p_id:id});
       if (error) throw error;
     }),
   /** Pending invitations addressed to the signed-in user's email. */
   myInvites: () =>
     online(async () => {
-      const { data, error } = await cdb()
-        .from("invitations")
-        .select("*")
-        .eq("status", "pending");
+      const {data,error} = await cdb().rpc("filey_my_invitations");
       if (error) throw error;
       return (data ?? []) as Invitation[];
     }, false),
   acceptInvite: (id: string) =>
     online(async () => {
-      const { error } = await cdb().rpc("accept_invitation", { invite: id });
-      if (error) throw error;
+      const client = cdb();
+      setWorkspaceTransition(true);
+      try {
+        const { error } = await client.rpc("accept_invitation", { invite: id });
+        if (error) throw error;
+      } finally { setWorkspaceTransition(false); }
     }),
 };
+
+async function sendTeamInvitation(body: Record<string,unknown>): Promise<{id:string;status:string;error?:string}> {
+  // Provider idempotency is handled by the invitation's persistent attempt id.
+  const {data,error} = await invokeFn(cdb(),"team-invite",{body},0);
+  if (error) {
+    const response = (error as {context?:Response}).context;
+    const detail = response ? await response.json().catch(() => null) : null;
+    throw new Error(detail?.error || (error as Error).message || "Could not prepare invitation.");
+  }
+  const result = data as {id:string;status:string;error?:string};
+  if (!result?.id) throw new Error(result?.error || "Could not prepare invitation.");
+  return result;
+}
 
 /* ===== Links =====
  *
@@ -6117,7 +6188,7 @@ export const channels = {
     const clean = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
     // Rejects rather than throwing synchronously: this reads as async, and a
     // caller's .catch() would never see a sync throw.
-    if (!clean) throw new Error("Give the channel a name.");
+    if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(clean)) throw new Error("Use a channel name of 1 to 80 letters or numbers.");
     const row = { name: clean, purpose: purpose?.trim() || null, shared: true };
     return write({ k: "insert", t: "org_channels", row }, async () => {
       const existing = await sList<OrgChannel>("org_channels");

@@ -2,7 +2,8 @@ import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useState } from "react";
 import { Hash, Plus } from "lucide-react";
 
-import { channels, type OrgChannel } from "../lib/api";
+import { channels, messages, type OrgChannel } from "../lib/api";
+import { useSearchParams } from "react-router-dom";
 import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { errMsg, cn } from "../lib/format";
@@ -25,7 +26,11 @@ const GENERAL = "general";
 export default function Team() {
   const { toast } = useUI();
   const [list, setList] = useState<OrgChannel[]>([]);
-  const [active, setActive] = useState(GENERAL);
+  const [params,setParams] = useSearchParams();
+  const active = params.get("channel") || GENERAL;
+  const setActive = (channel:string) => setParams({channel});
+  const focusMessage = Number(params.get("message")) || undefined;
+  const [unread,setUnread] = useState<Record<string,number>>({});
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -35,6 +40,7 @@ export default function Team() {
     try {
       const rows = await channels.list();
       setList(rows);
+      setUnread(await messages.unread());
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -49,8 +55,8 @@ export default function Team() {
 
   // A teammate creating a channel should appear here without a refresh.
   useLiveSync(() => {
-    channels.list().then(setList).catch(() => {});
-  });
+    void load();
+  }, ["org_channels","org_messages"]);
 
   const add = async () => {
     if (busy || !name.trim()) return;
@@ -154,6 +160,7 @@ export default function Team() {
                   >
                     <Hash size={12} className="shrink-0 opacity-70" />
                     <span className="truncate">{c.name}</span>
+                    {!!unread[c.name] && <span className="ml-auto rounded-full bg-foreground px-1.5 text-[11px] text-background" aria-label={`${unread[c.name]} unread messages`}>{unread[c.name] > 99 ? "99+" : unread[c.name]}</span>}
                   </button>
                 ))}
               </div>
@@ -167,7 +174,7 @@ export default function Team() {
           {activeChannel?.purpose && (
             <p className="mb-2 text-[12.5px] text-brand-400">{activeChannel.purpose}</p>
           )}
-          <CompanyMessages key={active} channel={active} />
+          <CompanyMessages key={active} channel={active} focusMessage={focusMessage} onRead={() => { void messages.unread().then(setUnread).catch(() => {}); }} />
         </section>
       </div>
     </div>

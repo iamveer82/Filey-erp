@@ -112,6 +112,7 @@ function Gate() {
     loading,
     configured,
     user,
+    profile,
     needsProfile,
     profileLoading,
     profileError,
@@ -149,7 +150,7 @@ function Gate() {
   if (needsProfile) return <ProfileSetup />;
   if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 
-  return <Suspense fallback={<Splash />}><Workspace /></Suspense>;
+  return <Suspense fallback={<Splash />}><Workspace key={`${user.id}:${profile?.org_id ?? "default"}`} /></Suspense>;
 }
 
 export default function App() {

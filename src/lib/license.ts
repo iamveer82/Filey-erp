@@ -337,6 +337,7 @@ export function resolveTier(
 }
 
 let cachedTier: Tier | null = null;
+let entitlementRevision = 0;
 
 /** Resolve (and cache) the current tier. Offline license check is local;
  *  the pro check reads the org's plan whenever there is a session — local
@@ -344,6 +345,7 @@ let cachedTier: Tier | null = null;
  *  ponytail: offline + local, a Pro user reads as Basic until back online. */
 export async function entitlement(force = false): Promise<Tier> {
   if (cachedTier && !force) return cachedTier;
+  const revision = entitlementRevision;
   const lic = await verifyStoredLicense();
   let plan: string | null = null;
   let status: string | null = null;
@@ -362,8 +364,9 @@ export async function entitlement(force = false): Promise<Tier> {
       /* offline / not signed in → fall through */
     }
   }
-  cachedTier = resolveTier(lic.valid, plan, status);
-  return cachedTier;
+  const tier = resolveTier(lic.valid, plan, status);
+  if (revision === entitlementRevision) cachedTier = tier;
+  return tier;
 }
 
 /** Last resolved tier, synchronously (for render paths). Defaults to "free"
@@ -406,6 +409,7 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
   if (cachedCloud && !force) return cachedCloud;
   if (!ENFORCE_LICENSING) return (cachedCloud = { allowed: true, reason: "unenforced" });
   if (!supabase) return { allowed: true, reason: "unenforced" };
+  const revision = entitlementRevision;
   try {
     const { data: orgId, error: orgError } = await supabase.rpc("current_org");
     if (orgError) throw orgError;
@@ -415,16 +419,17 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
       .eq("id", orgId)
       .maybeSingle();
     if (!data) return { allowed: true, reason: "unenforced" };
-    cachedCloud = resolveCloudAccess(
+    let access = resolveCloudAccess(
       data.plan as string | null,
       data.plan_status as string | null
     );
     // Basic can use the web too. Only the owner's Ultra licence lifts its cap.
-    if (cachedCloud.reason === "basic") {
+    if (access.reason === "basic") {
       const { data: licensed } = await supabase.rpc("filey_org_owner_licensed", { p_org: orgId });
-      if (licensed === true) cachedCloud = { allowed: true, reason: "paid" };
+      if (licensed === true) access = { allowed: true, reason: "paid" };
     }
-    return cachedCloud;
+    if (revision === entitlementRevision) cachedCloud = access;
+    return access;
   } catch {
     return { allowed: true, reason: "unenforced" };
   }
@@ -432,6 +437,7 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
 
 /** Drop the cached plan/tier answers — call after a purchase lands. */
 export function clearEntitlementCache(): void {
+  entitlementRevision++;
   cachedTier = null;
   cachedCloud = null;
 }
