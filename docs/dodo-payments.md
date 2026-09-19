@@ -89,30 +89,23 @@ address they paid with.
 
 ## How cloud access is enforced
 
-`public.filey_cloud_access()` (see `2026-09-16-cloud-access.sql`) is the real
-gate: a restrictive policy on every business table that lets INSERT, UPDATE and
-DELETE through only for an org with a live paid plan — or one that is
-grandfathered. `resolveCloudAccess()` in `src/lib/license.ts` mirrors it
-exactly, and `cloud-access.test.ts` pins the pair together. If they ever
-disagree, the app offers a Sync button the database then refuses.
+`public.filey_cloud_access()` (see `2026-09-19-basic-web-access.sql`) permits
+all signed-in workspace members, including Basic. Restrictive cloud policies
+still intersect the existing tenant, module and record-ownership policies.
+Authentication and access to another workspace have not changed.
 
-Three deliberate properties:
+- Basic can read, create, edit and delete records on the web. Only new invoices
+  consume its five-per-month allowance; invoice edits remain unlimited.
+- A lapsed Pro subscription falls back to Basic access rather than locking the
+  workspace. Existing records remain readable and editable.
+- Paid plans, an active Ultra licence held by the workspace owner, and existing
+  grandfathered workspaces retain unlimited cloud invoicing.
+- `platform_config.licensing_enforced` controls the invoice quota, not sign-in
+  or tenant isolation. The counter is private; clients can only request their
+  current workspace's usage through `filey_invoice_usage()`.
 
-- **SELECT is never gated.** Someone who stops paying keeps reading and
-  exporting every row they already made. Only new cloud writes stop. Their
-  books are not hostage to one missed renewal.
-- **Everyone already syncing is grandfathered**, flagged once at migration
-  time. They signed up when cloud was free; taking it away from a working
-  business to sell them a plan is not a trade worth making. A grandfathered org
-  is uncapped too, in the database and in the client, because it was uncapped
-  in practice before.
-- **The whole gate sits behind `platform_config.licensing_enforced`**, the same
-  switch the invoice cap already uses. Until that reads `'true'`, this
-  migration changes nothing — so it can ship long before you decide to charge.
-
-Note the client constant `ENFORCE_LICENSING` in `src/lib/license.ts` is
-separate and already `true`: the app caps free invoices and hides sync on its
-own. The database flag is what makes the server agree.
+`ENFORCE_LICENSING` enables the client's creation preflight. The database
+trigger is authoritative for every insert path, including concurrent requests.
 
 ## How the subscription differs
 
