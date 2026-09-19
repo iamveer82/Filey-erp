@@ -9,14 +9,13 @@ Two things are for sale:
 
 | Plan | Price | What it is | How it is enforced |
 |------|-------|-----------|--------------------|
-| **Free** | AED 0 | The whole ERP on one device, 5 invoices a month | Client-side cap in `checkFreeInvoiceCap()`; the cloud refuses its writes |
-| **Cloud** | $5 / month | Full cloud: sync every device, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
-| **Freedom** | $100 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
+| **Basic** | AED 0 | The whole ERP on one device, 5 invoices a month | Client-side cap in `checkFreeInvoiceCap()`; the cloud refuses its writes |
+| **Pro** | $5 / month | Full cloud: sync up to five registered devices, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
+| **Ultra** | $100 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
 
 One line decides which you need: work on this machine, or work everywhere.
-Free is a real tier — every module, your own data, five invoices a month — not
-a trial. Cloud sells sync; Freedom sells owning the local app outright. Buy
-both if you want both.
+Basic is a real tier — every module, your own data, five invoices a month — not
+a trial. Pro provides a monthly subscription; Ultra includes an offline desktop licence and web/cloud access. An Ultra owner does not need a second Pro subscription.
 
 What the buyer sees, either way: click buy, pay on Dodo's hosted page, and the
 app is on the new plan. No licence code, no email, no support ticket.
@@ -33,7 +32,7 @@ buyer pays on Dodo's hosted page  ◄──────────────�
         └─► browser returns to /#/settings?section=license&checkout=success
                    │
                    └─► claimPurchasedLicense() polls license_status, then
-                       license_activate → signed ECDSA token → Freedom
+                       license_activate → signed ECDSA token → Ultra
 ```
 
 The webhook is the **only** thing that grants a licence. The returning browser
@@ -109,7 +108,7 @@ own. The database flag is what makes the server agree.
 
 ## How the subscription differs
 
-The Cloud plan rides the same function and the same webhook endpoint. Every
+The Pro plan rides the same function and the same webhook endpoint. Every
 `subscription.*` event restates the subscription's status, so one handler
 covers activation, renewal, a failed card and cancellation — it maps the status
 onto the org's plan through `_shared/billing.ts` and writes it.
@@ -136,8 +135,8 @@ created independently.
 
 | Thing | Live (in use) | Test |
 |---|---|---|
-| Freedom, one-time $100 | `pdt_0NnqAUlBQ5P8F8IERLZOF` | `pdt_0NnmhtUadaYNc1xddfHT0` |
-| Cloud, $5/month subscription | `pdt_0NnqAUoNM0pPYUuGHkiR5` | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
+| Ultra, one-time $100 | `pdt_0NnqAUlBQ5P8F8IERLZOF` | `pdt_0NnmhtUadaYNc1xddfHT0` |
+| Pro, $5/month subscription | `pdt_0NnqAUoNM0pPYUuGHkiR5` | `pdt_0NnmhvmMYVo9Ojtd9szfD` |
 | Webhook → `…functions.supabase.co/dodo` | `ep_3JU1WZmbOqNWso8U0CYFo2PPTPx` | `ep_3JRoU69y6y8qshDvaZxyrzDyiQb` |
 
 The project's secrets point at **live mode** as of 2026-09-18. Switching back to
@@ -148,15 +147,15 @@ product id fails, and a mismatched webhook secret rejects every delivery.
 The steps below are what created each environment:
 
 1. **Products.** Dodo dashboard → Products → create two:
-   - a **one-time** product for the Freedom licence at $100, and
-   - a **subscription** product for Cloud at $5 / month.
+   - a **one-time** product for the Ultra licence at $100, and
+   - a **subscription** product for Pro at $5 / month.
 
    Copy both ids (`pdt_…`).
 2. **API key.** Developer → API keys. Start in **test mode**.
 3. **Webhook.** Developer → Webhooks → new endpoint:
    `https://<project-ref>.functions.supabase.co/dodo`, subscribed to
    `payment.succeeded` **and every `subscription.*` event** (active, renewed,
-   on_hold, past_due, paused, cancelled, expired, failed). Copy the signing
+   on_hold, past_due, paused, unpaused, updated, plan_changed, cancelled, expired, failed). Copy the signing
    secret (`whsec_…`).
 4. **Secrets:**
 
@@ -186,14 +185,14 @@ The steps below are what created each environment:
 With `DODO_PAYMENTS_ENVIRONMENT=test_mode`, buy each plan with a Dodo test
 card. Then check, in order:
 
-**Freedom**
+**Ultra**
 
 - a `licenses` row exists for the buyer with `dodo_payment_id` set,
-- the app flipped to Freedom without any further clicking,
+- the app flipped to Ultra without any further clicking,
 - replaying the same webhook (Dodo dashboard → resend) does **not** create a
   second row — the partial unique index refuses it.
 
-**Cloud**
+**Pro**
 
 - the buyer's `organizations` row shows `plan = 'cloud'`, `plan_status =
   'active'`, and `dodo_subscription_id` / `dodo_customer_id` set,
@@ -214,9 +213,7 @@ building a live checkout session against `checkout.dodopayments.com`.
 The environment variable still defaults to `test_mode` when unset, deliberately:
 a missing variable must never mean "charge real cards".
 
-**Rotating the API key.** The key is only used to *create* checkout sessions,
-so a revoked key breaks new purchases while webhooks keep working — their
-signing secret is separate. After issuing a replacement:
+**Rotating the API key.** The key creates checkout and portal sessions and retrieves current subscription state during webhook handling. A revoked key interrupts these calls; Dodo retries failed webhook deliveries. Signature verification uses a separate webhook secret. After issuing a replacement:
 
 ```bash
 supabase secrets set --project-ref voyrjqgaypiylwskkwpr DODO_PAYMENTS_API_KEY=<new key>
@@ -233,3 +230,15 @@ keeps the old key until it is recycled.
 those installs are gone. Its `pay_invoice` path (a customer paying an invoice
 from a share link) is untouched — that is a different feature from selling
 Filey, and an MoR cannot do it, since that money belongs to the tenant.
+
+## September 19, 2026 integration audit
+
+Live products now display Pro and Ultra with matching Filey artwork and current descriptions. Pro charges $5 monthly; its duration is 20 years, following Dodo’s ongoing subscription setup. A one-month duration with monthly frequency expires after one cycle. Customers may cancel earlier through Billing.
+
+The new 2026-09-19-billing-integrity.sql migration makes email verification explicit, serializes subscription delivery with row locks, and prevents an older event from reactivating a cancelled entitlement. The function checks product IDs even when metadata is present, retrieves current provider state, and assigns subscriptions only to authorized workspaces. Client billing and account pages use the current workspace. Production web access uses the server filey_cloud_access gate, including workspace-owner Ultra access.
+
+API and webhook signing secrets live only in Supabase. Never use VITE variables for them. The migration and updated function were deployed. Live negative checks rejected unauthenticated actions and invalid signatures. Regression SQL runs entirely inside a rollback; no customer business records were changed. No real payment was made. A separate sandbox purchase/renewal/cancellation acceptance pass remains required before commercial release.
+
+The web app is deployed in Vercel's `GoFiley / filey-erp` project at `https://filey-erp.vercel.app`. The website's Open Filey buttons use that working address. Public invoice links in the web app use its current origin; no URL environment override is needed. `app.gofiley.com` has been added to Vercel, but is pending GoDaddy sign-in and the following DNS record: CNAME `app` → `84cab2e31d4c788f.vercel-dns-017.com`. After Vercel verifies DNS and HTTPS, update the website's `APP_URL` to the custom domain. Do not replace the apex website or email DNS records.
+
+Basic remains free and has no Dodo checkout product. Its cover and the Pro/Ultra originals are in the local `output/brand/plans` folder, with the generation prompts. Both paid product images and descriptions were saved and verified through Dodo's product API.

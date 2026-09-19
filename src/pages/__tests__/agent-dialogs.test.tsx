@@ -102,6 +102,8 @@ it("preserves access on opening and reflects an explicit approval-mode change in
     </MemoryRouter>
   );
   fireEvent.click(screen.getByRole("button", { name: "Agent access" }));
+  expect(screen.getByRole("radio", { name: /Approve for me/ })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Manage action groups" }));
   const dialog = within(screen.getByRole("dialog", { name: "Agent access" }));
   expect(dialog.getByRole("radio", { name: "Accept edits" })).toBeChecked();
   expect(
@@ -113,10 +115,10 @@ it("preserves access on opening and reflects an explicit approval-mode change in
   fireEvent.click(dialog.getByRole("button", { name: "Done" }));
   expect(getAgentMode()).toBe("manual");
   expect(screen.getByRole("button", { name: "Agent access" })).toHaveTextContent(
-    "Access: Manual"
+    "Ask for approval"
   );
   expect(screen.getByRole("button", { name: "Agent access" })).toHaveAttribute("title",
-    "Asks before every action that changes anything. Reading is always free.");
+    "Ask for approval");
   expect(isCapabilityEnabled("crm")).toBe(false);
 });
 
@@ -237,4 +239,21 @@ it("keeps autonomous plan and tool results with the reply and passes history to 
       expect.objectContaining({ role: "assistant", text: "Review finished." }),
     ])
   );
+});
+
+it("passes the chosen effort into the agent and remembers it for this workspace", async () => {
+  vi.spyOn(ai, "getAiConfig").mockReturnValue({ provider: "openai", model: "gpt-5.2", baseUrl: "https://api.openai.com/v1", apiKey: "test" });
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "text" as const, text: "Ready." }; return "Ready.";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Reasoning effort: Default" }));
+  fireEvent.change(screen.getByRole("slider", { name: "Reasoning effort" }), { target: { value: "4" } });
+  expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", "Extra high");
+  fireEvent.keyDown(screen.getByRole("slider"), { key: "Escape" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Review this draft." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(stream).toHaveBeenCalled());
+  expect(stream.mock.calls[0][1]?.effort).toBe("xhigh");
 });

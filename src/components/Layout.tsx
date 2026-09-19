@@ -22,6 +22,7 @@ import AppIcon from "./AppIcon";
 import BloubBot from "./BloubBot";
 import Logo from "./Logo";
 import ErrorBoundary from "./ErrorBoundary";
+import BrowserPanel from "./BrowserPanel";
 import { PageContextProvider } from "../lib/pageContext";
 import { cn, todayYmd, CURRENCIES } from "../lib/format";
 import { initDisplayCurrency, useDisplayCurrency } from "../lib/displayCurrency";
@@ -42,7 +43,7 @@ const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as 
 /** Sidebar sections (Emergent reference grouping). Order within a group
  *  mirrors the user's workflow. */
 const MODULE_GROUPS: { title: string; ids: string[] }[] = [
-  { title: "Assistant", ids: ["agent", "browser"] },
+  { title: "Assistant", ids: ["agent"] },
   { title: "Business", ids: ["overview", "reports"] },
   {
     title: "Sales",
@@ -832,6 +833,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <main
             ref={scrollWrapRef}
             className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-page"
@@ -860,6 +862,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
             </div>
           </main>
+          <BrowserPanel />
+          </div>
         </div>
       </div>
     </PageContextProvider>

@@ -630,6 +630,7 @@ export async function* aiAutonomousStream(
   goal: string,
   opts: {
     maxTokens?: number;
+    effort?: AiEffort;
     maxRounds?: number;
     signal?: AbortSignal;
     onProgress?: (text: string) => void;
@@ -663,6 +664,7 @@ export async function* aiAutonomousStream(
   // Stream progress while the shared wrapper records lessons for next time.
   const stream = aiAgentStream(messages, {
     maxTokens: opts.maxTokens ?? 4096,
+    effort: opts.effort,
     maxRounds: opts.maxRounds ?? 20,
     extraTools: [TASK_COMPLETE_TOOL],
     finishToolName: "task_complete",

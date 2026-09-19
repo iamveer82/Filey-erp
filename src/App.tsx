@@ -263,13 +263,16 @@ function Gate() {
   // Keyed by user, so signing in as someone else never inherits the answer.
   const [webAnswer, setWebAnswer] = useState<{ uid: string; open: boolean } | null>(null);
   const [webCheck, setWebCheck] = useState(0);
-  const web: "checking" | "open" | "blocked" = hasTauri
+  // Local development previews use the desktop's local data adapter.
+  // Production browser builds always enforce the server entitlement.
+  const desktopPreview = hasTauri || (import.meta.env.DEV && getDataMode() === "local");
+  const web: "checking" | "open" | "blocked" = desktopPreview
     ? "open"
     : webAnswer && webAnswer.uid === user?.id
       ? webAnswer.open ? "open" : "blocked"
       : "checking";
   useEffect(() => {
-    if (hasTauri || !user) return;
+    if (desktopPreview || !user) return;
     let live = true;
     const check = () =>
       void webAccess().then((open) => live && setWebAnswer({ uid: user.id, open }));
@@ -280,7 +283,7 @@ function Gate() {
       live = false;
       window.removeEventListener("filey:entitlement", check);
     };
-  }, [user, webCheck]);
+  }, [user, webCheck, desktopPreview]);
   // First run: let the user pick where data lives — local (offline) or cloud.
   // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
   // straight in so existing users aren't prompted.

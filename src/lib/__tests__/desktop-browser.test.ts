@@ -1,7 +1,7 @@
 vi.mock("../moduleAccess", () => ({ requireModuleAccess: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { closeDesktopBrowserTabs, desktopBrowserCommand } from "../desktopBrowser";
+import { closeDesktopBrowserTabs, desktopBrowserCommand, getBrowserPanelState, setBrowserPanelOpen, layoutDesktopBrowser, registerBrowserViewportSync } from "../desktopBrowser";
 
 const identity = vi.hoisted(() => ({ scope: "local:org:user:one" as string | null, account: "org:user:one" as string | null }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: () => identity.scope, AGENT_STORAGE_EVENT: "filey:agent-storage" }));
@@ -10,6 +10,38 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 type NativeArgs = { profile: string; request: { action: string } };
 const nativeCalls = () => vi.mocked(invoke).mock.calls.map(([, args]) => args as NativeArgs);
 const lastCall = () => nativeCalls()[nativeCalls().length - 1];
+
+it("docks opened tabs, preserves them on collapse, and rejects invalid viewport bounds", async () => {
+  const tab = { id: "filey-browser-00000000-0000-0000-0000-000000000000", title: "Example", url: "https://example.com/", loading: false, window_id: "123", canGoBack: false, canGoForward: false };
+  vi.mocked(invoke).mockResolvedValue({ tabs: [tab], tab });
+  await desktopBrowserCommand({ action: "open", url: tab.url });
+  expect(getBrowserPanelState()).toMatchObject({ open: true, activeId: tab.id });
+  setBrowserPanelOpen(false);
+  expect(getBrowserPanelState().tabs).toHaveLength(1);
+  await layoutDesktopBrowser(null, tab.id);
+  expect(invoke).toHaveBeenLastCalledWith("desktop_browser_layout", { profile: expect.any(String), bounds: null, tabId: tab.id });
+  await expect(layoutDesktopBrowser({ x: -1, y: 0, width: 300, height: 500 }, tab.id)).rejects.toThrow("Invalid browser");
+});
+it("finishes an in-flight show before applying collapse", async () => {
+  let finish!: (value: unknown) => void;
+  vi.mocked(invoke).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const show = layoutDesktopBrowser({ x: 500, y: 80, width: 300, height: 400 }, "tab");
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  const hide = layoutDesktopBrowser(null, null);
+  await Promise.resolve();
+  expect(invoke).toHaveBeenCalledTimes(1);
+  finish(undefined);
+  await Promise.all([show, hide]);
+  expect(invoke).toHaveBeenLastCalledWith("desktop_browser_layout", { profile: expect.any(String), bounds: null, tabId: null });
+});
+
+it("reports a viewport failure to the caller instead of claiming the browser opened", async () => {
+  const unregister = registerBrowserViewportSync(async () => { throw new Error("Native view unavailable"); });
+  try {
+    await expect(desktopBrowserCommand({ action: "open", url: "https://example.com/" })).rejects.toThrow("Native view unavailable");
+  } finally { unregister(); }
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   identity.scope = "local:org:user:one";

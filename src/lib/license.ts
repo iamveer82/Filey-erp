@@ -349,10 +349,12 @@ export async function entitlement(force = false): Promise<Tier> {
   let status: string | null = null;
   if (supabase) {
     try {
+      const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+      if (orgError) throw orgError;
       const { data } = await supabase
         .from("organizations")
         .select("plan, plan_status")
-        .limit(1)
+        .eq("id", orgId)
         .maybeSingle();
       plan = (data?.plan as string) ?? null;
       status = (data?.plan_status as string) ?? null;
@@ -424,10 +426,12 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
   if (!ENFORCE_LICENSING) return (cachedCloud = { allowed: true, reason: "unenforced" });
   if (!supabase) return { allowed: true, reason: "unenforced" };
   try {
+    const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+    if (orgError) throw orgError;
     const { data } = await supabase
       .from("organizations")
       .select("plan, plan_status, cloud_grandfathered")
-      .limit(1)
+      .eq("id", orgId)
       .maybeSingle();
     if (!data) return { allowed: true, reason: "unenforced" };
     cachedCloud = resolveCloudAccess(
@@ -448,14 +452,13 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
   }
 }
 
-/** May this account use Filey on the web? Pro, Ultra, or a workspace
- *  grandfathered into free cloud. The browser can only hold a cloud
- *  workspace, so this is cloud access plus the account's own Ultra licence
- *  (which counts before 2026-09-19-ultra-cloud-access.sql is applied too). */
+/** Web access is decided by the server for the current workspace, including
+ *  Pro, workspace-owner Ultra, and grandfathered cloud access. */
 export async function webAccess(): Promise<boolean> {
-  if ((await cloudAccess(true)).allowed) return true;
+  if (!supabase) return false;
   try {
-    return !!(await licenseOverview());
+    const { data, error } = await supabase.rpc("filey_cloud_access");
+    return !error && data === true;
   } catch {
     return false;
   }

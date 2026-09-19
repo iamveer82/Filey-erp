@@ -91,7 +91,7 @@ export const MODULES: AppModule[] = [
     id: "browser",
     label: "Browser",
     short: "Browser",
-    desc: "Business websites and social apps in isolated desktop windows",
+    desc: "Business websites and social apps beside Filey AI",
     icon: "browser",
     to: "/browser",
     Component: WorkspaceBrowser,

@@ -4,7 +4,7 @@
 // can see, so the plan flips on its own:
 //
 //   • POST { action: "checkout" }            → Freedom licence (one-time)
-//   • POST { action: "checkout_cloud" }      → Cloud subscription ($1/month)
+//   • POST { action: "checkout_cloud" }      → Cloud subscription ($5/month)
 //   • POST { action: "portal" }              → Dodo customer portal (cancel, cards)
 //   • POST { action: "license_status" }      → { licensed } — polled after checkout
 //   • POST { action: "license_activate" }    → signed offline licence token
@@ -19,7 +19,7 @@
 //   DODO_PAYMENTS_API_KEY, DODO_PAYMENTS_WEBHOOK_KEY,
 //   DODO_PAYMENTS_ENVIRONMENT (test_mode | live_mode — defaults to test_mode),
 //   DODO_PRODUCT_FREEDOM (product id of the Freedom licence),
-//   DODO_PRODUCT_CLOUD (product id of the $1/month Cloud subscription),
+//   DODO_PRODUCT_CLOUD (product id of the $5/month Cloud subscription),
 //   LICENSE_SIGNING_KEY, SITE_URL.
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected by the platform.
 //
@@ -77,35 +77,26 @@ function json(body: unknown, status = 200) {
 const reply = (r: LicenseResult) => json(r.body, r.status);
 const admin = () => createClient(SUPABASE_URL, SERVICE_ROLE);
 
-/** The org this user bills for: their membership first, then an org they own. */
+/** Billing follows the profile workspace, with an explicit owner/admin check. */
 async function userOrg(supa: ReturnType<typeof admin>, userId: string) {
-  const { data: member } = await supa
-    .from("org_members")
-    .select("org_id")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
-  let orgId = member?.org_id as string | undefined;
-  if (!orgId) {
-    const { data: owned } = await supa
-      .from("organizations")
-      .select("id")
-      .eq("owner_id", userId)
-      .limit(1)
-      .maybeSingle();
-    orgId = owned?.id as string | undefined;
-  }
-  if (!orgId) return null;
-  const { data: org } = await supa
-    .from("organizations")
-    .select("*")
-    .eq("id", orgId)
-    .maybeSingle();
-  return org ?? null;
+  const { data: profile, error: profileError } = await supa.from("profiles")
+    .select("org_id").eq("id", userId).maybeSingle();
+  if (profileError) throw profileError;
+  if (!profile?.org_id) return null;
+  const { data: org, error } = await supa.from("organizations")
+    .select("*").eq("id", profile.org_id).maybeSingle();
+  if (error) throw error;
+  if (!org) return null;
+  if (org.owner_id === userId) return org;
+  const { data: member, error: memberError } = await supa.from("org_members")
+    .select("role").eq("org_id", profile.org_id).eq("user_id", userId).maybeSingle();
+  if (memberError) throw memberError;
+  return member?.role === "admin" || member?.role === "owner" ? org : null;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (req.headers.get("webhook-signature")) return handleWebhook(req);
 
   const payload = await req.json().catch(() => ({}) as Record<string, unknown>);
@@ -174,7 +165,12 @@ Deno.serve(async (req) => {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
       if (!PRODUCT_CLOUD) return json({ error: "Cloud plan not configured" }, 503);
       const org = await userOrg(supa, user.id);
-      if (!org) return json({ error: "No organisation found for this account." }, 404);
+      if (!org) return json({ error: "Only the workspace owner or an admin can manage billing." }, 403);
+      if (org.plan !== "free" && ["active", "trialing", "past_due"].includes(org.plan_status))
+        return json({ error: "This workspace already has a paid plan. Use Manage billing." }, 409);
+      const owned = await licenseStatus(supa, String(org.owner_id));
+      if (owned.body.licensed)
+        return json({ error: "This workspace already includes cloud access through Ultra." }, 409);
 
       const base = SITE_URL || "";
       const session = await dodo.checkoutSessions.create({
@@ -194,7 +190,8 @@ Deno.serve(async (req) => {
     // Dodo is the merchant of record and owns the billing relationship.
     if (action === "portal") {
       const org = await userOrg(supa, user.id);
-      const customerId = org?.dodo_customer_id as string | undefined;
+      if (!org) return json({ error: "Only the workspace owner or an admin can manage billing." }, 403);
+      const customerId = org.dodo_customer_id as string | undefined;
       if (!customerId)
         return json({ error: "No subscription on this workspace yet." }, 404);
       const portal = await dodo.customers.customerPortal.create(customerId);
@@ -302,7 +299,10 @@ async function handleWebhook(req: Request): Promise<Response> {
 
   // Subscriptions: every lifecycle event restates the status, so one handler
   // covers activation, renewal, a failed card and cancellation alike.
-  if (event.type.startsWith("subscription.")) return await handleSubscription(event.data);
+  if (event.type.startsWith("subscription.")) {
+    try { return await handleSubscription(event.data, event.timestamp); }
+    catch { return json({ error: "Could not update subscription. Delivery will be retried." }, 500); }
+  }
 
   // Everything else (disputes, refunds) is recorded by Dodo; only a completed
   // payment changes what this app lets someone do.
@@ -337,71 +337,22 @@ async function handleWebhook(req: Request): Promise<Response> {
   }
 }
 
-/** Put an org on (or off) the Cloud plan from a subscription event.
- *
- *  Events can arrive out of order — a retry of `subscription.active` can land
- *  after `subscription.cancelled` — so the org is matched by subscription id
- *  once it is known, and the row records which subscription set it. */
-async function handleSubscription(payload: unknown): Promise<Response> {
-  // The SDK's event union is wide; read the four fields this needs by name
-  // rather than pretending the whole union is one shape.
-  const data = (payload ?? {}) as {
-    subscription_id?: string;
-    status?: string;
-    next_billing_date?: string;
-    metadata?: Record<string, string>;
-    customer?: { customer_id?: string };
-  };
-  const subscriptionId = String(data.subscription_id ?? "");
-  const status = String(data.status ?? "");
-  const nextBilling = data.next_billing_date ? String(data.next_billing_date) : null;
-  const meta = data.metadata ?? {};
-  const customer = data.customer ?? {};
-  // Storefront / payment-link subscriptions carry no metadata: the product
-  // and Dodo's customer email stand in for it.
-  const buyer = buyerOf(payload as DodoPurchase, PRODUCT_CLOUD, "cloud_subscription");
-  if (!subscriptionId || !status)
-    return json({ received: true, ignored: "subscription event without id or status" });
-
-  const supa = admin();
-  // The checkout metadata names the org on the first event; later events for
-  // the same subscription find it by id, so a renewal needs no metadata.
-  let orgId = meta.org_id ?? "";
-  if (!orgId) {
-    const { data: found } = await supa
-      .from("organizations")
-      .select("id")
-      .eq("dodo_subscription_id", subscriptionId)
-      .limit(1)
-      .maybeSingle();
-    orgId = (found?.id as string) ?? "";
-  }
-  if (!orgId) {
-    // A website subscription has no org yet. Park it against the email so the
-    // first sign-in switches that workspace on — but only while the
-    // subscription is one that grants something; a cancellation for an
-    // unclaimed purchase has nothing to park.
-    if (buyer?.email && planPatchFor(status, nextBilling, CLOUD_PLAN).plan !== "free") {
-      const outcome = await parkOrGrant(supa, "cloud", buyer.email, {
-        subscription_id: subscriptionId,
-        customer_id: customer.customer_id,
-      });
-      return json({ received: true, outcome });
-    }
-    return json({ received: true, ignored: "no organisation for this subscription" });
-  }
-
-  const patch = planPatchFor(status, nextBilling, CLOUD_PLAN);
-  const { error } = await supa
-    .from("organizations")
-    .update({
-      ...patch,
-      dodo_subscription_id: subscriptionId,
-      ...(customer.customer_id ? { dodo_customer_id: customer.customer_id } : {}),
-    })
-    .eq("id", orgId);
-  // 500 so Dodo retries: an org left on the wrong plan either loses access it
-  // paid for or keeps access it stopped paying for.
-  if (error) return json({ error: error.message }, 500);
-  return json({ received: true, org: orgId, plan: patch.plan, status: patch.plan_status });
+/** Read current provider state, then atomically order deliveries and claims. */
+async function handleSubscription(payload: unknown, timestamp: string): Promise<Response> {
+  const id = String((payload as { subscription_id?: string })?.subscription_id ?? "");
+  if (!id || !Number.isFinite(Date.parse(timestamp)))
+    return json({ error: "Subscription event lacks an id or timestamp." }, 400);
+  const data = await dodo.subscriptions.retrieve(id);
+  const buyer = buyerOf(data as DodoPurchase, PRODUCT_CLOUD, "cloud_subscription");
+  if (!buyer) return json({ received: true, ignored: "unrelated product" });
+  const patch = planPatchFor(data.status, data.next_billing_date, CLOUD_PLAN);
+  const { data: outcome, error } = await admin().rpc("filey_apply_dodo_subscription", {
+    p_subscription: id, p_email: buyer.email?.trim().toLowerCase() ?? "",
+    p_customer: data.customer?.customer_id ?? null,
+    p_org: buyer.orgId ?? null, p_user: buyer.userId ?? null,
+    p_status: patch.plan_status, p_period_end: patch.current_period_end,
+    p_event_at: timestamp,
+  });
+  if (error) throw error;
+  return json({ received: true, outcome });
 }

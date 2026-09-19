@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Manager, Webview};
 
 const MAX_OUTPUT: u64 = 6_000_000;
 const SNAPSHOT_LIFETIME: Duration = Duration::from_secs(120);
@@ -23,6 +23,7 @@ struct Session {
     windows: HashMap<String, u64>,
     snapshot: Option<Snapshot>,
     root_window: Option<String>,
+    dialog_owner: Option<String>,
 }
 #[derive(Default)]
 struct State {
@@ -34,7 +35,7 @@ fn state() -> &'static Mutex<State> {
     STATE.get_or_init(|| Mutex::new(State::default()))
 }
 
-pub(super) fn check_window(window: &WebviewWindow) -> Result<(), String> {
+pub(super) fn check_window(window: &Webview) -> Result<(), String> {
     let url = window.url().map_err(|e| e.to_string())?;
     let bundled = url.scheme() == "tauri" && url.host_str() == Some("localhost")
         || matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost");
@@ -67,7 +68,7 @@ pub fn window_closed(label: &str) {
 
 #[tauri::command]
 pub fn computer_start(
-    window: WebviewWindow,
+    window: Webview,
     duration_seconds: Option<u64>,
     window_id: Option<String>,
 ) -> Result<Value, String> {
@@ -80,22 +81,29 @@ pub fn computer_start(
     }
     if let Some(ref id) = window_id {
         #[cfg(windows)]
-        let valid = window
-            .app_handle()
-            .webview_windows()
-            .values()
-            .any(|candidate| {
-                candidate.label().starts_with("filey-browser-")
-                    && candidate
-                        .hwnd()
-                        .is_ok_and(|handle| (handle.0 as usize).to_string() == *id)
-            });
+        let valid = super::desktop_browser::computer_windows(window.app_handle()).contains(id);
         #[cfg(not(windows))]
         let valid = false;
         if !valid {
             return Err("Choose a Filey browser window for this computer task.".into());
         }
     }
+    let dialog_owner = if window_id.is_some() {
+        #[cfg(windows)]
+        {
+            window
+                .window()
+                .hwnd()
+                .ok()
+                .map(|h| (h.0 as isize).to_string())
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    } else {
+        None
+    };
     let mut current = state()
         .lock()
         .map_err(|_| "Computer access is unavailable.")?;
@@ -107,6 +115,7 @@ pub fn computer_start(
         windows: HashMap::new(),
         snapshot: None,
         root_window: window_id,
+        dialog_owner,
     });
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -117,7 +126,7 @@ pub fn computer_start(
 }
 
 #[tauri::command]
-pub fn computer_stop(window: WebviewWindow, session_token: String) -> Result<(), String> {
+pub fn computer_stop(window: Webview, session_token: String) -> Result<(), String> {
     check_window(&window)?;
     let mut current = state()
         .lock()
@@ -207,7 +216,9 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
     if action == "list_windows" {
         active.snapshot = None;
         active.windows.clear();
-        return Ok(json!({"action": action, "root_window_id": active.root_window}));
+        return Ok(
+            json!({"action": action, "root_window_id": active.root_window, "dialog_owner_id": active.dialog_owner}),
+        );
     }
     if action == "screenshot" {
         let window = text(request, "window_id", 24)?;
@@ -293,17 +304,18 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn computer_command(
-    window: WebviewWindow,
+    window: Webview,
     session_token: String,
     request: Value,
 ) -> Result<Value, String> {
     check_window(&window)?;
-    tauri::async_runtime::spawn_blocking(move || execute(session_token, request))
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || execute(app, session_token, request))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn execute(token: String, request: Value) -> Result<Value, String> {
+fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value, String> {
     if !cfg!(windows) {
         return Err("Native computer control currently requires Windows.".into());
     }
@@ -314,7 +326,10 @@ fn execute(token: String, request: Value) -> Result<Value, String> {
         if current.job.is_some() {
             return Err("A computer action is already running. Wait or stop it first.".into());
         }
-        let prepared = prepare(&request, session(&mut current, &token)?)?;
+        let mut prepared = prepare(&request, session(&mut current, &token)?)?;
+        if prepared["action"] == "list_windows" {
+            prepared["browser_windows"] = json!(super::desktop_browser::computer_windows(&app));
+        }
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(
             HELPER
@@ -471,7 +486,8 @@ fn execute(token: String, request: Value) -> Result<Value, String> {
             .filter(|w| {
                 active.root_window.as_ref().is_none_or(|root| {
                     w["window_id"].as_str() == Some(root.as_str())
-                        || w["root_owner_id"].as_str() == Some(root.as_str())
+                        || w["root_owner_id"].as_str()
+                            == active.dialog_owner.as_deref().or(Some(root.as_str()))
                             && w["window_class"].as_str() == Some("#32770")
                 })
             })
@@ -510,6 +526,7 @@ mod tests {
             expires: None,
             windows: HashMap::from([("123".into(), 456)]),
             root_window: None,
+            dialog_owner: None,
             snapshot: Some(Snapshot {
                 id: "fresh".into(),
                 captured: Instant::now(),
@@ -519,7 +536,10 @@ mod tests {
     }
     #[test]
     fn default_access_has_no_deadline_but_requires_its_token_and_can_be_revoked() {
-        let mut current = State { session: Some(active()), job: None };
+        let mut current = State {
+            session: Some(active()),
+            job: None,
+        };
         assert!(session(&mut current, "wrong-token").is_err());
         assert!(session(&mut current, "session").unwrap().expires.is_none());
         revoke(&mut current);

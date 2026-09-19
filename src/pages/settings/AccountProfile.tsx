@@ -1,7 +1,5 @@
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { supabase, cloudConfigured } from "../../lib/supabase";
-import { isLocalMode } from "../../lib/dataMode";
-import { cloudSessionEmail } from "../../lib/sync";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { useEffect, useRef, useState } from "react";
@@ -52,7 +50,7 @@ function PwInput({
 }
 
 export default function AccountProfile() {
-  const { profile, user, updateProfile, signInWithPassword, refreshMfaPending } =
+  const { profile, updateProfile, signInWithPassword, refreshMfaPending } =
     useAuth();
   const { toast, prompt } = useUI();
   const [p, setP] = useState({
@@ -85,7 +83,7 @@ export default function AccountProfile() {
   // with no email_confirmed_at — reading verification from it always shows
   // "Unverified" even for a fully confirmed account. Read from the real
   // Supabase session instead.
-  const verified = !!(supabase && !isLocalMode() && (user as any)?.email_confirmed_at);
+  const [verified, setVerified] = useState(false);
 
   const onAvatar = (file?: File) => {
     if (!file) return;
@@ -121,12 +119,20 @@ export default function AccountProfile() {
   const [cloudChecked, setCloudChecked] = useState(false);
   useEffect(() => {
     let alive = true;
-    cloudSessionEmail()
-      .then((e) => alive && setCloudEmail(e))
+    if (!supabase) { setCloudChecked(true); return; }
+    const readSession = (account: { email?: string; email_confirmed_at?: string } | null) => {
+      if (!alive) return;
+      setCloudEmail(account?.email ?? null);
+      setVerified(!!account?.email_confirmed_at);
+    };
+    supabase.auth.getSession()
+      .then(({ data }) => readSession(data.session?.user ?? null))
       .catch(() => {})
       .finally(() => alive && setCloudChecked(true));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => readSession(session?.user ?? null));
     return () => {
       alive = false;
+      data.subscription.unsubscribe();
     };
   }, []);
   const cloudAccount = cloudConfigured && !!cloudEmail;
@@ -234,7 +240,7 @@ export default function AccountProfile() {
       // the old password and rejected the new one.
       await rememberLocalCredential(
         accountEmail,
-        user?.id ?? getLocalCredential()?.userId ?? "",
+        (await supabase.auth.getSession()).data.session?.user.id ?? getLocalCredential()?.userId ?? "",
         npw
       );
       setPwMsg({ ok: true, t: "Password updated." });

@@ -1,11 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setCacheOrg } from "../api";
 import { aiAgent, aiChat, aiFetch, listAiModels, setAiConfig } from "../ai";
-import { AI_DEV_ORIGINS } from "../aiEndpoint";
+import { AI_DEV_ORIGINS, aiEffortLevels, anthropicGenerationOptions } from "../aiEndpoint";
 
 beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("provider-qa", "qa-user"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const reply = () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
+
+it("sends selected effort to reasoning providers and leaves unsupported models at default", async () => {
+  const fetch = vi.fn(async () => reply());
+  vi.stubGlobal("fetch", fetch);
+  setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-5.2", apiKey: "fixture" });
+  await aiAgent([{ role: "user", text: "Check this." }], { effort: "xhigh" });
+  const body = JSON.parse(String((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+  expect(body.reasoning_effort).toBe("xhigh");
+  expect(body.max_completion_tokens).toBeGreaterThanOrEqual(65536);
+  expect(anthropicGenerationOptions("claude-opus-4-6", 2048, "max").output_config).toEqual({ effort: "max" });
+  expect(aiEffortLevels({ provider: "openai", model: "custom-local-model" })).toEqual(["auto"]);
+});
 
 it("uses reasoning-compatible parameters in both chat and agent requests", async () => {
   const fetch = vi.fn(async () => reply());

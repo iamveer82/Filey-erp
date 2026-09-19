@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   Mic,
@@ -21,12 +21,16 @@ import {
   Check,
   Square,
   Settings2,
+  PanelRight,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
+import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
+import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
+import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen } from "../lib/desktopBrowser";
 import { enableComputerUse, disableComputerUse, computerUseSupported } from "../lib/computerUse";
-import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
+import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, writeAgentStorage } from "../lib/agentStorage";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
 import { getReachConfig, setReachConfig } from "../lib/reach";
@@ -38,7 +42,7 @@ import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { skillsIndex } from "../lib/agentSkills";
 import { buildAiContext } from "../lib/aiContext";
-import { AGENT_MODES, getAgentMode, type AgentMode } from "../lib/agentMode";
+import { getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
 import {
   aiAgentStream,
   aiAutonomousStream,
@@ -46,6 +50,7 @@ import {
   AiError,
   buildSystemPrompt,
   getPersona,
+  getAiConfig,
   type AiMessage,
   type AiImage,
 } from "../lib/ai";
@@ -202,7 +207,17 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   };
   // Read fresh so changes in Settings are reflected when sending.
   const ready = aiReady();
+  const modelConfig = getAiConfig();
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
+  const [effort, setEffort] = useState<AiEffort>(() => {
+    const saved = readAgentStorage("filey.agent.effort");
+    return saved && Object.prototype.hasOwnProperty.call(EFFORT_LABELS, saved) ? saved as AiEffort : "auto";
+  });
+  const browserPanel = useSyncExternalStore(subscribeBrowserPanel, getBrowserPanelState);
+  const changeEffort = (next: AiEffort) => {
+    try { writeAgentStorage("filey.agent.effort", next, scope ?? undefined); setEffort(next); }
+    catch { setErr("Could not save the effort setting. Try again."); }
+  };
   /** The tools run so far this turn ("Looking up customers…"), shown as a chip
    *  trail while the agent works so a long turn reads as work, not a hang. */
   const [runProgress, setRunProgress] = useState<ChatTurn["run"]>();
@@ -474,7 +489,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         { role: "user", text: goalText, images },
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
-      const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096, computerSession };
+      const selectedEffort = aiEffortLevels(getAiConfig()).includes(effort) ? effort : "auto";
+      const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096, effort: selectedEffort, computerSession };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
         : aiAgentStream(messages, options);
@@ -615,7 +631,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   };
 
   const empty = chat.turns.length === 0;
-  const activeMode = AGENT_MODES.find((item) => item.id === mode)!;
 
   return (
     <div
@@ -685,10 +700,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               >
                 <Brain size={15} />
               </button>
-              <button type="button" onClick={() => setCapsOpen(true)} disabled={busy}
-                className="btn-ghost w-10 !px-0 sm:w-auto sm:!px-3" aria-label="Agent access" title={activeMode.description}>
-                <SlidersHorizontal size={15} />
-                <span className="hidden sm:inline">Access: {activeMode.name}</span>
+              <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
+                className="btn-ghost w-10 !px-0" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
+                <PanelRight size={16} />
               </button>
               <Link to="/settings?section=ai" className="btn-ghost w-10 !px-0" aria-label="AI settings" title="AI settings">
                 <Settings2 size={15} />
@@ -854,7 +868,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               {/* Action bar — one circular cluster, reference-style: the same
                   8×8 round slot carries attach, toggles, and send, so the eye
                   reads one row of controls instead of mixed shapes. */}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-1">
                 <div className="relative shrink-0" ref={plusRef}>
                   <button
                     type="button"
@@ -865,7 +879,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     title="Add files, repos, skills — Ctrl+U for files"
                     className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover"
                   >
-                    <Paperclip size={16} />
+                    <Plus size={18} />
                   </button>
 
                   <MenuPopover
@@ -955,6 +969,11 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     e.target.value = ""; // allow re-selecting the same file
                   }}
                 />
+                <AgentAccessControl mode={mode} disabled={busy} onCapabilities={() => setCapsOpen(true)} onChange={next => {
+                  setAgentMode(next);
+                  const saved = getAgentMode(); setMode(saved);
+                  if (saved !== next) setErr("Could not save the access mode. Your previous selection is unchanged.");
+                }} />
                 {/* Autonomous changes how a task runs, not its access permissions. */}
                 {auto && <button
                   type="button"
@@ -979,7 +998,29 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   />
                   Autonomous
                 </button>}
-                <div className="flex-1" />
+                <div className="ml-auto flex max-w-full items-center gap-1">
+                <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />
+                {/* Mic — dictation straight into the composer. Browser engine
+                    (Chromium WebView2), free, no key. Hidden where the browser
+                    doesn't ship SpeechRecognition. */}
+                {micSupported && !busy && (
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    disabled={busy}
+                    aria-label={listening ? "Stop dictation" : "Start dictation"}
+                    aria-pressed={listening}
+                    title={listening ? "Stop dictation" : "Dictate (speech-to-text)"}
+                    className={cn(
+                      "btn-ghost w-10 !border-transparent !px-0 shrink-0",
+                      listening
+                        ? "bg-danger/15 text-danger animate-pulse"
+                        : "text-muted-foreground hover:bg-hover hover:text-foreground"
+                    )}
+                  >
+                    <Mic size={15} />
+                  </button>
+                )}
                 {/* One button, three states — empty ghost, ready amber,
                     streaming stop — exactly like the reference input. Stop is
                     ink on purpose: an interrupt is not what amber invites. */}
@@ -1010,27 +1051,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     <ArrowUp size={16} />
                   </button>
                 )}
-                {/* Mic — dictation straight into the composer. Browser engine
-                    (Chromium WebView2), free, no key. Hidden where the browser
-                    doesn't ship SpeechRecognition. */}
-                {micSupported && !busy && (
-                  <button
-                    type="button"
-                    onClick={toggleMic}
-                    disabled={busy}
-                    aria-label={listening ? "Stop dictation" : "Start dictation"}
-                    aria-pressed={listening}
-                    title={listening ? "Stop dictation" : "Dictate (speech-to-text)"}
-                    className={cn(
-                      "btn-ghost w-10 !border-transparent !px-0 shrink-0",
-                      listening
-                        ? "bg-danger/15 text-danger animate-pulse"
-                        : "text-muted-foreground hover:bg-hover hover:text-foreground"
-                    )}
-                  >
-                    <Mic size={15} />
-                  </button>
-                )}
+                </div>
               </div>
             </div>
             <p id="filey-message-hint" className="mt-2 px-1 text-center text-[11px] text-muted-foreground">

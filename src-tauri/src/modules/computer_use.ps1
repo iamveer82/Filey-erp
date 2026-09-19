@@ -32,6 +32,17 @@ public static class FileyDesktop {
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+  [StructLayout(LayoutKind.Sequential)] public struct GuiThreadInfo {
+    public uint Size, Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect;
+  }
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+  [DllImport("user32.dll")] static extern bool IsChild(IntPtr parent, IntPtr child);
+  public static void CheckKeyboardFocus() {
+    if (GetAncestor(Target, 2) == Target) return;
+    var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo)) };
+    if (!GetGUIThreadInfo(0, ref info) || (info.Focus != Target && !IsChild(Target, info.Focus)))
+      throw new Exception("Click inside the browser before typing. Keyboard focus is outside this tab.");
+  }
   public static IntPtr Target;
   public static Rect Bounds;
   public static uint ProcessId;
@@ -42,9 +53,10 @@ public static class FileyDesktop {
     CheckStop();
     Rect rect; uint process;
     GetWindowThreadProcessId(Target, out process);
-    if (GetForegroundWindow() != Target || process != ProcessId || !GetWindowRect(Target, out rect)
+    if (GetForegroundWindow() != GetAncestor(Target, 2) || !IsWindowVisible(Target) || process != ProcessId || !GetWindowRect(Target, out rect)
       || rect.Left != Bounds.Left || rect.Top != Bounds.Top || rect.Right != Bounds.Right || rect.Bottom != Bounds.Bottom)
       throw new Exception("The target window changed. Take another screenshot before acting.");
+    foreach (var input in values) { if (input.type == 1) { CheckKeyboardFocus(); break; } }
     if (SendInput((uint)values.Length, values, Marshal.SizeOf(typeof(Input))) != values.Length)
       throw new Exception("Windows blocked input. Elevated or protected windows cannot be controlled.");
   }
@@ -77,13 +89,15 @@ public static class FileyDesktop {
 [FileyDesktop]::CheckStop()
 
 if ($request.action -eq 'list_windows') {
-  $windows = @([FileyDesktop]::Windows() | ForEach-Object {
+  $candidates = @([FileyDesktop]::Windows()) + @($request.browser_windows | ForEach-Object { [long]$_ })
+  $windows = @($candidates | Select-Object -Unique | ForEach-Object {
     $handle = [IntPtr]::new($_)
     [uint32]$processId = 0
     [void][FileyDesktop]::GetWindowThreadProcessId($handle, [ref]$processId)
     $rootOwner = [FileyDesktop]::GetAncestor($handle, 3).ToInt64().ToString()
     $windowClass = [FileyDesktop]::ClassName($handle)
-    if (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or ($rootOwner -eq $request.root_window_id -and $windowClass -eq '#32770')) {
+    $dialogOwner = if ($request.dialog_owner_id) { $request.dialog_owner_id } else { $request.root_window_id }
+    if ([FileyDesktop]::IsWindowVisible($handle) -and (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or ($rootOwner -eq $dialogOwner -and $windowClass -eq '#32770'))) {
       @{ window_id = $_.ToString(); title = [FileyDesktop]::Title($handle); process_id = $processId; minimized = [FileyDesktop]::IsIconic($handle); root_owner_id = $rootOwner; window_class = $windowClass }
     }
   })
@@ -103,10 +117,11 @@ if ($request.action -eq 'screenshot') {
   $expected = $request.bounds
   if ([FileyDesktop]::IsIconic($window) -or -not [FileyDesktop]::GetWindowRect($window, [ref]$before) -or $before.Left -ne $expected.x -or $before.Top -ne $expected.y -or ($before.Right - $before.Left) -ne $expected.width -or ($before.Bottom - $before.Top) -ne $expected.height) { throw 'The window moved or resized. Take a new screenshot before acting.' }
 }
-[void][FileyDesktop]::SetForegroundWindow($window)
+$foreground = [FileyDesktop]::GetAncestor($window, 2)
+[void][FileyDesktop]::SetForegroundWindow($foreground)
 Start-Sleep -Milliseconds 180
 [FileyDesktop]::CheckStop()
-if ([FileyDesktop]::GetForegroundWindow() -ne $window) { throw 'The selected window is not in front. Bring it to the foreground and take another screenshot.' }
+if ([FileyDesktop]::GetForegroundWindow() -ne $foreground) { throw 'The selected window is not in front. Bring it to the foreground and take another screenshot.' }
 $rect = [FileyDesktop+Rect]::new()
 if (-not [FileyDesktop]::GetWindowRect($window, [ref]$rect)) { throw 'Could not locate the selected window.' }
 $width = $rect.Right - $rect.Left

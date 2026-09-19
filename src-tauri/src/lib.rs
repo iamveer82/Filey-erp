@@ -96,6 +96,7 @@ pub fn run() {
                 modules::computer_use::computer_stop,
                 modules::computer_use::computer_command,
                 modules::desktop_browser::desktop_browser_command,
+            modules::desktop_browser::desktop_browser_layout,
             ];
             handler(invoke)
         })

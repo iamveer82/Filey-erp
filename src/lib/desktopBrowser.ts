@@ -15,6 +15,42 @@ export interface BrowserTab {
   warning?: string | null;
 }
 export interface DesktopBrowserResult { tabs: BrowserTab[]; tab?: BrowserTab | null }
+export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null }
+let panel: BrowserPanelState = { open: false, tabs: [], activeId: null };
+const panelListeners = new Set<() => void>();
+let syncViewport: (() => Promise<void>) | null = null;
+export const getBrowserPanelState = () => panel;
+export function subscribeBrowserPanel(listener: () => void) { panelListeners.add(listener); return () => { panelListeners.delete(listener); }; }
+function updatePanel(next: BrowserPanelState) { panel = next; panelListeners.forEach(listener => listener()); }
+export function setBrowserPanelOpen(open: boolean) { if (open !== panel.open) updatePanel({ ...panel, open }); }
+export function newBrowserPanelTab() { updatePanel({ ...panel, open: true, activeId: null }); }
+export function registerBrowserViewportSync(sync: () => Promise<void>) {
+  syncViewport = sync;
+  return () => { if (syncViewport === sync) syncViewport = null; };
+}
+
+export interface BrowserBounds { x: number; y: number; width: number; height: number }
+let layoutQueue: Promise<void> = Promise.resolve();
+export function layoutDesktopBrowser(bounds: BrowserBounds | null, tabId: string | null): Promise<void> {
+  if (!desktopBrowserSupported()) return Promise.resolve();
+  const scope = agentStorageScope();
+  const account = getCacheScope();
+  if (!scope || !account) return Promise.resolve();
+  const version = generation;
+  // Serialize native positioning so a slow show cannot overtake a collapse.
+  // This queue stays separate from commands, which await viewport readiness.
+  const result = layoutQueue.then(async () => {
+    if (scope !== agentStorageScope() || version !== generation) return;
+    const profile = await profileKey(account);
+    if (scope !== agentStorageScope() || version !== generation) return;
+    if (bounds && (!Object.values(bounds).every(Number.isFinite) || bounds.x < 0 || bounds.y < 0 || bounds.width < 1 || bounds.height < 1)) throw new Error("Invalid browser panel bounds.");
+    if (bounds) await requireModuleAccess("browser", true);
+    if (scope !== agentStorageScope() || version !== generation) return;
+    await invoke("desktop_browser_layout", { profile, bounds, tabId });
+  });
+  layoutQueue = result.catch(() => {});
+  return result;
+}
 export interface DesktopBrowserRequest {
   action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all";
   url?: string;
@@ -78,6 +114,7 @@ function validate(args: DesktopBrowserRequest | Record<string, unknown>): Deskto
 /** Closing tabs leaves the per-account browsing profile intact. */
 export function closeDesktopBrowserTabs(): Promise<void> {
   generation++;
+  updatePanel({ open: false, tabs: [], activeId: null });
   const profile = activeProfile;
   activeProfile = null;
   activeScope = null;
@@ -107,6 +144,7 @@ export async function desktopBrowserCommand(
       throw new DOMException("Browser action canceled or workspace changed", "AbortError");
     activeScope = scope;
     activeProfile = profile;
+    if (request.action === "open" || request.action === "focus") setBrowserPanelOpen(true);
     const abort = () => { if (request.action !== "list") void closeDesktopBrowserTabs().catch(() => {}); };
     signal?.addEventListener("abort", abort, { once: true });
     try {
@@ -118,6 +156,8 @@ export async function desktopBrowserCommand(
       }
       if (!result || !Array.isArray(result.tabs) || result.tabs.length > 8)
         throw new Error("Filey Browser returned an invalid response.");
+      updatePanel({ ...panel, tabs: result.tabs, activeId: result.tab?.id ?? (panel.activeId === null || result.tabs.some(tab => tab.id === panel.activeId) ? panel.activeId : result.tabs[0]?.id ?? null) });
+      if (request.action !== "list") await syncViewport?.();
       return result;
     } finally { signal?.removeEventListener("abort", abort); }
   });

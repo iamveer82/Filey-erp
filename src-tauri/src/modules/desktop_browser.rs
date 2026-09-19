@@ -1,13 +1,14 @@
 //! Browser windows contain untrusted remote sites. Only the main Filey window
 //! can manage them; the global invoke dispatcher rejects their custom IPC.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{
     webview::{NewWindowResponse, PageLoadEvent},
-    AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalPosition, LogicalSize, Manager, Rect, Url, Webview, WebviewBuilder,
+    WebviewUrl,
 };
 
 const PREFIX: &str = "filey-browser-";
@@ -148,8 +149,8 @@ fn close_profile(app: &AppHandle, profile: Option<&str>) {
         Vec::new()
     };
     for id in ids {
-        if let Some(window) = app.get_webview_window(&id) {
-            let _ = window.destroy();
+        if let Some(window) = app.get_webview(&id) {
+            let _ = window.close();
         }
     }
 }
@@ -166,7 +167,7 @@ pub fn window_closed(app: &AppHandle, label: &str) {
 
 // Native WebView2 history/control APIs; never evaluate page JavaScript.
 #[cfg(windows)]
-fn native_control(window: &WebviewWindow, action: &str) -> Result<(bool, bool), String> {
+fn native_control(window: &Webview, action: &str) -> Result<(bool, bool), String> {
     let action = action.to_owned();
     let (send, receive) = std::sync::mpsc::sync_channel(1);
     window
@@ -198,7 +199,7 @@ fn native_control(window: &WebviewWindow, action: &str) -> Result<(bool, bool), 
         .map_err(|_| "Browser controls did not respond. Try again.".to_string())?
 }
 #[cfg(not(windows))]
-fn native_control(_: &WebviewWindow, _: &str) -> Result<(bool, bool), String> {
+fn native_control(_: &Webview, _: &str) -> Result<(bool, bool), String> {
     Err("The built-in browser currently requires Windows.".into())
 }
 
@@ -211,7 +212,7 @@ fn read_tabs(app: &AppHandle, profile: &str) -> Result<Vec<BrowserTab>, String> 
         .map(|entry| entry.tab.clone())
         .collect();
     for tab in &mut result {
-        if let Some(window) = app.get_webview_window(&tab.id) {
+        if let Some(window) = app.get_webview(&tab.id) {
             if let Ok(url) = window.url() {
                 if allowed_url(&url) {
                     tab.url = display_url(&url);
@@ -267,8 +268,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
         let navigation_id = id.clone();
         let popup_id = id.clone();
         let download_id = id.clone();
-        let window = WebviewWindowBuilder::new(app, &id, WebviewUrl::External(url))
-            .title("Filey Browser").inner_size(1180.0, 820.0).min_inner_size(640.0, 480.0)
+        let builder = WebviewBuilder::new(&id, WebviewUrl::External(url))
             .data_directory(directory).devtools(false).browser_extensions_enabled(false)
             .disable_drag_drop_handler()
             .on_navigation(move |url| {
@@ -291,27 +291,46 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
             .on_document_title_changed(|window, title| {
                 let title: String = title.chars().filter(|c| !c.is_control()).take(180).collect();
                 update(window.label(), |tab| tab.title = title.clone());
-                let _ = window.set_title(&format!("Filey Browser — {title}"));
+
             })
             .on_page_load(|window, payload| {
                 update(window.label(), |tab| {
                     if allowed_url(payload.url()) { tab.url = display_url(payload.url()); }
                     tab.loading = matches!(payload.event(), PageLoadEvent::Started);
                 });
-            }).build().map_err(|e| format!("Could not open Filey Browser: {e}"))?;
+            });
+        let parent = app
+            .get_window("main")
+            .ok_or("Filey window is unavailable.")?;
+        let window = parent
+            .add_child(
+                builder,
+                LogicalPosition::new(0.0, 0.0),
+                LogicalSize::new(1.0, 1.0),
+            )
+            .map_err(|e| format!("Could not open Filey Browser: {e}"))?;
+        window.hide().map_err(|e| e.to_string())?;
         let present = tabs()
             .lock()
             .map_err(|_| "Browser state unavailable.")?
             .contains_key(&id);
         if !present {
-            let _ = window.destroy();
+            let _ = window.close();
             return Err("Browser opening was canceled because the workspace changed.".into());
         }
         #[cfg(windows)]
-        if let Ok(handle) = window.hwnd() {
-            update(&id, |tab| {
-                tab.window_id = Some((handle.0 as isize).to_string())
-            });
+        {
+            let browser_id = id.clone();
+            window
+                .with_webview(move |view| unsafe {
+                    let mut handle = Default::default();
+                    if view.controller().ParentWindow(&mut handle).is_ok() {
+                        update(&browser_id, |tab| {
+                            tab.window_id = Some((handle.0 as isize).to_string())
+                        });
+                    }
+                })
+                .map_err(|e| e.to_string())?;
         }
         Ok(id.clone())
     })();
@@ -325,7 +344,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn desktop_browser_command(
-    window: WebviewWindow,
+    window: Webview,
     profile: String,
     request: Value,
 ) -> Result<Value, String> {
@@ -360,9 +379,7 @@ pub async fn desktop_browser_command(
                 if !valid {
                     return Err("The browser tab does not belong to the current workspace.".into());
                 }
-                let tab_window = app
-                    .get_webview_window(id)
-                    .ok_or("The browser tab was closed.")?;
+                let tab_window = app.get_webview(id).ok_or("The browser tab was closed.")?;
                 match action {
                     "navigate" => {
                         tab_window
@@ -371,12 +388,10 @@ pub async fn desktop_browser_command(
                     }
                     "reload" => tab_window.reload().map_err(|e| e.to_string())?,
                     "focus" => {
-                        tab_window.show().map_err(|e| e.to_string())?;
-                        tab_window.unminimize().map_err(|e| e.to_string())?;
                         tab_window.set_focus().map_err(|e| e.to_string())?;
                     }
                     "close" => {
-                        tab_window.destroy().map_err(|e| e.to_string())?;
+                        tab_window.close().map_err(|e| e.to_string())?;
                         tabs()
                             .lock()
                             .map_err(|_| "Browser state unavailable.")?
@@ -403,9 +418,125 @@ pub async fn desktop_browser_command(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Clone, Copy, Deserialize)]
+pub struct BrowserBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+impl BrowserBounds {
+    fn valid(self, width: f64, height: f64) -> bool {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|n| n.is_finite())
+            && self.x >= 0.0
+            && self.y >= 0.0
+            && self.width >= 1.0
+            && self.height >= 1.0
+            && self.x + self.width <= width + 1.0
+            && self.y + self.height <= height + 1.0
+    }
+}
+
+/// Only handles of Filey's live child webviews are offered to computer use.
+pub(super) fn computer_windows(app: &AppHandle) -> Vec<String> {
+    tabs()
+        .lock()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|(id, _)| app.get_webview(id).is_some())
+                .filter_map(|(_, entry)| entry.tab.window_id.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn desktop_browser_layout(
+    window: Webview,
+    profile: String,
+    bounds: Option<BrowserBounds>,
+    tab_id: Option<String>,
+) -> Result<(), String> {
+    super::computer_use::check_window(&window)?;
+    if !valid_profile(&profile) {
+        return Err("A signed-in browser profile is required.".into());
+    }
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ids: Vec<String> = tabs()
+            .lock()
+            .map_err(|_| "Browser state unavailable.")?
+            .iter()
+            .filter(|(_, e)| e.profile == profile)
+            .map(|(id, _)| id.clone())
+            .collect();
+        // Hide first, including when a caller supplies an invalid rectangle.
+        for id in &ids {
+            if let Some(view) = app.get_webview(id) {
+                view.hide().map_err(|e| e.to_string())?;
+            }
+        }
+        let Some(bounds) = bounds else {
+            return Ok(());
+        };
+        let id = tab_id
+            .filter(|id| ids.contains(id))
+            .ok_or("Choose a tab in this workspace.")?;
+        let parent = app
+            .get_window("main")
+            .ok_or("Filey window is unavailable.")?;
+        let size = parent
+            .inner_size()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(parent.scale_factor().map_err(|e| e.to_string())?);
+        if !bounds.valid(size.width, size.height) {
+            return Err("Browser bounds must stay inside Filey.".into());
+        }
+        let view = app.get_webview(&id).ok_or("The browser tab was closed.")?;
+        view.set_bounds(Rect {
+            position: LogicalPosition::new(bounds.x, bounds.y).into(),
+            size: LogicalSize::new(bounds.width, bounds.height).into(),
+        })
+        .map_err(|e| e.to_string())?;
+        view.show().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_bounds_stay_inside_the_app() {
+        let valid = BrowserBounds {
+            x: 500.0,
+            y: 80.0,
+            width: 400.0,
+            height: 600.0,
+        };
+        assert!(valid.valid(1000.0, 800.0));
+        for invalid in [
+            BrowserBounds { x: -1.0, ..valid },
+            BrowserBounds {
+                width: f64::NAN,
+                ..valid
+            },
+            BrowserBounds {
+                width: 900.0,
+                ..valid
+            },
+            BrowserBounds {
+                height: 0.0,
+                ..valid
+            },
+        ] {
+            assert!(!invalid.valid(1000.0, 800.0));
+        }
+    }
     #[test]
     fn only_accepts_web_urls_and_safe_profile_components() {
         for url in [

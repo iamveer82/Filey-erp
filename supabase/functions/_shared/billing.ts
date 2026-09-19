@@ -84,9 +84,9 @@ export function buyerOf(
   type: "freedom_license" | "cloud_subscription"
 ): { userId?: string; orgId?: string; email?: string } | null {
   const meta = data.metadata ?? {};
-  const email = meta.email || data.customer?.email || undefined;
-  if (meta.type) return meta.type === type ? { userId: meta.user_id, orgId: meta.org_id, email } : null;
   const bought =
     data.product_id === product || (data.product_cart ?? []).some((i) => i.product_id === product);
-  return bought && product ? { email } : null;
+  if (!product || !bought || (meta.type && meta.type !== type)) return null;
+  const email = data.customer?.email || meta.email || undefined;
+  return meta.type ? { userId: meta.user_id, orgId: meta.org_id, email } : { email };
 }

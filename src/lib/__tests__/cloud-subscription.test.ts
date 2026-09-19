@@ -9,10 +9,15 @@ vi.mock("../supabase", () => ({
   isConfigured: true,
   cloudConfigured: true,
   supabase: {
+    rpc: async () => ({ data: "current-workspace", error: null }),
     from: () => {
       const query = {
         select: () => query,
         limit: () => query,
+        eq: (column: string, value: string) => {
+          expect([column, value]).toEqual(["id", "current-workspace"]);
+          return query;
+        },
         maybeSingle: async () => {
           plan.reads++;
           return {
@@ -77,5 +82,14 @@ describe("waiting for the Cloud plan to switch on", () => {
     const sub = await awaitCloudPlan(4, 0);
     expect(sub).toBeNull();
     expect(plan.reads).toBe(4);
+  });
+
+  it("never accepts a canceled or unknown paid-plan status", async () => {
+    const { awaitCloudPlan } = await import("../subscription");
+    plan.value = "cloud";
+    for (const status of ["canceled", "paused", "failed", "expired", "unknown", null]) {
+      plan.status = status;
+      expect(await awaitCloudPlan(1, 0)).toBeNull();
+    }
   });
 });

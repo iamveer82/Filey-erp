@@ -54,7 +54,7 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-semibold text-ink">Use on this computer</h2>
-                    <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-ink">
+                    <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-[#1c1917]">
                       Basic · Free
                     </span>
                   </div>
@@ -108,7 +108,7 @@ export default function SetupNotice() {
                     </span>
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Sync every device and share with your team. Already on Pro, or bought it on
+                    Sync up to five registered devices and share with your team. Already on Pro, or bought it on
                     gofiley.com? Pick this and sign in.
                   </p>
                 </div>

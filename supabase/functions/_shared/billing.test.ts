@@ -44,9 +44,11 @@ Deno.test("a storefront purchase with no metadata is recognised by product and e
   assertEquals(buyerOf(sub, "pdt_pro", "cloud_subscription"), { email: "a@b.co" });
 });
 
-Deno.test("our own checkouts are identified by metadata, never by product", () => {
+Deno.test("checkout metadata must agree with the purchased product", () => {
   const inApp = { metadata: { type: "freedom_license", user_id: "u1" }, product_cart: [{ product_id: "pdt_ultra" }] };
   assertEquals(buyerOf(inApp, "pdt_ultra", "freedom_license"), { userId: "u1", orgId: undefined, email: undefined });
+  assertEquals(buyerOf(inApp, "pdt_other", "freedom_license"), null);
+  assertEquals(buyerOf({ metadata: inApp.metadata }, "pdt_ultra", "freedom_license"), null);
   const cloudFirstCharge = { metadata: { type: "cloud_subscription" }, product_cart: [{ product_id: "pdt_pro" }] };
   assertEquals(buyerOf(cloudFirstCharge, "pdt_pro", "freedom_license"), null);
   // An unset product id must never match a payload that also lacks one.

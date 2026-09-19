@@ -1,5 +1,5 @@
 import { supabase, invokeFn } from "./supabase";
-import { clearEntitlementCache } from "./license";
+import { clearEntitlementCache, resolveTier } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
  * own org) and invokes the `dodo` edge function for checkout and the customer
@@ -49,7 +49,7 @@ export const PLANS: PlanCard[] = [
     period: " / month",
     blurb: "Your workspace everywhere, on every device you use.",
     features: [
-      "Full cloud: sync every device you sign in on",
+      "Cloud sync on up to 5 registered devices",
       "Filey on the web at app.gofiley.com",
       "Unlimited invoices — no monthly cap",
       "Team members share one workspace",
@@ -101,11 +101,15 @@ export interface Subscription {
 
 export async function getSubscription(): Promise<Subscription> {
   if (!supabase) return { plan: "free" };
-  const { data } = await supabase
+  const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+  if (orgError) throw orgError;
+  if (!orgId) return { plan: "free" };
+  const { data, error } = await supabase
     .from("organizations")
     .select("plan, plan_status, current_period_end")
-    .limit(1)
+    .eq("id", orgId)
     .maybeSingle();
+  if (error) throw error;
   return {
     plan: (data?.plan as Plan) ?? "free",
     plan_status: data?.plan_status ?? null,
@@ -161,7 +165,7 @@ export async function awaitCloudPlan(
 ): Promise<Subscription | null> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const sub = await getSubscription();
-    if (sub.plan !== "free" && sub.plan_status !== "pending") {
+    if (resolveTier(false, sub.plan, sub.plan_status) === "pro") {
       // Tier and cloud access are cached; without this the app keeps refusing
       // to sync for someone whose subscription just went live.
       clearEntitlementCache();
