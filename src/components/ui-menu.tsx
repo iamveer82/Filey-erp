@@ -71,7 +71,11 @@ export function MenuPopover({
       }
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeRef.current();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeRef.current();
+      anchorRef.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", esc);

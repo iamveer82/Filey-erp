@@ -18,8 +18,7 @@ import {
   HardDrive,
   X,
 } from "lucide-react";
-import AppIcon from "./AppIcon";
-import BloubBot from "./BloubBot";
+import WorkspaceNavigation from "./WorkspaceNavigation";
 import Logo from "./Logo";
 import ErrorBoundary from "./ErrorBoundary";
 import BrowserPanel from "./BrowserPanel";
@@ -28,7 +27,6 @@ import { cn, todayYmd, CURRENCIES } from "../lib/format";
 import { initDisplayCurrency, useDisplayCurrency } from "../lib/displayCurrency";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
-import { prefetchModule } from "../modules/registry";
 import { useAuth } from "../lib/auth";
 import { useLang, LANGS, type Lang } from "../lib/i18n";
 import { billing, followups, notifs as notifsApi, type Notification } from "../lib/api";
@@ -40,45 +38,6 @@ import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { isLocalMode } from "../lib/dataMode";
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
-
-/** Sidebar sections (Emergent reference grouping). Order within a group
- *  mirrors the user's workflow. */
-const MODULE_GROUPS: { title: string; ids: string[] }[] = [
-  { title: "Assistant", ids: ["agent"] },
-  { title: "Business", ids: ["overview", "reports"] },
-  {
-    title: "Sales",
-    ids: [
-      "orders",
-      "invoicing",
-      "quoting",
-      "crm",
-      "customers",
-      "follow-ups",
-      "marketing",
-    ],
-  },
-  {
-    title: "Purchases",
-    ids: ["suppliers", "purchase", "purchase-orders", "purchase-invoices"],
-  },
-  { title: "Inventory", ids: ["inventory"] },
-  {
-    title: "Accounting",
-    ids: [
-      "people",
-      "accounting",
-      "bank-accounts",
-      "cheques",
-      "payment-receipts",
-      "declaration",
-    ],
-  },
-  { title: "Service", ids: ["projects", "helpdesk"] },
-  { title: "Team", ids: ["team", "comms"] },
-  { title: "Tools", ids: ["tools", "files", "email-templates", "delivery-challans"] },
-  { title: "System", ids: ["settings", "integrations"] },
-];
 
 /** Quick-action commands for the search dropdown. `?new=1` deep-links a
  *  page to auto-open its create form. */
@@ -187,13 +146,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     .join("")
     .toUpperCase();
 
-  // Sidebar: fixed 248px (reference). Header button hides/shows on desktop;
-  // mobile uses an off-canvas drawer.
+  // Desktop visibility is saved; mobile uses a separate navigation drawer.
   const [hidden, setHidden] = useState(
     () => localStorage.getItem("sidebar.hidden") === "1"
   );
   const [mobileOpen, setMobileOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
+  const closeMenuRef = useRef<HTMLButtonElement>(null);
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width:1024px)").matches
   );
@@ -209,13 +168,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mobileOpen || isDesktop) return;
     const previous = document.activeElement as HTMLElement | null;
-    const controls = () =>
-      Array.from(
-        sidebarRef.current?.querySelectorAll<HTMLElement>(
-          'a[href],button:not([disabled]),input:not([disabled]),[tabindex="0"]'
-        ) || []
-      ).filter((el) => el.getClientRects().length);
-    controls()[0]?.focus();
+    const controls = () => {
+      const selector = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex="0"]';
+      return [
+        ...sidebarRef.current?.querySelectorAll<HTMLElement>(selector) || [],
+        ...document.querySelector(".workspace-account-menu")?.querySelectorAll<HTMLElement>(selector) || [],
+      ].filter(el => el.getClientRects().length);
+    };
+    closeMenuRef.current?.focus({ preventScroll: true });
     const trap = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
@@ -226,7 +186,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       const items = controls(),
         first = items[0],
         last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (!items.includes(document.activeElement as HTMLElement)) {
+        event.preventDefault();
+        first?.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last?.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -237,7 +200,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", trap);
     return () => {
       window.removeEventListener("keydown", trap);
-      previous?.focus();
+      previous?.focus({ preventScroll: true });
     };
   }, [mobileOpen, isDesktop]);
   useEffect(() => {
@@ -442,132 +405,64 @@ export default function Layout({ children }: { children: ReactNode }) {
               : "Offline · showing cached cloud records. Some actions require a connection."}
           </div>
         )}
-        {/* Mobile drawer backdrop */}
-        {mobileOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-            onClick={() => setMobileOpen(false)}
-            aria-hidden="true"
-          />
-        )}
+        <div
+          className="workspace-drawer-backdrop"
+          data-open={mobileOpen}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
 
-        {/* ───────────── Sidebar (reference: 248px, grouped sections) ───────────── */}
         {showSidebar && (
           <aside
+            id="workspace-sidebar"
             ref={sidebarRef}
             inert={!isDesktop && !mobileOpen}
             role={!isDesktop && mobileOpen ? "dialog" : undefined}
             aria-modal={!isDesktop && mobileOpen ? true : undefined}
             aria-label="Workspace navigation"
-            className={cn(
-              "workspace-sidebar w-[248px] shrink-0 h-full bg-sidebar border-r border-border flex flex-col",
-              "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:h-screen max-lg:transition-transform max-lg:duration-200",
-              mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full"
-            )}
+            className="workspace-sidebar"
+            data-open={mobileOpen}
           >
-            <div className="flex items-center px-3 pt-3 pb-3">
-              <Link
-                to="/overview"
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-hover"
-                title="Filey"
-              >
+            <div className="workspace-sidebar-header">
+              <Link to="/overview" aria-label={t("Filey home")} onClick={() => setMobileOpen(false)}
+                className="workspace-brand" title="Filey">
                 <Wordmark />
               </Link>
-              <button
+              <button ref={closeMenuRef} type="button"
                 aria-label="Close menu"
                 onClick={() => setMobileOpen(false)}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full hover:bg-hover lg:hidden"
-              >
-                <X size={18} />
+                className="workspace-sidebar-close lg:hidden">
+                <X size={19} strokeWidth={1.75} />
               </button>
             </div>
 
-            <div className="px-2 pb-3 overflow-y-auto overflow-x-hidden flex-1">
-              {MODULE_GROUPS.map((group) => {
-                const items = navModules.filter((m) => group.ids.includes(m.id));
-                if (items.length === 0) return null;
-                return (
-                  <div key={group.title} className="mt-3 first:mt-0">
-                    <div className="px-2.5 pb-1 text-[11.5px] font-medium text-muted-foreground">
-                      {t(group.title)}
-                    </div>
-                    <nav aria-label={t(group.title)} className="flex flex-col gap-0.5">
-                      {items.map(({ id, to, label, icon: iconName }) => (
-                        <NavLink
-                          key={to}
-                          to={to}
-                          onPointerEnter={event => { if (event.pointerType === "mouse") prefetchModule(id); }}
-                          onFocus={() => prefetchModule(id)}
-                          className={({ isActive }) =>
-                            cn(
-                              "workspace-nav-link group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors",
-                              isActive
-                                ? "bg-hover text-foreground font-medium"
-                                : "text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                            )
-                          }
-                        >
-                          {({ isActive }) => (
-                            <>
-                              {id === "agent" ? (
-                                <span className="inline-flex shrink-0 leading-none transition-transform motion-safe:group-hover:scale-110 motion-safe:group-hover:-rotate-3 motion-safe:group-active:scale-95 motion-reduce:transition-none">
-                                  <BloubBot
-                                    size={48}
-                                    state="idle"
-                                    animate={isDesktop || mobileOpen}
-                                    ambient
-                                    trackCursor
-                                  />
-                                </span>
-                              ) : (
-                                <AppIcon
-                                  name={iconName}
-                                  className={cn(
-                                    "h-4 w-4 shrink-0",
-                                    isActive ? "text-foreground" : "text-muted-foreground"
-                                  )}
-                                />
-                              )}
-                              <span className="truncate">{t(label)}</span>
-                            </>
-                          )}
-                        </NavLink>
-                      ))}
-                    </nav>
-                  </div>
-                );
-              })}
+            <WorkspaceNavigation
+              modules={navModules}
+              isDesktop={isDesktop}
+              mobileOpen={mobileOpen}
+              onNavigate={() => setMobileOpen(false)}
+            />
 
-              <div className="mt-6 border-t border-border pt-3 space-y-0.5">
-                <a
-                  href="#/help"
-                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                >
-                  <LifeBuoy className="h-[15px] w-[15px]" />
-                  {t("Help Center")}
-                </a>
-                <a
-                  href="#/docs"
-                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                >
-                  <BookOpen className="h-[15px] w-[15px]" />
-                  {t("Documentation")}
-                </a>
-              </div>
-            </div>
-
-            <div className="border-t border-border p-2">
-              <AccountDropdown className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-hover">
-                <Avatar size={28} />
-                <span className="leading-tight text-left min-w-0">
-                  <span className="block text-[13px] font-medium text-foreground truncate">
-                    {name}
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground truncate">
-                    {profile?.email ?? profile?.company ?? "Admin"}
+            <div className="workspace-sidebar-footer">
+              <nav className="workspace-support-links" aria-label={t("Support")}>
+                <NavLink to="/help" onClick={() => setMobileOpen(false)}>
+                  <LifeBuoy size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <span className="truncate">{t("Help Center")}</span>
+                </NavLink>
+                <NavLink to="/docs" onClick={() => setMobileOpen(false)}>
+                  <BookOpen size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <span className="truncate">{t("Documentation")}</span>
+                </NavLink>
+              </nav>
+              <AccountDropdown className="workspace-account-trigger">
+                <Avatar size={32} />
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-[13px] font-medium leading-5 text-foreground">{name}</span>
+                  <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
+                    {profile?.company || profile?.email || t("Account")}
                   </span>
                 </span>
-                <ChevronsUpDown className="ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               </AccountDropdown>
             </div>
           </aside>
@@ -590,6 +485,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={() => setMobileOpen(true)}
               aria-label={t("Open menu")}
+              aria-controls="workspace-sidebar"
+              aria-expanded={mobileOpen}
               className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground lg:hidden"
             >
               <Menu className="h-4 w-4" />
@@ -958,7 +855,7 @@ function AccountDropdown({
         anchorRef={btnRef}
         align="end"
         closeOnScroll
-        className="min-w-52"
+        className="workspace-account-menu min-w-52"
       >
         <div className="truncate px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
           {profile?.email || name}

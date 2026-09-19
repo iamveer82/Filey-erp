@@ -75,7 +75,7 @@ the same tokens and keep working; prefer token classes in new code.
 - Card title 14px semibold; card subtitle 12.5px muted.
 - Body/table data 13px; captions/meta 11.5–12px muted. Tabular numbers for data (`tabular-nums` on `.td`).
 - Page gutter comes from the Layout route container (`px-4 sm:px-6 pt-6 pb-16`) — pages do not add their own outer padding. The extra bottom space keeps the final row and pagination reachable.
-- Sidebar 248px; section labels 11.5px muted; nav items 13.5px with 15px icons; active = `bg-hover` + `font-medium` (no amber).
+- Sidebar 260px on desktop; mobile uses an inset 336px-max sheet with safe-area-aware height and 24px corners. Section labels 11.5–12px muted; nav items 13.5px (14px mobile), 18px icons and pill-shaped active foreground fills. Page filtering is local to permitted modules. Groups start expanded on desktop; mobile opens the current group. Keep all controls at least 44px tall on touch screens and support/account controls pinned below the scrollable navigation.
 - Header h-16: sidebar toggle, divider, page title, ⌘K search (260px), theme toggle, notifications, account avatar.
 - Settings uses horizontally scrollable section tabs with keyboard navigation, URL state and preserved unsaved panel drafts. The user prefers this to a second vertical sidebar. Appearance uses aligned, divided rows.
 - Keep the existing 48px animated BloubBot beside Filey AI in the sidebar. This requested brand detail is an exception to standard Lucide navigation icons; preserve its reduced-motion and hidden-view behavior.
