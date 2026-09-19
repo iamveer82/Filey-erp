@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { loadTasks, isDue, updateTask } from "../lib/agentTasks";
-import { aiAutonomous, aiReady, DENY_SENSITIVE } from "../lib/ai";
 import { useUI } from "../lib/ui";
 import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
 
@@ -35,10 +34,14 @@ export default function AgentScheduler() {
 
     const tick = async () => {
       const scope = agentStorageScope();
-      if (!alive || ticking.current || !aiReady() || !scope) return;
+      if (!alive || ticking.current || !scope) return;
+      const due = loadTasks().filter(t => isDue(t) && !running.current.has(t.id));
+      if (!due.length) return;
       ticking.current = true;
       try {
-        for (const t of loadTasks()) {
+        const { aiAutonomous, aiReady, DENY_SENSITIVE } = await import("../lib/ai");
+        if (!aiReady()) return;
+        for (const t of due) {
           if (!alive || scope !== agentStorageScope()) return;
           if (!isDue(t) || running.current.has(t.id)) continue;
           running.current.add(t.id);

@@ -73,6 +73,14 @@ describe("a failed fetch", () => {
 });
 
 describe("a good fetch", () => {
+  it("shares one cold request across simultaneous consumers", async () => {
+    const fn = vi.fn(async () => ({ ok: true, json: async () => apiBody }));
+    vi.stubGlobal("fetch", fn);
+    const results = await Promise.all([getExchangeRates(), getExchangeRates(), getExchangeRates()]);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(results[0]).toEqual(results[2]);
+  });
+
   it("is cached, and the API is not called again", async () => {
     const fn = vi.fn(async () => ({ ok: true, json: async () => apiBody }));
     vi.stubGlobal("fetch", fn);

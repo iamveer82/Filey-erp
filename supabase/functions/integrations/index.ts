@@ -15,6 +15,7 @@
 // lib/zernio) — that path is for offline installs and self-hosters.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
+import { cachedCatalog } from "../_shared/catalog-cache.ts";
 
 const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
 const ZERNIO_BASE = "https://zernio.com/api/v1";
@@ -265,23 +266,22 @@ async function composio(
     // rather than only the ones we thought to list.
     const q = String(payload.query ?? "").trim();
     const n = Number(payload.limit ?? 20);
-    return callJson(
-      `${COMPOSIO_BASE}/toolkits?limit=${n}${q ? `&search=${encodeURIComponent(q)}` : ""}`,
-      { headers },
-      "Could not search apps"
-    );
+    if (q.length > 200 || !Number.isInteger(n) || n < 1 || n > 100)
+      return { status: 400, body: { error: "Use a search under 201 characters and a limit from 1 to 100." } };
+    const url = `${COMPOSIO_BASE}/toolkits?limit=${n}${q ? `&search=${encodeURIComponent(q)}` : ""}`;
+    return cachedCatalog(url, key, () => callJson(url, { headers }, "Could not search apps"));
   }
 
   if (action === "tools") {
     // What can this customer actually do right now — the tools belonging to the
     // apps they have connected.
     const toolkits = String(payload.toolkits ?? "");
+    const n = Number(payload.limit ?? 40);
+    if (toolkits.length > 500 || !Number.isInteger(n) || n < 1 || n > 100)
+      return { status: 400, body: { error: "Invalid toolkit filter or limit (1–100)." } };
     const q = toolkits ? `&toolkit_slug=${encodeURIComponent(toolkits)}` : "";
-    return callJson(
-      `${COMPOSIO_BASE}/tools?limit=${Number(payload.limit ?? 40)}${q}`,
-      { headers },
-      "Could not list tools"
-    );
+    const url = `${COMPOSIO_BASE}/tools?limit=${n}${q}`;
+    return cachedCatalog(url, key, () => callJson(url, { headers }, "Could not list tools"));
   }
 
   return { status: 400, body: { error: `Unknown Composio action: ${action}` } };

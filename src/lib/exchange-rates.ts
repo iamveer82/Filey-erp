@@ -53,7 +53,13 @@ function saveCache(rates: Rates, ttlMs: number = CACHE_TTL_MS): void {
   }
 }
 
-async function fetchFresh(): Promise<Rates> {
+let pending: Promise<Rates> | undefined;
+function fetchFresh(): Promise<Rates> {
+  // The overview, currency menu and invoice form can request rates together.
+  return pending ??= fetchRates().finally(() => { pending = undefined; });
+}
+
+async function fetchRates(): Promise<Rates> {
   // v2 includes AED; the old ECB-only endpoint omitted it and therefore
   // silently selected approximate fallback rates on every successful request.
   try {

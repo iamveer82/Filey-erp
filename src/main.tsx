@@ -20,9 +20,6 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
-import { autoStartBridge } from "./lib/waBridge";
-import { startWaAgent } from "./lib/waAgent";
-import { startProactiveAgent } from "./lib/proactiveAgent";
 import { seedDefaultSkills } from "./lib/defaultSkills";
 import { quarantineLegacyCredentials } from "./lib/credentialStore";
 
@@ -34,14 +31,12 @@ installExtensionBannerGuard();
 // Recovery links contain a credential; do not initialize telemetry on this page.
 if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
 startAutoSync();
-// WhatsApp comes up with the app when the owner has asked for it, so the
-// channel is simply live after launch rather than something to go and start.
-// Never awaited: a bridge that won't start must not hold up the UI.
-void autoStartBridge();
-// The WhatsApp agent answers on-device — mount the listener once, up front.
-startWaAgent();
-// Proactive: daily summary + low-stock/overdue alerts to the owner on WhatsApp.
-startProactiveAgent();
+// These services need the native sidecar. Web sign-in must not download their
+// agent runtime; desktop still starts them once without blocking rendering.
+if ("__TAURI_INTERNALS__" in window) {
+  void import("./lib/desktopServices").then(({ startDesktopServices }) => startDesktopServices())
+    .catch(() => console.warn("Desktop messaging could not start; open Integrations to retry."));
+}
 // Seed the default business-skill pack once, so the agent starts capable.
 seedDefaultSkills();
 void quarantineLegacyCredentials().catch(() => console.warn("Legacy credential migration is pending; open AI settings to retry."));
