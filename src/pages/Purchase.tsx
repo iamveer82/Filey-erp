@@ -3,7 +3,7 @@ import { Plus, Trash2, Paperclip } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { aed, fmtDate, num, errMsg } from "../lib/format";
+import { aed, fmtDate, num, errMsg, todayYmd } from "../lib/format";
 import { PageHeader, Badge, ErrorBanner, MetricCard } from "../components/ui";
 import { useUI } from "../lib/ui";
 
@@ -32,16 +32,9 @@ export default function Purchase() {
   );
 
   const thisMonth = useMemo(() => {
-    const now = new Date();
+    const month = todayYmd().slice(0, 7);
     return expenses
-      .filter((e) => {
-        const d = new Date(e.expense_date);
-        return (
-          !isNaN(d.getTime()) &&
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
-      })
+      .filter((e) => e.expense_date?.slice(0, 7) === month)
       .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   }, [expenses]);
 
@@ -51,8 +44,7 @@ export default function Purchase() {
       g.set(e.category, (g.get(e.category) ?? 0) + (Number(e.amount) || 0));
     }
     return Array.from(g.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6);
+      .sort((a, b) => b[1] - a[1]);
   }, [expenses]);
 
   const maxCat = byCategory[0]?.[1] || 1;
@@ -94,7 +86,7 @@ export default function Purchase() {
         <MetricCard
           label="Total expenses"
           value={aed(totalSpend)}
-          change={`${num(expenses.length)} entries`}
+          change={`${num(expenses.length)} ${expenses.length === 1 ? "entry" : "entries"}`}
           changeTone="up"
         />
         <MetricCard
@@ -131,7 +123,7 @@ export default function Purchase() {
             </div>
           ) : (
             <div className="mt-4 space-y-3">
-              {byCategory.map(([name, amount]) => (
+              {byCategory.slice(0, 6).map(([name, amount]) => (
                 <div key={name}>
                   <div className="flex items-center justify-between text-[13px]">
                     <span className="text-foreground">{name}</span>

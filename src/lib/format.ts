@@ -114,7 +114,9 @@ export function todayYmd(): string {
 
 export function fmtDate(d?: string | null): string {
   if (!d) return "—";
-  const date = new Date(d);
+  // Database DATE values are calendar dates, not UTC timestamps. Local noon
+  // avoids shifting an invoice back one day west of UTC (and DST midnight gaps).
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d);
   if (isNaN(date.getTime())) return d;
   return date.toLocaleDateString("en-AE", {
     day: "2-digit",

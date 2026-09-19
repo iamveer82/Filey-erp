@@ -3,6 +3,7 @@ import { tools, getCacheScope } from "./api";
 import { useAuth } from "./auth";
 import { getDataMode } from "./dataMode";
 import { MODULES, type AppModule } from "../modules/registry";
+import { useLiveSync } from "./realtime";
 
 import { canUseModule, loadModuleAccess, type ModuleAccess } from "./moduleAccess";
 
@@ -30,6 +31,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [generation, retry] = useState(0);
+  useLiveSync(() => retry(n => n + 1), ["org_members", "app_settings"]);
   const workspaceKey = () => String(getDataMode()) + ":" + String(getCacheScope());
   const [workspace, setWorkspace] = useState(workspaceKey);
   useEffect(() => {

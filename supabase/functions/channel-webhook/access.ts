@@ -114,8 +114,8 @@ export async function tryPair(
     return "Too many attempts — try again later.";
   }
   if (!creds.pair_code || !(await timingSafeEqualStr(String(creds.pair_code), m[1]))) {
-    // Failed attempts are what the limiter counts, and each one leaves an
-    // audit row — brute-forcing the code shows up in audit_log.
+    // Every attempt is already reserved. Also audit incorrect codes so
+    // brute-forcing shows up in the account's activity trail.
     await logAction(client, ownerId, attemptAction, {
       provider: msg.channel,
       sender: String(sender).slice(0, 64),

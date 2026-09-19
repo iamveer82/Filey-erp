@@ -62,6 +62,14 @@ try {
   const teamMigration = sql('supabase/2026-09-20-team-workspaces.sql');
   console.log(run('psql', teamArgs, sql('scripts/fixtures/team-setup.sql') + '\n' + migration + '\n' + moduleMigration + '\n'
     + teamMigration + '\n' + teamMigration + '\n' + sql('scripts/fixtures/team-assertions.sql')).trim());
+  const rateMigration = sql('supabase/2026-09-20-edge-rate-limits.sql');
+  console.log(run('psql',teamArgs,rateMigration+'\n'+rateMigration+'\n'+sql('scripts/fixtures/rate-limit-assertions.sql')).trim());
+  const limitRace = await Promise.all(Array.from({length:12}, () =>
+    promisify(execFile)(exe('psql'), [...teamArgs,'-tAc',
+      "set role service_role; select public.filey_take_rate_limit('concurrent-account','race',3,3600);"],
+      {encoding:'utf8',windowsHide:true})));
+  assert.equal(limitRace.filter(result => result.stdout.trim()==='t').length,3);
+  console.log('PASS: exactly three of twelve concurrent requests reserve the three available slots.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }
