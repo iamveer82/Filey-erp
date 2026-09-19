@@ -36,10 +36,12 @@ export default function WorkspaceNavigation({
   const scroller = useRef<HTMLDivElement>(null);
   const filter = useRef<HTMLInputElement>(null);
   useEffect(() => {
+    // Keep the outgoing content still while the mobile drawer slides closed.
+    if (!isDesktop && !mobileOpen) return;
     setQuery("");
     setExpanded({});
     if (scroller.current) scroller.current.scrollTop = 0;
-  }, [pathname, mobileOpen]);
+  }, [pathname, mobileOpen, isDesktop]);
 
   const search = query.trim().toLocaleLowerCase();
   const groups = GROUPS.map(group => ({

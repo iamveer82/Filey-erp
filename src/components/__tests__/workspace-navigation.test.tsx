@@ -60,3 +60,18 @@ it("keeps desktop groups expanded while allowing compact navigation", () => {
   expect(screen.queryByRole("link", { name: "Invoicing" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Reports" })).toHaveAttribute("aria-current", "page");
 });
+
+it("keeps the filtered contents still during mobile closing and resets on reopening", () => {
+  const navigation = (open: boolean) => <MemoryRouter initialEntries={["/settings"]}>
+    <WorkspaceNavigation modules={modules} isDesktop={false} mobileOpen={open} onNavigate={() => {}} />
+  </MemoryRouter>;
+  const view = render(navigation(true));
+  const search = screen.getByRole("textbox", { name: "Find a page" });
+  fireEvent.change(search, { target: { value: "invoice" } });
+  view.rerender(navigation(false));
+  expect(search).toHaveValue("invoice");
+  expect(screen.getByRole("link", { name: "Invoicing" })).toBeVisible();
+  view.rerender(navigation(true));
+  expect(search).toHaveValue("");
+  expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
+});

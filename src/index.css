@@ -93,10 +93,11 @@
     border: 1px solid hsl(var(--border));
     border-radius: 24px;
     box-shadow: 0 16px 60px rgb(0 0 0 / .16);
-    transform: translateX(calc(-100% - 16px - env(safe-area-inset-left)));
-    transition: transform 220ms cubic-bezier(.22,1,.36,1);
+    transform: translate3d(calc(-100% - 24px - env(safe-area-inset-left)), 0, 0);
+    will-change: transform;
+    transition: transform 220ms cubic-bezier(.32,.72,0,1);
   }
-  .workspace-sidebar[data-open="true"] { transform: translateX(0); }
+  .workspace-sidebar[data-open="true"] { transform: translate3d(0, 0, 0); transition-duration: 260ms; }
   .workspace-sidebar-close { display: grid; }
   .workspace-sidebar-header { padding: 12px 12px 10px; }
   .workspace-nav-search { min-height: 44px; }
@@ -105,11 +106,12 @@
   .workspace-nav-link { min-height: 44px; font-size: 14px; }
   .workspace-nav-group + .workspace-nav-group { margin-top: 4px; }
   .workspace-support-links a { min-height: 44px; font-size: 12px; }
-  .workspace-drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / .24); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease-out, visibility 180ms; }
-  .workspace-drawer-backdrop[data-open="true"] { opacity: 1; visibility: visible; pointer-events: auto; }
+  .workspace-drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / .24); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 220ms ease-out, visibility 0s linear 220ms; }
+  .workspace-drawer-backdrop[data-open="true"] { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .workspace-sidebar, .workspace-drawer-backdrop, .workspace-nav-heading svg, .workspace-nav-link { transition: none; }
+  .workspace-sidebar[data-open], .workspace-drawer-backdrop, .workspace-nav-heading svg, .workspace-nav-link { transition: none; }
+  .workspace-sidebar { will-change: auto; }
 }
 
 /* ── Design tokens (Emergent reference) ──────────────────────────────────

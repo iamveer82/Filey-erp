@@ -79,6 +79,7 @@ the same tokens and keep working; prefer token classes in new code.
 - Header h-16: sidebar toggle, divider, page title, ⌘K search (260px), theme toggle, notifications, account avatar.
 - Settings uses horizontally scrollable section tabs with keyboard navigation, URL state and preserved unsaved panel drafts. The user prefers this to a second vertical sidebar. Appearance uses aligned, divided rows.
 - Keep the existing 48px animated BloubBot beside Filey AI in the sidebar. This requested brand detail is an exception to standard Lucide navigation icons; preserve its reduced-motion and hidden-view behavior.
+- Mobile navigation slides from the left using only transform: 260ms entering, 220ms exiting, with a gentle easing curve and a 220ms backdrop fade. Keep outgoing contents still during dismissal. Reduced motion disables the slide and fade.
 - Radii: `rounded-full` for buttons, filter chips and avatars; explicit `rounded-[8px]` for shared inputs/selects/textareas; `rounded-xl` (12px) for cards/modals. Do not substitute `rounded-lg` for an 8px field: the current Tailwind configuration maps `lg` to 10px. Pill buttons are the user's explicit preference; square icon buttons become circles, and joined calendar ranges keep flat inner edges.
 
 ## 3. Theme & accent system
