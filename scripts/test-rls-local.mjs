@@ -25,7 +25,10 @@ await new Promise(resolve => server.close(resolve));
 let started = false;
 try {
   run('initdb', ['-D', temp, '-U', 'postgres', '--auth=trust', '--encoding=UTF8', '--no-locale']);
-  run('pg_ctl', ['-D', temp, '-l', join(temp, 'server.log'), '-o', `-h 127.0.0.1 -p ${port}`, '-w', 'start']);
+  // Linux packages default to a system-owned socket directory. Keep this
+  // disposable cluster's socket in its own writable directory instead.
+  const socket = process.platform === 'win32' ? '' : ` -k "${temp}"`;
+  run('pg_ctl', ['-D', temp, '-l', join(temp, 'server.log'), '-o', `-h 127.0.0.1 -p ${port}${socket}`, '-w', 'start']);
   started = true;
   const sql = file => readFileSync(join(root, file), 'utf8');
   const migration = sql('supabase/2026-09-12-shared-record-permissions.sql');
@@ -54,6 +57,7 @@ try {
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
+  try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }
   process.exitCode = 1;
 } finally {
   if (started) run('pg_ctl', ['-D', temp, '-m', 'immediate', '-w', 'stop']);
