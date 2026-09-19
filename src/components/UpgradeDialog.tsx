@@ -6,16 +6,11 @@ import { PLANS, startCheckout, awaitCloudPlan, type PlanCard } from "../lib/subs
 import {
   startFreedomCheckout,
   claimPurchasedLicense,
-  cloudAccess,
   FREE_LIMITS,
 } from "../lib/license";
-import { isLocalMode } from "../lib/dataMode";
-import { switchWorkspace } from "../lib/switchWorkspace";
 import { useUI } from "../lib/ui";
 
-type Reason = "invoices" | "emails" | "cloud";
-
-const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+type Reason = "invoices" | "emails";
 
 /** When the Basic allowance comes back: the 1st of next month for invoices,
  *  tomorrow for the daily email cap. */
@@ -39,7 +34,7 @@ export default function UpgradeDialog() {
   const { toast } = useUI();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<Reason>("invoices");
-  const [busy, setBusy] = useState<"cloud" | "lite" | "local" | null>(null);
+  const [busy, setBusy] = useState<"cloud" | "lite" | null>(null);
 
   useEffect(() => {
     const onOffer = (e: Event) => {
@@ -49,29 +44,6 @@ export default function UpgradeDialog() {
     window.addEventListener("filey:upgrade", onOffer);
     return () => window.removeEventListener("filey:upgrade", onOffer);
   }, []);
-
-  // A cloud workspace without Pro can read but not save — the database
-  // refuses. Say so on arrival, instead of letting the first save fail with a
-  // row-level-security error.
-  useEffect(() => {
-    if (isLocalMode()) return;
-    void cloudAccess(true).then((a) => {
-      if (a.allowed) return;
-      setReason("cloud");
-      setOpen(true);
-    });
-  }, []);
-
-  const switchToDevice = async () => {
-    setBusy("local");
-    try {
-      await switchWorkspace("local");
-      window.location.reload();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-      setBusy(null);
-    }
-  };
 
   // A purchase can land from outside this dialog (the website, a browser tab
   // left open). auth.tsx announces it; say so and get out of the way.
@@ -106,7 +78,6 @@ export default function UpgradeDialog() {
     }
   };
 
-  const cloud = reason === "cloud";
   const headline =
     reason === "emails"
       ? "You've sent today's Basic emails"
@@ -115,23 +86,12 @@ export default function UpgradeDialog() {
   return (
     <Modal open={open} onClose={() => setOpen(false)} title="Keep going with Filey" size="lg">
       <p className="text-sm text-muted-foreground">
-        {cloud ? (
-          <>
-            Saving to a cloud workspace is part of Pro. Everything already here stays
-            readable — subscribe to keep working in the cloud, or carry on free on this
-            device with Basic.
-          </>
-        ) : (
-          <>
-            {headline}. Your work is safe and nothing is deleted — upgrade to carry on now,
-            or wait and your allowance comes back {reason === "emails" ? "" : "on "}
-            {resetsOn(reason)}.
-          </>
-        )}
+        {headline}. Upgrade to create more now, or your allowance comes back {reason === "emails" ? "" : "on "}
+        {resetsOn(reason)}. {reason === "invoices" && "You can keep editing existing invoices without a limit."}
       </p>
 
-      <div className={"mt-5 grid gap-4 " + (cloud ? "" : "md:grid-cols-2")}>
-        {PLANS.filter((p) => (cloud ? p.id === "cloud" : p.id !== "free")).map((p) => (
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        {PLANS.filter((p) => p.id !== "free").map((p) => (
           <div
             key={p.id}
             className={
@@ -171,21 +131,9 @@ export default function UpgradeDialog() {
         <p className="text-xs text-muted-foreground">
           Billed by Dodo Payments. Cancel Pro any time from Settings → Billing.
         </p>
-        {cloud && !hasTauri ? (
-          // A browser cannot hold a local workspace; the free way is the app.
-          <a className="btn-ghost" href="https://gofiley.com/#download">
-            Get the free desktop app
-          </a>
-        ) : cloud ? (
-          <button className="btn-ghost" disabled={!!busy} onClick={() => void switchToDevice()}>
-            {busy === "local" ? <Loader2 size={15} className="animate-spin" /> : null}
-            Use this device instead — free
-          </button>
-        ) : (
-          <button className="btn-ghost" onClick={() => setOpen(false)}>
-            Wait until {resetsOn(reason)}
-          </button>
-        )}
+        <button className="btn-ghost" onClick={() => setOpen(false)}>
+          Back to my workspace
+        </button>
       </div>
     </Modal>
   );

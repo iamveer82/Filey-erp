@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setDataMode } from "../dataMode";
-import { billing } from "../api";
+import { billing, invoicesThisMonth } from "../api";
 import { localClient } from "../localdb";
 
 /* DATA LOSS REGRESSION.
@@ -32,6 +32,14 @@ const doc = (over: Record<string, unknown> = {}) =>
   }) as never;
 
 describe("invoice line items survive saves", () => {
+  it("allows repeated edits after five creations, but refuses a sixth invoice", async () => {
+    let id = 0;
+    for (let i = 1; i <= 5; i++) id = await billing.saveDoc(doc({ number: `INV-${i}` }));
+    await expect(billing.saveDoc(doc({ number: "INV-6" }))).rejects.toThrow(/Basic plan limit reached/);
+    for (let i = 0; i < 7; i++) await billing.saveDoc(doc({ id, number: "INV-5", notes: `Edit ${i}` }));
+    expect((await billing.getDoc(id)).notes).toBe("Edit 6");
+    expect(await invoicesThisMonth()).toBe(5);
+  });
   it("keeps items across a normal edit", async () => {
     const id = (await billing.saveDoc(doc())) as number;
     await billing.saveDoc(doc({ id, customer_name: "Acme Ltd" }));

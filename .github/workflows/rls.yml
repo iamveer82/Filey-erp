@@ -10,7 +10,7 @@ on:
       - "supabase/**/*.sql"
       - "scripts/rls-test.mjs"
       - "scripts/test-rls-local.mjs"
-      - "scripts/fixtures/rls-*.sql"
+      - "scripts/fixtures/*.sql"
       - ".github/workflows/rls.yml"
 
 jobs:

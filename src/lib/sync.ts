@@ -18,7 +18,6 @@ import { supabase } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
-import { cloudAccessNow } from "./license";
 import {
   loadColl,
   replaceColl,
@@ -296,17 +295,6 @@ export async function syncNow(
   if (running) return stop("A sync is already running — wait for it to finish.");
   if (migrating) return stop("A data migration is running — sync will resume after it finishes.");
   if (typeof navigator !== "undefined" && !navigator.onLine) return stop("No internet connection.");
-
-  // Cloud is the paid plan. Without it the database refuses every write, so
-  // say so here rather than letting a push fail row by row with an RLS error
-  // nobody can act on. Read from cache, never awaited: this sits between the
-  // `running` check and the reservation below, where an await would reopen the
-  // race that ordering exists to close.
-  if (!cloudAccessNow().allowed)
-    return stop(
-      "Syncing to the cloud needs Filey Pro ($5/month) — Settings → Billing. " +
-        "Your work stays safe on this device either way.",
-    );
 
   // Reserve before the first await, so a second sync or workspace switch
   // cannot start while authentication or the journal is being read.

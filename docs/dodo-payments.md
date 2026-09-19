@@ -9,16 +9,24 @@ Two things are for sale:
 
 | Plan | Price | What it is | How it is enforced |
 |------|-------|-----------|--------------------|
-| **Basic** | AED 0 | The whole ERP on one device, 5 invoices a month | Client-side cap in `checkFreeInvoiceCap()`; the cloud refuses its writes |
+| **Basic** | $0 | ERP and CRM on the web or desktop, 5 new invoices a month, unlimited edits | Local creation check; atomic monthly workspace counter in the cloud |
 | **Pro** | $5 / month | Full cloud: sync up to five registered devices, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
 | **Ultra** | $100 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
 
-One line decides which you need: work on this machine, or work everywhere.
-Basic is a real tier — every module, your own data, five invoices a month — not
+Every plan includes web access and cloud sync. Basic is a real tier — every module,
+your own data, five new invoices a month and unlimited edits — not
 a trial. Pro provides a monthly subscription; Ultra includes an offline desktop licence and web/cloud access. An Ultra owner does not need a second Pro subscription.
 
 What the buyer sees, either way: click buy, pay on Dodo's hosted page, and the
 app is on the new plan. No licence code, no email, no support ticket.
+
+Basic cloud usage is per workspace and resets at 00:00 UTC on the first of each
+month. `2026-09-19-basic-web-access.sql` counts INSERTs only, including AI,
+quotation conversion and sync; UPDATEs and conflict-updates do not consume usage.
+Deleting an invoice does not refund a creation. Concurrent requests share one
+atomic counter. Existing grandfathered workspaces retain unlimited invoicing.
+The existing email/provider/device limits are unchanged. Regression checks:
+`npm run test:rls:local` and `npm test`.
 
 ## How it fits together
 

@@ -14,6 +14,8 @@ import {
   startFreedomCheckout,
   claimPurchasedLicense,
   verifyStoredLicense,
+  cloudAccess,
+  entitlement,
   FREE_LIMITS,
 } from "../../lib/license";
 import { Check } from "lucide-react";
@@ -21,6 +23,7 @@ import { billing, erp, crm, quotes, invoicesThisMonth } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import { isLocalMode } from "../../lib/dataMode";
 
 const ENTERPRISE_MAILTO =
   "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
@@ -35,13 +38,17 @@ export default function BillingPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [ownsUltra, setOwnsUltra] = useState(false);
   const [invoicesUsed, setInvoicesUsed] = useState<number | null>(null);
+  const [capped, setCapped] = useState(true);
 
   useEffect(() => {
     const refreshOwned = () => {
       void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
       void getSubscription().then(setSub).catch(() => {});
+      void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
+        setCapped(tier === "free" && (isLocalMode() || !["paid", "grandfathered"].includes(access.reason)));
+      });
     };
-    void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
+    refreshOwned();
     void invoicesThisMonth().then(setInvoicesUsed).catch(() => {});
     // A purchase collected in the background (auth.tsx) updates this page too.
     window.addEventListener("filey:entitlement", refreshOwned);
@@ -156,7 +163,6 @@ export default function BillingPanel() {
   const current =
     sub.plan === "free" && ownsUltra ? PLANS.find((p) => p.id === "lite")! : planCardFor(sub.plan);
   const owned = (p: PlanCard) => p.id === current.id || (p.id === "lite" && ownsUltra);
-  const capped = current.id === "free";
   const cap = FREE_LIMITS.invoicesPerMonth;
   const pctUsed = Math.min(100, Math.round(((invoicesUsed ?? 0) / cap) * 100));
 
@@ -226,10 +232,10 @@ export default function BillingPanel() {
           )}
           <p className="text-xs text-muted-foreground">
             {!capped
-              ? `No monthly cap on ${current.name}.`
+              ? "This workspace has unlimited invoices."
               : pctUsed >= 100
-                ? "You've used this month's Basic invoices. Pick a plan below to keep invoicing."
-                : "Basic includes 5 invoices a month. It resets on the 1st."}
+                ? "You've used this month's 5 new invoices. You can keep editing existing invoices without a limit."
+                : "Basic includes 5 new invoices a month and unlimited edits. Cloud usage resets on the 1st at 00:00 UTC."}
           </p>
           {statsError ? (
             <p role="alert" className="text-sm text-danger">

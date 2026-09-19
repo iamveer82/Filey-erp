@@ -25,7 +25,7 @@ import {
   type MigrateResult,
 } from "../../lib/migrate";
 import { setMigrating, isMigrating } from "../../lib/sync";
-import { hasLocalData, cloudAccess, type CloudAccess } from "../../lib/license";
+import { hasLocalData } from "../../lib/license";
 import {
   hasTauri,
   pickFolder,
@@ -63,16 +63,9 @@ function CloudSyncCard() {
   const [info, setInfo] = useState("");
   /** Sign-in failed in the way that usually means "no cloud account yet". */
   const [offerSignup, setOfferSignup] = useState(false);
-  /** Cloud is the $5/month plan. Null until checked; the database is the real
-   *  gate, so this only decides what the card says. */
-  const [cloudPlan, setCloudPlan] = useState<CloudAccess | null>(null);
-
   useEffect(() => {
     cloudSessionEmail()
       .then(setConnected)
-      .catch(() => {});
-    cloudAccess(true)
-      .then(setCloudPlan)
       .catch(() => {});
     const onStatus = () => {
       setSync(getSyncStatus());
@@ -169,17 +162,6 @@ function CloudSyncCard() {
         seconds, and edits from your other devices or teammates download automatically.
         Conflicting edits stay on this device until you review which version to keep.
       </p>
-
-      {cloudPlan && !cloudPlan.allowed && (
-        <div className="rounded-lg border border-border bg-hover p-4 text-sm">
-          <p className="font-medium text-foreground">Syncing needs Filey Pro — $5/month.</p>
-          <p className="mt-1 text-muted-foreground">
-            Everything you have made so far stays on this device and keeps working. Get
-            Pro in Settings → Billing and syncing switches on by itself, or stay local
-            and own it outright with Ultra.
-          </p>
-        </div>
-      )}
 
       {connected ? (
         <>

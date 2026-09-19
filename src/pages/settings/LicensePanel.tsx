@@ -162,8 +162,7 @@ export default function LicensePanel() {
       >
         <p className="text-sm leading-relaxed text-muted-foreground">
           One-time purchase. Verified offline on this device - no internet needed after
-          activation. Up to 2 devices per license. Sync is Pro, a separate subscription
-          under Billing.
+          activation. Up to 2 devices per license. Every plan includes web access and cloud sync.
         </p>
         <p className="text-sm mt-2">
           <span className="text-brand-500">Current plan: </span>
@@ -171,8 +170,8 @@ export default function LicensePanel() {
           {tier === "free" && (
             <span className="text-brand-400">
               {" "}
-              - unlimited local invoices; hosted cloud: {FREE_LIMITS.invoicesPerMonth}
-              /month, "Made with Filey" on documents
+              - {FREE_LIMITS.invoicesPerMonth} new invoices/month, unlimited edits,
+              "Made with Filey" on documents
             </span>
           )}
         </p>

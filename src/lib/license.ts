@@ -314,7 +314,7 @@ export type Tier = "free" | "lite" | "pro";
 /** Free tier caps. Volume + branding only — never compliance/correctness.
  *  Cloud is included on Free; the paid tier is about volume and owning it
  *  outright, not about where the data lives. Mirror any change in
- *  supabase/2026-07-29-free-invoice-cap-5.sql or the server cap disagrees. */
+ *  supabase/2026-09-19-basic-web-access.sql or the server cap disagrees. */
 export const FREE_LIMITS = { invoicesPerMonth: 5 };
 
 /** Desktop (Lite) license device slots. */
@@ -374,18 +374,16 @@ export function currentTier(): Tier {
 
 /* ---------------- who may use the cloud ---------------- */
 
-/** Why an account can (or cannot) write to the cloud. "grandfathered" is an
- *  org that was already syncing when cloud became a paid plan. */
-export type CloudReason = "unenforced" | "paid" | "grandfathered" | "none";
+/** All plans include cloud access. The reason distinguishes Basic's creation
+ *  cap from paid or grandfathered unlimited invoicing. */
+export type CloudReason = "unenforced" | "paid" | "grandfathered" | "basic";
 export interface CloudAccess {
   allowed: boolean;
   reason: CloudReason;
 }
 
-/** MUST agree with public.filey_cloud_access() in
- *  supabase/2026-09-16-cloud-access.sql. If the two ever disagree, the app
- *  either offers a Sync button that the database then refuses, or hides one
- *  that would have worked. */
+/** Plan access only; authentication and workspace permissions remain server
+ *  enforced. Invoice exemptions match 2026-09-19-basic-web-access.sql. */
 export function resolveCloudAccess(
   plan: string | null | undefined,
   planStatus: string | null | undefined,
@@ -400,24 +398,10 @@ export function resolveCloudAccess(
   )
     return { allowed: true, reason: "paid" };
   if (grandfathered) return { allowed: true, reason: "grandfathered" };
-  return { allowed: false, reason: "none" };
+  return { allowed: true, reason: "basic" };
 }
 
 let cachedCloud: CloudAccess | null = null;
-let cloudRefresh: Promise<CloudAccess> | null = null;
-
-/** The last known answer, without waiting for the network.
- *
- *  Hot paths (every sync tick) must not block on a plan lookup: awaiting one
- *  inside sync's critical section held its lock across a round trip and made
- *  every other caller report "a sync is already running". Unknown reads as
- *  allowed and a refresh is kicked off for next time — the database is the
- *  real gate, so the worst case is one refused push with a clear error. */
-export function cloudAccessNow(): CloudAccess {
-  if (!cachedCloud && !cloudRefresh) cloudRefresh = cloudAccess().finally(() => (cloudRefresh = null));
-  return cachedCloud ?? { allowed: true, reason: "unenforced" };
-}
-
 /** The signed-in org's cloud entitlement. Unknown (offline, signed out) is
  *  treated as allowed: refusing to sync because we could not read the plan
  *  would strand someone who is paying. The database is the real gate. */
@@ -439,28 +423,14 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
       data.plan_status as string | null,
       data.cloud_grandfathered as boolean | null
     );
-    // An Ultra licence held by the workspace owner also opens the cloud
-    // (2026-09-19-ultra-cloud-access.sql). A member cannot read the owner's
-    // licence, so ask the database's own gate rather than mirroring it.
-    if (!cachedCloud.allowed) {
-      const { data: open } = await supabase.rpc("filey_cloud_access");
-      if (open === true) cachedCloud = { allowed: true, reason: "paid" };
+    // Basic can use the web too. Only the owner's Ultra licence lifts its cap.
+    if (cachedCloud.reason === "basic") {
+      const { data: licensed } = await supabase.rpc("filey_org_owner_licensed", { p_org: orgId });
+      if (licensed === true) cachedCloud = { allowed: true, reason: "paid" };
     }
     return cachedCloud;
   } catch {
     return { allowed: true, reason: "unenforced" };
-  }
-}
-
-/** Web access is decided by the server for the current workspace, including
- *  Pro, workspace-owner Ultra, and grandfathered cloud access. */
-export async function webAccess(): Promise<boolean> {
-  if (!supabase) return false;
-  try {
-    const { data, error } = await supabase.rpc("filey_cloud_access");
-    return !error && data === true;
-  } catch {
-    return false;
   }
 }
 
@@ -535,20 +505,21 @@ export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
   if (!ENFORCE_LICENSING) return;
-  // Free is a LOCAL tier now, so the cap has to hold on this device too —
-  // it used to skip local mode entirely, back when local was the paid thing.
-  // Freedom (lite) buys unlimited local; Cloud (pro) buys unlimited hosted.
+  // Basic has the same creation cap locally and on the web. Edits never call this.
   if ((await entitlement()) !== "free") return;
   // A cloud workspace the plan opens — Pro, an Ultra owner (the web app has
   // no local licence token), or grandfathered from free cloud — is uncapped.
   // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
-  if (!isLocalMode() && (await cloudAccess()).allowed) return;
+  if (!isLocalMode()) {
+    const { reason } = await cloudAccess();
+    if (reason === "paid" || reason === "grandfathered") return;
+  }
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth) {
     offerUpgrade("invoices");
     throw new Error(
       `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Pro is $5/month, or buy Ultra once for unlimited local use — Settings → Billing.`
+        `Editing existing invoices is unlimited. Pro is $5/month, or buy Ultra once for unlimited invoicing — Settings → Billing.`
     );
   }
 }

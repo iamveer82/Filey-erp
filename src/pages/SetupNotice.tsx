@@ -35,9 +35,6 @@ export default function SetupNotice() {
 
         {cloudConfigured && (
           <>
-            {/* Primary path - this computer. Basic is free and local; saving to
-                the cloud is Pro, so offering cloud as the free default sent new
-                accounts into a workspace that refused every save. */}
             <button
               onClick={() => void chooseLocal()}
               className="group w-full text-left rounded-xl border border-brand-200 dark:border-white/12
@@ -88,7 +85,7 @@ export default function SetupNotice() {
               <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
             </div>
 
-            {/* Secondary path - the cloud workspace, which is Pro. */}
+            {/* Cloud is available on every plan. */}
             <button
               onClick={() => choose("cloud")}
               className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
@@ -104,12 +101,12 @@ export default function SetupNotice() {
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-ink">Use Filey Cloud</h2>
                     <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
-                      Pro · $5/month
+                      Basic · Free
                     </span>
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Sync up to five registered devices and share with your team. Already on Pro, or bought it on
-                    gofiley.com? Pick this and sign in.
+                    Sign in to use Filey on the web and sync your devices. Basic includes
+                    5 new invoices a month and unlimited edits.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

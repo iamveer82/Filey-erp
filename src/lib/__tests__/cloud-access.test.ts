@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCloudAccess } from "../license";
 
 // These assertions must agree with public.filey_cloud_access() in
-// supabase/2026-09-16-cloud-access.sql. When they drift, the app either offers
+// supabase/2026-09-19-basic-web-access.sql. When they drift, the app either offers
 // a Sync button the database then refuses, or hides one that would have worked.
 describe("who may write to the cloud", () => {
   const enforced = true;
@@ -21,16 +21,16 @@ describe("who may write to the cloud", () => {
     expect(access.reason).toBe("grandfathered");
   });
 
-  it("refuses a free org that was never grandfathered", () => {
+  it("allows a Basic workspace without granting unlimited invoices", () => {
     const access = resolveCloudAccess("free", null, false, enforced);
-    expect(access.allowed).toBe(false);
-    expect(access.reason).toBe("none");
+    expect(access.allowed).toBe(true);
+    expect(access.reason).toBe("basic");
   });
 
-  it("refuses a lapsed subscription", () => {
+  it("returns a lapsed subscription to Basic web access", () => {
     for (const status of ["canceled", "expired", "paused", "failed", "pending", null]) {
-      expect(resolveCloudAccess("cloud", status, false, enforced).allowed, `status ${status}`).toBe(
-        false
+      expect(resolveCloudAccess("cloud", status, false, enforced), `status ${status}`).toEqual(
+        { allowed: true, reason: "basic" }
       );
     }
   });

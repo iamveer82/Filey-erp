@@ -1,6 +1,8 @@
 // Real PostgreSQL, disposable cluster, no Supabase credentials or customer data.
 // PGBIN may point to a PostgreSQL bin directory; pg_config is used on CI/Linux.
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -35,6 +37,20 @@ try {
   const expenseOutput = run('psql', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
     sql('scripts/fixtures/expense-setup.sql') + '\n' + sql('supabase/2026-09-13-expense-entry.sql') + '\n' + sql('supabase/2026-09-13-expense-entry.sql') + '\n' + sql('scripts/fixtures/expense-assertions.sql'));
   console.log(expenseOutput.trim());
+  run('createdb', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', 'basic_web']);
+  const basicArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'basic_web', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+  const basicMigration = sql('supabase/2026-09-19-basic-web-access.sql');
+  console.log(run('psql', basicArgs, sql('scripts/fixtures/basic-web-setup.sql') + '\n'
+    + sql('supabase/2026-09-19-ultra-cloud-access.sql') + '\n' + basicMigration + '\n'
+    + basicMigration + '\n' + sql('scripts/fixtures/basic-web-assertions.sql')).trim());
+  const races = await Promise.allSettled(Array.from({ length: 8 }, (_, i) =>
+    promisify(execFile)(exe('psql'), [...basicArgs, '-c',
+      `set role authenticated; select set_config('test.uid','20000000-0000-0000-0000-000000000006',false); insert into invoice_docs(id) values(${700+i});`],
+    { encoding: 'utf8', windowsHide: true })));
+  assert.equal(races.filter(result => result.status === 'fulfilled').length, 1);
+  for (const result of races) if (result.status === 'rejected') assert.match(result.reason.stderr, /Basic plan limit reached/);
+  assert.equal(run('psql', [...basicArgs, '-tAc', "select used from invoice_monthly_usage where org_id='10000000-0000-0000-0000-000000000006'"]).trim(), '5');
+  console.log('PASS: eight concurrent creations compete for one slot; exactly one succeeds.');
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);

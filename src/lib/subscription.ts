@@ -32,10 +32,11 @@ export const PLANS: PlanCard[] = [
     kind: "subscription",
     name: "Basic",
     price: "$0",
-    blurb: "The whole ERP on your device, up to 5 invoices a month.",
+    blurb: "On the web or your device, with 5 new invoices a month.",
     features: [
       "Core ERP & CRM, all modules",
-      "5 invoices per month",
+      "5 new invoices per month, unlimited edits",
+      "Filey on the web with cloud sync",
       "Local storage and backups on this device",
       "“Made with Filey” on documents",
       "Bring-your-own AI key",

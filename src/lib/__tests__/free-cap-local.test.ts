@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Free is a LOCAL tier now: the whole ERP on-device, five invoices a month.
-// The cap used to skip local mode entirely, back when local was the paid
-// thing — so this is the assertion that the inversion actually took.
+// Basic's five-creation limit applies locally as well as on the web.
 vi.mock("../dataMode", () => ({
   isLocalMode: () => true,
   assertWorkspaceCurrent: () => {},

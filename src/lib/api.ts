@@ -1221,8 +1221,15 @@ async function adjustProductStock(
   }
 }
 
-/** Invoices created since the 1st of the current month (free-tier cap). */
+/** New invoices this month. Cloud usage is workspace-wide, including deleted
+ *  invoices, and never downloads invoice contents just to count them. */
 export async function invoicesThisMonth(): Promise<number> {
+  if (!isLocalMode()) {
+    const { data, error } = await sb().rpc("filey_invoice_usage");
+    if (error) throw error;
+    if (!Number.isSafeInteger(data) || data < 0) throw new Error("Invoice usage could not be loaded.");
+    return data;
+  }
   const rows = await sList<{ created_at?: string }>("invoice_docs");
   const start = new Date();
   start.setDate(1);
