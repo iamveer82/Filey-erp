@@ -19,6 +19,11 @@ Vercel immutable cache plus the browser service-worker cache. HTML checks the
 network for deployments; API responses are not cached by the service worker.
 Concurrent currency-rate requests share one fetch.
 
+Public tool covers and icons have a one-hour browser cache; they are not marked
+immutable because their filenames do not contain a content hash. Missing files
+under those directories return 404 instead of the SPA shell. HTML, the install
+manifest and service worker continue to revalidate so updates remain discoverable.
+
 ## Workspace data and navigation
 
 Redux Toolkit Query owns the shared search/notification snapshot. Two consumers
@@ -71,7 +76,7 @@ creation/template selection without saving, and production sign-in/recovery at
 device testing remain release checks; responsive Chromium testing does not certify
 those devices. Viewport unit checks cover keyboard resize, offset and pinch zoom.
 
-## Optional Redis cache
+## Redis catalog cache
 
 The integrations Edge Function caches successful Composio toolkit/tool catalogs
 for five minutes. Authentication and workspace permissions are checked before
@@ -90,6 +95,18 @@ Add these two **Supabase Edge Function secrets**, not Vite variables:
 The Vercel integration labels these `KV_REST_API_URL` and `KV_REST_API_TOKEN` in
 its connection guide. Deploy the `integrations` function after configuration.
 No database migration or customer-record update is needed.
+
+Production configuration was enabled on 19 September 2026. Both secret digests
+were verified in Supabase and the Redis endpoint returned PONG. The deployed
+integrations function already includes the catalog cache. Keep these credentials
+in backend secrets; neither the frontend build nor the repository contains them.
+A live check of the shared cache module made two requests with synthetic catalog
+data: the provider loader ran once, the second request hit Redis, and the entry
+had a 300-second expiry. No customer records were used in this check.
+
+Billable integration actions reuse the workspace profile already checked for
+authorization, avoiding a second identical profile query. Membership and plan
+checks still run on each request.
 
 Missing credentials, quota exhaustion or a Redis outage fall back to the provider.
 Each Redis operation has a 500 ms timeout. Monitor usage before changing plans;

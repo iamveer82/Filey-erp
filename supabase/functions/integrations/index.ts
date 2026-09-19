@@ -84,12 +84,7 @@ Deno.serve(async (req) => {
     if (BILLABLE.has(op) && !ownKey) {
       // Same tier resolution as send-email: the org's plan decides the ceiling.
       let paid = false;
-      const { data: prof } = await supa
-        .from("profiles")
-        .select("org_id")
-        .eq("id", userId)
-        .maybeSingle();
-      const orgId = prof?.org_id as string | undefined;
+      const orgId = profile.org_id as string;
       if (orgId && orgId !== "default") {
         const { data: org } = await supa
           .from("organizations")
