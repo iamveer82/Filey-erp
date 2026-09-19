@@ -24,7 +24,7 @@ Basic cloud usage is per workspace and resets at 00:00 UTC on the first of each
 month. `2026-09-19-basic-web-access.sql` counts INSERTs only, including AI,
 quotation conversion and sync; UPDATEs and conflict-updates do not consume usage.
 Deleting an invoice does not refund a creation. Concurrent requests share one
-atomic counter. Existing grandfathered workspaces retain unlimited invoicing.
+atomic counter. The same five-creation allowance applies to historic Basic workspaces.
 The existing email/provider/device limits are unchanged. Regression checks:
 `npm run test:rls:local` and `npm test`.
 
@@ -98,8 +98,9 @@ Authentication and access to another workspace have not changed.
   consume its five-per-month allowance; invoice edits remain unlimited.
 - A lapsed Pro subscription falls back to Basic access rather than locking the
   workspace. Existing records remain readable and editable.
-- Paid plans, an active Ultra licence held by the workspace owner, and existing
-  grandfathered workspaces retain unlimited cloud invoicing.
+- Paid plans and an active Ultra licence held by the workspace owner retain
+  unlimited cloud invoicing. Historic free-cloud access does not bypass the
+  Basic creation allowance; all existing invoices remain editable.
 - `platform_config.licensing_enforced` controls the invoice quota, not sign-in
   or tenant isolation. The counter is private; clients can only request their
   current workspace's usage through `filey_invoice_usage()`.

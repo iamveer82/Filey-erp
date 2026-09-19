@@ -37,7 +37,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
 
 Applied to the configured Filey cloud project on 13 September 2026. Both expense RPCs were verified as SECURITY INVOKER with authenticated-only execution. Behavioral checks ran against a disposable PostgreSQL database; production business records were not changed for testing.
 
-13. `2026-09-19-basic-web-access.sql` — Basic can use web/cloud workspaces. Keeps tenant/record restrictions, replaces the paid-only gate, and counts new invoice INSERTs atomically per workspace/month (UTC). Edits/upserts do not count. Paid, Ultra and grandfathered exemptions remain. Apply after the Ultra migration. Seeds a private usage counter from current-month invoices without altering business records. Test with `npm run test:rls:local` (includes eight concurrent requests for one slot). **Applied 2026-09-19** through the management API; verified the live gate, AFTER INSERT trigger, usage RPC and private counter permissions.
+13. `2026-09-19-basic-web-access.sql` — Basic can use web/cloud workspaces. Keeps tenant/record restrictions, replaces the paid-only gate, and counts new invoice INSERTs atomically per workspace/month (UTC). Edits/upserts do not count. Paid and Ultra exemptions remain; historic Basic accounts use the same five-creation allowance. Apply after the Ultra migration. Seeds a private usage counter from current-month invoices without altering business records. Test with `npm run test:rls:local` (includes eight concurrent requests for one slot). **Applied 2026-09-19** through the management API; verified the live gate, AFTER INSERT trigger, usage RPC and private counter permissions.
 
 ## Prod state — verified 2026-09-18
 

@@ -63,8 +63,7 @@ begin
     set used = invoice_monthly_usage.used + 1
   returning used into v_count;
 
-  select cloud_grandfathered or
-    (plan is not null and plan <> 'free' and plan_status in ('active','trialing','past_due'))
+  select (plan is not null and plan <> 'free' and plan_status in ('active','trialing','past_due'))
     or public.filey_org_owner_licensed(v_org)
   into v_unlimited from public.organizations where id::text = v_org;
 

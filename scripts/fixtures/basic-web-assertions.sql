@@ -48,14 +48,26 @@ select set_config('test.uid','20000000-0000-0000-0000-000000000007',false);
 do $$ begin
   if filey_invoice_usage() <> 5 then raise exception 'Members do not share workspace usage'; end if;
 end $$;
--- Paid, grandfathered and Ultra workspaces remain uncapped.
-do $$ begin
-  for org in 2..4 loop
+-- Paid and Ultra workspaces remain uncapped.
+do $$ declare org integer; begin
+  foreach org in array array[2,4] loop
     perform set_config('test.uid','20000000-0000-0000-0000-'||lpad(org::text,12,'0'),false);
     if filey_invoice_usage() <> 0 then raise exception 'Usage leaked across tenants'; end if;
     insert into invoice_docs(id) select org*100+n from generate_series(1,6) n;
     if filey_invoice_usage() <> 6 then raise exception 'Unlimited workspace blocked'; end if;
   end loop;
+end $$;
+-- Historic Basic workspaces get five creations too; existing invoices stay editable.
+select set_config('test.uid','20000000-0000-0000-0000-000000000003',false);
+insert into invoice_docs(id) select n from generate_series(301,305) n;
+do $$ begin
+  begin
+    insert into invoice_docs(id) values(306);
+    raise exception 'Historic Basic workspace bypassed cap';
+  exception when sqlstate 'P0001' then
+    if sqlerrm not like 'Basic plan limit reached%' then raise; end if;
+  end;
+  update invoice_docs set notes='Historic invoice stays editable' where id=301;
 end $$;
 -- A new month's counter starts at zero, independent of the previous month.
 reset role;

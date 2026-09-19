@@ -374,9 +374,8 @@ export function currentTier(): Tier {
 
 /* ---------------- who may use the cloud ---------------- */
 
-/** All plans include cloud access. The reason distinguishes Basic's creation
- *  cap from paid or grandfathered unlimited invoicing. */
-export type CloudReason = "unenforced" | "paid" | "grandfathered" | "basic";
+/** All plans include cloud access. Paid workspaces have unlimited invoicing. */
+export type CloudReason = "unenforced" | "paid" | "basic";
 export interface CloudAccess {
   allowed: boolean;
   reason: CloudReason;
@@ -387,7 +386,6 @@ export interface CloudAccess {
 export function resolveCloudAccess(
   plan: string | null | undefined,
   planStatus: string | null | undefined,
-  grandfathered: boolean | null | undefined,
   enforced: boolean = ENFORCE_LICENSING
 ): CloudAccess {
   if (!enforced) return { allowed: true, reason: "unenforced" };
@@ -397,7 +395,6 @@ export function resolveCloudAccess(
     (planStatus === "active" || planStatus === "trialing" || planStatus === "past_due")
   )
     return { allowed: true, reason: "paid" };
-  if (grandfathered) return { allowed: true, reason: "grandfathered" };
   return { allowed: true, reason: "basic" };
 }
 
@@ -414,14 +411,13 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
     if (orgError) throw orgError;
     const { data } = await supabase
       .from("organizations")
-      .select("plan, plan_status, cloud_grandfathered")
+      .select("plan, plan_status")
       .eq("id", orgId)
       .maybeSingle();
     if (!data) return { allowed: true, reason: "unenforced" };
     cachedCloud = resolveCloudAccess(
       data.plan as string | null,
-      data.plan_status as string | null,
-      data.cloud_grandfathered as boolean | null
+      data.plan_status as string | null
     );
     // Basic can use the web too. Only the owner's Ultra licence lifts its cap.
     if (cachedCloud.reason === "basic") {
@@ -507,12 +503,12 @@ export async function checkFreeInvoiceCap(
   if (!ENFORCE_LICENSING) return;
   // Basic has the same creation cap locally and on the web. Edits never call this.
   if ((await entitlement()) !== "free") return;
-  // A cloud workspace the plan opens — Pro, an Ultra owner (the web app has
-  // no local licence token), or grandfathered from free cloud — is uncapped.
+  // Pro and Ultra-owner workspaces are uncapped. Historic free-cloud access
+  // does not lift Basic's creation limit now that every plan includes the web.
   // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
   if (!isLocalMode()) {
     const { reason } = await cloudAccess();
-    if (reason === "paid" || reason === "grandfathered") return;
+    if (reason === "paid") return;
   }
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth) {

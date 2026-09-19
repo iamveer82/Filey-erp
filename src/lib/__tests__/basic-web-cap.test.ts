@@ -28,8 +28,13 @@ it("opens Basic web access without bypassing the creation cap", async () => {
   state.used = 4;
   await expect(checkFreeInvoiceCap(async () => state.used)).resolves.toBeUndefined();
 });
-it.each(["licensed", "grandfathered"] as const)("preserves %s unlimited cloud invoicing", async (flag) => {
-  state[flag] = true;
+it("keeps the Basic creation cap on historic free-cloud workspaces", async () => {
+  state.grandfathered = true;
+  expect(await cloudAccess()).toEqual({ allowed: true, reason: "basic" });
+  await expect(checkFreeInvoiceCap(async () => 5)).rejects.toThrow(/Basic plan limit reached/);
+});
+it("preserves Ultra-owner unlimited cloud invoicing", async () => {
+  state.licensed = true;
   const count = vi.fn(async () => 99);
   await expect(checkFreeInvoiceCap(count)).resolves.toBeUndefined();
   expect(count).not.toHaveBeenCalled();

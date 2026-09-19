@@ -9,27 +9,21 @@ describe("who may write to the cloud", () => {
 
   it("lets a live paid plan through", () => {
     for (const status of ["active", "trialing", "past_due"]) {
-      const access = resolveCloudAccess("cloud", status, false, enforced);
+      const access = resolveCloudAccess("cloud", status, enforced);
       expect(access.allowed, `status ${status}`).toBe(true);
       expect(access.reason).toBe("paid");
     }
   });
 
-  it("keeps a grandfathered org on the cloud for free", () => {
-    const access = resolveCloudAccess("free", null, true, enforced);
-    expect(access.allowed).toBe(true);
-    expect(access.reason).toBe("grandfathered");
-  });
-
   it("allows a Basic workspace without granting unlimited invoices", () => {
-    const access = resolveCloudAccess("free", null, false, enforced);
+    const access = resolveCloudAccess("free", null, enforced);
     expect(access.allowed).toBe(true);
     expect(access.reason).toBe("basic");
   });
 
   it("returns a lapsed subscription to Basic web access", () => {
     for (const status of ["canceled", "expired", "paused", "failed", "pending", null]) {
-      expect(resolveCloudAccess("cloud", status, false, enforced), `status ${status}`).toEqual(
+      expect(resolveCloudAccess("cloud", status, enforced), `status ${status}`).toEqual(
         { allowed: true, reason: "basic" }
       );
     }
@@ -39,12 +33,12 @@ describe("who may write to the cloud", () => {
     // Real organizations rows carry these. Refusing them would read as a
     // billing failure to the customers who paid the most.
     for (const plan of ["pro", "business", "enterprise"]) {
-      expect(resolveCloudAccess(plan, "active", false, enforced).allowed, plan).toBe(true);
+      expect(resolveCloudAccess(plan, "active", enforced).allowed, plan).toBe(true);
     }
   });
 
   it("changes nothing at all while licensing is unenforced", () => {
-    const access = resolveCloudAccess("free", null, false, false);
+    const access = resolveCloudAccess("free", null, false);
     expect(access.allowed).toBe(true);
     expect(access.reason).toBe("unenforced");
   });

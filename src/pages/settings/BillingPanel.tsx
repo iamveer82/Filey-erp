@@ -45,7 +45,7 @@ export default function BillingPanel() {
       void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
       void getSubscription().then(setSub).catch(() => {});
       void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
-        setCapped(tier === "free" && (isLocalMode() || !["paid", "grandfathered"].includes(access.reason)));
+        setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
       });
     };
     refreshOwned();
