@@ -25,7 +25,7 @@
   }
   .filey-chat { min-height: calc(var(--filey-viewport-height, 100dvh) - 10rem); }
 }
-@media screen and (max-width: 767px) {
+@media screen and (max-width: 1023px) {
   /* A readable field size also avoids Safari zooming the page on focus. */
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea { font-size: 16px !important; }
   .filey-workspace :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .workspace-nav-link) { min-height: 44px; }
