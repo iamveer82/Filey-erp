@@ -3,6 +3,7 @@
 // `data-accent` on <html>. Reactivity via the shared "filey-ui" window
 // event (also fired on theme change — see theme.ts).
 import { useSyncExternalStore } from "react";
+import { readAppearanceCookie, writeAppearanceCookie } from "./appearanceCookie";
 
 export const accentPalette = {
   amber: { hex: "#faca1a", name: "Filey yellow", soft: "#fdd86a" },
@@ -19,8 +20,10 @@ export type AccentKey = keyof typeof accentPalette;
 const KEY = "filey-accent";
 
 export function getAccent(): AccentKey {
-  const v = localStorage.getItem(KEY);
-  return v && v in accentPalette ? (v as AccentKey) : "amber";
+  let v: string | null | undefined;
+  try { v = localStorage.getItem(KEY); } catch { /* cookie fallback */ }
+  v ??= readAppearanceCookie("accent");
+  return v && Object.prototype.hasOwnProperty.call(accentPalette, v) ? (v as AccentKey) : "amber";
 }
 
 export function applyAccent(a: AccentKey = getAccent()): void {
@@ -31,7 +34,8 @@ export function applyAccent(a: AccentKey = getAccent()): void {
 }
 
 export function setAccent(a: AccentKey): void {
-  localStorage.setItem(KEY, a);
+  try { localStorage.setItem(KEY, a); } catch { /* cookie fallback */ }
+  writeAppearanceCookie("accent", a);
   applyAccent(a);
 }
 

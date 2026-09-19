@@ -524,6 +524,7 @@ const onLine = () =>
   typeof navigator === "undefined" ? true : navigator.onLine;
 
 let activeCacheOrg = "default";
+let cacheIdentity = 0;
 /** Scope the local read-cache to an organization. Call whenever the
  *  signed-in user's org changes (login, org switch, sign-out). */
 export function setCacheOrg(orgId?: string | null, userId?: string): void {
@@ -531,6 +532,7 @@ export function setCacheOrg(orgId?: string | null, userId?: string): void {
   if (next === activeCacheOrg) return;
   clearLog();
   activeCacheOrg = next;
+  cacheIdentity++;
   if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:agent-storage"));
 }
 
@@ -576,14 +578,43 @@ async function cacheRead<T>(key: string): Promise<CacheEnvelope<T> | null> {
   return { __t: 0, v: raw as T };
 }
 
+let cacheClock = 0;
+const cacheStamp = () => cacheClock = Math.max(Date.now(), cacheClock + 1);
 const cacheWrite = (key: string, value: unknown): Promise<void> =>
-  cacheSet(key, { __t: Date.now(), v: value } satisfies CacheEnvelope<unknown>);
+  cacheSet(key, { __t: cacheStamp(), v: value } satisfies CacheEnvelope<unknown>);
 
 /** When the last mutation happened. A cached list stored before this can't be
  *  trusted to show it, so those reads go to the server instead of serving. */
 let lastWriteAt = 0;
+let readRevision = 0;
 function markWrite(): void {
-  lastWriteAt = Date.now();
+  lastWriteAt = cacheStamp();
+  readRevision++;
+}
+
+const fetching = new Map<string, Promise<unknown>>();
+class SupersededRead extends Error {}
+
+/** Share one cloud read between mounted pages, header widgets and refreshes.
+ * A save or identity change prevents an older response from becoming current. */
+function fetchCached<T>(k: string, run: () => Promise<T>): Promise<T> {
+  const identity = cacheIdentity, revision = readRevision;
+  const requestKey = `${identity}:${revision}:${k}`;
+  const pending = fetching.get(requestKey);
+  if (pending) return pending as Promise<T>;
+  const request = (async () => {
+    await flushOutbox();
+    if (identity !== cacheIdentity || isLocalMode()) throw new SupersededRead();
+    const fresh = await run();
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || revision !== readRevision || isLocalMode()) throw new SupersededRead();
+    await cacheWrite(k, fresh);
+    if (identity !== cacheIdentity || revision !== readRevision || isLocalMode()) throw new SupersededRead();
+    return fresh;
+  })();
+  fetching.set(requestKey, request);
+  void request.finally(() => fetching.delete(requestKey)).catch(() => {});
+  return request;
 }
 
 /** Background refresh behind a served cache hit. One per key at a time; the
@@ -594,10 +625,8 @@ function revalidate<T>(k: string, run: () => Promise<T>): void {
   revalidating.add(k);
   void (async () => {
     try {
-      await flushOutbox();
-      const fresh = await run();
       const prev = await cacheRead<T>(k);
-      await cacheWrite(k, fresh);
+      const fresh = await fetchCached(k, run);
       if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged();
     } catch {
       /* keep serving the cached copy */
@@ -709,6 +738,8 @@ export async function flushOutbox(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
+  for (const event of ["filey:cloud-change", "filey:remote-update", "focus", "online"])
+    window.addEventListener(event, markWrite);
   window.addEventListener("online", () => {
     flushOutbox().catch((e) => console.error("Failed to flush outbox:", e));
   });
@@ -718,20 +749,32 @@ if (typeof window !== "undefined") {
 async function readCached<T>(
   key: string,
   run: () => Promise<T>,
-  empty: T
+  empty: T,
+  retry = true
 ): Promise<T> {
   assertWorkspaceCurrent();
   if (isLocalMode()) return run(); // local store is the source of truth
+  const identity = cacheIdentity;
+  const current = () => {
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || isLocalMode()) throw new Error("Your workspace changed. Reopen this section.");
+  };
   // Membership itself is loaded by a separate RPC, never this cache. Restricted
   // staff always read through RLS so a former role's cached rows cannot leak.
   const access = await loadModuleAccess();
-  if (!access.admin && access.modules !== null) return run();
+  current();
+  if (!access.admin && access.modules !== null) {
+    const data = await run();
+    current();
+    return data;
+  }
   // Namespace the local cache by the active organization so data from
   // one org never bleeds into another on a shared device.
   const k = `${activeCacheOrg}:${key}`;
   if (!isConfigured) return (await cacheRead<T>(k))?.v ?? empty;
 
   const hit = await cacheRead<T>(k);
+  current();
   if (!onLine()) return hit?.v ?? empty;
 
   // Stale-while-revalidate. This used to await the network on every read even
@@ -740,16 +783,18 @@ async function readCached<T>(
   // and refresh behind it — but only when it provably post-dates every write
   // made this session, or a user could save something and not see it.
   if (hit && hit.__t > lastWriteAt) {
-    revalidate(k, run);
+    if (Date.now() - hit.__t > 15_000) revalidate(k, run);
     return hit.v;
   }
 
   try {
-    await flushOutbox();
-    const data = await run();
-    await cacheWrite(k, data);
-    return data;
+    return await fetchCached(k, run);
   } catch (error) {
+    current();
+    if (error instanceof SupersededRead) {
+      if (retry) return readCached(key, run, empty, false);
+      throw new Error("Data changed while loading. Please try again.");
+    }
     if (!hit) throw error; // A failed first load is not an empty business.
     console.warn("Could not refresh data; displaying the saved snapshot");
     return hit.v;

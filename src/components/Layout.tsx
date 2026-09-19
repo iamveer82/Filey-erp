@@ -28,6 +28,7 @@ import { cn, todayYmd, CURRENCIES } from "../lib/format";
 import { initDisplayCurrency, useDisplayCurrency } from "../lib/displayCurrency";
 import AnimatedThemeToggler from "./AnimatedThemeToggler";
 import { useModules } from "../lib/modules";
+import { prefetchModule } from "../modules/registry";
 import { useAuth } from "../lib/auth";
 import { useLang, LANGS, type Lang } from "../lib/i18n";
 import { billing, followups, notifs as notifsApi, type Notification } from "../lib/api";
@@ -495,6 +496,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                         <NavLink
                           key={to}
                           to={to}
+                          onPointerEnter={event => { if (event.pointerType === "mouse") prefetchModule(id); }}
+                          onFocus={() => prefetchModule(id)}
                           className={({ isActive }) =>
                             cn(
                               "workspace-nav-link group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors",

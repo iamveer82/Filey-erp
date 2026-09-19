@@ -1,40 +1,53 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { type AppIconName } from "../components/AppIcon";
 
-const ModernOverview = lazy(() => import("../pages/ModernOverview"));
-const AgentChat = lazy(() => import("../pages/AgentChat"));
-const WorkspaceBrowser = lazy(() => import("../pages/WorkspaceBrowser"));
-const Inventory = lazy(() => import("../pages/Inventory"));
-const Orders = lazy(() => import("../pages/Orders"));
-const Invoicing = lazy(() => import("../pages/Invoicing"));
-const PurchaseInvoicing = lazy(async () => {
+/** The same import promise serves navigation intent and React.lazy. */
+function page(load: () => Promise<{ default: ComponentType }>) {
+  let pending: ReturnType<typeof load> | undefined;
+  const preload = () => pending ??= load().catch(error => { pending = undefined; throw error; });
+  return Object.assign(lazy(preload), { preload });
+}
+
+export function prefetchModule(id: string): void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (connection?.saveData || connection?.effectiveType?.includes("2g")) return;
+  void MODULES.find(module => module.id === id)?.Component.preload().catch(() => {});
+}
+
+const ModernOverview = page(() => import("../pages/ModernOverview"));
+const AgentChat = page(() => import("../pages/AgentChat"));
+const WorkspaceBrowser = page(() => import("../pages/WorkspaceBrowser"));
+const Inventory = page(() => import("../pages/Inventory"));
+const Orders = page(() => import("../pages/Orders"));
+const Invoicing = page(() => import("../pages/Invoicing"));
+const PurchaseInvoicing = page(async () => {
   const m = await import("../pages/Invoicing");
   return { default: () => <m.default mode="purchase" /> };
 });
-const Quoting = lazy(() => import("../pages/Quoting"));
-const Crm = lazy(() => import("../pages/Crm"));
-const Customers = lazy(() => import("../pages/Customers"));
-const FollowUpsPage = lazy(() => import("../pages/FollowUps"));
-const Suppliers = lazy(() => import("../pages/Suppliers"));
-const Purchase = lazy(() => import("../pages/Purchase"));
-const PurchaseOrders = lazy(() => import("../pages/PurchaseOrders"));
-const Reports = lazy(() => import("../pages/reports/Reports"));
-const People = lazy(() => import("../pages/People"));
-const Accounting = lazy(() => import("../pages/Accounting"));
-const ToolsPage = lazy(() => import("../pages/PdfTools"));
-const MyFilesPage = lazy(() => import("../pages/MyFiles"));
-const Settings = lazy(() => import("../pages/Tools"));
-const Integrations = lazy(() => import("../pages/Integrations"));
-const Marketing = lazy(() => import("../pages/Marketing"));
-const DeliveryChallan = lazy(() => import("../pages/DeliveryChallan"));
-const PaymentReceipt = lazy(() => import("../pages/PaymentReceipt"));
-const DeclarationLetter = lazy(() => import("../pages/DeclarationLetter"));
-const ChequeRegister = lazy(() => import("../pages/ChequeRegister"));
-const BankAccounts = lazy(() => import("../pages/BankAccounts"));
-const EmailTemplates = lazy(() => import("../pages/EmailTemplates"));
-const Work = lazy(() => import("../pages/Work"));
-const Team = lazy(() => import("../pages/Team"));
-const Comms = lazy(() => import("../pages/Comms"));
+const Quoting = page(() => import("../pages/Quoting"));
+const Crm = page(() => import("../pages/Crm"));
+const Customers = page(() => import("../pages/Customers"));
+const FollowUpsPage = page(() => import("../pages/FollowUps"));
+const Suppliers = page(() => import("../pages/Suppliers"));
+const Purchase = page(() => import("../pages/Purchase"));
+const PurchaseOrders = page(() => import("../pages/PurchaseOrders"));
+const Reports = page(() => import("../pages/reports/Reports"));
+const People = page(() => import("../pages/People"));
+const Accounting = page(() => import("../pages/Accounting"));
+const ToolsPage = page(() => import("../pages/PdfTools"));
+const MyFilesPage = page(() => import("../pages/MyFiles"));
+const Settings = page(() => import("../pages/Tools"));
+const Integrations = page(() => import("../pages/Integrations"));
+const Marketing = page(() => import("../pages/Marketing"));
+const DeliveryChallan = page(() => import("../pages/DeliveryChallan"));
+const PaymentReceipt = page(() => import("../pages/PaymentReceipt"));
+const DeclarationLetter = page(() => import("../pages/DeclarationLetter"));
+const ChequeRegister = page(() => import("../pages/ChequeRegister"));
+const BankAccounts = page(() => import("../pages/BankAccounts"));
+const EmailTemplates = page(() => import("../pages/EmailTemplates"));
+const Work = page(() => import("../pages/Work"));
+const Team = page(() => import("../pages/Team"));
+const Comms = page(() => import("../pages/Comms"));
 
 export interface AppModule {
   id: string;
@@ -43,7 +56,7 @@ export interface AppModule {
   desc: string;
   icon: AppIconName;
   to: string;
-  Component: LazyExoticComponent<ComponentType>;
+  Component: LazyExoticComponent<ComponentType> & { preload: () => Promise<{ default: ComponentType }> };
   /** Core modules are always on and cannot be disabled. */
   core?: boolean;
 }

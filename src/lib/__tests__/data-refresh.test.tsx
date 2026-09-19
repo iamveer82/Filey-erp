@@ -51,6 +51,19 @@ afterEach(() => {
 
 const refresh = () => act(() => vi.advanceTimersByTime(250));
 
+it("defers background refresh bursts until the tab becomes visible", () => {
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  const reload = vi.fn();
+  renderHook(() => useLiveSync(reload));
+  notifyDataChanged(); notifyDataChanged();
+  refresh();
+  expect(reload).not.toHaveBeenCalled();
+  visibility.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  refresh();
+  expect(reload).toHaveBeenCalledTimes(1);
+});
+
 it("coalesces local, sync and cloud changes, uses the latest callback and cleans up", () => {
   const previous = vi.fn();
   const latest = vi.fn();

@@ -26,6 +26,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [disabled, setDisabled] = useState<string[]>([]);
   const [access, setAccess] = useState<ModuleAccess | null>(null);
+  const [accessWorkspace, setAccessWorkspace] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [generation, retry] = useState(0);
@@ -45,24 +46,28 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     let active = true;
-    setLoading(true); setAccess(null); setDisabled([]); setError("");
+    // Keep the current screen/form mounted during a same-workspace recheck.
+    // Server reads and writes still enforce permissions; failure clears access.
+    setError("");
     void (async () => {
-      const permissions = await loadModuleAccess();
-      const rows = await tools.settings();
+      const [permissions, rows] = await Promise.all([loadModuleAccess(), tools.settings()]);
       const raw = rows.find(row => row.key === KEY)?.value;
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(parsed)) throw new Error("Module settings could not be read.");
       if (active && workspace === workspaceKey()) {
-        setAccess(permissions); setDisabled(parsed.map(String));
+        setAccess(permissions); setAccessWorkspace(workspace); setDisabled(parsed.map(String));
       }
     })().catch(error => {
-      if (active) setError(error instanceof Error ? error.message : "Workspace permissions could not be loaded.");
+      if (active) {
+        setAccess(null); setDisabled([]);
+        setError(error instanceof Error ? error.message : "Workspace permissions could not be loaded.");
+      }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [user?.id, workspace, generation]);
 
   const isEnabled = (id: string) => {
-    if (workspace !== workspaceKey() || !access || !canUseModule(access,id)) return false;
+    if (accessWorkspace !== workspaceKey() || !access || !canUseModule(access,id)) return false;
     return !!MODULES.find(module => module.id === id)?.core || !disabled.includes(id);
   };
 

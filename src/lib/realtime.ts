@@ -50,7 +50,10 @@ export async function startRealtime(): Promise<void> {
     if (attempt !== generation) return;
     channel = supabase
       .channel("filey-live-sync")
-      .on("postgres_changes", { event: "*", schema: "public" }, () => emit())
+      .on("postgres_changes", { event: "*", schema: "public" }, () => {
+        window.dispatchEvent(new Event("filey:cloud-change"));
+        emit();
+      })
       .subscribe();
   } finally {
     if (attempt === generation) starting = false;
@@ -72,17 +75,23 @@ export function useLiveSync(reload: () => void): void {
   ref.current = reload;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let dirty = false;
     const listener: Listener = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => ref.current(), 250);
+      dirty = true;
+      if (document.visibilityState === "hidden") return;
+      timer = setTimeout(() => { dirty = false; ref.current(); }, 250);
     };
+    const visible = () => { if (dirty && document.visibilityState !== "hidden") listener(); };
     listeners.add(listener);
     window.addEventListener("filey:local-write", listener);
     window.addEventListener("filey:remote-update", listener);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       listeners.delete(listener);
       window.removeEventListener("filey:local-write", listener);
       window.removeEventListener("filey:remote-update", listener);
+      document.removeEventListener("visibilitychange", visible);
       clearTimeout(timer);
     };
   }, []);

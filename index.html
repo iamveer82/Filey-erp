@@ -68,14 +68,25 @@
       }
     </style>
     <script>
-      // Set theme before paint to avoid a flash of the wrong scheme.
+      // Apply the small visual preferences before paint, even when local
+      // storage is unavailable. The cookies never contain account data.
       (function () {
         try {
-          var t = localStorage.getItem("theme") || "system";
+          function preference(key, cookie) {
+            try { var saved = localStorage.getItem(key); if (saved) return saved; } catch (e) {}
+            try {
+              var part = document.cookie.split(/;\s*/).find(function (value) { return value.indexOf(cookie + "=") === 0; });
+              return part ? decodeURIComponent(part.slice(cookie.length + 1)) : "";
+            } catch (e) { return ""; }
+          }
+          var t = preference("theme", "filey_theme") || "system";
           var dark =
             t === "dark" ||
             (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
+          var accent = preference("filey-accent", "filey_accent");
+          if (/^(amber|blue|emerald|rose|violet|sky|slate)$/.test(accent))
+            document.documentElement.dataset.accent = accent;
         } catch (e) {}
       })();
     </script>

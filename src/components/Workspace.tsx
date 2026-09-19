@@ -12,6 +12,8 @@ import UpdateNotice from "./UpdateNotice";
 import UpgradeDialog from "./UpgradeDialog";
 import AgentScheduler from "./AgentScheduler";
 import { Toaster } from "./Toaster";
+import WorkspaceDataProvider from "./WorkspaceDataProvider";
+import { workspaceQueryScope } from "../lib/workspaceQueries";
 
 const CustomerDetail = lazy(() => import("../pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("../pages/SupplierDetail"));
@@ -83,6 +85,7 @@ function AppRoutes() {
 
 export default function Workspace() {
   return (
+    <WorkspaceDataProvider key={workspaceQueryScope()}>
     <ModulesProvider>
       <Layout>
         <AppRoutes />
@@ -97,5 +100,6 @@ export default function Workspace() {
       <UpgradeDialog />
       <Toaster />
     </ModulesProvider>
+    </WorkspaceDataProvider>
   );
 }
