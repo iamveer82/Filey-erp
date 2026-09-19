@@ -59,7 +59,7 @@ it("replaces the workspace identity after the server reports an organization swi
   expect(fixture.signOut).not.toHaveBeenCalled();
 });
 
-it("ignores an earlier profile response after a newer workspace has loaded", async () => {
+it.each([null, { message: "JWT expired" }])("ignores an earlier profile response (%j) after a newer workspace has loaded", async (error) => {
   localStorage.setItem("filey_data_mode", "cloud");
   render(<AuthProvider><SessionProbe /></AuthProvider>);
   await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
@@ -70,11 +70,28 @@ it("ignores an earlier profile response after a newer workspace has loaded", asy
   fixture.profileRead.mockResolvedValueOnce({ data: { ...fixture.user, company: "Joined team", org_id: "joined-org" }, error: null });
   await act(async () => { await currentAuth.reloadProfile(); });
   await act(async () => {
-    finishEarlier({ data: { ...fixture.user, company: "Earlier team", org_id: "earlier-org" }, error: null });
+    finishEarlier({ data: { ...fixture.user, company: "Earlier team", org_id: "earlier-org" }, error });
     await earlier;
   });
   expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
   expect(screen.getByText("owner:Joined team:ready")).toBeTruthy();
+  expect(fixture.refreshSession).not.toHaveBeenCalled();
+});
+
+it("catches up on a workspace switch missed during disconnection without resetting the current screen while loading", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
+  const reads = fixture.profileRead.mock.calls.length;
+  act(() => window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["org_messages"] } })));
+  expect(fixture.profileRead).toHaveBeenCalledTimes(reads);
+  let finish!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  expect(screen.getByText("owner:Example:ready")).toBeTruthy();
+  await act(async () => finish({ data: { ...fixture.user, company: "Joined team", org_id: "joined-org" }, error: null }));
+  expect(screen.getByText("owner:Joined team:ready")).toBeTruthy();
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
 });
 
 function SessionProbe() {

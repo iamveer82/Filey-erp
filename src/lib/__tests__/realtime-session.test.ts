@@ -44,3 +44,27 @@ it("releases idle background channels and catches up once when returning", async
   window.removeEventListener("filey:cloud-change", changed);
   vi.restoreAllMocks(); vi.useRealTimers();
 });
+
+it("catches up after a socket reconnect and ignores callbacks from a signed-out session", async () => {
+  mock.session.mockResolvedValue({ data: { session: { access_token: "current-account-token", user: { id: "owner" } } } });
+  let status!: (value: string) => void;
+  const channel = { on: vi.fn(), subscribe: vi.fn((callback) => { status = callback; return channel; }) };
+  channel.on.mockReturnValue(channel);
+  mock.channel.mockReturnValue(channel);
+  const changed = vi.fn();
+  window.addEventListener("filey:cloud-change", changed);
+  try {
+    await startRealtime();
+    status("SUBSCRIBED");
+    expect(changed).not.toHaveBeenCalled();
+    status("CHANNEL_ERROR");
+    status("SUBSCRIBED");
+    expect(changed).toHaveBeenCalledOnce();
+    stopRealtime();
+    status("SUBSCRIBED");
+    expect(changed).toHaveBeenCalledOnce();
+  } finally {
+    stopRealtime();
+    window.removeEventListener("filey:cloud-change", changed);
+  }
+});

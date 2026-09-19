@@ -240,6 +240,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
   const profileReadRevision = useRef(0);
+  const loadedOrg = useRef(profile?.org_id);
+  loadedOrg.current = profile?.org_id;
 
   const completeLocalSignIn = (u: User) => {
     const p = localProfile();
@@ -257,6 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select("*")
       .eq("id", u.id)
       .maybeSingle();
+    if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
     // A read that FAILED is not evidence the profile is missing. This used to
     // ignore `error` and set profileLoaded in a finally, so one network blip or
     // RLS hiccup on sign-in made needsProfile true and dropped an existing user
@@ -272,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (error) throw error;
     const prof = (data as Profile) ?? null;
-    if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
+    if (loadedOrg.current !== prof?.org_id) clearEntitlementCache();
     setCacheOrg(prof?.org_id, u.id);
     setProfile(prof);
     setProfileError(null);
@@ -298,9 +301,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void loadProfile(user).catch((e: Error) => setProfileError(e.message));
       }
     };
+    const reconnected = (event: Event) => {
+      if ((event as CustomEvent<{tables?: string[]}>).detail?.tables?.length) return;
+      // Catch up after sleep/reconnect without discarding a same-workspace draft.
+      void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+    };
     window.addEventListener("filey:cloud-profile",changed);
     window.addEventListener("filey:workspace-transition",transition);
-    return () => { window.removeEventListener("filey:cloud-profile",changed); window.removeEventListener("filey:workspace-transition",transition); };
+    window.addEventListener("filey:cloud-change",reconnected);
+    return () => {
+      window.removeEventListener("filey:cloud-profile",changed);
+      window.removeEventListener("filey:workspace-transition",transition);
+      window.removeEventListener("filey:cloud-change",reconnected);
+    };
   }, [local,user,profile?.org_id,loadProfile]);
 
   useEffect(() => {
