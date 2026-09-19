@@ -35,9 +35,11 @@ export default function SetupNotice() {
 
         {cloudConfigured && (
           <>
-            {/* Primary path - cloud. The free default: account, sync, team. */}
+            {/* Primary path - this computer. Basic is free and local; saving to
+                the cloud is Pro, so offering cloud as the free default sent new
+                accounts into a workspace that refused every save. */}
             <button
-              onClick={() => choose("cloud")}
+              onClick={() => void chooseLocal()}
               className="group w-full text-left rounded-xl border border-brand-200 dark:border-white/12
                          bg-white p-5 shadow-sm
                          transition-[box-shadow,border-color,transform] duration-200
@@ -47,23 +49,23 @@ export default function SetupNotice() {
             >
               <div className="flex items-start gap-4">
                 <div className="shrink-0 grid place-items-center h-11 w-11 rounded-xl bg-foreground text-background">
-                  <Cloud size={22} />
+                  <HardDrive size={22} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-semibold text-ink">Use Filey Cloud</h2>
+                    <h2 className="text-base font-semibold text-ink">Use on this computer</h2>
                     <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-ink">
-                      Free · Recommended
+                      Basic · Free
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-brand-500">
-                    Sign up in the app. Your data is stored securely and synced.
+                    Create your free account, then everything runs on this machine.
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
-                      "Free account, ready in seconds",
-                      "Synced and backed up across devices",
-                      "Invite your team and share records",
+                      "The whole ERP and CRM, 5 invoices a month",
+                      "Works offline — your data stays here",
+                      "Upgrade to Pro or Ultra any time",
                     ].map((line) => (
                       <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600">
                         <Check size={14} className="shrink-0 text-success" />
@@ -86,9 +88,9 @@ export default function SetupNotice() {
               <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
             </div>
 
-            {/* Secondary path - offline, the licensed tier. Quiet by design. */}
+            {/* Secondary path - the cloud workspace, which is Pro. */}
             <button
-              onClick={() => void chooseLocal()}
+              onClick={() => choose("cloud")}
               className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
                          bg-transparent p-4 transition-colors duration-200
                          hover:bg-brand-50 dark:hover:bg-white/5 active:scale-[0.99] cursor-pointer
@@ -96,19 +98,18 @@ export default function SetupNotice() {
             >
               <div className="flex items-center gap-3">
                 <div className="shrink-0 grid place-items-center h-9 w-9 rounded-xl bg-brand-100 dark:bg-white/10 text-ink">
-                  <HardDrive size={18} />
+                  <Cloud size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-ink">Use offline</h2>
-                    {(
-                      <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
-                        Free local edition
-                      </span>
-                    )}
+                    <h2 className="text-sm font-semibold text-ink">Use Filey Cloud</h2>
+                    <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
+                      Pro · $5/month
+                    </span>
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Free core ERP and CRM on this computer. Sign in once online to link your device.
+                    Sync every device and share with your team. Already on Pro, or bought it on
+                    gofiley.com? Pick this and sign in.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

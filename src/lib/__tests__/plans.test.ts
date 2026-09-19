@@ -67,7 +67,7 @@ describe("planCardFor", () => {
   // one number while the checkout charges another is the worst kind of bug to
   // find out about from a customer.
   it("carries the current prices", () => {
-    expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
+    expect(PLANS.find((p) => p.id === "free")?.price).toBe("$0");
     expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$5");
     expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
     expect(PLANS.find((p) => p.id === "lite")?.price).toBe("$100");

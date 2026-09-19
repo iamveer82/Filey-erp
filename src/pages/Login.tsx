@@ -28,7 +28,7 @@ const humanError = (e: unknown): string => {
   if (/signups not allowed for otp|otp_disabled/i.test(m))
     return "No Filey account uses this email, so there's no code to send. Create an account instead.";
   if (/invalid login credentials|invalid email or password/i.test(m))
-    return "That email and password don't match an account. If you signed up with a one-time code, sign in with “One-time code” below.";
+    return "That email and password don't match an account. New to Filey? Create one below. Signed up with a code? Use “One-time code”.";
   if (/email not confirmed/i.test(m))
     return "This account hasn't been confirmed yet. Use “One-time code” to get a fresh one.";
   if (/failed to fetch|network/i.test(m))
@@ -119,7 +119,11 @@ export default function Login() {
   const deviceClaimed = localMode && hasLocalCredential();
 
   const [screen, setScreen] = useState<Screen>("form");
-  const [mode, setMode] = useState<Mode>("signin");
+  // A device no account has claimed is almost always a new customer — often
+  // one who just paid on the website and has no account yet. Open on signup.
+  const [mode, setMode] = useState<Mode>(() =>
+    isLocalMode() && !hasLocalCredential() ? "signup" : "signin"
+  );
   const [channel, setChannel] = useState<Channel>("email");
   const [method, setMethod] = useState<Method>("password");
   const [recovering, setRecovering] = useState(false);
@@ -261,7 +265,14 @@ export default function Login() {
         );
       }
     } catch (e2: any) {
-      setErr(humanError(e2));
+      // Signing up with an address that already has an account: take them to
+      // sign-in with the password they just typed, one click from done.
+      if (mode === "signup" && /already exists|already registered/i.test(e2?.message ?? "")) {
+        setMode("signin");
+        setMethod("password");
+        setConfirm("");
+        setMsg("You already have a Filey account with this email. Sign in below.");
+      } else setErr(humanError(e2));
     } finally {
       setBusy(false);
     }

@@ -83,7 +83,7 @@ it("counts free local invoices against the monthly allowance", async () => {
   // entirely, back when local was the thing you paid for.
   expect(await canUseLocalMode()).toBe(true);
   await expect(checkFreeInvoiceCap(async () => 0)).resolves.toBeUndefined();
-  await expect(checkFreeInvoiceCap(async () => 5)).rejects.toThrow(/Free plan limit reached/);
+  await expect(checkFreeInvoiceCap(async () => 5)).rejects.toThrow(/Basic plan limit reached/);
 });
 
 it("lets Filey AI create a ticket through the same validation and write gate", async () => {

@@ -47,7 +47,7 @@ export const GUIDES = [
     summary: "Use core ERP and CRM locally without a paid license.",
     steps: [
       "Core local storage and local invoices are free with no monthly invoice cap. Sign in online once to link the device; later offline password access requires a remembered password sign-in.",
-      "Paid Freedom licenses retain their existing benefits, device activation and offline signature verification. They are not required to access your local records.",
+      "Paid Ultra licenses retain their existing benefits, device activation and offline signature verification. They are not required to access your local records.",
       "Hosted cloud quotas and provider charges are separate. Free local software does not include unlimited hosted email, SMS, or external AI usage.",
       "In the desktop app, open Data & Storage to create a full database-and-files backup. The separate summary export is not a complete restorable backup.",
     ],

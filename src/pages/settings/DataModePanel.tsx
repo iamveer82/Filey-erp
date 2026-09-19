@@ -109,7 +109,7 @@ function CloudSyncCard() {
       // instead of leaving them on a dead end.
       if (!signup && /invalid login credentials|invalid email or password/i.test(msg)) {
         setErr(
-          "That email and password didn't match a Filey Cloud account. If you've been using Filey offline, this email has no cloud account yet - creating one takes a moment and your on-device data stays exactly where it is."
+          "That email and password didn't match a Filey account. If you've been using Filey offline, this email has no cloud account yet - creating one takes a moment and your on-device data stays exactly where it is."
         );
         setOfferSignup(true);
       } else {
@@ -171,11 +171,11 @@ function CloudSyncCard() {
 
       {cloudPlan && !cloudPlan.allowed && (
         <div className="rounded-lg border border-border bg-hover p-4 text-sm">
-          <p className="font-medium text-foreground">Syncing needs Filey Cloud — $5/month.</p>
+          <p className="font-medium text-foreground">Syncing needs Filey Pro — $5/month.</p>
           <p className="mt-1 text-muted-foreground">
-            Everything you have made so far stays on this device and keeps working. Buy
-            Cloud in Settings → Billing and syncing switches on by itself, or stay local
-            and own it outright with Freedom.
+            Everything you have made so far stays on this device and keeps working. Get
+            Pro in Settings → Billing and syncing switches on by itself, or stay local
+            and own it outright with Ultra.
           </p>
         </div>
       )}
@@ -571,7 +571,7 @@ export default function DataModePanel() {
             disabled={localExists === null}
             desc={
               "Device records, available offline. Cloud sync is optional and controlled separately." +
-              " Free core ERP and CRM, with unlimited local invoices."
+              " Basic is free: the whole ERP and CRM, 5 invoices a month."
             }
           />
         </div>

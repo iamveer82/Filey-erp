@@ -132,6 +132,7 @@ import {
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
 import TemplateDesigner from "../components/TemplateDesigner";
+import { offerUpgrade, isPlanLimitError } from "../lib/license";
 
 type CustomColumn = { key: string; label: string };
 
@@ -667,7 +668,8 @@ export default function Quoting() {
       toast.success("Invoice created from quotation.");
       navigate(`/invoicing?open=${id}`);
     } catch (e) {
-      toast.error(`Could not convert: ${errMsg(e)}`);
+      if (isPlanLimitError(e)) offerUpgrade();
+      else toast.error(`Could not convert: ${errMsg(e)}`);
     }
   };
 
@@ -999,7 +1001,8 @@ export default function Quoting() {
         toast.success("Invoice created from quotation.");
         navigate(`/invoicing?open=${id}`);
       } catch (e) {
-        toast.error(`Could not convert: ${errMsg(e)}`);
+        if (isPlanLimitError(e)) offerUpgrade();
+        else toast.error(`Could not convert: ${errMsg(e)}`);
       } finally {
         setConverting(false);
       }

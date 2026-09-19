@@ -10,9 +10,14 @@ import {
   type PlanCard,
   type Subscription,
 } from "../../lib/subscription";
-import { startFreedomCheckout, claimPurchasedLicense } from "../../lib/license";
+import {
+  startFreedomCheckout,
+  claimPurchasedLicense,
+  verifyStoredLicense,
+  FREE_LIMITS,
+} from "../../lib/license";
 import { Check } from "lucide-react";
-import { billing, erp, crm, quotes } from "../../lib/api";
+import { billing, erp, crm, quotes, invoicesThisMonth } from "../../lib/api";
 import { useEffect, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
@@ -28,6 +33,20 @@ export default function BillingPanel() {
   const [sub, setSub] = useState<Subscription>({ plan: "free" });
   const [subLoading, setSubLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [ownsUltra, setOwnsUltra] = useState(false);
+  const [invoicesUsed, setInvoicesUsed] = useState<number | null>(null);
+
+  useEffect(() => {
+    const refreshOwned = () => {
+      void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
+      void getSubscription().then(setSub).catch(() => {});
+    };
+    void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
+    void invoicesThisMonth().then(setInvoicesUsed).catch(() => {});
+    // A purchase collected in the background (auth.tsx) updates this page too.
+    window.addEventListener("filey:entitlement", refreshOwned);
+    return () => window.removeEventListener("filey:entitlement", refreshOwned);
+  }, []);
 
   useEffect(() => {
     let failed = false;
@@ -94,14 +113,15 @@ export default function BillingPanel() {
         return;
       }
       if (p.kind === "license") {
-        // Freedom: one-time. On desktop the checkout opens in the system
+        // Ultra: one-time. On desktop the checkout opens in the system
         // browser, so this window waits for the webhook instead of redirecting.
         if ((await startFreedomCheckout()) === "redirected") return;
         toast.info("Finish the payment in your browser — this page unlocks by itself.");
         const state = await claimPurchasedLicense(60, 5000);
+        if (state?.valid) setOwnsUltra(true);
         toast[state ? "success" : "info"](
           state
-            ? "Freedom is active on this device."
+            ? "Ultra is active on this device."
             : "No payment yet. When it completes, reopen this page and it activates."
         );
         return;
@@ -111,7 +131,7 @@ export default function BillingPanel() {
       const updated = await awaitCloudPlan();
       if (updated) {
         setSub(updated);
-        toast.success("Cloud is active on this workspace.");
+        toast.success("Pro is active on this workspace.");
       } else {
         toast.info("No subscription yet. When it completes, reopen this page.");
       }
@@ -131,17 +151,14 @@ export default function BillingPanel() {
     }
   };
 
-  const current = planCardFor(sub.plan);
-  const used = Object.values(stats).reduce((a, b) => a + b, 0);
-  const LIMITS: Record<string, number> = {
-    free: 500,
-    pro: 25000,
-    business: 25000,
-    enterprise: Infinity,
-  };
-  const limit = LIMITS[sub.plan] ?? 500;
-  const pctUsed =
-    limit === Infinity ? 0 : Math.min(100, Math.round((used / limit) * 100));
+  // The org's plan says Basic for someone who bought Ultra: the licence lives
+  // on the device, not the org. Show what they actually have.
+  const current =
+    sub.plan === "free" && ownsUltra ? PLANS.find((p) => p.id === "lite")! : planCardFor(sub.plan);
+  const owned = (p: PlanCard) => p.id === current.id || (p.id === "lite" && ownsUltra);
+  const capped = current.id === "free";
+  const cap = FREE_LIMITS.invoicesPerMonth;
+  const pctUsed = Math.min(100, Math.round(((invoicesUsed ?? 0) / cap) * 100));
 
   return (
     <>
@@ -177,20 +194,21 @@ export default function BillingPanel() {
         </SettingsSection>
 
         <SettingsSection
-          title="Storage usage"
-          description="Customers, products, invoices, orders and quotations saved in this workspace."
+          title="Usage"
+          description="What this workspace holds, and your invoice allowance this month."
         >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-medium tabular-nums text-foreground">
-              {used.toLocaleString()}
-              {limit !== Infinity ? ` / ${limit.toLocaleString()}` : ""} records
+              {capped
+                ? `${invoicesUsed ?? "–"} / ${cap} invoices this month`
+                : "Unlimited invoices"}
             </span>
           </div>
-          {limit !== Infinity && (
+          {capped && (
             <div
               className="h-1.5 w-full overflow-hidden rounded-full bg-hover"
               role="progressbar"
-              aria-label="Storage usage"
+              aria-label="Invoices used this month"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={pctUsed}
@@ -207,11 +225,11 @@ export default function BillingPanel() {
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            {limit === Infinity
-              ? "Unlimited on your plan."
-              : pctUsed >= 90
-                ? "You're nearly out of space - upgrade your plan for more."
-                : "Counts customers, products, invoices, orders and quotes."}
+            {!capped
+              ? `No monthly cap on ${current.name}.`
+              : pctUsed >= 100
+                ? "You've used this month's Basic invoices. Pick a plan below to keep invoicing."
+                : "Basic includes 5 invoices a month. It resets on the 1st."}
           </p>
           {statsError ? (
             <p role="alert" className="text-sm text-danger">
@@ -242,12 +260,12 @@ export default function BillingPanel() {
                 key={p.id}
                 className={cn(
                   "flex min-w-0 flex-col rounded-lg border p-5",
-                  p.id === current.id ? "border-foreground/30" : "border-border"
+                  owned(p) ? "border-foreground/30" : "border-border"
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-foreground">{p.name}</p>
-                  {p.id === current.id ? (
+                  {owned(p) ? (
                     <span className="pill bg-hover text-foreground text-xs">Current</span>
                   ) : (
                     p.recommended && (
@@ -278,13 +296,15 @@ export default function BillingPanel() {
                   ))}
                 </ul>
                 <div className="mt-5">
-                  {p.id === current.id ? (
+                  {owned(p) ? (
                     <button className="btn-ghost w-full" disabled>
                       Your plan
                     </button>
                   ) : p.id === "free" ? (
                     <p className="py-2 text-center text-xs text-brand-400">
-                      Downgrade anytime in the billing portal
+                      {sub.plan !== "free"
+                        ? "Cancel Pro in the billing portal to return to Basic"
+                        : "Everything in Basic is part of your plan"}
                     </p>
                   ) : (
                     <button

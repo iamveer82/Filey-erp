@@ -101,7 +101,7 @@ export default function LicensePanel() {
       .then((state) => {
         if (cancelled) return;
         if (state) {
-          setMsg("Freedom is active on this device.");
+          setMsg("Ultra is active on this device.");
           refresh();
         } else {
           setErr(
@@ -162,7 +162,7 @@ export default function LicensePanel() {
       >
         <p className="text-sm leading-relaxed text-muted-foreground">
           One-time purchase. Verified offline on this device - no internet needed after
-          activation. Up to 2 devices per license. Cloud sync is a separate subscription
+          activation. Up to 2 devices per license. Sync is Pro, a separate subscription
           under Billing.
         </p>
         <p className="text-sm mt-2">
@@ -313,9 +313,9 @@ export default function LicensePanel() {
               <button
                 className="btn-primary mt-3"
                 disabled={busy}
-                onClick={() => run(buyFreedom, "Freedom is active on this device.")}
+                onClick={() => run(buyFreedom, "Ultra is active on this device.")}
               >
-                <ShoppingCart size={15} /> Buy desktop license
+                <ShoppingCart size={15} /> Buy Ultra — $100 once
               </button>
 
               <div className="mt-4 border-t border-border pt-4">
@@ -413,7 +413,7 @@ export default function LicensePanel() {
       {/* Website leads + their coupon codes — send the code after payment. */}
       {leads.length > 0 && (
         <SettingsSection
-          title="Freedom leads & coupons"
+          title="Ultra leads & coupons"
           description="Manage requests for the desktop plan."
           stacked
         >

@@ -63,3 +63,30 @@ export function planPatchFor(
  *  is either paying for nothing or using what they stopped paying for. */
 export const grantsCloud = (status: DodoSubscriptionStatus | string): boolean =>
   planPatchFor(status).plan !== "free";
+
+/** Who bought what, in the fields this app needs from a Dodo payload. */
+export interface DodoPurchase {
+  metadata?: Record<string, string> | null;
+  product_cart?: { product_id?: string }[] | null;
+  product_id?: string | null;
+  customer?: { email?: string | null } | null;
+}
+
+/** The buyer behind a purchase of `product`, or null when it is not one.
+ *
+ *  Checkouts this app creates carry metadata saying what they are and whose
+ *  they are. Dodo's own storefront and payment links carry none — so without
+ *  this fallback a customer who paid there got nothing. For those, the product
+ *  id says what was bought and the email Dodo collected says who bought it. */
+export function buyerOf(
+  data: DodoPurchase,
+  product: string,
+  type: "freedom_license" | "cloud_subscription"
+): { userId?: string; orgId?: string; email?: string } | null {
+  const meta = data.metadata ?? {};
+  const email = meta.email || data.customer?.email || undefined;
+  if (meta.type) return meta.type === type ? { userId: meta.user_id, orgId: meta.org_id, email } : null;
+  const bought =
+    data.product_id === product || (data.product_cart ?? []).some((i) => i.product_id === product);
+  return bought && product ? { email } : null;
+}

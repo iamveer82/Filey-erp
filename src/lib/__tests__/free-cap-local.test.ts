@@ -25,7 +25,7 @@ describe("the free invoice cap on a local workspace", () => {
     clearEntitlementCache();
     await expect(
       checkFreeInvoiceCap(async () => FREE_LIMITS.invoicesPerMonth)
-    ).rejects.toThrow(/Free plan limit reached/);
+    ).rejects.toThrow(/Basic plan limit reached/);
   });
 
   it("names both ways out in the message", async () => {
@@ -34,7 +34,7 @@ describe("the free invoice cap on a local workspace", () => {
     // Someone who has hit the wall needs to know the two prices, not just that
     // they are blocked.
     await expect(checkFreeInvoiceCap(async () => 99)).rejects.toThrow(/\$5\/month/);
-    await expect(checkFreeInvoiceCap(async () => 99)).rejects.toThrow(/Freedom/);
+    await expect(checkFreeInvoiceCap(async () => 99)).rejects.toThrow(/Ultra/);
   });
 
   it("lets the fifth through", async () => {

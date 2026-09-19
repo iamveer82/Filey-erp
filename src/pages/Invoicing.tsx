@@ -106,6 +106,7 @@ import {
   FB_KEY,
 } from "../lib/docItems";
 import ScanDocModal from "../components/ScanDocModal";
+import { offerUpgrade, isPlanLimitError } from "../lib/license";
 import { CustomerAdvancesPanel } from "../components/AdvanceCard";
 import TemplateDesigner from "../components/TemplateDesigner";
 import DocTemplateGallery from "../components/DocTemplateGallery";
@@ -430,9 +431,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     data: QuickViewData;
   } | null>(null);
   const [reminding, setReminding] = useState(false);
-  // Free-tier invoice cap hit (client check or server trigger) → upgrade modal.
-  const [capOpen, setCapOpen] = useState(false);
-  const isCapError = (e: unknown) => errMsg(e).includes("Free plan limit reached");
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(false);
   const loadDocs = useCallback(() => {
@@ -796,7 +794,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       await loadDocs();
       return id;
     } catch (e) {
-      if (isCapError(e)) setCapOpen(true);
+      // Cap hit (client check or server trigger) → the global upgrade dialog.
+      if (isPlanLimitError(e)) offerUpgrade();
       else toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
       setSaving(false);
@@ -877,7 +876,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
           : "Moved back to draft."
       );
     } catch (e) {
-      if (isCapError(e)) setCapOpen(true);
+      if (isPlanLimitError(e)) offerUpgrade();
       else toast.error(`Could not update: ${errMsg(e)}`);
     } finally {
       setSaving(false);
@@ -1646,36 +1645,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       />
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
-
-      {/* Free-tier invoice cap - upgrade path instead of a bare error toast. */}
-      <Modal
-        open={capOpen}
-        onClose={() => setCapOpen(false)}
-        title="Free plan limit reached"
-      >
-        <p className="text-[13px] text-brand-500">
-          You've used all 20 invoices in this calendar month on the Free plan.
-          Upgrade to keep invoicing without interruption:
-        </p>
-        <ul className="mt-3 space-y-1.5 text-[13px] text-brand-500 list-disc pl-5">
-          <li>
-            <b className="text-ink">Offline</b>. One-time purchase, fully offline,
-            no monthly cap.
-          </li>
-          <li>
-            <b className="text-ink">Pro</b>. Cloud sync and multi-device, no monthly
-            cap.
-          </li>
-        </ul>
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setCapOpen(false)}>
-            Not now
-          </button>
-          <a href="#/settings?section=billing" className="btn-primary">
-            View plans
-          </a>
-        </div>
-      </Modal>
 
       {company && (
         <CompanyModal

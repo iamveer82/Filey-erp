@@ -339,13 +339,15 @@ export function resolveTier(
 let cachedTier: Tier | null = null;
 
 /** Resolve (and cache) the current tier. Offline license check is local;
- *  the pro check reads the org's plan when in cloud mode. */
+ *  the pro check reads the org's plan whenever there is a session — local
+ *  mode included, since Pro promises no monthly cap wherever you work.
+ *  ponytail: offline + local, a Pro user reads as Basic until back online. */
 export async function entitlement(force = false): Promise<Tier> {
   if (cachedTier && !force) return cachedTier;
   const lic = await verifyStoredLicense();
   let plan: string | null = null;
   let status: string | null = null;
-  if (!isLocalMode() && supabase) {
+  if (supabase) {
     try {
       const { data } = await supabase
         .from("organizations")
@@ -433,9 +435,29 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
       data.plan_status as string | null,
       data.cloud_grandfathered as boolean | null
     );
+    // An Ultra licence held by the workspace owner also opens the cloud
+    // (2026-09-19-ultra-cloud-access.sql). A member cannot read the owner's
+    // licence, so ask the database's own gate rather than mirroring it.
+    if (!cachedCloud.allowed) {
+      const { data: open } = await supabase.rpc("filey_cloud_access");
+      if (open === true) cachedCloud = { allowed: true, reason: "paid" };
+    }
     return cachedCloud;
   } catch {
     return { allowed: true, reason: "unenforced" };
+  }
+}
+
+/** May this account use Filey on the web? Pro, Ultra, or a workspace
+ *  grandfathered into free cloud. The browser can only hold a cloud
+ *  workspace, so this is cloud access plus the account's own Ultra licence
+ *  (which counts before 2026-09-19-ultra-cloud-access.sql is applied too). */
+export async function webAccess(): Promise<boolean> {
+  if ((await cloudAccess(true)).allowed) return true;
+  try {
+    return !!(await licenseOverview());
+  } catch {
+    return false;
   }
 }
 
@@ -469,7 +491,42 @@ export async function claimWebsitePurchases(): Promise<boolean> {
   }
 }
 
-/** Free-tier invoice cap: throws a friendly error when a NEW invoice would
+/** Turn any payment made elsewhere into access on this machine. Safe to run on
+ *  every sign-in, app start and window focus: it collects website purchases,
+ *  then activates this device when the account owns Ultra and no device has
+ *  used that licence yet. A licence already in use somewhere is left to
+ *  Settings → Licence, or a device someone freed on purpose would keep taking
+ *  its slot back. Returns true when access changed. */
+export async function collectPurchases(): Promise<boolean> {
+  const claimed = await claimWebsitePurchases();
+  let activated = false;
+  try {
+    if (!(await verifyStoredLicense()).valid) {
+      const owned = await licenseOverview();
+      if (owned && owned.devices.length === 0) {
+        activated = (await activateThisDevice()).valid;
+      }
+    }
+  } catch {
+    /* offline, or signed out — the next sign-in tries again */
+  }
+  if (claimed || activated) clearEntitlementCache();
+  return claimed || activated;
+}
+
+/** Ask the app to show the upgrade dialog (UpgradeDialog listens). Fired
+ *  alongside the throw, so a caller that only knows how to toast still puts
+ *  the way out on screen. */
+export function offerUpgrade(reason: "invoices" | "emails" = "invoices"): void {
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent("filey:upgrade", { detail: { reason } }));
+}
+
+/** Matches both this file's cap errors and the database trigger's. */
+export const isPlanLimitError = (e: unknown) =>
+  /plan limit reached/i.test(e instanceof Error ? e.message : String(e));
+
+/** Basic-tier invoice cap: throws a friendly error when a NEW invoice would
  *  exceed this month's allowance. No-op unless licensing is enforced. */
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
@@ -479,16 +536,18 @@ export async function checkFreeInvoiceCap(
   // it used to skip local mode entirely, back when local was the paid thing.
   // Freedom (lite) buys unlimited local; Cloud (pro) buys unlimited hosted.
   if ((await entitlement()) !== "free") return;
-  // An org grandfathered into free cloud was never capped in practice, and
-  // dropping it to five invoices a month is the same broken promise as
-  // cutting it off. Mirrors enforce_free_invoice_cap() in the database.
-  if (!isLocalMode() && (await cloudAccess()).reason === "grandfathered") return;
+  // A cloud workspace the plan opens — Pro, an Ultra owner (the web app has
+  // no local licence token), or grandfathered from free cloud — is uncapped.
+  // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
+  if (!isLocalMode() && (await cloudAccess()).allowed) return;
   const used = await countThisMonth();
-  if (used >= FREE_LIMITS.invoicesPerMonth)
+  if (used >= FREE_LIMITS.invoicesPerMonth) {
+    offerUpgrade("invoices");
     throw new Error(
-      `Free plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Filey Cloud is $5/month, or buy Freedom once for unlimited local use — Settings → Billing.`
+      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
+        `Pro is $5/month, or buy Ultra once for unlimited local use — Settings → Billing.`
     );
+  }
 }
 
 /* ---------------- email daily cap (per tier) ---------------- */
@@ -525,11 +584,13 @@ export async function checkEmailDailyCap(): Promise<void> {
   if (!ENFORCE_LICENSING) return;
   const limit = EMAIL_DAILY_LIMIT[await entitlement()];
   if (!Number.isFinite(limit)) return;
-  if ((await emailCountToday()) >= limit)
+  if ((await emailCountToday()) >= limit) {
+    offerUpgrade("emails");
     throw new Error(
       `Daily email limit reached (${limit} today). ` +
         `Upgrade in Settings → Billing to send more.`
     );
+  }
 }
 
 /** Record one successful send against today's local counter. */

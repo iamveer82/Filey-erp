@@ -36,7 +36,7 @@ import {
   grantLicense,
   type LicenseResult,
 } from "../_shared/license.ts";
-import { planPatchFor } from "../_shared/billing.ts";
+import { buyerOf, planPatchFor, type DodoPurchase } from "../_shared/billing.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -124,6 +124,10 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
 
+    // Signed-in checkouts come from the app or from gofiley.com; /thanks words
+    // the next step differently for each.
+    const fromApp = payload.from === "web" ? "" : "&from=app";
+
     const allowed = await rateLimit(supa, user.id, "dodo_action", 20, 3600);
     if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
     await logAction(supa, user.id, "dodo_action", { action });
@@ -148,7 +152,7 @@ Deno.serve(async (req) => {
       if (!PRODUCT_FREEDOM) return json({ error: "Freedom product not configured" }, 503);
       const already = await licenseStatus(supa, user.id);
       if (already.body.licensed)
-        return json({ error: "This account already owns a Freedom licence." }, 409);
+        return json({ error: "This account already owns Ultra." }, 409);
 
       // SECURITY: the redirect target comes from SITE_URL, never the caller's
       // Origin header — otherwise the checkout doubles as an open redirect.
@@ -159,8 +163,8 @@ Deno.serve(async (req) => {
         // The webhook is what grants the licence; this metadata is how it knows
         // whose account to grant it to.
         metadata: { type: "freedom_license", user_id: user.id },
-        return_url: base ? `${base}/#/settings?section=license&checkout=success` : undefined,
-        cancel_url: base ? `${base}/#/settings?section=license&checkout=cancel` : undefined,
+        return_url: base ? `${base}/thanks?plan=freedom${fromApp}` : undefined,
+        cancel_url: base ? `${base}/#pricing` : undefined,
       });
       if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
       return json({ url: session.checkout_url, session_id: session.session_id });
@@ -179,8 +183,8 @@ Deno.serve(async (req) => {
         // org_id is how the webhook knows whose cloud to switch on; the
         // subscription carries it forward to every renewal event.
         metadata: { type: "cloud_subscription", org_id: String(org.id), user_id: user.id },
-        return_url: base ? `${base}/#/settings?section=billing&checkout=success` : undefined,
-        cancel_url: base ? `${base}/#/settings?section=billing&checkout=cancel` : undefined,
+        return_url: base ? `${base}/thanks?plan=cloud${fromApp}` : undefined,
+        cancel_url: base ? `${base}/#pricing` : undefined,
       });
       if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
       return json({ url: session.checkout_url, session_id: session.session_id });
@@ -305,25 +309,26 @@ async function handleWebhook(req: Request): Promise<Response> {
   if (event.type !== "payment.succeeded") return json({ received: true, ignored: event.type });
 
   const data = event.data;
-  const meta = (data.metadata ?? {}) as Record<string, string>;
 
   // A subscription's first charge arrives here too; the subscription events
-  // own that plan, so this path only handles the one-time licence.
-  if (meta.type === "cloud_subscription")
-    return json({ received: true, ignored: "subscription payment" });
-  if (meta.type !== "freedom_license" || !data.payment_id)
-    return json({ received: true, ignored: "not a Freedom licence purchase" });
+  // own that plan, so this path only handles the one-time licence. buyerOf
+  // also recognises purchases from Dodo's storefront and payment links, which
+  // carry none of our metadata.
+  const buyer = buyerOf(data as DodoPurchase, PRODUCT_FREEDOM, "freedom_license");
+  if (!buyer || !data.payment_id)
+    return json({ received: true, ignored: "not an Ultra licence purchase" });
 
   try {
-    // Bought from the website: no account yet, so park it against the email.
-    if (!meta.user_id) {
-      if (!meta.email) return json({ received: true, ignored: "purchase with no buyer" });
-      const outcome = await parkOrGrant(admin(), "freedom", meta.email, {
+    // No account attached (the website, the storefront): park it against the
+    // email, or grant it now if that email already has an account.
+    if (!buyer.userId) {
+      if (!buyer.email) return json({ received: true, ignored: "purchase with no buyer" });
+      const outcome = await parkOrGrant(admin(), "freedom", buyer.email, {
         payment_id: data.payment_id,
       });
       return json({ received: true, outcome });
     }
-    const outcome = await grantLicense(admin(), meta.user_id, data.payment_id);
+    const outcome = await grantLicense(admin(), buyer.userId, data.payment_id);
     return json({ received: true, outcome });
   } catch (e) {
     // 500 asks Dodo to retry, which is what we want: the buyer has paid and
@@ -352,6 +357,9 @@ async function handleSubscription(payload: unknown): Promise<Response> {
   const nextBilling = data.next_billing_date ? String(data.next_billing_date) : null;
   const meta = data.metadata ?? {};
   const customer = data.customer ?? {};
+  // Storefront / payment-link subscriptions carry no metadata: the product
+  // and Dodo's customer email stand in for it.
+  const buyer = buyerOf(payload as DodoPurchase, PRODUCT_CLOUD, "cloud_subscription");
   if (!subscriptionId || !status)
     return json({ received: true, ignored: "subscription event without id or status" });
 
@@ -373,8 +381,8 @@ async function handleSubscription(payload: unknown): Promise<Response> {
     // first sign-in switches that workspace on — but only while the
     // subscription is one that grants something; a cancellation for an
     // unclaimed purchase has nothing to park.
-    if (meta.email && planPatchFor(status, nextBilling, CLOUD_PLAN).plan !== "free") {
-      const outcome = await parkOrGrant(supa, "cloud", meta.email, {
+    if (buyer?.email && planPatchFor(status, nextBilling, CLOUD_PLAN).plan !== "free") {
+      const outcome = await parkOrGrant(supa, "cloud", buyer.email, {
         subscription_id: subscriptionId,
         customer_id: customer.customer_id,
       });

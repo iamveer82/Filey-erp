@@ -12,7 +12,7 @@ import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { startRealtime, stopRealtime } from "./realtime";
-import { registerCloudDevice, entitlement, claimWebsitePurchases } from "./license";
+import { registerCloudDevice, entitlement, collectPurchases } from "./license";
 import { mfaRequired } from "./mfa";
 import {
   assertLocalAccount,
@@ -340,16 +340,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error("[auth] loadProfile failed:", err);
             setProfileError(err?.message ?? String(err));
           });
-          // Someone can buy on the website before Filey is on their machine.
-          // That purchase waits on their email; this is where it is collected,
-          // now that Supabase has verified the address. Deferred with the
-          // profile load for the same reason: no awaited Supabase call may run
-          // while onAuthStateChange holds the auth lock.
-          void claimWebsitePurchases()
-            .then((claimed) => {
-              if (claimed) window.dispatchEvent(new Event("filey:entitlement"));
-            })
-            .catch(() => {});
         }, 0);
       } else {
         loadedFor.current = null;
@@ -413,6 +403,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void entitlement(true).catch(() => {});
   }, [session?.user?.id, local]);
+
+  // A payment made outside the app — on the website before Filey was even
+  // installed, or in the browser tab a Buy button opened — becomes access
+  // here: on sign-in, on app start, and when the window regains focus after
+  // paying. Both modes: local sign-in holds a Supabase session too. Runs off
+  // the auth lock (an effect, not onAuthStateChange).
+  useEffect(() => {
+    if (!user?.id || !supabase) return;
+    let last = 0;
+    const collect = () => {
+      if (Date.now() - last < 60_000) return;
+      last = Date.now();
+      void collectPurchases()
+        .then((changed) => {
+          if (changed) window.dispatchEvent(new Event("filey:entitlement"));
+        })
+        .catch(() => {});
+    };
+    collect();
+    window.addEventListener("focus", collect);
+    return () => window.removeEventListener("focus", collect);
+  }, [user?.id]);
 
   const signInWithPassword = async (c: Credential, password: string) => {
     const email = c.value.trim().toLowerCase();

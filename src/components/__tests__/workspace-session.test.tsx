@@ -39,6 +39,7 @@ vi.mock("../../lib/realtime", () => ({ startRealtime: vi.fn(), stopRealtime: vi.
 vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
   entitlement: async () => ({}),
+  collectPurchases: async () => false,
 }));
 vi.mock("../../lib/mfa", () => ({ mfaRequired: async () => false }));
 import { AuthProvider, adoptLocalProfile, useAuth } from "../../lib/auth";

@@ -23,12 +23,15 @@ export interface PlanCard {
   features: string[];
 }
 
+/* Display names: Basic (id "free"), Pro (id "cloud"), Ultra (id "lite"). The
+ * ids are what the database, the webhook and licence tokens store, so they
+ * never follow a rename. */
 export const PLANS: PlanCard[] = [
   {
     id: "free",
     kind: "subscription",
-    name: "Free",
-    price: "AED 0",
+    name: "Basic",
+    price: "$0",
     blurb: "The whole ERP on your device, up to 5 invoices a month.",
     features: [
       "Core ERP & CRM, all modules",
@@ -41,12 +44,13 @@ export const PLANS: PlanCard[] = [
   {
     id: "cloud",
     kind: "subscription",
-    name: "Cloud",
+    name: "Pro",
     price: "$5",
     period: " / month",
     blurb: "Your workspace everywhere, on every device you use.",
     features: [
       "Full cloud: sync every device you sign in on",
+      "Filey on the web at app.gofiley.com",
       "Unlimited invoices — no monthly cap",
       "Team members share one workspace",
       "Backed up off your machine",
@@ -57,7 +61,7 @@ export const PLANS: PlanCard[] = [
     // id stays "lite" — issued licence tokens key off it.
     id: "lite",
     kind: "license",
-    name: "Freedom",
+    name: "Ultra",
     price: "$100",
     period: " one-time",
     recommended: true,
@@ -68,7 +72,7 @@ export const PLANS: PlanCard[] = [
       "2 device slots",
       "Free updates included",
       "No watermark",
-      "Add Cloud for $5/month if you want sync too",
+      "Filey on the web at app.gofiley.com",
     ],
   },
 ];

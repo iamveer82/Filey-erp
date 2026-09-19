@@ -9,8 +9,11 @@ import {
   CLOUD_DEVICE_LIMIT,
   listOrgDevices,
   releaseOrgDevice,
+  startFreedomCheckout,
+  webAccess,
   type OrgDevice,
 } from "./lib/license";
+import { startCheckout } from "./lib/subscription";
 import { UIProvider } from "./lib/ui";
 import { LanguageProvider } from "./lib/i18n";
 import { ModulesProvider, useModules } from "./lib/modules";
@@ -26,6 +29,7 @@ import CommandPalette from "./components/CommandPalette";
 import OverdueReminder from "./components/OverdueReminder";
 import Notifier from "./components/Notifier";
 import UpdateNotice from "./components/UpdateNotice";
+import UpgradeDialog from "./components/UpgradeDialog";
 import AgentScheduler from "./components/AgentScheduler";
 import { Toaster } from "./components/Toaster";
 import { maybePromptDesktopShortcut } from "./lib/shortcut";
@@ -161,6 +165,60 @@ function DeviceLimitScreen() {
   );
 }
 
+/** Filey on the web (app.gofiley.com) is part of Pro and Ultra. A Basic
+ *  account signing in from a browser gets the two ways forward instead of a
+ *  workspace that would refuse every save. */
+function WebPlanGate({ onRecheck }: { onRecheck: () => void }) {
+  const { user, signOut } = useAuth();
+  const [busy, setBusy] = useState<"cloud" | "lite" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const buy = async (plan: "cloud" | "lite") => {
+    setBusy(plan);
+    setError(null);
+    try {
+      // The browser build redirects this tab to Dodo; the return lands on
+      // gofiley.com/thanks, and signing in here again finds the plan.
+      if (plan === "cloud") await startCheckout("cloud");
+      else await startFreedomCheckout();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="min-h-screen grid place-items-center p-6 bg-canvas">
+      <div className="card max-w-md w-full space-y-4">
+        <h1 className="text-lg font-semibold text-ink">Filey on the web is part of Pro and Ultra</h1>
+        <p className="text-sm text-brand-500">
+          {user?.email ? <><span className="text-ink">{user.email}</span> is on Basic. </> : null}
+          Basic runs free on your own computer with the desktop app. Upgrade to use Filey from
+          any browser — your data syncs with the desktop app too.
+        </p>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button className="btn-primary" disabled={!!busy} onClick={() => void buy("cloud")}>
+            {busy === "cloud" ? "Opening checkout…" : "Get Pro — $5/month"}
+          </button>
+          <button className="btn-ghost" disabled={!!busy} onClick={() => void buy("lite")}>
+            {busy === "lite" ? "Opening checkout…" : "Get Ultra — $100 once"}
+          </button>
+        </div>
+        <a className="btn-ghost w-full" href="https://gofiley.com/#download">
+          Download the free desktop app
+        </a>
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+          <button className="text-xs text-brand-500 hover:text-ink" onClick={onRecheck}>
+            Already paid? Check again
+          </button>
+          <button className="text-xs text-brand-500 hover:text-ink" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProfileLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="min-h-screen grid place-items-center p-6 bg-canvas">
@@ -201,6 +259,28 @@ function Gate() {
     const t = setTimeout(() => void maybePromptDesktopShortcut(), 2000);
     return () => clearTimeout(t);
   }, [user]);
+  // The browser build is Pro/Ultra only; the desktop app never asks.
+  // Keyed by user, so signing in as someone else never inherits the answer.
+  const [webAnswer, setWebAnswer] = useState<{ uid: string; open: boolean } | null>(null);
+  const [webCheck, setWebCheck] = useState(0);
+  const web: "checking" | "open" | "blocked" = hasTauri
+    ? "open"
+    : webAnswer && webAnswer.uid === user?.id
+      ? webAnswer.open ? "open" : "blocked"
+      : "checking";
+  useEffect(() => {
+    if (hasTauri || !user) return;
+    let live = true;
+    const check = () =>
+      void webAccess().then((open) => live && setWebAnswer({ uid: user.id, open }));
+    check();
+    // A purchase collected in the background (auth.tsx) opens the gate.
+    window.addEventListener("filey:entitlement", check);
+    return () => {
+      live = false;
+      window.removeEventListener("filey:entitlement", check);
+    };
+  }, [user, webCheck]);
   // First run: let the user pick where data lives — local (offline) or cloud.
   // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
   // straight in so existing users aren't prompted.
@@ -221,6 +301,11 @@ function Gate() {
   // that form upserts over the real name and company.
   if (profileError)
     return <ProfileLoadError message={profileError} onRetry={() => void reloadProfile()} />;
+  // Before profile setup: a Basic account in the browser should learn the web
+  // needs Pro or Ultra before filling in a form it cannot use.
+  if (web === "checking") return <Splash />;
+  if (web === "blocked" && ENFORCE_LICENSING)
+    return <WebPlanGate onRecheck={() => { setWebAnswer(null); setWebCheck((n) => n + 1); }} />;
   if (needsProfile) return <ProfileSetup />;
   if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 
@@ -234,6 +319,9 @@ function Gate() {
       <Notifier />
       <UpdateNotice />
       <AgentScheduler />
+      {/* Opens wherever a plan limit is hit, so the way out is on the screen
+          the person is already looking at. */}
+      <UpgradeDialog />
       <Toaster />
     </ModulesProvider>
   );

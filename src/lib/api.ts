@@ -1165,7 +1165,7 @@ async function adjustProductStock(
 }
 
 /** Invoices created since the 1st of the current month (free-tier cap). */
-async function invoicesThisMonth(): Promise<number> {
+export async function invoicesThisMonth(): Promise<number> {
   const rows = await sList<{ created_at?: string }>("invoice_docs");
   const start = new Date();
   start.setDate(1);

@@ -127,12 +127,22 @@ export function fmtDate(d?: string | null): string {
  * Handles Error, Supabase PostgrestError ({message, details, hint}),
  * and plain objects without producing [object Object]. */
 export function errMsg(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const obj = e as Record<string, unknown>;
-    return String(obj.message ?? obj.details ?? obj.hint ?? JSON.stringify(e));
-  }
-  return String(e);
+  const msg =
+    e instanceof Error
+      ? e.message
+      : e && typeof e === "object"
+        ? String(
+            (e as Record<string, unknown>).message ??
+              (e as Record<string, unknown>).details ??
+              (e as Record<string, unknown>).hint ??
+              JSON.stringify(e)
+          )
+        : String(e);
+  // The database's refusal reads like a crash. On a cloud workspace it almost
+  // always means the plan does not include cloud saves.
+  if (/row-level security/i.test(msg))
+    return "This workspace can't save that. Cloud saves need Filey Pro (Settings → Billing), or switch to this device for free in Settings → Data & Storage.";
+  return msg;
 }
 
 /**
