@@ -1,3 +1,4 @@
+import { FileySpinner } from "../../components/FileySpinner";
 import { useEffect, useState } from "react";
 import { Cloud, HardDrive, Check, Download, Upload, FolderOpen } from "lucide-react";
 import { getDataMode, type DataMode } from "../../lib/dataMode";
@@ -800,13 +801,7 @@ export default function DataModePanel() {
               role="status"
               aria-label="Syncing"
             >
-              <div
-                className="h-10 w-10 rounded-full animate-spin"
-                style={{
-                  border: "3px solid hsl(var(--brand-200))",
-                  borderTopColor: "hsl(var(--ink))",
-                }}
-              />
+              <FileySpinner size={40} className="text-foreground" />
             </div>
           ) : (
             <>

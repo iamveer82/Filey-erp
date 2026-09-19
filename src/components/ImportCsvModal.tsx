@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Loader2, CheckCircle2 } from "lucide-react";
+import { Upload, CheckCircle2 } from "lucide-react";
 import { ErrorBanner, Modal } from "./ui";
 import { useUI } from "../lib/ui";
 import { parseCsvObjects } from "../lib/csv";

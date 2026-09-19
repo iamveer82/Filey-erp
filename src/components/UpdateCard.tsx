@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { SettingsSection } from "./SettingsLayout";
 import {

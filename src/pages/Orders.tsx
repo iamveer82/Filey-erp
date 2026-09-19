@@ -94,7 +94,7 @@ export default function Orders() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["orders", "order_items", "products", "crm_customers"]);
 
   const stats = useMemo(() => {
     // localdb is schemaless — propagated/imported rows may lack fields.

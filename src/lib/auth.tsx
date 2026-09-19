@@ -11,7 +11,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
-import { startRealtime, stopRealtime } from "./realtime";
+import { watchRealtimeSession, stopRealtime } from "./realtime";
 import { registerCloudDevice, entitlement, collectPurchases } from "./license";
 import { mfaRequired } from "./mfa";
 import {
@@ -358,10 +358,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Live multi-client sync follows the session: open the channel once
   // signed in, close it on sign-out so the next user starts clean.
   useEffect(() => {
-    if (local) return; // local mode is single-user, no live sync
-    if (session?.user) void startRealtime();
-    else stopRealtime();
-  }, [session, local]);
+    if (local || !session?.user) { stopRealtime(); return; }
+    return watchRealtimeSession();
+  }, [session?.user?.id, local]);
 
   // Two-factor gate. Keyed on the USER, deliberately not on the access token:
   // a re-auth mid-session (the change-password screens sign in again to

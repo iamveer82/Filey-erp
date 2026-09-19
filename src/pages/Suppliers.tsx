@@ -88,7 +88,7 @@ export default function Suppliers() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["products", "suppliers", "purchase_orders", "purchase_order_items"]);
 
   const groups = useMemo<CategoryGroup[]>(() => {
     const m = new Map<string, CategoryGroup>();

@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import FreeConnections from "../components/FreeConnections";
 import WorkServices from "../components/WorkServices";
 import EmailConnection from "../components/EmailConnection";
@@ -13,7 +14,6 @@ import {
   FileText,
   Globe,
   Landmark,
-  Loader2,
   Megaphone,
   MessageCircle,
   Plug,

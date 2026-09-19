@@ -218,7 +218,7 @@ function CrmWorkspace({
       generation.current++;
     };
   }, [load]);
-  useLiveSync(load);
+  useLiveSync(load, ["crm_customers", "crm_people", "crm_leads", "crm_opportunities", "crm_tasks", "crm_notes", "crm_activities", "app_settings"]);
   const go = (next: View) => {
     setParams({ view: next });
     setDraftEditor(null);

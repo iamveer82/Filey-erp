@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+
 import * as safePdf from "../lib/pdfjsSafe";
 import { PDFDocument } from "pdf-lib";
 import type { Tool } from "./PdfToolbox";

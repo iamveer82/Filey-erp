@@ -5,6 +5,7 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { applyTheme, watchAppearance } from "./lib/theme";
 import { applyAccent } from "./lib/accent";
+import { watchViewport } from "./lib/viewport";
 import { initMonitoring } from "./lib/monitoring";
 import "flag-icons/css/flag-icons.min.css";
 import "./index.css";
@@ -27,6 +28,8 @@ applyTheme();
 applyAccent();
 const stopAppearanceSync = watchAppearance();
 import.meta.hot?.dispose(stopAppearanceSync);
+const stopViewport = watchViewport();
+import.meta.hot?.dispose(stopViewport);
 installExtensionBannerGuard();
 // Recovery links contain a credential; do not initialize telemetry on this page.
 if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();

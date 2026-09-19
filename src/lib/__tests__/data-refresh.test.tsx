@@ -51,6 +51,18 @@ afterEach(() => {
 
 const refresh = () => act(() => vi.advanceTimersByTime(250));
 
+it("refreshes only subscribers for changed tables, with a broad fallback for unknown changes", () => {
+  const inventory = vi.fn(), inbox = vi.fn();
+  renderHook(() => useLiveSync(inventory, ["products"]));
+  renderHook(() => useLiveSync(inbox, ["notifications"]));
+  notifyDataChanged(["products"]); refresh();
+  expect(inventory).toHaveBeenCalledTimes(1); expect(inbox).not.toHaveBeenCalled();
+  notifyDataChanged(["notifications"]); refresh();
+  expect(inventory).toHaveBeenCalledTimes(1); expect(inbox).toHaveBeenCalledTimes(1);
+  notifyDataChanged(); refresh();
+  expect(inventory).toHaveBeenCalledTimes(2); expect(inbox).toHaveBeenCalledTimes(2);
+});
+
 it("defers background refresh bursts until the tab becomes visible", () => {
   const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
   const reload = vi.fn();

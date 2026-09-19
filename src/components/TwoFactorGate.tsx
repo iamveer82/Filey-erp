@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 // The second step of sign-in. Shown when a password (or an emailed code) has
 // produced a real session that still sits at assurance level aal1 because the
 // account has an authenticator app enrolled.
@@ -6,7 +7,7 @@
 // unsatisfied session is exactly what 2FA exists to refuse, and leaving it
 // alive on the device would make the whole step decorative.
 import { useEffect, useState } from "react";
-import { Loader2, AlertCircle, ShieldCheck } from "lucide-react";
+import { AlertCircle, ShieldCheck } from "lucide-react";
 import Logo from "./Logo";
 import { FormField } from "./ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "./InputOTP";

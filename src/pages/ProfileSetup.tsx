@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck, Building2, ArrowRight, Loader2 } from "lucide-react";
+import { ShieldCheck, Building2, ArrowRight } from "lucide-react";
 import { Button } from "../components/Button";
 import { useAuth } from "../lib/auth";
 

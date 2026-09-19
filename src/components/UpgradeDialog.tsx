@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { Check, Cloud, HardDrive, Loader2 } from "lucide-react";
+import { Check, Cloud, HardDrive } from "lucide-react";
 import { Modal } from "./ui";
 import { PLANS, startCheckout, awaitCloudPlan, type PlanCard } from "../lib/subscription";
 import {

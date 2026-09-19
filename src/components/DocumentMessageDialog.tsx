@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Download, FileText, Link2, Loader2, MessageCircle, Send, Share2, Sparkles, Square } from "lucide-react";
+import { Download, FileText, Link2, MessageCircle, Send, Share2, Sparkles, Square } from "lucide-react";
 import { Modal, ErrorBanner } from "./ui";
 import { cn, errMsg } from "../lib/format";
 import { bridgeState, hasDesktop, onBridgeState } from "../lib/waBridge";

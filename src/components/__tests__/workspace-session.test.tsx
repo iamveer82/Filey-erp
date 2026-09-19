@@ -35,7 +35,7 @@ vi.mock("../../lib/supabase", () => ({
   },
 }));
 vi.mock("../../lib/api", () => ({ setCacheOrg: vi.fn((org?: string | null, user?: string) => { fixture.scope = user ? `${org || "default"}:${user}` : "signed out"; }) }));
-vi.mock("../../lib/realtime", () => ({ startRealtime: vi.fn(), stopRealtime: vi.fn() }));
+vi.mock("../../lib/realtime", () => ({ watchRealtimeSession: vi.fn(), stopRealtime: vi.fn() }));
 vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
   entitlement: async () => ({}),

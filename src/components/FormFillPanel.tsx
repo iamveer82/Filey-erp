@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { Loader2, FileType2 } from "lucide-react";
+import { FileType2 } from "lucide-react";
 import { readFormFields, fillForm, type PdfFormField } from "../lib/pdfTools";
 import { errMsg } from "../lib/format";
 import { SelectMenu } from "./ui-menu";

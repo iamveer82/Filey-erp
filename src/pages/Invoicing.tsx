@@ -457,7 +457,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     loadRecurs();
   }, [loadDocs, loadRecurs, toast]);
   useEffect(reload, [reload]);
-  useLiveSync(reload);
+  useLiveSync(reload, ["invoice_docs", "invoice_doc_items", "invoice_payments", "invoice_recurrence", "company_profile", "app_settings"]);
 
   // Generate any due recurring invoices once on load.
   useEffect(() => {

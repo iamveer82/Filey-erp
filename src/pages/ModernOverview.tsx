@@ -143,7 +143,7 @@ export default function ModernOverview() {
     return () => { loadId.current = undefined; };
   }, [load]);
 
-  useLiveSync(load);
+  useLiveSync(load, ["orders", "invoice_docs", "invoice_doc_items", "invoice_payments", "expenses", "crm_customers", "payment_receipts", "company_profile"]);
 
   // ── Derived metrics ────────────────────────────────────────────────────
   const orderStats = useMemo(() => {

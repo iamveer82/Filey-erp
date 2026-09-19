@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
 import { redactBoxes, type RedactBox, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";

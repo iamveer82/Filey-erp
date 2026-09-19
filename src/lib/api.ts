@@ -586,19 +586,24 @@ const cacheWrite = (key: string, value: unknown): Promise<void> =>
 /** When the last mutation happened. A cached list stored before this can't be
  *  trusted to show it, so those reads go to the server instead of serving. */
 let lastWriteAt = 0;
-let readRevision = 0;
-function markWrite(): void {
-  lastWriteAt = cacheStamp();
-  readRevision++;
+let lastAnyWriteAt = 0;
+const tableWrites = new Map<string, number>();
+function markWrite(tables?: readonly string[]): void {
+  lastAnyWriteAt = cacheStamp();
+  if (tables?.length) for (const table of tables) tableWrites.set(table, lastAnyWriteAt);
+  else lastWriteAt = lastAnyWriteAt;
 }
+const readRevision = (tables?: readonly string[]) => tables
+  ? Math.max(lastWriteAt, ...tables.map(table => tableWrites.get(table) ?? 0))
+  : lastAnyWriteAt;
 
 const fetching = new Map<string, Promise<unknown>>();
 class SupersededRead extends Error {}
 
 /** Share one cloud read between mounted pages, header widgets and refreshes.
  * A save or identity change prevents an older response from becoming current. */
-function fetchCached<T>(k: string, run: () => Promise<T>): Promise<T> {
-  const identity = cacheIdentity, revision = readRevision;
+function fetchCached<T>(k: string, run: () => Promise<T>, tables?: readonly string[]): Promise<T> {
+  const identity = cacheIdentity, revision = readRevision(tables);
   const requestKey = `${identity}:${revision}:${k}`;
   const pending = fetching.get(requestKey);
   if (pending) return pending as Promise<T>;
@@ -607,9 +612,9 @@ function fetchCached<T>(k: string, run: () => Promise<T>): Promise<T> {
     if (identity !== cacheIdentity || isLocalMode()) throw new SupersededRead();
     const fresh = await run();
     assertWorkspaceCurrent();
-    if (identity !== cacheIdentity || revision !== readRevision || isLocalMode()) throw new SupersededRead();
+    if (identity !== cacheIdentity || revision !== readRevision(tables) || isLocalMode()) throw new SupersededRead();
     await cacheWrite(k, fresh);
-    if (identity !== cacheIdentity || revision !== readRevision || isLocalMode()) throw new SupersededRead();
+    if (identity !== cacheIdentity || revision !== readRevision(tables) || isLocalMode()) throw new SupersededRead();
     return fresh;
   })();
   fetching.set(requestKey, request);
@@ -620,14 +625,14 @@ function fetchCached<T>(k: string, run: () => Promise<T>): Promise<T> {
 /** Background refresh behind a served cache hit. One per key at a time; the
  *  UI is only nudged when the data actually changed, so this can't loop. */
 const revalidating = new Set<string>();
-function revalidate<T>(k: string, run: () => Promise<T>): void {
+function revalidate<T>(k: string, run: () => Promise<T>, tables?: readonly string[]): void {
   if (revalidating.has(k)) return;
   revalidating.add(k);
   void (async () => {
     try {
       const prev = await cacheRead<T>(k);
-      const fresh = await fetchCached(k, run);
-      if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged();
+      const fresh = await fetchCached(k, run, tables);
+      if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged(tables);
     } catch {
       /* keep serving the cached copy */
     } finally {
@@ -738,8 +743,9 @@ export async function flushOutbox(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
-  for (const event of ["filey:cloud-change", "filey:remote-update", "focus", "online"])
-    window.addEventListener(event, markWrite);
+  window.addEventListener("filey:cloud-change", event => markWrite((event as CustomEvent<{ tables?: string[] }>).detail?.tables));
+  for (const event of ["filey:remote-update", "focus", "online"])
+    window.addEventListener(event, () => markWrite());
   window.addEventListener("online", () => {
     flushOutbox().catch((e) => console.error("Failed to flush outbox:", e));
   });
@@ -750,6 +756,7 @@ async function readCached<T>(
   key: string,
   run: () => Promise<T>,
   empty: T,
+  tables?: readonly string[],
   retry = true
 ): Promise<T> {
   assertWorkspaceCurrent();
@@ -782,17 +789,17 @@ async function readCached<T>(
   // paid a full round trip per list before anything appeared. Serve the copy
   // and refresh behind it — but only when it provably post-dates every write
   // made this session, or a user could save something and not see it.
-  if (hit && hit.__t > lastWriteAt) {
-    if (Date.now() - hit.__t > 15_000) revalidate(k, run);
+  if (hit && hit.__t > readRevision(tables)) {
+    if (Date.now() - hit.__t > 15_000) revalidate(k, run, tables);
     return hit.v;
   }
 
   try {
-    return await fetchCached(k, run);
+    return await fetchCached(k, run, tables);
   } catch (error) {
     current();
     if (error instanceof SupersededRead) {
-      if (retry) return readCached(key, run, empty, false);
+      if (retry) return readCached(key, run, empty, tables, false);
       throw new Error("Data changed while loading. Please try again.");
     }
     if (!hit) throw error; // A failed first load is not an empty business.
@@ -821,8 +828,8 @@ async function write<T>(
   }
   const result = await run();
   // A read started during the save may have cached the previous rows.
-  markWrite();
-  notifyDataChanged();
+  markWrite([_op.t]);
+  notifyDataChanged([_op.t]);
   return result;
 }
 
@@ -847,8 +854,9 @@ async function writeMany<T>(
     await flushOutbox();
   }
   const result = await run();
-  markWrite();
-  notifyDataChanged();
+  const tables = [...new Set(_ops.map(op => op.t))];
+  markWrite(tables);
+  notifyDataChanged(tables);
   return result;
 }
 
@@ -874,11 +882,14 @@ async function sList<T>(
   table: string,
   order?: { col: string; asc: boolean }[],
   select = "*",
-  client: any = null
+  client: any = null,
+  limit = Infinity
 ): Promise<T[]> {
+  if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) throw new Error("Invalid row limit.");
   const rows: T[] = [];
   const remote = client != null || !isLocalMode();
-  for (let offset = 0; ; offset += 500) {
+  for (let offset = 0; offset < limit; offset += 500) {
+    const take = Math.min(500, limit - offset);
     let q: any = (client ?? sb()).from(table).select(select);
     for (const o of order ?? []) {
       // Offline IDs are random. "Newest first" must sort by creation time;
@@ -889,13 +900,14 @@ async function sList<T>(
     }
     if (remote) {
       if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
-      q = q.range(offset, offset + 499);
+      q = q.range(offset, offset + take - 1);
     }
     const { data, error } = await q;
     if (error) throw error;
     rows.push(...(data ?? []));
-    if (!remote || (data ?? []).length < 500) return rows;
+    if (!remote || (data ?? []).length < take) return rows.slice(0, limit);
   }
+  return rows;
 }
 /** Child rows belonging to one parent, filtered by the server.
  *
@@ -1302,7 +1314,7 @@ export const erp = {
     readCached<Product[]>(
       "erp_products",
       () => sList<Product>("products", [{ col: "name", asc: true }]),
-      []
+      [], ["products"]
     ),
   createProduct: (input: Omit<Product, "id" | "created_at">) => {
     const row = clean(input as Record<string, unknown>);
@@ -1387,7 +1399,7 @@ export const erp = {
     readCached<Order[]>(
       "erp_orders",
       () => sList<Order>("orders", [{ col: "id", asc: false }]),
-      []
+      [], ["orders"]
     ),
   createOrder: (orderNumber: string, customerName: string, total: number) => {
     const row = {
@@ -2460,7 +2472,7 @@ export const tools = {
           [{ col: "key", asc: true }],
           "key,value"
         ),
-      []
+      [], ["app_settings"]
     ),
   setSetting: (key: string, value: string) =>
     online(async () => {
@@ -2647,7 +2659,7 @@ export const crm = {
       "crm_customers",
       () =>
         sList<CrmCustomer>("crm_customers", [{ col: "name", asc: true }]),
-      []
+      [], ["crm_customers"]
     ),
   createCustomer: (input: Omit<CrmCustomer, "id" | "created_at">) => {
     const row = clean(input as Record<string, unknown>);
@@ -3844,7 +3856,7 @@ export const billing = {
           };
         }) as InvoiceDocSummary[];
       },
-      []
+      [], ["invoice_docs", "invoice_doc_items", "invoice_payments"]
     ),
   getDoc: (docId: number) =>
     readCached<InvoiceDoc>(
@@ -4432,7 +4444,7 @@ export const billing = {
         default_tax_rate: 5,
         default_accent: "#222222",
         default_template: "minimal",
-      }
+      }, ["company_profile"]
     ),
   saveCompany: async (input: CompanyProfile) => {
     validateCountry(input.country_code);
@@ -6130,13 +6142,9 @@ export const emailLog = {
   /** Everything sent, newest first. */
   list: (limit = 100) =>
     readCached<EmailMessage[]>(
-      "email_messages",
-      async () =>
-        (await sList<EmailMessage>("email_messages", [{ col: "sent_at", asc: false }])).slice(
-          0,
-          limit
-        ),
-      []
+      `email_messages:recent:${limit}`,
+      () => sList<EmailMessage>("email_messages", [{ col: "sent_at", asc: false }], "*", null, limit),
+      [], ["email_messages"]
     ),
   /** Correspondence about one record — what a customer page shows. */
   forEntity: (entityType: string, entityId: number) =>
@@ -6197,10 +6205,9 @@ export interface CallLog {
 export const callLog = {
   list: (limit = 100) =>
     readCached<CallLog[]>(
-      "call_logs",
-      async () =>
-        (await sList<CallLog>("call_logs", [{ col: "started_at", asc: false }])).slice(0, limit),
-      []
+      `call_logs:recent:${limit}`,
+      () => sList<CallLog>("call_logs", [{ col: "started_at", asc: false }], "*", null, limit),
+      [], ["call_logs"]
     ),
   forEntity: (entityType: string, entityId: number) =>
     readCached<CallLog[]>(

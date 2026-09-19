@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ session: vi.fn(), channel: vi.fn(), setAuth: vi.fn(), remove: vi.fn() }));
 vi.mock("../supabase", () => ({ isConfigured: true, supabase: { auth: { getSession: mock.session }, realtime: { setAuth: mock.setAuth }, channel: mock.channel, removeChannel: mock.remove } }));
-import { startRealtime, stopRealtime } from "../realtime";
+import { startRealtime, stopRealtime, watchRealtimeSession } from "../realtime";
 
 it("cannot revive a previous user's channel when sign-out races with startup", async () => {
   let first!: (value: unknown) => void;
@@ -24,4 +24,23 @@ it("cannot revive a previous user's channel when sign-out races with startup", a
   expect(mock.setAuth).toHaveBeenCalledExactlyOnceWith("current-account-token");
   expect(channel.subscribe).toHaveBeenCalledTimes(1);
   stopRealtime();
+});
+
+it("releases idle background channels and catches up once when returning", async () => {
+  vi.useFakeTimers(); mock.session.mockReset(); mock.remove.mockClear();
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  mock.session.mockResolvedValue({ data: { session: { access_token: "current-account-token" } } });
+  const changed = vi.fn(); window.addEventListener("filey:cloud-change", changed);
+  const stop = watchRealtimeSession();
+  await vi.advanceTimersByTimeAsync(0);
+  visibility.mockReturnValue("hidden"); document.dispatchEvent(new Event("visibilitychange"));
+  await vi.advanceTimersByTimeAsync(59_999); expect(mock.remove).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1); expect(mock.remove).toHaveBeenCalledOnce();
+  visibility.mockReturnValue("visible"); document.dispatchEvent(new Event("visibilitychange"));
+  await vi.advanceTimersByTimeAsync(0); expect(changed).toHaveBeenCalledOnce();
+  expect(mock.session).toHaveBeenCalledTimes(2);
+  stop(); document.dispatchEvent(new Event("visibilitychange"));
+  expect(mock.session).toHaveBeenCalledTimes(2);
+  window.removeEventListener("filey:cloud-change", changed);
+  vi.restoreAllMocks(); vi.useRealTimers();
 });

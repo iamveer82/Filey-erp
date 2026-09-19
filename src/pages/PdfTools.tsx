@@ -1,8 +1,9 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
-  FileText, Upload, Loader2, FolderPlus, Download, X, Plus, ShieldCheck, RotateCcw, FileArchive,
+  FileText, Upload, FolderPlus, Download, X, Plus, ShieldCheck, RotateCcw, FileArchive,
 } from "lucide-react";
 import ToolsCatalogue from "../components/ToolsCatalogue";
 import { plural } from "../lib/format";

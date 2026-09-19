@@ -69,3 +69,14 @@ it("invalidates fresh snapshots when another client changes data", async () => {
   expect((await erp.products())[0].name).toBe("Remote update");
   expect(cloud.read).toHaveBeenCalledTimes(2);
 });
+
+it("keeps unrelated snapshots fresh and only reloads the changed table", async () => {
+  await erp.products(); await erp.orders();
+  expect(cloud.read).toHaveBeenCalledTimes(2);
+  window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["notifications"] } }));
+  await erp.products(); await erp.orders();
+  expect(cloud.read).toHaveBeenCalledTimes(2);
+  window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["products"] } }));
+  await erp.products(); await erp.orders();
+  expect(cloud.read).toHaveBeenCalledTimes(3);
+});

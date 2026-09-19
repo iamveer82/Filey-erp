@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import Logo from "./Logo";
 import { FormField } from "./ui";
 import { createRecoveryClient, requestPasswordResetEmail } from "../lib/supabase";

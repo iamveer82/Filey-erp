@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Upload, Loader2, GripVertical, X, Combine, ArrowLeft, ArrowRight } from "lucide-react";
+import { Upload, GripVertical, X, Combine, ArrowLeft, ArrowRight } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
 import { mergePdfs, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";

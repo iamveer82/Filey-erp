@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, Sparkles, Loader2, FileText } from "lucide-react";
+import { Upload, Sparkles, FileText } from "lucide-react";
 import { Modal } from "./ui";
 import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";

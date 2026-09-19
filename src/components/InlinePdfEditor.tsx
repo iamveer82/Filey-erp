@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import {
   useEffect,
   useImperativeHandle,
@@ -21,7 +22,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";

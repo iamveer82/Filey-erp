@@ -1,7 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import {
   Upload,
-  Loader2,
   Check,
   ChevronLeft,
   ChevronRight,

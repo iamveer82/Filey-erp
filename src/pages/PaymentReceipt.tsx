@@ -1,3 +1,4 @@
+import { FileySpinner } from "../components/FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -825,7 +826,7 @@ export default function PaymentReceipt() {
         <>
           {!form ? (
             <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
+              <FileySpinner size={16} />
               Loading editor…
             </div>
           ) : (

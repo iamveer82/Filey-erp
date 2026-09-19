@@ -6,7 +6,8 @@ import { useLiveSync } from "../lib/realtime";
 
 export default function WorkspaceDataProvider({ children }: { children: ReactNode }) {
   const [store] = useState(createWorkspaceStore);
-  useLiveSync(() => store.dispatch(workspaceQueries.util.invalidateTags(["Workspace"])));
+  useLiveSync(() => store.dispatch(workspaceQueries.util.invalidateTags(["Workspace"])),
+    ["products", "orders", "invoice_docs", "invoice_doc_items", "invoice_payments", "crm_customers"]);
   useEffect(() => {
     const stop = setupListeners(store.dispatch);
     return () => { stop(); store.dispatch(workspaceQueries.util.resetApiState()); };

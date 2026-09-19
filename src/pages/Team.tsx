@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useState } from "react";
-import { Hash, Plus, Loader2 } from "lucide-react";
+import { Hash, Plus } from "lucide-react";
 
 import { channels, type OrgChannel } from "../lib/api";
 import { useUI } from "../lib/ui";

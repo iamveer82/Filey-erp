@@ -5,12 +5,13 @@ vi.mock("../supabase", () => ({
   supabase: { rpc: async () => ({ data: {allowed:true,admin:true,modules:null},error:null }) },
   sb: () => ({
     from: () => {
-      let offset = 0;
+      let offset = 0, count = 500;
       const query = {
         select: () => query,
         order: () => query,
-        range: (start: number) => {
+        range: (start: number, end: number) => {
           offset = start;
+          count = end - start + 1;
           state.offsets.push(start);
           return query;
         },
@@ -20,7 +21,7 @@ vi.mock("../supabase", () => ({
               ? { data: null, error: { message: "Database unavailable" } }
               : {
                   data: Array.from(
-                    { length: Math.max(0, Math.min(500, 1205 - offset)) },
+                    { length: Math.max(0, Math.min(count, 1205 - offset)) },
                     (_, i) => ({ id: offset + i + 1, name: `Product ${offset + i}`, po_id: 1, amount: 10 })
                   ),
                   error: null,
@@ -31,7 +32,7 @@ vi.mock("../supabase", () => ({
     },
   }),
 }));
-import { billing, erp, pos, setCacheOrg } from "../api";
+import { billing, callLog, emailLog, erp, pos, setCacheOrg } from "../api";
 beforeEach(() => {
   localStorage.clear();
   state.fail = false;
@@ -41,6 +42,15 @@ beforeEach(() => {
 it("reads beyond the cloud row cap with stable pagination", async () => {
   expect(await erp.products()).toHaveLength(1205);
   expect(state.offsets).toEqual([0, 500, 1000]);
+});
+it("bounds communication history on the server and separates differently sized cached lists", async () => {
+  expect(await emailLog.list(10)).toHaveLength(10);
+  expect(await emailLog.list(100)).toHaveLength(100);
+  expect(state.offsets).toEqual([0, 0]);
+  state.offsets = [];
+  expect(await callLog.list(550)).toHaveLength(550);
+  expect(state.offsets).toEqual([0, 500]);
+  expect(await callLog.list(0)).toEqual([]);
 });
 it("surfaces a failed initial load instead of returning an empty business", async () => {
   state.fail = true;

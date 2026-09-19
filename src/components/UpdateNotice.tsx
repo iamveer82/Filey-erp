@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { X, Loader2, Sparkles } from "lucide-react";
+import { X, Sparkles } from "lucide-react";
 import { checkForUpdate, installUpdate, type UpdateInfo } from "../lib/updater";
 
 /* localStorage key holding the version the user last dismissed, so we don't

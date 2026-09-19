@@ -109,6 +109,6 @@ export default function Notifier() {
     // toast is recreated each render — intentionally excluded from deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useLiveSync(() => void check(toast, false).catch(() => {}));
+  useLiveSync(() => void check(toast, false).catch(() => {}), ["orders", "quotations", "quotation_items", "app_settings"]);
   return null;
 }

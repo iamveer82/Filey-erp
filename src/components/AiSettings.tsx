@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Loader2, RefreshCw, ChevronDown, Check, Eye, EyeOff, KeyRound, ExternalLink, Save, CircleAlert } from "lucide-react";
+import { Sparkles, RefreshCw, ChevronDown, Check, Eye, EyeOff, KeyRound, ExternalLink, Save, CircleAlert } from "lucide-react";
 import {
   getAiConfig,
   setAiConfig,

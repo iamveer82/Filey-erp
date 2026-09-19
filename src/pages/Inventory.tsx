@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -16,7 +17,6 @@ import {
   PackagePlus,
   ShoppingCart,
   ClipboardList,
-  Loader2,
   ChevronDown,
 } from "lucide-react";
 import {
@@ -203,7 +203,7 @@ export default function Inventory() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["products"]);
 
   const categories = useMemo(
     () =>

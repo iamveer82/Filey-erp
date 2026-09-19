@@ -69,7 +69,7 @@ export default function Accounting() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["accounts", "transactions"]);
 
   const doRepair = async () => {
     const ok = await confirm({

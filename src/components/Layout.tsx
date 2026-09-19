@@ -177,7 +177,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       .catch((e) => console.error("Failed to sync display currency:", e));
   };
   useEffect(syncCurrency, []);
-  useLiveSync(syncCurrency);
+  useLiveSync(syncCurrency, ["company_profile"]);
   // Re-key the route container when the display currency changes (see below).
   const { currency: displayCcy } = useDisplayCurrency();
   const initials = name
@@ -300,7 +300,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       .catch((e) => console.error("Failed to load inbox:", e));
   };
   useEffect(loadInbox, []);
-  useLiveSync(loadInbox);
+  useLiveSync(loadInbox, ["notifications"]);
 
   // Surface due / overdue follow-ups as in-app reminders, once per day.
   useEffect(() => {
@@ -578,7 +578,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           inert={mobileOpen && !isDesktop}
           className="flex-1 min-w-0 flex flex-col overflow-hidden"
         >
-          <header className="shrink-0 z-30 h-16 bg-background border-b border-border flex items-center px-3 sm:px-6 gap-2 sm:gap-3">
+          <header className="workspace-header shrink-0 z-30 h-16 bg-background border-b border-border flex items-center px-3 sm:px-6 gap-2 sm:gap-3">
             {/* Sidebar toggle - desktop hides/shows, mobile opens the drawer */}
             <button
               onClick={() => (isDesktop ? setHidden((h) => !h) : setMobileOpen(true))}
@@ -723,7 +723,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <CurrencySwitcher />
 
               {/* Light / dark theme toggle */}
-              <AnimatedThemeToggler />
+              <span className="hidden min-[400px]:inline-flex"><AnimatedThemeToggler /></span>
 
               {/* Notifications */}
               <div ref={notifRef} className="relative">
@@ -743,7 +743,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 {notifOpen && (
                   <div
                     style={{ "--materialize-origin": "top right" } as CSSProperties}
-                    className="materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
+                    className="workspace-notifications materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                       <p className="text-[13px] font-semibold text-foreground">
@@ -859,7 +859,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   the footer above the fold whatever the scroller does. */}
               <div
                 key={`${pathname}:${displayCcy}`}
-                className="fade-in px-4 sm:px-6 pt-6 pb-16"
+                className="workspace-content min-w-0 fade-in px-4 sm:px-6 pt-6 pb-16"
               >
                 <ErrorBoundary>{children}</ErrorBoundary>
               </div>

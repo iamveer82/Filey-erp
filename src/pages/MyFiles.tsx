@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -20,7 +21,6 @@ import {
   FolderInput,
   Download,
   Trash2,
-  Loader2,
   ArrowLeft,
   Pencil,
   Share2,

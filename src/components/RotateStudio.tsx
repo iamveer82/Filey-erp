@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, RotateCcw, RotateCw, Check } from "lucide-react";
+import { RotateCcw, RotateCw, Check } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
 import { rotatePdf, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";

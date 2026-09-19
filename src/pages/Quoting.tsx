@@ -353,7 +353,7 @@ export default function Quoting() {
   };
 
   useEffect(reload, []);
-  useLiveSync(reload);
+  useLiveSync(reload, ["quotations", "quotation_items", "crm_customers", "company_profile"]);
 
   // Deal/customer links prepare a reviewable draft; opening them writes nothing.
   useEffect(() => {

@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckSquare, Loader2, Plus, Square, StickyNote, Trash2 } from "lucide-react";
+import { CheckSquare, Plus, Square, StickyNote, Trash2 } from "lucide-react";
 import {
   persistCrmRecord,
   removeCrmRecord,

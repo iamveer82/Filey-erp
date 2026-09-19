@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Plus, Play, Trash2, Loader2, Timer, AlertTriangle } from "lucide-react";
+import { X, Plus, Play, Trash2, Timer, AlertTriangle } from "lucide-react";
 import {
   loadTasks,
   addTask,

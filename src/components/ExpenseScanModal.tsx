@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useState } from "react";
-import { Upload, Sparkles, Loader2, Receipt } from "lucide-react";
+import { Upload, Sparkles, Receipt } from "lucide-react";
 import { Modal, Field } from "./ui";
 import { SelectMenu } from "./ui-menu";
 import { DateField } from "./DatePicker";

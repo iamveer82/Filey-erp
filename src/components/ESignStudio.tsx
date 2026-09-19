@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Upload,
@@ -6,7 +7,6 @@ import {
   X,
   PenLine,
   Eraser,
-  Loader2,
   Check,
   FileText,
   ChevronLeft,

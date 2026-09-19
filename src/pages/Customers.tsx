@@ -95,7 +95,7 @@ export default function Customers() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["crm_customers"]);
 
   // Persisted "saved view": the active filter set survives reloads.
   const [vw, setVw] = useState<{ email: boolean; trn: boolean }>(() => {

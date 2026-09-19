@@ -24,7 +24,7 @@ export default function Purchase() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["expenses"]);
 
   const totalSpend = useMemo(
     () => expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0),

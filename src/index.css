@@ -4,6 +4,38 @@
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
 @config "../tailwind.config.js";
 
+@keyframes filey-spin { to { transform: rotate(360deg); } }
+.page-heading-actions > .flex { max-width: 100%; flex-wrap: wrap; }
+.filey-spinner-arc { transform-origin: 12px 12px; animation: filey-spin 900ms linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .filey-spinner-arc { animation: none; }
+}
+
+/* Browser chrome, notches and software keyboards are part of the workspace. */
+@media screen and (max-width: 1023px) {
+  #root { height: var(--filey-viewport-height, 100dvh); }
+  .filey-workspace { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .workspace-header { height: calc(4rem + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .workspace-header > button, .workspace-header > div { flex-shrink: 0; }
+  .workspace-sidebar { height: var(--filey-viewport-height, 100dvh); padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
+  .workspace-content { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+  .filey-dialog {
+    top: calc(var(--filey-viewport-top, 0px) + var(--filey-viewport-height, 100dvh) / 2);
+    max-height: calc(var(--filey-viewport-height, 100dvh) - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .filey-chat { min-height: calc(var(--filey-viewport-height, 100dvh) - 10rem); }
+}
+@media screen and (max-width: 767px) {
+  /* A readable field size also avoids Safari zooming the page on focus. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea { font-size: 16px !important; }
+  .filey-workspace :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .workspace-nav-link) { min-height: 44px; }
+  .workspace-header :is(button, a) { min-height: 44px; min-width: 44px; justify-content: center; }
+  input:is([type="checkbox"], [type="radio"]) { min-width: 24px; min-height: 24px; }
+  .filey-table-scroll { scroll-padding-inline: 1rem; }
+  .filey-table-scroll .cell-pinned-end { position: static; box-shadow: none; }
+  .workspace-notifications { position: fixed; inset-inline: 1rem; top: calc(4rem + env(safe-area-inset-top)); width: auto; max-height: calc(var(--filey-viewport-height, 100dvh) - 6rem); }
+}
+
 /* ── Design tokens (Emergent reference) ──────────────────────────────────
    Neutral zinc hsl scale; every Tailwind surface/text color in
    tailwind.config.js resolves through these, so the `.dark` class flips

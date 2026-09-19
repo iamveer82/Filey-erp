@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useState } from "react";
-import { Mail, Phone, MessageCircle, Plus, Loader2, Trash2 } from "lucide-react";
+import { Mail, Phone, MessageCircle, Plus, Trash2 } from "lucide-react";
 
 import { emailLog, callLog, type EmailMessage, type CallLog } from "../lib/api";
 import { useUI } from "../lib/ui";
@@ -47,7 +48,7 @@ export default function Comms() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["email_messages", "call_logs"]);
 
   const removeCall = async (c: CallLog) => {
     const ok = await confirm({

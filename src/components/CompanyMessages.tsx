@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { isLocalMode } from "../lib/dataMode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Send, Trash2, MessageSquare, Loader2, Reply } from "lucide-react";
+import { Send, Trash2, MessageSquare, Reply } from "lucide-react";
 import { messages, org, type OrgMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";

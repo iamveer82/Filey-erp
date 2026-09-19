@@ -66,7 +66,7 @@ export default function People() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["employees", "attendance", "payroll"]);
 
   const statuses = useMemo(
     () => Array.from(new Set(emps.map((e) => e.status || "active"))).sort(),

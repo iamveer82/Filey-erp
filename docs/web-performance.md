@@ -9,9 +9,9 @@ Measured with the same Vite production configuration:
 
 | Initial JavaScript | Before | After |
 | --- | ---: | ---: |
-| Uncompressed | 1,208,141 bytes | 788,526 bytes |
-| Gzip | 377,508 bytes | 241,718 bytes |
-| Static chunks | 19 | 15 |
+| Uncompressed | 1,208,141 bytes | 791,002 bytes |
+| Gzip | 377,508 bytes | 242,655 bytes |
+| Static chunks | 19 | 16 |
 
 This is 35% less initial JavaScript (36% compressed), not a claimed reduction in
 page-load time. Routes still load on demand. Content-hashed assets use the existing
@@ -28,20 +28,48 @@ only inside the authenticated workspace, resets when it unmounts, and never
 persists account data in cookies. API reads and writes still enforce permissions.
 
 The existing cloud read layer now coalesces concurrent reads across all its
-callers. Successful snapshots are fresh for 15 seconds; saves, cloud changes,
-focus and reconnect invalidate them. An in-flight response from before a write
+callers. Successful snapshots are fresh for 15 seconds. Known table changes
+invalidate their dependent snapshots and refresh only relevant mounted consumers;
+unknown changes, focus and reconnect use a broad invalidation. An in-flight response from before a write
 or identity change cannot become the current snapshot. Permissions are checked
 separately and restricted staff reads continue through RLS.
 
 Sidebar pointer/focus intent preloads the destination's JavaScript, without
 fetching its records. Data-saving and 2G connections skip this prefetch. Hidden
 tabs defer live refresh bursts and suspend the optional scrolling animation.
+After 60 seconds hidden, the shared Supabase Realtime channel disconnects. Returning
+reconnects and refreshes authorized data once to catch up on missed changes.
 Returning to a tab rechecks module access without remounting an unfinished form;
 switching workspaces never reuses the previous workspace's access permissions.
 
 Two small host-only cookies remember theme and accent when local storage is
 unavailable. They apply before React paints, use SameSite=Lax and Secure on
 HTTPS, and never hold authentication, API keys or business records.
+
+Recent email/call history now limits rows in the database query instead of loading
+the entire history and slicing it in the browser. Cache keys include the requested
+limit. Regression checks verify that an unrelated notification causes zero extra
+product/order reads, a product change causes one product read, and requesting 550
+call records uses two bounded pages. These are request-count checks, not a measured
+percentage reduction in the production Supabase bill.
+
+## Loading states and phone layouts
+
+`FileySpinner` provides the shared rotating arc for busy controls and inline status.
+`FileyLoader` and the pre-React splash pair that arc with the existing Filey mascot.
+Animations stop under reduced motion; status containers provide accessible labels.
+
+Phone layouts account for display safe areas, browser chrome and the software
+keyboard through `visualViewport`. Pinch zoom remains enabled. Fields use 16px
+text, common actions use 44px targets, heading actions wrap, and wide data tables
+scroll without pinning the action column over their content. Dialogs fit the visible
+viewport. The install manifest supports both orientations and a PNG app icon.
+
+Browser QA covered the main workspace routes at 390×844 and 360×800, invoice
+creation/template selection without saving, and production sign-in/recovery at
+320×740. No business records were changed. Physical iPhone/Android and Safari
+device testing remain release checks; responsive Chromium testing does not certify
+those devices. Viewport unit checks cover keyboard resize, offset and pinch zoom.
 
 ## Optional Redis cache
 
@@ -77,6 +105,7 @@ node scripts/test-service-worker.mjs
 deno test --allow-env --allow-net --lock=deno.lock --frozen supabase/functions/_shared/catalog-cache.test.ts
 npx vitest run src/components/__tests__/agent-scheduler-scope.test.tsx src/components/__tests__/password-recovery-route.test.tsx src/lib/__tests__/exchange-rates-cache.test.ts src/lib/__tests__/wa-agent-lifecycle.test.ts
 npx vitest run src/lib/__tests__/api-cache-concurrency.test.ts src/lib/__tests__/workspace-queries.test.ts src/lib/__tests__/module-access.test.tsx src/lib/__tests__/appearance-cookie.test.ts src/lib/__tests__/performance-ui.test.ts src/lib/__tests__/data-refresh.test.tsx
+npx vitest run src/lib/__tests__/cloud-data-reads.test.ts src/lib/__tests__/realtime-session.test.ts src/lib/__tests__/viewport.test.ts src/components/__tests__/filey-loader.test.tsx src/components/__tests__/workspace-session.test.tsx
 ```
 
 Check sign-in, recovery and authenticated route navigation in the browser as well.

@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, X, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { X, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import type { pdfjs } from "../lib/pdfjsSafe";
 import * as safePdf from "../lib/pdfjsSafe";
 import { fileBytes, type SavedFile } from "../lib/files";

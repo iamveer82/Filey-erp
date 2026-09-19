@@ -653,7 +653,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       {/* A full-width session header frames the centered conversation. */}
       <div
         ref={topRef}
-        className="relative flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col"
+        className="filey-chat relative flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col"
       >
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
@@ -862,7 +862,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                  * still shown, by the wrapper's border darkening.
                  */
                 className="max-h-[160px] min-h-[48px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
-                autoFocus
+                autoFocus={typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
               />
 
               {/* Action bar — one circular cluster, reference-style: the same

@@ -1,6 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Loader2,
   Mail,
   Phone,
   Plus,

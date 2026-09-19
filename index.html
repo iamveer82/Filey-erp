@@ -9,7 +9,7 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Filey" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https:; connect-src 'self' blob: data: https://*.supabase.co https://*.supabase.in https://api.openai.com https://api.anthropic.com https://openrouter.ai https://api.groq.com https://api.moonshot.cn https://api.deepseek.com http://localhost:* https:; frame-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
@@ -46,26 +46,31 @@
         display: grid;
         place-items: center;
         background: #fdfdfd;
-        font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI",
+        font-family: Inter, system-ui, -apple-system, "Segoe UI",
           Roboto, sans-serif;
       }
       #boot-splash h1 {
         margin: 0;
-        font-size: 24px;
-        font-weight: 700;
+        font-size: 18px;
+        font-weight: 600;
         letter-spacing: -0.01em;
         color: #0a0a0a;
       }
-      #boot-splash svg {
-        animation: filey-boot-spin 1s linear infinite;
-        transform-origin: 50% 50%;
+      #boot-splash .boot-mark { position: relative; width: 64px; height: 64px; display: grid; place-items: center; }
+      #boot-splash svg { position: absolute; inset: 0; color: #faca1a; }
+      #boot-splash svg g {
+        animation: filey-boot-spin 900ms linear infinite;
+        transform-origin: 12px 12px;
       }
+      #boot-splash p { margin: 4px 0 0; font-size: 12px; color: #62626a; }
       html.dark #boot-splash {
-        background: #15161a;
+        background: #0a0a0a;
       }
       html.dark #boot-splash h1 {
         color: #f4f5f6;
       }
+      html.dark #boot-splash p { color: #a1a1a1; }
+      @media (prefers-reduced-motion: reduce) { #boot-splash svg g { animation: none; } }
     </style>
     <script>
       // Apply the small visual preferences before paint, even when local
@@ -96,17 +101,14 @@
     <div id="root">
       <div id="boot-splash" role="status" aria-label="Loading Filey">
         <div style="display: flex; flex-direction: column; align-items: center; gap: 16px">
-          <h1>Filey</h1>
-          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="6" fill="none" stroke="#C9CBD6" stroke-width="2" />
-            <path
-              d="M8 2 a6 6 0 0 1 6 6"
-              fill="none"
-              stroke="#2563EB"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
+          <div class="boot-mark">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity="0.16" />
+              <g><path d="M12 3a9 9 0 0 1 9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><circle cx="12" cy="21" r="1.25" fill="currentColor" opacity="0.45" /></g>
+            </svg>
+            <img src="/icons/filey-logo.png" alt="" width="32" height="32" />
+          </div>
+          <div style="text-align: center"><h1>Filey</h1><p>Loading Filey</p></div>
         </div>
       </div>
     </div>

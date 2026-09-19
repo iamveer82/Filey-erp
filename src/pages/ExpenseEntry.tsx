@@ -1,6 +1,7 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Check, Download, FileText, Loader2, Paperclip, Plus, Receipt, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, Download, FileText, Paperclip, Plus, Receipt, Trash2, X } from "lucide-react";
 import { fin, type Account, type Expense } from "../lib/api";
 import { PageHeader, Field, ErrorBanner } from "../components/ui";
 import { useUI } from "../lib/ui";

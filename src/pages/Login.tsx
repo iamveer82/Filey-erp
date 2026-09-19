@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -6,7 +7,6 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Loader2,
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";

@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -7,7 +8,6 @@ import {
   CircleDollarSign,
   Clock,
   FileText,
-  Loader2,
   Mail,
   Phone,
   Wallet,

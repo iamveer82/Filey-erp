@@ -1,6 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import {
-  Loader2,
   RotateCw,
   Trash2,
   Scissors,

@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import {
   ReactNode,
   useEffect,
@@ -15,7 +16,6 @@ import {
   ArrowDownRight,
   Users,
   Lock,
-  Loader2,
   AlertCircle,
   Inbox,
   Check,
@@ -37,7 +37,7 @@ export function Skeleton({ className }: { className?: string }) {
 /** Centered spinner for loading panels. */
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
+    <div role="status" aria-label={label || "Loading"} className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
       <Loader2 size={18} className="animate-spin" />
       {label && <span className="text-sm">{label}</span>}
     </div>
@@ -100,7 +100,7 @@ export function PageHeader({
         <h1 className="text-[24px] leading-tight font-semibold text-foreground tracking-tight">{t(title)}</h1>
         {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{t(subtitle)}</p>}
       </div>
-      {action && <div className="flex max-w-full flex-wrap items-center gap-2">{action}</div>}
+      {action && <div className="page-heading-actions flex min-w-0 max-w-full flex-wrap items-center gap-2">{action}</div>}
     </div>
   );
 }
@@ -496,7 +496,7 @@ export function DataTable<T>({
       <div
         ref={scrollRef}
         className={cn(
-          "overflow-x-auto"
+          "filey-table-scroll min-w-0 overflow-x-auto overscroll-x-contain"
         )}
       >
         <table className="w-full">

@@ -269,7 +269,7 @@ export default function PurchaseOrders() {
   };
 
   useEffect(reload, []);
-  useLiveSync(reload);
+  useLiveSync(reload, ["purchase_orders", "purchase_order_items", "suppliers", "company_profile"]);
 
   // ⌘K deep-link: ?new=1 opens a blank PO once company is loaded.
   const [params, setParams] = useSearchParams();
