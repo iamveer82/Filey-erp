@@ -28,6 +28,7 @@ import {
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
+import AppIcon from "../components/AppIcon";
 import { cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
@@ -344,7 +345,7 @@ export default function Integrations() {
         name: "PDF Tools",
         desc: "Merge, split, compress and convert PDFs on-device - no network needed.",
         category: "Documents",
-        icon: <BrandIcon name="pdf" className="h-5 w-5" />,
+        icon: <AppIcon name="tools" className="h-5 w-5" />,
         to: "/tools",
         action: "Open",
         builtin: true,

@@ -14,6 +14,9 @@ import {
   X,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Users,
   Lock,
   AlertCircle,
@@ -526,17 +529,11 @@ export function DataTable<T>({
                       className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground"
                     >
                       {c.label}
-                      <span
-                        className={cn(
-                          "text-xs transition-all duration-200 inline-block",
-                          sort?.key === c.key
-                            ? "text-foreground"
-                            : "text-muted-foreground",
-                          sort?.key === c.key && sort.dir === -1 && "rotate-180"
-                        )}
-                      >
-                        {sort?.key === c.key ? "▲" : "↕"}
-                      </span>
+                      {sort?.key !== c.key
+                        ? <ArrowUpDown size={16} className="text-muted-foreground" aria-hidden="true" />
+                        : sort.dir === 1
+                          ? <ArrowUp size={16} aria-hidden="true" />
+                          : <ArrowDown size={16} aria-hidden="true" />}
                     </button>
                   </th>
                 ) : (

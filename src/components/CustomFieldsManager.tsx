@@ -19,6 +19,7 @@ import {
   Square,
   ChevronUp,
   ChevronDown,
+  TriangleAlert,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./Sheet";
 import { Button } from "./Button";
@@ -308,7 +309,7 @@ export function CustomFieldsManager({
                           >
                             <span className="font-medium text-ink">Preview: </span>
                             {sample}
-                            {vErr && <span className="block mt-1">⚠ {vErr}</span>}
+                            {vErr && <span className="mt-1 flex items-center gap-1"><TriangleAlert size={14} aria-hidden="true" />{vErr}</span>}
                           </div>
                         )}
                       </div>

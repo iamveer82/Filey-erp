@@ -51,7 +51,7 @@ export default function WorkspaceNavigation({
   return (
     <div className="workspace-navigation">
       <div className="workspace-nav-search">
-        <Search size={17} strokeWidth={1.75} aria-hidden="true" />
+        <Search size={18} strokeWidth={1.75} aria-hidden="true" />
         <input
           ref={filter}
           aria-label={t("Find a page")}

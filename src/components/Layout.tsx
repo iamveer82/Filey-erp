@@ -432,7 +432,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 aria-label="Close menu"
                 onClick={() => setMobileOpen(false)}
                 className="workspace-sidebar-close lg:hidden">
-                <X size={19} strokeWidth={1.75} />
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
@@ -480,7 +480,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               aria-label={t("Toggle sidebar")}
               className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground lg:inline-grid hidden"
             >
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeft size={18} aria-hidden="true" />
             </button>
             <button
               onClick={() => setMobileOpen(true)}
@@ -489,7 +489,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               aria-expanded={mobileOpen}
               className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground lg:hidden"
             >
-              <Menu className="h-4 w-4" />
+              <Menu size={18} aria-hidden="true" />
             </button>
             <div className="hidden sm:block h-4 w-px bg-border" />
             <span className="text-[14px] font-medium text-foreground truncate">
@@ -508,14 +508,14 @@ export default function Layout({ children }: { children: ReactNode }) {
                 onClick={() => window.dispatchEvent(new Event("toggle-command-palette"))}
                 className="grid h-10 w-10 place-items-center rounded-full hover:bg-hover md:hidden"
               >
-                <Search size={17} />
+                <Search size={18} aria-hidden="true" />
               </button>
               <Link
                 to="/settings?section=datamode"
                 aria-label={`Storage: ${local ? "This device" : "Cloud"}. Open storage settings`}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover"
               >
-                {local ? <HardDrive size={14} /> : <Cloud size={14} />}
+                {local ? <HardDrive size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
                 <span className="hidden sm:inline">
                   {local ? "This device" : "Cloud"}
                 </span>
@@ -629,7 +629,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   onClick={() => setNotifOpen((o) => !o)}
                   className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground relative"
                 >
-                  <Bell className="h-4 w-4" />
+                  <Bell size={18} aria-hidden="true" />
                   {badge > 0 && (
                     <span className="absolute top-1 right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold grid place-items-center">
                       {badge > 9 ? "9+" : badge}

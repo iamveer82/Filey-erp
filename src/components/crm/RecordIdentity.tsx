@@ -4,6 +4,7 @@ import {
   CheckSquare,
   Kanban,
   StickyNote,
+  Pin,
   Target,
   Users,
 } from "lucide-react";
@@ -71,7 +72,7 @@ export default function RecordIdentity({ kind, row }: { kind: CrmObject; row: Cr
       <RecordAvatar kind={kind} name={name} />
       <span className="min-w-0">
         <span className="block truncate font-medium">
-          {row.pinned ? "★ " : ""}
+          {Boolean(row.pinned) && <Pin size={14} className="mr-1 inline" role="img" aria-label="Pinned" />}
           {name}
         </span>
         {subtitle && (

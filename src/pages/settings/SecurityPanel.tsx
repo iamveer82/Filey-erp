@@ -12,7 +12,7 @@ import {
 } from "../../lib/mfa";
 import { Modal, Field } from "../../components/ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Lock, KeyRound, Monitor, ShieldAlert } from "lucide-react";
+import { Lock, KeyRound, Monitor, ShieldAlert, ChevronRight } from "lucide-react";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 function ManageRow({
@@ -51,26 +51,11 @@ function ManageRow({
         </span>
       </span>
       {right}
-      {!danger && onClick && <ChevronRightIcon />}
+      {!danger && onClick && <ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />}
     </button>
   );
 }
 
-function ChevronRightIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      className="text-muted-foreground shrink-0"
-    >
-      <path d="m9 18 6-6-6-6" />
-    </svg>
-  );
-}
 
 export default function SecurityPanel({
   onChangePassword,

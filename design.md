@@ -23,7 +23,7 @@ Taste's current scope emphasizes landing pages and explicitly excludes dense das
 1. **Never** introduce colors, fonts, radii, shadows, or spacing values that are not defined here or in the token files.
 2. **Always** use design tokens / shared primitives instead of hard-coded values.
 3. **Typefaces:** Inter (`font-sans`, self-hosted variable font) everywhere. IBM Plex Mono (`font-mono`) for document numbers/code only. Lora (`font-serif`) only inside print document templates.
-4. **Icons:** Lucide React only, 1.75px stroke (set globally in index.css), sizes 15px (sidebar), 16–20px elsewhere.
+4. **Icons:** Lucide React only, 1.75px stroke (set globally in index.css), sizes 18px (sidebar/header), 16px (table actions and sorting), 16–20px elsewhere. Reuse AppIcon module mappings in navigation, search and Settings. File types use outline document icons; service logos remain confined to integration/authentication identity. Icons never shrink in flex layouts. Preserve the Filey logo, animated AI mascot, custom loading indicator and tool-cover artwork.
 5. **Filey yellow** is the default accent (`amber` remains its saved key). Use the `primary-*` ramp for primary CTAs and small key highlights. Never use bright accent colors for body text on light surfaces or large decorative fills. A user's selected accent replaces the default across shared controls and charts.
 6. **No decorative effects.** Banned: gradients (background or text), glows, shimmer, spotlight/tilt cards, parallax, glassmorphism. The only gradient allowed is inside recharts (accent bar/area fills) and the neutral avatar disc.
 7. **Motion budget:** color transitions ≤200ms; route enter = `.fade-in` (opacity + 4px rise, 250ms); overlay enter = `.materialize-*` (opacity + ≤3% scale + ≤6px translate, ≤200ms, one-shot). No hover movement (no scale/lift), no springs, no decorative loops. `prefers-reduced-motion` collapses transforms to fades. Exceptions: buttons may press to `scale(0.97)` on `:active`; the shared `FileySpinner` rotates only while loading and stops under reduced motion; preserve the requested sidebar AI mascot.
@@ -129,7 +129,7 @@ Settings use `SettingsPanel` and `SettingsSection`: one divided surface per tab,
 
 ## 7. App modules
 
-Sidebar groups (Layout `MODULE_GROUPS`): Assistant (Filey AI) · Business
+Sidebar groups (WorkspaceNavigation `GROUPS`): Assistant (Filey AI) · Business
 (Overview, Reports) · Sales (Orders, Invoicing, Quoting, CRM, Customers,
 Follow-ups, Marketing) · Purchases (Suppliers, Purchase, Purchase Orders,
 Purchase Invoices) · Inventory · Accounting (People, Accounting, Bank

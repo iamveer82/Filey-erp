@@ -6,7 +6,7 @@ import {
   type FollowUp,
   type FollowUpRepeat,
 } from "../lib/api";
-import { Badge, ErrorBanner, Field } from "./ui";
+import { Badge, ErrorBanner, Field, EmptyState } from "./ui";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { cn, fmtDate, todayYmd } from "../lib/format";
@@ -294,86 +294,7 @@ export default function FollowUps({
       {loading && <p className="py-6 text-sm text-muted-foreground">Loading reminders…</p>}
       {error && <div className="space-y-3"><ErrorBanner message={error} /><button className="btn-ghost" onClick={() => { void load(); }}>Retry</button></div>}
       {!loading && !error && visible.length === 0 && (
-        <div className="empty-gradient rounded-xl p-8 flex flex-col items-center gap-4 text-center">
-          <svg
-            width="100"
-            height="80"
-            viewBox="0 0 100 80"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="opacity-80 text-primary-500"
-          >
-            <rect
-              x="24"
-              y="8"
-              width="52"
-              height="44"
-              rx="5"
-              fill="currentColor"
-              fillOpacity="0.12"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <line
-              x1="34"
-              y1="20"
-              x2="66"
-              y2="20"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="28"
-              x2="58"
-              y2="28"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="36"
-              x2="50"
-              y2="36"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="44"
-              x2="62"
-              y2="44"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <circle
-              cx="50"
-              cy="68"
-              r="7"
-              fill="currentColor"
-              fillOpacity="0.12"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <div>
-            <p className="text-sm font-medium text-brand-700">No reminders yet</p>
-            <p className="text-xs text-brand-500 mt-1">
-              Add a note with a date - we'll remind you that day.
-            </p>
-          </div>
-        </div>
+        <EmptyState icon={AlarmClock} title="No reminders yet" description="Add a note with a date - we'll remind you that day." />
       )}
 
       {!loading && !error && visible.length > 0 && <ul>{visible.map((f) => Row(f, statusOf(f)))}</ul>}

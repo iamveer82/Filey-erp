@@ -7,10 +7,6 @@ import {
   UserRound,
   Target,
   Contact,
-  FileText,
-  Package,
-  LayoutDashboard,
-  Plus,
 } from "lucide-react";
 import { useModules } from "../lib/modules";
 import AppIcon from "../components/AppIcon";
@@ -39,37 +35,37 @@ const QUICK_ACTIONS: {
   {
     label: "New invoice",
     to: "/invoicing?new=1",
-    icon: <FileText size={15} />,
+    icon: <AppIcon name="invoicing" className="h-4 w-4" />,
     keywords: ["invoice", "bill"],
   },
   {
     label: "New quotation",
     to: "/quoting?new=1",
-    icon: <FileText size={15} />,
+    icon: <AppIcon name="quotations" className="h-4 w-4" />,
     keywords: ["quotation", "quote"],
   },
   {
     label: "Add product",
     to: "/inventory?new=1",
-    icon: <Package size={15} />,
+    icon: <AppIcon name="inventory" className="h-4 w-4" />,
     keywords: ["product", "stock", "item"],
   },
   {
     label: "Add customer",
     to: "/customers?new=1",
-    icon: <UserRound size={15} />,
+    icon: <AppIcon name="customers" className="h-4 w-4" />,
     keywords: ["customer", "client", "crm"],
   },
   {
     label: "New sales order",
     to: "/orders?new=1",
-    icon: <LayoutDashboard size={15} />,
+    icon: <AppIcon name="orders" className="h-4 w-4" />,
     keywords: ["order", "sales"],
   },
   {
     label: "Record expense",
     to: "/purchase?new=1",
-    icon: <Plus size={15} />,
+    icon: <AppIcon name="purchase" className="h-4 w-4" />,
     keywords: ["purchase", "expense", "spend"],
   },
 ];

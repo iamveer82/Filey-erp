@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileText } from "lucide-react";
+import { File, FileArchive, FileAudio, FileImage, FileSpreadsheet, FileText, FileVideo, type LucideIcon } from "lucide-react";
 
 const ICONS: Record<string, { src: string; dark?: string; alt: string }> = {
   supabase: { src: "/icons/supabase.svg", alt: "Supabase" },
@@ -43,6 +43,15 @@ export default function BrandIcon({
   return <img src={src} alt={meta.alt} className={className} />;
 }
 
+const FILE_ICONS: Record<string, LucideIcon> = {
+  pdf: FileText, doc: FileText, docx: FileText, txt: FileText, rtf: FileText,
+  xls: FileSpreadsheet, xlsx: FileSpreadsheet, csv: FileSpreadsheet, ods: FileSpreadsheet,
+  png: FileImage, jpg: FileImage, jpeg: FileImage, webp: FileImage, gif: FileImage, svg: FileImage, heic: FileImage,
+  zip: FileArchive, rar: FileArchive, '7z': FileArchive,
+  mp3: FileAudio, wav: FileAudio, m4a: FileAudio, ogg: FileAudio,
+  mp4: FileVideo, mov: FileVideo, webm: FileVideo,
+};
+
 export function FileIcon({
   name,
   className = "h-5 w-5",
@@ -51,15 +60,6 @@ export function FileIcon({
   className?: string;
 }) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const mimeMap: Record<string, keyof typeof ICONS> = {
-    pdf: "pdf",
-    docx: "word",
-    doc: "word",
-    xlsx: "excel",
-    xls: "excel",
-    csv: "excel",
-  };
-  const icon = mimeMap[ext];
-  if (!icon) return <FileText className={className} />;
-  return <BrandIcon name={icon} className={className} />;
+  const Icon = Object.prototype.hasOwnProperty.call(FILE_ICONS, ext) ? FILE_ICONS[ext] : File;
+  return <Icon className={className} aria-hidden="true" />;
 }

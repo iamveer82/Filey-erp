@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
   Activity,
+  AlarmClock,
   AlertTriangle,
   Banknote,
   Blocks,
@@ -14,25 +15,29 @@ import {
   FileSignature,
   FileText,
   FolderOpen,
+  FolderKanban,
   Globe,
   HeartHandshake,
   Inbox,
   Landmark,
   LayoutGrid,
+  LifeBuoy,
   LineChart,
   Mail,
   Megaphone,
+  MessagesSquare,
   PackageMinus,
   PackageOpen,
   PackagePlus,
   Receipt,
+  ReceiptText,
   ScrollText,
   Settings,
   ShoppingCart,
-  Target,
   Truck,
   UserCircle2,
   Users,
+  UsersRound,
   Wallet,
   Wrench,
   XCircle,
@@ -61,6 +66,11 @@ const iconMap: Record<string, LucideIcon> = {
   order: ShoppingCart,
   sales: ShoppingCart,
   customers: Users,
+  team: UsersRound,
+  projects: FolderKanban,
+  helpdesk: LifeBuoy,
+  comms: MessagesSquare,
+  purchaseInvoice: ReceiptText,
   crm: HeartHandshake,
   people: UserCircle2,
   suppliers: Building2,
@@ -87,8 +97,8 @@ const iconMap: Record<string, LucideIcon> = {
   banks: Landmark,
   email: Mail,
   emails: Mail,
-  followups: Target,
-  followup: Target,
+  followups: AlarmClock,
+  followup: AlarmClock,
   marketing: Megaphone,
   tools: Wrench,
   tool: Wrench,
@@ -129,7 +139,7 @@ export type AppIconName = keyof typeof iconMap;
 
 export default function AppIcon({
   name,
-  className = "",
+  className = "h-5 w-5",
   style,
   alt,
 }: {
@@ -141,9 +151,10 @@ export default function AppIcon({
   const Icon = iconMap[name] ?? LayoutGrid;
   return (
     <Icon
-      role="img"
-      aria-label={alt || name}
-      className={className}
+      role={alt ? "img" : undefined}
+      aria-label={alt}
+      aria-hidden={alt ? undefined : true}
+      className={`shrink-0 ${className}`}
       style={style}
       strokeWidth={1.75}
     />
@@ -155,5 +166,5 @@ export function getAppIconNode(
   className = "",
   alt?: string
 ): ReactNode {
-  return <AppIcon name={name} className={className} alt={alt || name} />;
+  return <AppIcon name={name} className={className} alt={alt} />;
 }

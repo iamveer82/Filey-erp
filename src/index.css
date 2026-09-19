@@ -373,6 +373,8 @@
      CSS beats the inline stroke-width="2" presentation attribute. */
   svg.lucide {
     stroke-width: 1.75;
+    flex-shrink: 0;
+    vertical-align: middle;
   }
 }
 

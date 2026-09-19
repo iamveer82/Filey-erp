@@ -6,6 +6,7 @@ import {
   Sliders,
   FileText,
   Banknote,
+  UsersRound,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
@@ -34,6 +35,7 @@ import {
   ErrorBanner,
   FilterChip,
   SearchInput,
+  EmptyState,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import { RowActions, QuickViewModal, shareVia } from "../components/RowActions";
@@ -193,73 +195,7 @@ export default function People() {
       </div>
 
       {!loading && emps.length === 0 && (
-        <div className="empty-gradient rounded-xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
-          <svg
-            width="100"
-            height="80"
-            viewBox="0 0 100 80"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="opacity-70"
-          >
-            <circle
-              cx="36"
-              cy="28"
-              r="12"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <circle cx="34" cy="26" r="3" fill="#f59e0b" />
-            <path
-              d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <circle
-              cx="64"
-              cy="28"
-              r="12"
-              fill="#71717a"
-              fillOpacity="0.12"
-              stroke="#71717a"
-              strokeWidth="1.5"
-            />
-            <circle cx="62" cy="26" r="3" fill="#3f3f46" />
-            <path
-              d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z"
-              fill="#71717a"
-              fillOpacity="0.12"
-              stroke="#71717a"
-              strokeWidth="1.5"
-            />
-            <circle
-              cx="50"
-              cy="68"
-              r="7"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="#f59e0b"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <div>
-            <p className="text-sm font-medium text-brand-700">No employees yet</p>
-            <p className="text-xs text-brand-500 mt-1">
-              Add your first team member to start tracking attendance and payroll.
-            </p>
-          </div>
-        </div>
+        <EmptyState icon={UsersRound} title="No employees yet" description="Add your first team member to start tracking attendance and payroll." />
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
