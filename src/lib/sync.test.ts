@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
+import { PUSH_TABLES } from "./syncTables";
 
 // Stable fixture IDs keep these journal/transport checks readable. The real
 // cross-device allocator is exercised in record-id.test and localdb.test.
@@ -85,6 +86,12 @@ function fakeCloud(opts?: {
       },
     },
     async rpc(name: string, args?: any) {
+      if (name === "filey_sync_manifest") {
+        calls.push({ table: "(rpc)", op: name, payload: args });
+        return { data: Object.fromEntries(args.p_tables.map((t: string) => [t,
+          (opts?.pull?.[t] ?? []).slice(args.p_offset, args.p_offset + args.p_limit)
+            .map(({ id, updated_at, sync_revision }) => ({ id, updated_at, sync_revision }))])), error: null };
+      }
       if (name === "sync_record") {
         calls.push({ table: args.p_table, op: args.p_delete ? "delete" : "upsert", payload: [args.p_row], ids: [args.p_row.id] });
         return opts?.failTables?.includes(args.p_table)
@@ -462,12 +469,12 @@ describe("pullNow", () => {
     const unchanged = { id: 1, body: "Large unchanged message", sync_revision: 4 };
     const updated = { id: 2, body: "Edited message", sync_revision: 6 };
     await replaceColl("email_messages", [unchanged, { ...updated, body: "Old message", sync_revision: 5 }, { id: 3, sync_revision: 1 }]);
-    const { client, calls, reads } = fakeCloud({ pull: {
+    const { client, calls } = fakeCloud({ pull: {
       crm_people: [{ id: 3, name: "Ada", sync_revision: 1 }],
       email_messages: [unchanged, updated],
     } });
     expect(await pullNow(client)).toBe(true);
-    expect(reads).toContainEqual({ table: "email_messages", columns: "id, sync_revision" });
+    expect(calls.find(c => c.op === "filey_sync_manifest")?.payload.p_tables).toContain("email_messages");
     expect(calls.filter(c => c.table === "email_messages")).toEqual([{ table: "email_messages", op: "select-in", ids: [2] }]);
     expect((await localClient.from("email_messages").select("*")).data).toEqual([unchanged, updated]);
     const { data } = await localClient.from("crm_people").select("*");
@@ -476,6 +483,32 @@ describe("pullNow", () => {
     expect(await pullNow(client)).toBe(true);
     expect(calls.some(c => c.table === "email_messages" || c.table === "crm_people")).toBe(false);
   });
+});
+
+it("checks all 45 clean collections in one metadata call and only pages collections with more rows", async () => {
+  const rows = Array.from({ length: 1001 }, (_, id) => ({ id, name: "Cached", updated_at: "2026-09-20", sync_revision: 1 }));
+  await replaceColl("products", rows);
+  const { client, calls, reads } = fakeCloud({ pull: { products: rows } });
+  expect(await pullNow(client)).toBe(true);
+  const manifests = calls.filter(c => c.op === "filey_sync_manifest");
+  expect(manifests.map(c => c.payload)).toEqual([
+    { p_tables: PUSH_TABLES, p_offset: 0, p_limit: 1000 },
+    { p_tables: ["products"], p_offset: 1000, p_limit: 1000 },
+  ]);
+  expect(reads.map(r => r.table)).toEqual(["profiles"]);
+  expect((await localClient.from("products").select("*")).data).toEqual(rows);
+});
+
+it("preserves every collection when the metadata batch is partial or fails", async () => {
+  await replaceColl("products", [{ id: 1, name: "Keep me" }]);
+  const { client } = fakeCloud();
+  client.rpc = async () => ({ data: { products: [] }, error: null });
+  expect(await pullNow(client)).toBe(false);
+  expect(getSyncStatus().error).toContain("Incomplete cloud change check");
+  expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Keep me");
+  client.rpc = async () => ({ data: null, error: { message: "Connection failed" } });
+  expect(await pullNow(client)).toBe(false);
+  expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Keep me");
 });
 
 it("reconciles just the saved collections, while a manual check still finds other-device changes", async () => {

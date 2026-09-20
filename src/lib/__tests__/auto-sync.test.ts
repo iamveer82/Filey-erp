@@ -4,7 +4,11 @@ const cloud = vi.hoisted(() => ({ reads: [] as string[], writes: [] as string[] 
 vi.mock("../supabase", () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: { user: { id: "sync-test-user" }, expires_at: Date.now() / 1000 + 3600 } } }) },
-    rpc: async (name: string, args?: { p_table: string }) => {
+    rpc: async (name: string, args?: { p_table: string; p_tables?: string[] }) => {
+      if (name === "filey_sync_manifest") {
+        cloud.reads.push(...args!.p_tables!);
+        return { data: Object.fromEntries(args!.p_tables!.map(t => [t, []])), error: null };
+      }
       if (name === "sync_record") cloud.writes.push(args!.p_table);
       return { data: { ok: true, revision: 1 }, error: null };
     },

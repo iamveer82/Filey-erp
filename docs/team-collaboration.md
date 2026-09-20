@@ -1,5 +1,9 @@
 # Team collaboration release
 
+September 20 deployment: the migration is applied and `team-invite` v1 is active.
+The existing Resend configuration is present. Structural and disposable-database
+checks passed; real two-user email delivery remains a separate acceptance test.
+
 The team upgrade adds verified-email invitations, a workspace selector, synchronized workspace identity, conversation pagination, unread counts, and mention links. Business records are not moved when someone joins or switches a workspace.
 
 ## Deployment order
@@ -51,4 +55,4 @@ These cannot be replaced by unit tests or a successful deployment:
 - In a separate Dodo **test-mode** environment, complete a checkout and verify signed webhook delivery through to plan activation, renewal, cancellation, and the customer portal. Do not switch production billing into test mode or charge a real card for this check.
 - Test reconnect after a dropped connection and workspace switching while another tab is open.
 
-At implementation time the saved Supabase management token returned 401 and the dashboard was signed out. Cloud deployment and provider-level acceptance are pending restored access. Local checks do not establish production email delivery or Dodo checkout success.
+At implementation time the saved Supabase management token returned 401 and the dashboard was signed out. Access is now restored and the backend is deployed. Local checks do not establish production email delivery or Dodo checkout success.

@@ -485,9 +485,10 @@ export async function pullPaged(
 async function pullIncremental(
   supa: SupabaseClient,
   t: string,
-  version = "updated_at"
+  version = "updated_at",
+  metadata?: Record<string, any>[]
 ): Promise<Record<string, any>[]> {
-  const meta = await pullPaged(supa, t, `id, ${version}`);
+  const meta = metadata ?? await pullPaged(supa, t, `id, ${version}`);
   const local = new Map(
     (await loadColl(t)).map((r) => [String((r as any).id), r as Record<string, any>])
   );
@@ -510,6 +511,27 @@ async function pullIncremental(
   return meta
     .map((m) => staleIds.has(String(m.id)) ? fetched.get(String(m.id)) : local.get(String(m.id)))
     .filter(Boolean) as Record<string, any>[];
+}
+
+/** Batch only metadata; unchanged image/document bodies never leave Supabase.
+ * A partial/error response must not be interpreted as remote deletions. */
+async function pullManifest(supa: SupabaseClient, tables: string[]): Promise<Record<string, Record<string, any>[]>> {
+  const result: Record<string, Record<string, any>[]> = Object.fromEntries(tables.map(t => [t, []]));
+  let pending = tables;
+  for (let offset = 0; pending.length; offset += 1000) {
+    const { data, error } = await supa.rpc("filey_sync_manifest", { p_tables: pending, p_offset: offset, p_limit: 1000 });
+    if (error) throw new Error(`Could not check cloud changes: ${error.message}`);
+    const more: string[] = [];
+    for (const table of pending) {
+      const rows = data?.[table];
+      if (!Array.isArray(rows) || rows.length > 1000 || rows.some(r => !r || !["string", "number"].includes(typeof r.id)))
+        throw new Error(`Incomplete cloud change check for ${table}. Local records were preserved.`);
+      result[table].push(...rows);
+      if (rows.length === 1000) more.push(table);
+    }
+    pending = more;
+  }
+  return result;
 }
 
 /** Cloud → local: replace every clean (non-dirty) collection with the rows
@@ -543,12 +565,13 @@ export async function pullNow(
     await inRealOrg(supa, uid, true); // refresh org membership for the next push
     const before = await journalSnapshot();
     const changed: string[] = [];
-    for (const t of PUSH_TABLES) {
-      if (opts?.tables && !opts.tables.includes(t)) continue;
-      if (before.tables[t]) continue;
+    const tables = PUSH_TABLES.filter(t => (!opts?.tables || opts.tables.includes(t)) && !before.tables[t]);
+    // A one-table save already needs just one read; batch full catch-up checks.
+    const manifest = tables.length > 1 ? await pullManifest(supa, tables) : undefined;
+    for (const t of tables) {
       // Every synchronized table has a revision trigger. Histories and CRM
       // tables without updated_at need not resend unchanged bodies either.
-      const rows = await pullIncremental(supa, t, INCREMENTAL.has(t) ? "updated_at" : "sync_revision");
+      const rows = await pullIncremental(supa, t, INCREMENTAL.has(t) ? "updated_at" : "sync_revision", manifest?.[t]);
       if (t === "user_files") await pullFileBlobs(supa, rows);
       // A local write raced the pull — stop; the queued push must run first.
       if ((await freshSession(supa))?.user.id !== uid)

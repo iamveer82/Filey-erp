@@ -1,5 +1,21 @@
 # Supabase migrations — apply order & convention
 
+## September 20 live reconciliation
+
+Applied and read back from `voyrjqgaypiylwskkwpr`:
+`migrations/2026-07-17-followup-repeat.sql`, `2026-09-20-team-workspaces.sql`,
+`2026-09-20-edge-rate-limits.sql`, `2026-09-20-profile-insert-scope.sql`,
+`2026-09-20-realtime-coverage.sql`, and `2026-09-20-sync-manifest.sql`.
+Apply the team changes after module/shared-record/team-comms migrations, and the
+manifest/publication changes after all 45 sync tables and revision triggers exist.
+Deploy the manifest before the new sync client. No customer rows were rewritten.
+
+The runtime catalog guard reports 78 tables, 1,041 columns, 53 functions and no
+missing checked requirements. Use `verify-runtime-schema.sql` with
+`scripts/check-cloud-schema.mjs` before a release; see the
+[cloud audit](../docs/2026-09-20-cloud-sync-audit.md). Do not replay the entire
+historical baseline on production: it contains legacy data backfills/deduplication.
+
 This project applies schema as a **baseline + additive idempotent migrations**.
 Every migration uses `create table if not exists` / `add column if not exists` /
 `drop policy if exists … create policy …`, so the whole set is safe to re-run.

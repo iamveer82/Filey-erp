@@ -396,7 +396,7 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
+  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
   const { data: urlData, error: urlErr } = await sb().storage.from(BUCKET).createSignedUrl(path, 300);
   if (urlErr) throw urlErr;

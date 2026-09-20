@@ -1,5 +1,75 @@
 # Cloud connection and photo-sync audit — 20 September 2026
 
+## Current live status (supersedes the earlier sign-in blockers below)
+
+Supabase and Vercel dashboard access is restored. The Supabase CLI session was
+refreshed through its normal browser sign-in; an expired management-token entry
+was removed from ignored `.env.local`. No credential was added to source control.
+
+The live catalog was compared with static RPC callers, explicit migration/baseline
+columns, all 45 synchronized collections, revision triggers, RLS, publication
+membership and function security settings. Before repair it exposed the missing
+team and rate-limit RPCs, `follow_ups.repeat`, and 14 missing Realtime collections.
+The following additive migrations are now applied to `voyrjqgaypiylwskkwpr`:
+
+- `migrations/2026-07-17-followup-repeat.sql`
+- `2026-09-20-team-workspaces.sql`
+- `2026-09-20-edge-rate-limits.sql`
+- `2026-09-20-profile-insert-scope.sql`
+- `2026-09-20-realtime-coverage.sql`
+- `2026-09-20-sync-manifest.sql`
+
+The final check reports **78 tables, 1,041 columns, 53 functions, zero detected
+issues**. The check is a structural guard, not a substitute for behavioral RLS
+tests. All original 76 public tables had RLS; every synchronized table already
+had its revision column and enabled trigger. Core sync/expense RPCs use invoker
+permissions, and the billing webhook RPC is service-only. All three Storage
+buckets are private and enforce user-folder ownership. The profile INSERT policy
+now also checks organization membership, closing the delete/recreate route into
+an unrelated organization. Normal onboarding/upserts pass the local SQL test.
+
+The deployed functions are `team-invite` v1, `dodo` v9, `stripe` v15,
+`agent-jobs` v14, `run-tool` v11, `channel-webhook` v19 and `send-email` v19.
+Existing gateway JWT settings were preserved; `team-invite` verifies the real
+session itself. Resend and Redis secret names are present on the backend; values
+were not retrieved. Prior function source was saved in ignored local output for
+rollback. No business records were inserted, edited or removed during this audit.
+
+### Fewer requests without another data service
+
+`filey_sync_manifest` batches paged ID/version checks with **SECURITY INVOKER**,
+so existing table permissions still decide visibility. A normal full check with
+fewer than 1,000 rows per collection uses **1 metadata request instead of 45**.
+Only collections with another page need subsequent metadata requests. Changed
+record bodies still load separately. A one-collection save keeps its existing
+single direct metadata read. Partial/error responses preserve the local snapshot.
+This reduces network round trips; it does not eliminate the underlying database
+reads or promise a fixed end-user speedup. No additional Redis/database service
+was introduced; existing Redis remains optional for provider catalogs only.
+
+The Free-plan usage snapshot was approximately 1.602/5 GB egress, 0.16/0.5 GB
+database space and 0.044/1 GB Storage for September 7–October 7. No current overage
+was shown. These are a point-in-time check, not a guarantee against future usage.
+
+### Reproduce the read-only deployment guard
+
+```powershell
+npx supabase db query --linked --project-ref voyrjqgaypiylwskkwpr --file supabase/verify-runtime-schema.sql --output json > output/cloud-audit/runtime-schema.json
+node scripts/check-cloud-schema.mjs output/cloud-audit/runtime-schema.json
+```
+
+The new batched-sync tests cover paging, preserved local edits/deletions, partial
+responses and transport failures. The existing focused sync/photo/cache tests,
+72 edge tests, disposable PostgreSQL permission/quota/team/rate tests, TypeScript,
+production build, route-bundle check, changed-code ESLint and SQLite migration
+preservation checks passed. Static initial JavaScript is 792,952 bytes. A timer
+test initially used the old per-table mock; its fixture now serves batched
+metadata and passes again.
+
+Production frontend promotion and provider-level two-user email/checkout
+acceptance are recorded separately when complete. No emails or charges were
+generated to test this release.
+
 ## Changes
 
 - Saved stamps, signatures and reusable images now use the active `sb()` data client. Local writes and deletions enter the existing durable sync journal; cloud writes surface errors instead of claiming success. The old global `filey.assets.v1` cache is preserved behind an explicit recovery action because it has no trustworthy account owner.
