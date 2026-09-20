@@ -744,8 +744,9 @@ export async function flushOutbox(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("filey:cloud-change", event => markWrite((event as CustomEvent<{ tables?: string[] }>).detail?.tables));
-  for (const event of ["filey:remote-update", "focus", "online"])
+  for (const event of ["filey:cloud-change", "filey:remote-update"])
+    window.addEventListener(event, event => markWrite((event as CustomEvent<{ tables?: string[] }>).detail?.tables));
+  for (const event of ["focus", "online"])
     window.addEventListener(event, () => markWrite());
   window.addEventListener("online", () => {
     flushOutbox().catch((e) => console.error("Failed to flush outbox:", e));

@@ -128,7 +128,7 @@ export function useLiveSync(reload: () => void, tables?: readonly string[]): voi
       }, 250);
     };
     const visible = () => { if (dirty && document.visibilityState !== "hidden") listener(); };
-    const local = () => listener();
+    const local = (event: Event) => listener((event as CustomEvent<{ tables?: string[] }>).detail?.tables);
     listeners.add(listener);
     window.addEventListener("filey:local-write", local);
     window.addEventListener("filey:remote-update", local);

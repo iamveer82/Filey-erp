@@ -44,3 +44,37 @@ The older unscoped image library is not uploaded automatically. Its owner can op
 - Browser QA also confirmed a public Filey image saved into the reusable local stamp library. A 1,085,549-byte PNG chosen as a QA avatar became a 512 × 512 WebP with 10,787 data-URL characters (roughly 8 KB image payload), then saved successfully. This is one fixture result, not a general compression guarantee.
 
 Changes are local to the development branch. No production deployment was attempted because the branch's previously documented backend migrations/functions still need deployment and authenticated verification.
+
+## Follow-up: free-tier usage and connection checks
+
+- Local save-triggered sync now reconciles only uploaded collections. Startup,
+  reconnect, foreground catch-up, the visible five-minute interval and manual
+  sync retain full reconciliation. A product-only save makes one collection
+  metadata scan instead of 45. Uploads, membership and bookkeeping still run.
+- Message histories and the remaining CRM/work collections now use their existing
+  sync revisions instead of repeatedly fetching unchanged row bodies. No new
+  migration, dependency, Redis instance or paid service was added.
+- Completed pulls identify changed tables so unrelated mounted consumers do not
+  refresh. Automatic-sync timers/listeners are removed on development hot reload.
+- The live project Auth settings endpoint returned HTTP 200 using the application's
+  publishable key. A one-time schema-presence check used `select=...&limit=0` for
+  all 45 synchronized collections plus the profile fields. **42/46 checks returned
+  HTTP 200**. `company_profile`, `app_settings`, `org_messages` and `profiles`
+  returned 401 (`permission denied for function current_org`) to this anonymous
+  request. These require an authenticated check; the result is not evidence that
+  signed-in users are denied access. No business rows were retrieved or changed.
+- Both dashboards still require sign-in in the available browser. Vercel is waiting
+  for email verification; Supabase needs sign-in. Column-presence checks do not
+  verify production triggers, policies, indexes, Storage rules or deployed function
+  versions. The previously shared management tokens both returned 401.
+- GitHub still reports production deployment `6548612696` at commit `04ee646b`.
+  Neither the earlier local-photo fixes nor this follow-up is deployed.
+
+Follow-up verification: **60 tests across 8 sync/cache/refresh test files passed**,
+TypeScript passed, and the disposable PostgreSQL suite passed sync conflicts,
+tenant/module permissions, expense transactions, invoice quotas, billing, team
+workflows and rate-limit checks. The production build, route-bundle checks,
+ESLint error check for changed files and the desktop SQLite migration check all
+passed. Initial static JavaScript is 792,370 bytes; the build retains existing
+converter chunk/import warnings. These checks use disposable fixtures, not
+customer data.

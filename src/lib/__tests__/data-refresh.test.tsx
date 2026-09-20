@@ -76,6 +76,16 @@ it("defers background refresh bursts until the tab becomes visible", () => {
   expect(reload).toHaveBeenCalledTimes(1);
 });
 
+it("a targeted sync refreshes its subscribers without reloading unrelated sections", () => {
+  const inventory = vi.fn(), inbox = vi.fn();
+  renderHook(() => useLiveSync(inventory, ["products"]));
+  renderHook(() => useLiveSync(inbox, ["notifications"]));
+  window.dispatchEvent(new CustomEvent("filey:remote-update", { detail: { tables: ["products"] } }));
+  refresh();
+  expect(inventory).toHaveBeenCalledOnce();
+  expect(inbox).not.toHaveBeenCalled();
+});
+
 it("coalesces local, sync and cloud changes, uses the latest callback and cleans up", () => {
   const previous = vi.fn();
   const latest = vi.fn();

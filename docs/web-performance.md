@@ -47,6 +47,21 @@ reconnects and refreshes authorized data once to catch up on missed changes.
 Returning to a tab rechecks module access without remounting an unfinished form;
 switching workspaces never reuses the previous workspace's access permissions.
 
+Desktop automatic saves now reconcile only the collections present in the upload
+journal. Startup, reconnect, returning to the app, the visible five-minute check
+and **Sync now** still reconcile all collections. A pending full check cannot be
+downgraded by a simultaneous save. The scheduler releases its listeners/timers on
+hot reload. Other-device changes in local mode still arrive on the next full
+check; cloud mode retains its existing Realtime subscription.
+
+All synchronized collections now use small ID/version snapshots: tables without
+reliable timestamp triggers use the existing `sync_revision` trigger, including
+CRM people, notes, tasks and message histories. Only changed bodies are downloaded;
+the full ID list still detects deletions. Table-specific sync events avoid
+refreshing unrelated mounted sections. A request-count regression confirms a
+single product save scans one collection instead of all 45; this excludes upload,
+membership and bookkeeping requests and is not a production billing measurement.
+
 Two small host-only cookies remember theme and accent when local storage is
 unavailable. They apply before React paints, use SameSite=Lax and Secure on
 HTTPS, and never hold authentication, API keys or business records.
