@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { isLocalMode } from "../../lib/dataMode";
+import SubscriptionRefunds from "../../components/SubscriptionRefunds";
 
 const ENTERPRISE_MAILTO =
   "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
@@ -204,6 +205,8 @@ export default function BillingPanel() {
             )}
           </div>
         </SettingsSection>
+
+        <SubscriptionRefunds />
 
         <SettingsSection
           title="Usage"

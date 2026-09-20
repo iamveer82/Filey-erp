@@ -23,10 +23,12 @@ import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig, openAiHeaders, openAiGene
 import { agentStorageScope } from "./agentStorage";
 import { getCacheScope } from "./api";
 import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
+import { creditChoice, createCreditFetch } from "./aiCredits";
 
 export type AiProvider = "openai" | "anthropic";
 
 export interface AiConfig {
+  billing?: "credits";
   provider: AiProvider;
   /** Base URL for the selected OpenAI-compatible or Anthropic API. */
   baseUrl: string;
@@ -93,7 +95,17 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
   return { ...cfg, apiKey: await readCredential(aiCredentialName(cfg), scope) ?? "" };
 }
 
-export function aiReady(cfg: AiConfig = getAiConfig()): boolean {
+export function getActiveAiConfig(): AiConfig {
+  const choice = creditChoice();
+  return choice.funding === "credits" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model, apiKey: "", billing: "credits" } : getAiConfig();
+}
+
+async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
+  return funding !== "byok" && creditChoice().funding === "credits" ? getActiveAiConfig() : getAiRequestConfig();
+}
+
+export function aiReady(cfg: AiConfig = getActiveAiConfig()): boolean {
+  if (cfg.billing === "credits") return !!cfg.model.trim();
   return !!aiEndpoint(cfg.baseUrl) && !!cfg.model.trim() &&
     (!!cfg.apiKey.trim() || hasCredential(aiCredentialName(cfg)) || isLocalAiEndpoint(cfg));
 }
@@ -271,6 +283,8 @@ export class AiError extends Error {
 }
 
 interface ChatOpts {
+  /** Connection tests can explicitly use the user's own provider. */
+  funding?: "byok";
   maxTokens?: number;
   effort?: AiEffort;
   temperature?: number;
@@ -303,14 +317,14 @@ export async function aiChat(
   messages: AiMessage[],
   opts: ChatOpts = {}
 ): Promise<string> {
-  const cfg = await getAiRequestConfig();
+  const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
     throw new AiError(
       "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
     );
   return cfg.provider === "anthropic"
     ? anthropicChat(cfg, messages, opts)
-    : openaiChat(cfg, messages, opts);
+    : openaiChat(cfg, messages, opts, cfg.billing === "credits" ? createCreditFetch() : aiFetch);
 }
 
 /** Ceiling for one model request when the caller passes no signal of its own.
@@ -329,7 +343,8 @@ function effectiveSignal(signal?: AbortSignal): AbortSignal | undefined {
 async function openaiChat(
   cfg: AiConfig,
   messages: AiMessage[],
-  opts: ChatOpts
+  opts: ChatOpts,
+  fetchFn = aiFetch
 ): Promise<string> {
   const url = `${cfg.baseUrl.trim().replace(/\/+$/, "")}/chat/completions`;
   const body = {
@@ -348,7 +363,7 @@ async function openaiChat(
         : m.text,
     })),
   };
-  const res = await aiFetch(url, {
+  const res = await fetchFn(url, {
     method: "POST",
     headers: openAiHeaders(cfg.apiKey),
     body: JSON.stringify(body),
@@ -576,14 +591,14 @@ export async function* aiAgentStream(
   messages: AiMessage[],
   opts: AgentOpts = {}
 ): AsyncGenerator<AgentEvent, string, void> {
-  const cfg = await getAiRequestConfig();
+  const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
     throw new AiError("No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
   const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
   const scope = agentStorageScope();
   const prior = opts.isOwner === false ? "" : journalDigest();
   const context = prior ? [{ role: "system" as const, text: prior }, ...messages] : messages;
-  const stream = runAgentStream(context, opts, { cfg, fetchFn: aiFetch });
+  const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing === "credits" ? createCreditFetch() : aiFetch });
   const events: AgentEvent[] = [];
   try {
     for (;;) {

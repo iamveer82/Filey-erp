@@ -13,6 +13,7 @@ import {
 import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig } from "../lib/aiEndpoint";
 import { useUI } from "../lib/ui";
 import { SettingsPanel, SettingsSection } from "./SettingsLayout";
+import AiFundingControl from "./AiFundingControl";
 import { getCacheScope } from "../lib/api";
 import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
 
@@ -284,7 +285,7 @@ export default function AiSettings() {
         if (controller.signal.aborted) return;
         if (action === "save") setResult({ ok: true, text: "Settings saved. Test the connection to verify your model." });
         else {
-          const text = await aiChat([{ role: "user", text: "Reply with the single word: ok" }], { maxTokens: 2048, signal: controller.signal });
+          const text = await aiChat([{ role: "user", text: "Reply with the single word: ok" }], { maxTokens: 2048, signal: controller.signal, funding: "byok" });
           if (controller.signal.aborted) return;
           if (!text.trim()) throw new Error("The provider accepted the request but returned no text. Try a different chat model; this model may need a larger reasoning budget.");
           setResult({ ok: true, text: `Connected to ${cfg.model.trim()}. Your model returned a text response.` });
@@ -305,6 +306,9 @@ export default function AiSettings() {
 
   return (
     <SettingsPanel>
+      <SettingsSection title="AI payment method" description="Use your own key or optional Filey Credits on Basic, Pro and Ultra. Credits never activate automatically if your key fails.">
+        <AiFundingControl />
+      </SettingsSection>
       <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5"><Sparkles size={13} />{local ? "On this device" : "Your provider"}</span>

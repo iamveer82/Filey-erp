@@ -3,6 +3,7 @@
 // Everything runs on-device; nothing is sent unless the bridge is paired and
 // the owner's number resolves.
 import { aiAutonomous, aiReady, DENY_SENSITIVE } from "./ai";
+import { creditChoice } from "./aiCredits";
 import { log } from "./log";
 import { bridgeState, getBridgeConfig, hasDesktop, onBridgeState, sendWa } from "./waBridge";
 import { loadReminders, nextOccurrence, saveReminders } from "./reminders";
@@ -68,6 +69,8 @@ const ALERTS_GOAL =
  *  not consume its slot's throttle, or a transient failure blacks the alert
  *  out for a whole day and nobody is told why it went quiet. */
 async function run(kind: "daily" | "alerts"): Promise<boolean> {
+  // Enabling a wallet for chat must not silently start paid background sweeps.
+  if (creditChoice().funding === "credits") return false;
   if (!aiReady()) return false;
   const to = await ownerJid();
   if (!to) return false; // bridge not paired — nothing to send through

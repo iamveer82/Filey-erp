@@ -27,6 +27,8 @@ import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
+import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
+import { getActiveAiConfig } from "../lib/ai";
 import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
 import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen } from "../lib/desktopBrowser";
 import { enableComputerUse, disableComputerUse, computerUseSupported } from "../lib/computerUse";
@@ -50,7 +52,6 @@ import {
   AiError,
   buildSystemPrompt,
   getPersona,
-  getAiConfig,
   type AiMessage,
   type AiImage,
 } from "../lib/ai";
@@ -206,8 +207,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     setListening(!!dictationRef.current);
   };
   // Read fresh so changes in Settings are reflected when sending.
+  useAiFunding();
   const ready = aiReady();
-  const modelConfig = getAiConfig();
+  const modelConfig = getActiveAiConfig();
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
   const [effort, setEffort] = useState<AiEffort>(() => {
     const saved = readAgentStorage("filey.agent.effort");
@@ -489,7 +491,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         { role: "user", text: goalText, images },
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
-      const selectedEffort = aiEffortLevels(getAiConfig()).includes(effort) ? effort : "auto";
+      const selectedEffort = aiEffortLevels(getActiveAiConfig()).includes(effort) ? effort : "auto";
       const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096, effort: selectedEffort, computerSession };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
@@ -998,7 +1000,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   />
                   Autonomous
                 </button>}
-                <div className="ml-auto flex max-w-full items-center gap-1">
+                <div className="ml-auto flex max-w-full flex-wrap items-center gap-1">
+                <AiFundingControl disabled={busy} />
                 <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />
                 {/* Mic — dictation straight into the composer. Browser engine
                     (Chromium WebView2), free, no key. Hidden where the browser

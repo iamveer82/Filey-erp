@@ -16,6 +16,7 @@ import {
   Activity,
   KeyRound,
   Stethoscope,
+  Wallet,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
@@ -34,6 +35,7 @@ const AppearancePanel = lazy(() => import("./AppearancePanel"));
 const PreferencesPanel = lazy(() => import("./PreferencesPanel"));
 const NotificationsPanel = lazy(() => import("./NotificationsPanel"));
 const BillingPanel = lazy(() => import("./BillingPanel"));
+const AiCreditsPanel = lazy(() => import("./AiCreditsPanel"));
 const BackupPanel = lazy(() => import("./BackupPanel"));
 const DataModePanel = lazy(() => import("./DataModePanel"));
 const LicensePanel = lazy(() => import("./LicensePanel"));
@@ -46,6 +48,7 @@ type Section =
   | "appearance"
   | "preferences"
   | "billing"
+  | "credits"
   | "security"
   | "notifications"
   | "backup"
@@ -59,6 +62,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
+  { id: "credits", label: "AI Credits", icon: Wallet },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
@@ -136,6 +140,7 @@ export default function Settings() {
               { id: "company", el: <CompanyDetails /> },
               { id: "account", el: <AccountProfile /> },
               { id: "ai", el: <AiSettings /> },
+              { id: "credits", el: <AiCreditsPanel /> },
               { id: "users", el: <UsersRoles /> },
               { id: "apps", el: <AppsManager /> },
               { id: "appearance", el: <AppearancePanel /> },
