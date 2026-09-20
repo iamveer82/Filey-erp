@@ -156,10 +156,9 @@ export async function listFiles(): Promise<SavedFile[]> {
     let query = sb()
       .from("user_files")
       .select("id,name,mime,size,storage_path,tool,folder_id,created_at")
-      .eq("owner", uid)
       .order("created_at", { ascending: false })
       .order("id", { ascending: true });
-    if (!isLocalMode()) query = query.range(offset, offset + 499);
+    if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
     const { data, error } = await query;
     if (error) throw error;
     files.push(...(data ?? []).map((r) => ({
@@ -194,10 +193,9 @@ export async function listFolders(): Promise<UserFolder[]> {
     let query = sb()
       .from("user_folders")
       .select("id,name,parent_id,created_at")
-      .eq("owner", uid)
       .order("name", { ascending: true })
       .order("id", { ascending: true });
-    if (!isLocalMode()) query = query.range(offset, offset + 499);
+    if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
     const { data, error } = await query;
     if (error) throw error;
     folders.push(...(data ?? []).map((r) => ({
@@ -398,7 +396,7 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: true });
+  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
   const { data: urlData, error: urlErr } = await sb().storage.from(BUCKET).createSignedUrl(path, 300);
   if (urlErr) throw urlErr;

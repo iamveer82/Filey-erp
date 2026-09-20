@@ -353,6 +353,12 @@ export default function Login() {
   return (
     <div className="min-h-full bg-canvas grid place-items-center p-6">
       <div className="w-full max-w-sm">
+        {!hasTauriShell && (
+          <a href="https://gofiley.com/" className="btn-ghost mb-6">
+            <ArrowLeft size={16} aria-hidden="true" />
+            Back to GoFiley
+          </a>
+        )}
         <div className="flex flex-col items-center text-center mb-6">
           <Logo size={44} />
           <h1 className="mt-4 text-[22px] font-semibold tracking-tight text-foreground">

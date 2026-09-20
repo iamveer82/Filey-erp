@@ -12,8 +12,9 @@ import { supabase, isConfigured } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
-import { registerCloudDevice, entitlement, collectPurchases } from "./license";
+import { registerCloudDevice, entitlement, collectPurchases, clearEntitlementCache } from "./license";
 import { mfaRequired } from "./mfa";
+import { pendingProfile, queueProfile } from "./profileSync";
 import {
   assertLocalAccount,
   getLocalCredential,
@@ -70,11 +71,7 @@ function localProfile(): Profile {
 }
 
 function saveLocalProfile(p: Profile): void {
-  try {
-    localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
+  localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
 }
 
 /** Copy the account's cloud profile onto this device. The profile is created
@@ -95,6 +92,7 @@ export function adoptLocalProfile(p: Partial<Profile>): void {
     ...Object.fromEntries(
       Object.entries(p).filter(([, v]) => v !== null && v !== undefined && v !== "")
     ),
+    ...(p.id ? pendingProfile(p.id) : {}),
   } as Profile;
   saveLocalProfile(merged);
 }
@@ -239,6 +237,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // The user id whose profile is currently loaded — lets us ignore token
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
+  const profileReadRevision = useRef(0);
+  const loadedOrg = useRef(profile?.org_id);
+  loadedOrg.current = profile?.org_id;
 
   const completeLocalSignIn = (u: User) => {
     const p = localProfile();
@@ -250,11 +251,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async function readProfile(u: User, refreshed = false): Promise<void> {
     if (!supabase) return;
+    const revision = ++profileReadRevision.current;
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", u.id)
       .maybeSingle();
+    if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
     // A read that FAILED is not evidence the profile is missing. This used to
     // ignore `error` and set profileLoaded in a finally, so one network blip or
     // RLS hiccup on sign-in made needsProfile true and dropped an existing user
@@ -270,12 +273,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (error) throw error;
     const prof = (data as Profile) ?? null;
-    if (loadedFor.current !== u.id) return;
+    if (loadedOrg.current !== prof?.org_id) clearEntitlementCache();
     setCacheOrg(prof?.org_id, u.id);
     setProfile(prof);
     setProfileError(null);
     setProfileLoaded(true);
   }, []);
+
+  // An invitation or a switch on another device changes the server profile.
+  // Unmount the old workspace before reloading its identity and permissions.
+  useEffect(() => {
+    if (local || !user) return;
+    const changed = (event: Event) => {
+      const next = (event as CustomEvent<Profile>).detail;
+      if (next.org_id === profile?.org_id) return;
+      setCacheOrg(null,user.id);
+      clearEntitlementCache();
+      setProfileLoaded(false);
+      void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+    };
+    const transition = (event: Event) => {
+      if ((event as CustomEvent<boolean>).detail) {
+        setCacheOrg(null,user.id); clearEntitlementCache(); setProfileLoaded(false);
+      } else {
+        void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+      }
+    };
+    const reconnected = (event: Event) => {
+      if ((event as CustomEvent<{tables?: string[]}>).detail?.tables?.length) return;
+      // Catch up after sleep/reconnect without discarding a same-workspace draft.
+      void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+    };
+    window.addEventListener("filey:cloud-profile",changed);
+    window.addEventListener("filey:workspace-transition",transition);
+    window.addEventListener("filey:cloud-change",reconnected);
+    return () => {
+      window.removeEventListener("filey:cloud-profile",changed);
+      window.removeEventListener("filey:workspace-transition",transition);
+      window.removeEventListener("filey:cloud-change",reconnected);
+    };
+  }, [local,user,profile?.org_id,loadProfile]);
 
   useEffect(() => {
     if (local) return; // no Supabase auth in local mode — synthetic user
@@ -320,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       if (!active) return;
       authChanged = true;
+      if (loadedFor.current !== s?.user?.id) clearEntitlementCache();
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
@@ -395,13 +433,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session?.user || local) return;
     void retryDeviceRegistration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id]);
+  }, [session?.user?.id, profile?.org_id]);
 
   // Warm the tier cache (free/lite/pro) so render paths can read it
   // synchronously via currentTier(). Local mode resolves immediately.
   useEffect(() => {
     void entitlement(true).catch(() => {});
-  }, [session?.user?.id, local]);
+  }, [session?.user?.id, local, profile?.org_id]);
 
   // A payment made outside the app — on the website before Filey was even
   // installed, or in the browser tab a Buy button opened — becomes access
@@ -622,6 +660,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: `${firstName.trim()} ${lastName.trim()}`.trim(),
         company: company.trim(),
       };
+      queueProfile(user?.id ?? "", { name: np.name, company: np.company });
       saveLocalProfile(np);
       setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);
@@ -646,6 +685,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (patch: Partial<Profile>) => {
     if (local) {
       const np = { ...(profile ?? { id: LOCAL_USER.id, email: "", name: "", company: "" }), ...patch } as Profile;
+      queueProfile(user?.id ?? "", patch);
       saveLocalProfile(np);
       setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);
@@ -677,6 +717,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileError,
     reloadProfile: async () => {
       if (!user) return;
+      if (!local) { setProfileLoaded(false); setCacheOrg(null,user.id); clearEntitlementCache(); }
       setProfileError(null);
       try {
         await loadProfile(user);

@@ -15,7 +15,7 @@ vi.mock("../../lib/api", () => ({
   org: {
     get: async () => ({ id: "org-1", name: "Example team" }),
     members: async () => [{ id: "member-1", user_id: "owner-1", org_id: "org-1", role: "owner", name: "Owner" }],
-    invites: async () => [], myInvites: async () => [], invite,
+    invites: async () => [], myInvites: async () => [], workspaces: async () => [{id:"org-1",name:"Example team",role:"owner"}], invite,
   },
   fin: { createExpense: vi.fn() },
 }));
@@ -24,7 +24,7 @@ vi.mock("../../lib/docScan", () => ({ fileToImages: async () => [] }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 it("retains an invitation draft after a failed send and closes only after a successful retry", async () => {
-  invite.mockRejectedValueOnce(new Error("Network unavailable")).mockResolvedValueOnce("invite-1");
+  invite.mockRejectedValueOnce(new Error("Network unavailable")).mockResolvedValueOnce({id:"invite-1",status:"accepted"});
   render(<MemoryRouter><UIProvider><UsersRoles /></UIProvider></MemoryRouter>);
   fireEvent.click(await screen.findByRole("button", { name: "Invite Member" }));
   const modal = within(screen.getByRole("dialog"));

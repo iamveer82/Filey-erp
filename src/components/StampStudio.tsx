@@ -15,7 +15,8 @@ import {
 import * as safePdf from "../lib/pdfjsSafe";
 import { placeStamp, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
-import { useAssets } from "../lib/assets";
+import { legacyAssets, useAssets } from "../lib/assets";
+import { errMsg } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
 
 
@@ -95,7 +96,8 @@ export default function StampStudio({
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const pwdRef = useRef<string | undefined>(undefined);
-  const { assets, save, remove } = useAssets();
+  const { assets, error: libraryError, refresh: refreshLibrary, save, remove } = useAssets();
+  const [recovery, setRecovery] = useState<ReturnType<typeof legacyAssets> | null>(null);
   const isWatermark = variant === "watermark";
   const isBackground = variant === "background";
   const isLogo = variant === "logo";
@@ -336,11 +338,10 @@ export default function StampStudio({
         placeholder: isWatermark ? "My watermark" : "My signature",
       });
       if (name == null) return;
-      save(name, stamp.src, stamp.ratio);
+      await save(name, stamp.src, stamp.ratio);
       toastRef.current.success("Saved to your library.");
     } catch (e) {
-      // prompt cancelled or errored — silently ignore
-      console.warn("Save to library failed:", e);
+      toastRef.current.error(`Could not save image: ${errMsg(e)}`);
     }
   };
 
@@ -640,6 +641,29 @@ export default function StampStudio({
       )}
 
       {/* ── Saved-asset library strip ─────────────────────────────────────── */}
+      {mode === "image" && libraryError && (
+        <p role="alert" className="mb-2 text-sm text-danger">
+          Could not load your image library: {libraryError}{" "}
+          <button className="underline" onClick={() => void refreshLibrary()}>Retry</button>
+        </p>
+      )}
+      {mode === "image" && localStorage.getItem("filey.assets.v1") && (
+        <details className="mb-3 text-sm text-brand-600" onToggle={e => {
+          if (e.currentTarget.open) setRecovery(legacyAssets());
+        }}>
+          <summary className="cursor-pointer">Recover images saved by an older version</summary>
+          <p className="my-2">Choose your image, then save it to your library to include it in sync.</p>
+          <div className="flex gap-2 overflow-x-auto">
+            {recovery?.map(a => (
+              <button key={a.id} title={a.name} aria-label={`Recover ${a.name}`}
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-brand-200 bg-white p-1"
+                onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}>
+                <img src={a.dataUrl} alt={a.name} className="max-h-full max-w-full object-contain" />
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
       {mode === "image" && assets.length > 0 && (
         <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-1">
           <span className="shrink-0 text-[11px] font-medium text-brand-500">Saved</span>
@@ -658,7 +682,7 @@ export default function StampStudio({
                 />
               </button>
               <button
-                onClick={() => remove(a.id)}
+                onClick={() => void remove(a.id).catch(e => toastRef.current.error(`Could not delete image: ${errMsg(e)}`))}
                 title={`Delete “${a.name}”`}
                 className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-danger text-white shadow group-hover:grid"
               >

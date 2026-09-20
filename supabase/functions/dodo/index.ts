@@ -230,7 +230,8 @@ async function publicCheckout(
   // the email, which is the only identity a stranger has here.
   const allowed = await rateLimit(supa, `web:${email}`, "dodo_public_checkout", 5, 3600);
   if (!allowed) return json({ error: "Too many attempts — try again later." }, 429);
-  await logAction(supa, `web:${email}`, "dodo_public_checkout", { plan });
+  // There is no account UUID yet; the service-only limiter records this
+  // attempt. audit_log.user_id accepts real account UUIDs only.
 
   const base = SITE_URL || "";
   const session = await dodo.checkoutSessions.create({

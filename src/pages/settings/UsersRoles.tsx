@@ -3,24 +3,31 @@ import { useUI } from "../../lib/ui";
 import { MODULES } from "../../modules/registry";
 import { Badge, Modal, Field } from "../../components/ui";
 import { Plus, Trash2 } from "lucide-react";
-import { org, type OrgMember, type Organization, type Invitation } from "../../lib/api";
+import { org, type OrgMember, type Organization, type Invitation, type TeamWorkspace } from "../../lib/api";
 import { isLocalMode } from "../../lib/dataMode";
 import { supabase } from "../../lib/supabase";
 import { SelectMenu } from "../../components/ui-menu";
 import { useEffect, useState } from "react";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import { useSearchParams } from "react-router-dom";
+import { clearEntitlementCache } from "../../lib/license";
 
 /* ---------------- Users & Roles (Organization) ---------------- */
 
 const ROLES = ["owner", "admin", "manager", "accountant", "staff"];
 
 export default function UsersRoles() {
-  const { profile, user, updateProfile } = useAuth();
+  const { profile, user, updateProfile, reloadProfile } = useAuth();
+  const [params] = useSearchParams();
+  const requestedInvite = params.get("invite");
   const { toast, confirm } = useUI();
   const [o, setO] = useState<Organization | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [invites, setInvites] = useState<Invitation[]>([]);
   const [myInvites, setMyInvites] = useState<Invitation[]>([]);
+  const [workspaces, setWorkspaces] = useState<TeamWorkspace[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [editName, setEditName] = useState(profile?.name ?? "");
   const [editCompany, setEditCompany] = useState(profile?.company ?? "");
   // Sync the inline editors when the profile loads after mount (cloud mode
@@ -63,39 +70,17 @@ export default function UsersRoles() {
     });
   }, [local]);
 
-  const load = () => {
-    org
-      .get()
-      .then(setO)
-      .catch((e) =>
-        toast.error(
-          "Failed to load organization: " + (e instanceof Error ? e.message : e)
-        )
-      );
-    org
-      .members()
-      .then(setMembers)
-      .catch((e) =>
-        toast.error("Failed to load members: " + (e instanceof Error ? e.message : e))
-      );
-    org
-      .invites()
-      .then(setInvites)
-      .catch((e) => {
-        setInvites([]);
-        console.error("Failed to load invites:", e);
-      });
-    org
-      .myInvites()
-      .then(setMyInvites)
-      .catch((e) => {
-        setMyInvites([]);
-        console.error("Failed to load my invites:", e);
-      });
+  const load = async () => {
+    setLoadError("");
+    try {
+      const [workspace,team,pending,mine,choices] = await Promise.all([org.get(),org.members(),org.invites(),org.myInvites(),org.workspaces()]);
+      setO(workspace); setMembers(team); setInvites(pending); setMyInvites(mine); setWorkspaces(choices);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally { setLoaded(true); }
   };
   useEffect(() => {
     if (!local || cloudUser) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [local, cloudUser]);
 
   const uid = local ? cloudUser?.id : user?.id;
@@ -109,21 +94,28 @@ export default function UsersRoles() {
     orgMembers.find((m) => m.user_id === uid)?.role ?? (personal ? "owner" : "staff");
   const isAdmin = personal || ["owner", "admin"].includes(myRole);
 
-  const switchOrg = async (id: string) => {
+  const refreshWorkspace = async () => {
+    clearEntitlementCache();
+    localStorage.setItem("filey_cloud_workspace",`${uid}:${Date.now()}`);
     if (local) {
-      // The cloud profile's org_id is what current_org()/RLS key off — the
-      // local shim profile has no cloud meaning.
-      const { error } = await supabase!
-        .from("profiles")
-        .update({ org_id: id })
-        .eq("id", cloudUser!.id);
-      if (error) throw new Error(error.message);
-      setCloudOrgId(id);
+      const {data,error} = await supabase!.rpc("current_org");
+      if (error) throw error;
+      setCloudOrgId(data);
+      await load();
     } else {
-      await updateProfile({ org_id: id });
+      await reloadProfile();
     }
     setName("");
-    setTimeout(load, 150);
+  };
+  const switchOrg = async (id: string) => {
+    if (busy || id === currentOrg) return;
+    setBusy(true);
+    try {
+      await org.switchWorkspace(id);
+      await refreshWorkspace();
+      toast.success("Workspace switched.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
   };
 
   const createOrg = async () => {
@@ -131,7 +123,8 @@ export default function UsersRoles() {
     setBusy(true);
     try {
       const id = await org.create(name.trim());
-      await switchOrg(id);
+      await org.switchWorkspace(id);
+      await refreshWorkspace();
       toast.success("Organization created.");
     } catch (e) {
       toast.error(`Could not create org: ${e instanceof Error ? e.message : e}`);
@@ -153,9 +146,10 @@ export default function UsersRoles() {
     }
     setBusy(true);
     try {
-      await org.invite(trimmed, inviteRole, null);
+      const result = await org.invite(trimmed, inviteRole, null);
       setInviteEmail("");
-      toast.success(`Invitation sent to ${trimmed}.`);
+      if (result.status === "accepted") toast.success(`Invitation email queued for ${trimmed}.`);
+      else toast.error(result.error || "Invitation created, but email could not be confirmed. Retry below.");
       setInviteOpen(false);
       load();
     } catch (e) {
@@ -169,8 +163,8 @@ export default function UsersRoles() {
     setBusy(true);
     try {
       await org.acceptInvite(id);
+      await refreshWorkspace();
       toast.success("Joined organization.");
-      setTimeout(load, 150);
     } catch (e) {
       toast.error(`Could not accept: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -202,18 +196,18 @@ export default function UsersRoles() {
 
   return (
     <SettingsPanel>
+      {loadError && <div role="alert" className="rounded-xl border border-danger/20 p-4 text-sm"><p>Team workspace could not be loaded: {loadError}</p><button className="btn-ghost mt-2" onClick={() => void load()}>Try again</button></div>}
+      {requestedInvite && loaded && !loadError && !myInvites.some(i => i.id === requestedInvite) && <p role="status" className="rounded-xl bg-muted p-4 text-sm">This invitation is expired, already used, or addressed to another email. Sign in with the invited email, or ask the workspace owner for a new invitation.</p>}
       <SettingsSection
         title="Workspace"
         description="The organization you are currently working in."
       >
-        <p className="break-words font-medium text-foreground">
-          {personal ? "Personal workspace" : o?.name}
-        </p>
+        {workspaces.length > 1 ? <SelectMenu ariaLabel="Active workspace" value={currentOrg} disabled={busy} onChange={id => void switchOrg(id)} options={workspaces.map(w => ({value:w.id,label:`${w.name} · ${w.role}`}))} /> : <p className="break-words font-medium text-foreground">{loaded ? personal ? "Personal workspace" : o?.name : "Loading workspace…"}</p>}
         <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
           {personal
             ? "You're working solo. Create an organization to invite a team and share data."
             : local
-              ? "Invite teammates by email. Business records sync to the whole team automatically; your files stay private."
+              ? "Team membership is managed in the cloud. Switching a cloud workspace keeps this device's existing records in place; review Cloud sync before syncing again."
               : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
         </p>
       </SettingsSection>
@@ -277,16 +271,16 @@ export default function UsersRoles() {
         >
           <ul className="space-y-2">
             {myInvites.map((inv) => (
-              <li key={inv.id} className="flex items-center justify-between gap-3">
-                <span className="text-sm text-foreground">
-                  Join as <b>{inv.role}</b>
+              <li key={inv.id} className="flex flex-wrap items-center justify-between gap-3">
+                <span className="min-w-0 flex-1 basis-40 break-words text-sm text-foreground">
+                  <b>{inv.workspace_name || "Team workspace"}</b><span className="block text-xs text-muted-foreground">Join as {inv.role} · expires {new Date(inv.expires_at).toLocaleDateString()}</span>
                 </span>
                 <button
                   className="btn-primary"
                   disabled={busy}
                   onClick={() => acceptInvite(inv.id)}
                 >
-                  Accept
+                  Accept invitation
                 </button>
               </li>
             ))}
@@ -328,12 +322,23 @@ export default function UsersRoles() {
               {invites
                 .filter((i) => i.status === "pending")
                 .map((inv) => (
-                  <li key={inv.id} className="flex items-center justify-between gap-3">
-                    <span className="min-w-0 break-all text-sm">
+                  <li key={inv.id} className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="min-w-0 flex-1 basis-40 break-all text-sm">
                       <b className="text-foreground">{inv.email}</b>{" "}
                       <span className="text-muted-foreground">· {inv.role}</span>
+                      <span className="block text-xs text-muted-foreground">{new Date(inv.expires_at).getTime() <= Date.now() ? "Expired" : ({accepted:"Email queued",sending:"Awaiting email confirmation",unknown:"Email unconfirmed",failed:"Email failed",not_sent:"Email not sent"}[inv.email_status] ?? "Email not sent")} · expires {new Date(inv.expires_at).toLocaleDateString()}</span>
                     </span>
+                    <button className="btn-ghost shrink-0" disabled={busy} onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const result = await org.resendInvite(inv.id,inv.email_status === "accepted" || new Date(inv.expires_at).getTime() <= Date.now());
+                        if (result.status === "accepted") toast.success("Invitation email queued."); else toast.error(result.error || "Email could not be confirmed.");
+                        await load();
+                      } catch(e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                      finally { setBusy(false); }
+                    }}>{inv.email_status === "accepted" ? "Resend" : "Retry email"}</button>
                     <button
+                      disabled={busy}
                       aria-label="Revoke invitation"
                       className="btn-ghost w-10 shrink-0 p-0 text-danger hover:bg-danger/10"
                       onClick={async () => {
@@ -344,8 +349,10 @@ export default function UsersRoles() {
                           danger: true,
                         });
                         if (!ok) return;
-                        await org.revokeInvite(inv.id);
-                        load();
+                        setBusy(true);
+                        try { await org.revokeInvite(inv.id); await load(); }
+                        catch(e) { toast.error(e instanceof Error ? e.message : String(e)); }
+                        finally { setBusy(false); }
                       }}
                     >
                       <Trash2 size={15} />
@@ -508,8 +515,7 @@ export default function UsersRoles() {
             />
           </Field>
           <p className="text-xs text-muted-foreground">
-            They sign up with this email, then accept from their Settings → Users &amp;
-            Roles.
+            We email a link valid for seven days. They sign in or create an account with this address, then accept the invitation. Their existing records stay in their own workspace.
           </p>
         </fieldset>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">

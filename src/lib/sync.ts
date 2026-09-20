@@ -18,6 +18,7 @@ import { supabase } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
+import { syncProfile } from "./profileSync";
 import {
   loadColl,
   replaceColl,
@@ -328,6 +329,7 @@ export async function syncNow(
       return false;
     }
 
+    await syncProfile(supa, uid);
     const j = await journalSnapshot();
     const dirty = PUSH_TABLES.filter((t) => j.tables[t]);
     if (!dirty.length) {
@@ -482,9 +484,11 @@ export async function pullPaged(
  *  on every beat — the free-tier egress blowout. */
 async function pullIncremental(
   supa: SupabaseClient,
-  t: string
+  t: string,
+  version = "updated_at",
+  metadata?: Record<string, any>[]
 ): Promise<Record<string, any>[]> {
-  const meta = await pullPaged(supa, t, "id, updated_at");
+  const meta = metadata ?? await pullPaged(supa, t, `id, ${version}`);
   const local = new Map(
     (await loadColl(t)).map((r) => [String((r as any).id), r as Record<string, any>])
   );
@@ -492,7 +496,7 @@ async function pullIncremental(
   // on both sides compares equal, and would otherwise never be downloaded.
   const stale = meta.filter((m) => {
     const have = local.get(String(m.id));
-    return !have || have.updated_at !== m.updated_at;
+    return !have || m[version] == null || have[version] !== m[version];
   });
 
   const fetched = new Map<string, Record<string, any>>();
@@ -509,14 +513,35 @@ async function pullIncremental(
     .filter(Boolean) as Record<string, any>[];
 }
 
+/** Batch only metadata; unchanged image/document bodies never leave Supabase.
+ * A partial/error response must not be interpreted as remote deletions. */
+async function pullManifest(supa: SupabaseClient, tables: string[]): Promise<Record<string, Record<string, any>[]>> {
+  const result: Record<string, Record<string, any>[]> = Object.fromEntries(tables.map(t => [t, []]));
+  let pending = tables;
+  for (let offset = 0; pending.length; offset += 1000) {
+    const { data, error } = await supa.rpc("filey_sync_manifest", { p_tables: pending, p_offset: offset, p_limit: 1000 });
+    if (error) throw new Error(`Could not check cloud changes: ${error.message}`);
+    const more: string[] = [];
+    for (const table of pending) {
+      const rows = data?.[table];
+      if (!Array.isArray(rows) || rows.length > 1000 || rows.some(r => !r || !["string", "number"].includes(typeof r.id)))
+        throw new Error(`Incomplete cloud change check for ${table}. Local records were preserved.`);
+      result[table].push(...rows);
+      if (rows.length === 1000) more.push(table);
+    }
+    pending = more;
+  }
+  return result;
+}
+
 /** Cloud → local: replace every clean (non-dirty) collection with the rows
  *  this account can see — its own plus org-shared ones (RLS decides). The id
  *  list is always a full snapshot, so remote deletes propagate for free; the
- *  row BODIES come down incrementally where updated_at is trustworthy. Dirty
+ *  row BODIES come down incrementally by timestamp or sync revision. Dirty
  *  tables are skipped — local edits win until they've been pushed. */
 export async function pullNow(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean },
+  opts?: { manual?: boolean; tables?: readonly string[] },
 ): Promise<boolean> {
   const supa = client ?? supabase;
   if (!isLocalMode() || !supa || (!opts?.manual && !autoSyncEnabled()) || running || migrating)
@@ -539,22 +564,24 @@ export async function pullNow(
     setStatus({ state: "syncing" });
     await inRealOrg(supa, uid, true); // refresh org membership for the next push
     const before = await journalSnapshot();
-    let changed = false;
-    for (const t of PUSH_TABLES) {
-      if (before.tables[t]) continue;
-      const rows = INCREMENTAL.has(t)
-        ? await pullIncremental(supa, t)
-        : await pullPaged(supa, t, "*");
+    const changed: string[] = [];
+    const tables = PUSH_TABLES.filter(t => (!opts?.tables || opts.tables.includes(t)) && !before.tables[t]);
+    // A one-table save already needs just one read; batch full catch-up checks.
+    const manifest = tables.length > 1 ? await pullManifest(supa, tables) : undefined;
+    for (const t of tables) {
+      // Every synchronized table has a revision trigger. Histories and CRM
+      // tables without updated_at need not resend unchanged bodies either.
+      const rows = await pullIncremental(supa, t, INCREMENTAL.has(t) ? "updated_at" : "sync_revision", manifest?.[t]);
       if (t === "user_files") await pullFileBlobs(supa, rows);
       // A local write raced the pull — stop; the queued push must run first.
       if ((await freshSession(supa))?.user.id !== uid)
         throw new Error("Your session changed. Local records were not replaced for this table.");
       assertWorkspaceCurrent();
       if ((await journalVersion()) !== before.v) break;
-      if (await replaceColl(t, rows, before.v)) changed = true;
+      if (await replaceColl(t, rows, before.v)) changed.push(t);
     }
-    if (changed && typeof window !== "undefined")
-      window.dispatchEvent(new Event("filey:remote-update"));
+    if (changed.length && typeof window !== "undefined")
+      window.dispatchEvent(new CustomEvent("filey:remote-update", { detail: { tables: changed } }));
     setStatus({ state: "done", at: new Date().toISOString() });
     return true;
   } catch (e: any) {
@@ -565,20 +592,24 @@ export async function pullNow(
   }
 }
 
-/** One full sync beat: seed once, push local changes, then pull what's new
- *  from other devices and teammates. Pull after a failed push is safe — dirty
- *  tables are skipped, so unpushed local edits can't be overwritten. */
+/** Seed once, push local changes, then reconcile the cloud. A failed push
+ *  retains the journal and stops the cycle so the next attempt can retry. */
 export async function syncCycle(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean }
+  opts?: { manual?: boolean; changesOnly?: boolean }
 ): Promise<boolean> {
   if (migrating || (!opts?.manual && !autoSyncEnabled())) return false;
   await seedIfNeeded(client);
+  // A local save only needs to reconcile the collections it uploads. Startup,
+  // reconnect, the five-minute check and Sync now still reconcile every table.
+  const tables = opts?.changesOnly && !opts.manual
+    ? Object.keys((await journalSnapshot()).tables)
+    : undefined;
   // "Sync now" is a button, not a heartbeat: pass the intent down so it does
   // not sit there doing nothing when auto-sync happens to be switched off.
   const pushed = await syncNow(client, opts);
   if (!pushed) return false;
-  const pulled = await pullNow(client, opts);
+  const pulled = tables?.length === 0 || await pullNow(client, { ...opts, tables });
   return pushed && pulled;
 }
 
@@ -599,41 +630,55 @@ async function seedIfNeeded(client?: SupabaseClient | null): Promise<void> {
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let fullSyncPending = false;
 
-/** Debounced sync — a burst of writes becomes one push (then a pull). */
-export function scheduleSync(delayMs = 4000): void {
+/** Coalesce writes without downgrading a pending startup/reconnect check. */
+export function scheduleSync(delayMs = 4000, changesOnly = false): void {
+  fullSyncPending ||= !changesOnly;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    void syncCycle().catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
+    const changesOnly = !fullSyncPending;
+    fullSyncPending = false;
+    void syncCycle(null, { changesOnly }).catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
   }, delayMs);
 }
 
 /** Wire up auto-sync for the app's lifetime. Call once at startup; no-op
  *  outside local mode or in builds without cloud config. */
-export function startAutoSync(): void {
-  if (typeof window === "undefined") return;
-  if (!isLocalMode() || !supabase) return;
+export function startAutoSync(): () => void {
+  if (typeof window === "undefined" || !isLocalMode() || !supabase) return () => {};
   // Near-instant: push ~1s after a write. Short enough to feel immediate, long
   // enough that a burst of saves (e.g. an invoice + its items) becomes one push.
-  window.addEventListener("filey:local-write", () => scheduleSync(1000));
-  window.addEventListener("online", () => scheduleSync(1000));
+  const saved = () => scheduleSync(1000, true);
+  const online = () => scheduleSync(1000);
+  window.addEventListener("filey:local-write", saved);
+  window.addEventListener("online", online);
   // Pull once when the user returns to the app — covers edits missed while the
   // window was hidden (see the idle-poll note below).
-  document.addEventListener("visibilitychange", () => {
+  const visible = () => {
     if (!document.hidden) scheduleSync(1000);
-  });
+  };
+  document.addEventListener("visibilitychange", visible);
   scheduleSync(3000); // catch up on writes made while offline or signed out
   // Idle poll so teammate / second-device edits land. A poll used to re-download
   // a full snapshot of every table, which burnt cloud egress 24/7 for nothing —
   // that is what exhausted the free-tier quota. Now three things hold it down:
   // pullNow is incremental (see pullIncremental), the interval is 5 min, and
-  // nothing polls while the window is hidden (a backgrounded app syncs nothing
-  // until you look at it again — the visibilitychange pull above catches up).
-  setInterval(() => {
+  // periodic pulls pause while hidden; the visibilitychange pull catches up.
+  const interval = setInterval(() => {
     if (typeof document !== "undefined" && document.hidden) return;
     void syncCycle().catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
   }, 300_000);
+  return () => {
+    window.removeEventListener("filey:local-write", saved);
+    window.removeEventListener("online", online);
+    document.removeEventListener("visibilitychange", visible);
+    clearInterval(interval);
+    if (timer) clearTimeout(timer);
+    timer = null;
+    fullSyncPending = false;
+  };
 }
 
 /** Mark every non-empty local collection dirty, then sync — the "upload all my

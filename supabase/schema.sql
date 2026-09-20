@@ -39,7 +39,9 @@ drop policy if exists profiles_self_delete on profiles;
 create policy profiles_self_select on profiles for select
   using (id = auth.uid());
 create policy profiles_self_insert on profiles for insert
-  with check (id = auth.uid());
+  with check (id = auth.uid() and (org_id = 'default' or exists (
+    select 1 from public.org_members m where m.org_id = profiles.org_id and m.user_id = auth.uid()
+  )));
 create policy profiles_self_update on profiles for update
   using (id = auth.uid())
   with check (

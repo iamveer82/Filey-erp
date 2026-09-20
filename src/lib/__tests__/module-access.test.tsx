@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { setCacheOrg } from "../api";
 import { loadModuleAccess, requireToolModuleAccess } from "../moduleAccess";
 import { ModulesProvider, useModules } from "../modules";
+import { notifyDataChanged } from "../realtime";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../../../supabase/functions/_shared/integration-access";
 
 const rpc = vi.hoisted(() => vi.fn());
@@ -55,6 +56,19 @@ it("keeps an unfinished form mounted while focus rechecks workspace access", asy
   expect(input).toHaveValue("Unsaved invoice");
   complete({ data: { allowed: true, admin: false, modules: ["inventory"] }, error: null });
   await waitFor(() => expect(screen.getByLabelText("Draft title")).toHaveValue("Unsaved invoice"));
+});
+it("refreshes revoked permissions after a membership event or reconnect, without rechecking unrelated messages", async () => {
+  rpc.mockResolvedValue({data:{allowed:true,admin:true,modules:null},error:null});
+  render(<ModulesProvider><Consumer/></ModulesProvider>);
+  await screen.findByText("People allowed");
+  rpc.mockResolvedValue({data:{allowed:true,admin:false,modules:["inventory"]},error:null});
+  act(() => notifyDataChanged(["org_members"]));
+  await screen.findByText("People blocked");
+  rpc.mockResolvedValue({data:{allowed:true,admin:true,modules:null},error:null});
+  act(() => notifyDataChanged(["org_messages"]));
+  expect(screen.getByText("People blocked")).toBeInTheDocument();
+  act(() => notifyDataChanged());
+  await screen.findByText("People allowed");
 });
 it("does not reuse the old workspace's permissions while loading a new workspace", async () => {
   rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null }, error: null });

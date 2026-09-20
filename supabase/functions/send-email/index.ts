@@ -12,10 +12,11 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { rateLimit } from "../_shared/rateLimit.ts";
 
 // SECURITY: per-user DAILY cap so a compromised account can't mass-mail from
-// our domain. Counted in audit_log (action='email_send') via the service-role
-// client — no extra table. Tiered to mirror src/lib/license.ts:
+// our domain. Reserve each attempt before contacting Resend; a failed or
+// uncertain provider response still consumes the attempt. Tiered limits:
 //   free  → 10/day (must match EMAIL_DAILY_LIMIT.free)
 //   paid  → cloud plan OR an active one-time desktop licence; effectively
 //           unlimited, but a high safety ceiling still guards our Resend
@@ -120,16 +121,9 @@ serve(async (req) => {
     }
     const limit = paid ? PAID_DAILY_CEILING : FREE_DAILY_LIMIT;
 
-    const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
-    const { count } = await supa
-      .from("audit_log")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("action", "email_send")
-      .gte("created_at", dayAgo);
-    if ((count ?? 0) >= limit) {
+    if (!await rateLimit(supa, userId, "email_send", limit, 86400)) {
       return json(
-        { error: `Daily email limit reached (${limit}/day). Try again tomorrow or upgrade your plan.` },
+        { error: `Daily email attempt limit reached (${limit}/day). Try again tomorrow or upgrade your plan.` },
         429
       );
     }
@@ -154,7 +148,7 @@ serve(async (req) => {
     const data = await res.json();
     if (!res.ok) return json({ error: data?.message ?? "Send failed" }, res.status === 429 ? 429 : 422);
 
-    // Count the send (this row is what the rate limit reads).
+    // Record accepted sends separately from the service's attempt budget.
     const ins = await supa.from("audit_log").insert({
       user_id: userId,
       actor: "user",

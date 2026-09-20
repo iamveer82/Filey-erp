@@ -40,6 +40,7 @@ vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
   entitlement: async () => ({}),
   collectPurchases: async () => false,
+  clearEntitlementCache: vi.fn(),
 }));
 vi.mock("../../lib/mfa", () => ({ mfaRequired: async () => false }));
 import { AuthProvider, adoptLocalProfile, useAuth } from "../../lib/auth";
@@ -47,6 +48,51 @@ import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
 import * as localAuth from "../../lib/localAuth";
 
 let currentAuth: ReturnType<typeof useAuth>;
+
+it("replaces the workspace identity after the server reports an organization switch", async () => {
+  localStorage.setItem("filey_data_mode","cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
+  fixture.profileRead.mockResolvedValue({data:{...fixture.user,name:"Owner",company:"Joined team",org_id:"joined-org"},error:null});
+  await act(async () => { window.dispatchEvent(new CustomEvent("filey:cloud-profile",{detail:{id:"owner",org_id:"joined-org"}})); });
+  await waitFor(() => expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope","joined-org:owner"));
+  expect(fixture.signOut).not.toHaveBeenCalled();
+});
+
+it.each([null, { message: "JWT expired" }])("ignores an earlier profile response (%j) after a newer workspace has loaded", async (error) => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
+  let finishEarlier!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finishEarlier = resolve; }));
+  let earlier!: Promise<void>;
+  act(() => { earlier = currentAuth.reloadProfile(); });
+  fixture.profileRead.mockResolvedValueOnce({ data: { ...fixture.user, company: "Joined team", org_id: "joined-org" }, error: null });
+  await act(async () => { await currentAuth.reloadProfile(); });
+  await act(async () => {
+    finishEarlier({ data: { ...fixture.user, company: "Earlier team", org_id: "earlier-org" }, error });
+    await earlier;
+  });
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
+  expect(screen.getByText("owner:Joined team:ready")).toBeTruthy();
+  expect(fixture.refreshSession).not.toHaveBeenCalled();
+});
+
+it("catches up on a workspace switch missed during disconnection without resetting the current screen while loading", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
+  const reads = fixture.profileRead.mock.calls.length;
+  act(() => window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["org_messages"] } })));
+  expect(fixture.profileRead).toHaveBeenCalledTimes(reads);
+  let finish!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  expect(screen.getByText("owner:Example:ready")).toBeTruthy();
+  await act(async () => finish({ data: { ...fixture.user, company: "Joined team", org_id: "joined-org" }, error: null }));
+  expect(screen.getByText("owner:Joined team:ready")).toBeTruthy();
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
+});
 
 function SessionProbe() {
   const auth = useAuth();

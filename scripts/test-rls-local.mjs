@@ -37,6 +37,9 @@ try {
   const output = run('psql', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
     sql('scripts/fixtures/rls-setup.sql') + '\n' + migration + '\n' + migration + '\n' + syncMigration + '\n' + syncMigration + '\n' + sql('scripts/fixtures/rls-checks.sql') + '\n' + sql('scripts/fixtures/sync-checks.sql') + '\n' + sql('scripts/fixtures/module-checks.sql') + '\n' + moduleMigration + '\n' + moduleMigration + '\n' + sql('scripts/fixtures/module-assertions.sql'));
   console.log(output.trim());
+  const manifestMigration = sql('supabase/2026-09-20-sync-manifest.sql');
+  console.log(run('psql', ['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-X','-q','-v','ON_ERROR_STOP=1'],
+    manifestMigration+'\n'+manifestMigration+'\n'+sql('scripts/fixtures/manifest-assertions.sql')).trim());
   const expenseOutput = run('psql', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
     sql('scripts/fixtures/expense-setup.sql') + '\n' + sql('supabase/2026-09-13-expense-entry.sql') + '\n' + sql('supabase/2026-09-13-expense-entry.sql') + '\n' + sql('scripts/fixtures/expense-assertions.sql'));
   console.log(expenseOutput.trim());
@@ -55,6 +58,23 @@ try {
   assert.equal(run('psql', [...basicArgs, '-tAc', "select used from invoice_monthly_usage where org_id='10000000-0000-0000-0000-000000000006'"]).trim(), '5');
   console.log('PASS: eight concurrent creations compete for one slot; exactly one succeeds.');
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
+  console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql')+'\n'
+    +sql('supabase/2026-09-19-billing-integrity.sql')+'\n'+sql('scripts/fixtures/billing-lifecycle-assertions.sql')).trim());
+  run('createdb', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', 'team_acceptance']);
+  const teamArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'team_acceptance', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+  const teamMigration = sql('supabase/2026-09-20-team-workspaces.sql');
+  console.log(run('psql', teamArgs, sql('scripts/fixtures/team-setup.sql') + '\n' + migration + '\n' + moduleMigration + '\n'
+    + teamMigration + '\n' + teamMigration + '\n' + sql('scripts/fixtures/team-assertions.sql')).trim());
+  console.log(run('psql',teamArgs,sql('supabase/2026-09-20-profile-insert-scope.sql')+'\n'
+    +sql('scripts/fixtures/profile-scope-assertions.sql')).trim());
+  const rateMigration = sql('supabase/2026-09-20-edge-rate-limits.sql');
+  console.log(run('psql',teamArgs,rateMigration+'\n'+rateMigration+'\n'+sql('scripts/fixtures/rate-limit-assertions.sql')).trim());
+  const limitRace = await Promise.all(Array.from({length:12}, () =>
+    promisify(execFile)(exe('psql'), [...teamArgs,'-tAc',
+      "set role service_role; select public.filey_take_rate_limit('concurrent-account','race',3,3600);"],
+      {encoding:'utf8',windowsHide:true})));
+  assert.equal(limitRace.filter(result => result.stdout.trim()==='t').length,3);
+  console.log('PASS: exactly three of twelve concurrent requests reserve the three available slots.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }

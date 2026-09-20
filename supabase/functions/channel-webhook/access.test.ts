@@ -63,8 +63,7 @@ Deno.test("whatsapp + slack pins unchanged (digit-normalized / user id)", async 
 
 // ---- PAIR flow ----
 
-/** Fake client modelling just what tryPair touches: the agent_channels row,
- *  the audit_log counter query (rateLimit) and its failure inserts. */
+/** Fake client modelling the channel, atomic attempt reservation and audit. */
 function fakePairClient(opts: {
   pairCode?: string | null;
   ownerRef?: string | null;
@@ -77,6 +76,7 @@ function fakePairClient(opts: {
   const auditInserts: Record<string, unknown>[] = [];
   let counted = opts.priorFailures ?? 0;
   const client = {
+    rpc: async () => ({ data: counted++ < 5, error: null }),
     from(table: string) {
       if (table === "agent_channels") {
         return {
@@ -107,20 +107,12 @@ function fakePairClient(opts: {
           },
         };
       }
-      // audit_log: rateLimit counts rows; logAction inserts them.
+      // audit_log records failed codes separately from the attempt budget.
       return {
         insert: (row: Record<string, unknown>) => {
           auditInserts.push(row);
           return Promise.resolve({ error: null });
         },
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              gte: () =>
-                Promise.resolve({ count: counted, error: null }),
-            }),
-          }),
-        }),
       };
     },
   };
@@ -128,7 +120,6 @@ function fakePairClient(opts: {
     client,
     updates,
     auditInserts,
-    bumpFailures: () => void counted++,
   };
 }
 

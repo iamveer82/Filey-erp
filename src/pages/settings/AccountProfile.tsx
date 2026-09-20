@@ -63,7 +63,7 @@ export default function AccountProfile() {
     date_format: profile?.date_format ?? "DD MMM, YYYY",
     time_format: profile?.time_format ?? "12 Hour (02:30 PM)",
   });
-  const set = (k: keyof typeof p, v: string) => setP({ ...p, [k]: v });
+  const set = (k: keyof typeof p, v: string) => setP(current => ({ ...current, [k]: v }));
   const avatarRef = useRef<HTMLInputElement>(null);
   const [savedProfile, setSavedProfile] = useState(false);
   const [savedPrefs, setSavedPrefs] = useState(false);
@@ -85,7 +85,7 @@ export default function AccountProfile() {
   // Supabase session instead.
   const [verified, setVerified] = useState(false);
 
-  const onAvatar = (file?: File) => {
+  const onAvatar = async (file?: File) => {
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       toast.error("Avatar must be under 2 MB — pick a smaller image.");
@@ -95,9 +95,23 @@ export default function AccountProfile() {
       toast.error("Pick an image file (PNG, JPG, etc.).");
       return;
     }
-    const r = new FileReader();
-    r.onload = () => set("avatar", String(r.result));
-    r.readAsDataURL(file);
+    try {
+      const image = await createImageBitmap(file);
+      try {
+        // Profile photos appear in small avatars. Keep their source bounded so
+        // profile reads and the offline retry queue don't carry megapixel files.
+        const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Image processing is unavailable.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        set("avatar", canvas.toDataURL("image/webp", 0.85));
+      } finally { image.close(); }
+    } catch {
+      toast.error("Could not read that photo. Try a PNG or JPG image.");
+    }
   };
 
   // ---- password ----

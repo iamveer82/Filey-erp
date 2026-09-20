@@ -33,7 +33,8 @@ import.meta.hot?.dispose(stopViewport);
 installExtensionBannerGuard();
 // Recovery links contain a credential; do not initialize telemetry on this page.
 if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
-startAutoSync();
+const stopAutoSync = startAutoSync();
+import.meta.hot?.dispose(stopAutoSync);
 // These services need the native sidecar. Web sign-in must not download their
 // agent runtime; desktop still starts them once without blocking rendering.
 if ("__TAURI_INTERNALS__" in window) {

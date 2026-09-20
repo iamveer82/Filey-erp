@@ -48,14 +48,26 @@ export async function startRealtime(): Promise<void> {
     if (attempt !== generation || !data.session) return;
     await supabase.realtime.setAuth(data.session?.access_token ?? null);
     if (attempt !== generation) return;
+    let connectedBefore = false;
     channel = supabase
       .channel("filey-live-sync")
       .on("postgres_changes", { event: "*", schema: "public" }, payload => {
+        if (attempt !== generation) return;
+        if (payload.table === "profiles" && "id" in payload.new && payload.new.id === data.session?.user.id)
+          window.dispatchEvent(new CustomEvent("filey:cloud-profile", {detail:payload.new}));
         const tables = payload.table ? [payload.table] : undefined;
         window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables } }));
         emit(tables);
       })
-      .subscribe();
+      .subscribe(status => {
+        if (status !== "SUBSCRIBED" || attempt !== generation) return;
+        // Changes made while disconnected are not replayed by Postgres Changes.
+        if (connectedBefore) {
+          window.dispatchEvent(new Event("filey:cloud-change"));
+          emit();
+        }
+        connectedBefore = true;
+      });
   } finally {
     if (attempt === generation) starting = false;
   }
@@ -116,7 +128,7 @@ export function useLiveSync(reload: () => void, tables?: readonly string[]): voi
       }, 250);
     };
     const visible = () => { if (dirty && document.visibilityState !== "hidden") listener(); };
-    const local = () => listener();
+    const local = (event: Event) => listener((event as CustomEvent<{ tables?: string[] }>).detail?.tables);
     listeners.add(listener);
     window.addEventListener("filey:local-write", local);
     window.addEventListener("filey:remote-update", local);

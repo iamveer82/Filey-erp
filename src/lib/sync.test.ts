@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
 import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
+import { PUSH_TABLES } from "./syncTables";
 
 // Stable fixture IDs keep these journal/transport checks readable. The real
 // cross-device allocator is exercised in record-id.test and localdb.test.
@@ -63,6 +64,7 @@ function fakeCloud(opts?: {
 }) {
   const uid = opts?.uid ?? UID;
   const refreshes: number[] = [];
+  const reads: { table: string; columns: string }[] = [];
   const calls: { table: string; op: string; payload?: any; ids?: any[] }[] = [];
   // supabase-js stores the session and a refresh REPLACES it, so the next
   // getSession sees the new expiry. Modelling that matters: the push checks the
@@ -84,6 +86,12 @@ function fakeCloud(opts?: {
       },
     },
     async rpc(name: string, args?: any) {
+      if (name === "filey_sync_manifest") {
+        calls.push({ table: "(rpc)", op: name, payload: args });
+        return { data: Object.fromEntries(args.p_tables.map((t: string) => [t,
+          (opts?.pull?.[t] ?? []).slice(args.p_offset, args.p_offset + args.p_limit)
+            .map(({ id, updated_at, sync_revision }) => ({ id, updated_at, sync_revision }))])), error: null };
+      }
       if (name === "sync_record") {
         calls.push({ table: args.p_table, op: args.p_delete ? "delete" : "upsert", payload: [args.p_row], ids: [args.p_row.id] });
         return opts?.failTables?.includes(args.p_table)
@@ -118,6 +126,7 @@ function fakeCloud(opts?: {
           };
         },
         select(cols: string) {
+          reads.push({ table, columns: cols });
           const rows = opts?.pull?.[table] ?? [];
           // The incremental pull asks for "id, updated_at" first, so the fake
           // has to actually honour the column list — a mock that always
@@ -156,7 +165,7 @@ function fakeCloud(opts?: {
       };
     },
   };
-  return { client: client as any, calls, refreshes };
+  return { client: client as any, calls, refreshes, reads };
 }
 
 describe("local write journal", () => {
@@ -355,6 +364,18 @@ describe("org sharing", () => {
 });
 
 describe("pullNow", () => {
+  it("downloads only changed saved images by revision and still propagates remote deletions", async () => {
+    const original = { id: "image-1", owner: UID, data_url: "large-base64-image", sync_revision: 1 };
+    const changed = { id: "image-2", owner: UID, data_url: "new-image", sync_revision: 2 };
+    await replaceColl("user_assets", [original, { ...changed, data_url: "old-image", sync_revision: 1 }, { id: "deleted", sync_revision: 1 }]);
+    const { client, calls } = fakeCloud({ pull: { user_assets: [original, changed] } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.filter(c => c.table === "user_assets")).toEqual([{ table: "user_assets", op: "select-in", ids: ["image-2"] }]);
+    expect((await localClient.from("user_assets").select("*")).data).toEqual([original, changed]);
+    calls.length = 0;
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some(c => c.table === "user_assets")).toBe(false);
+  });
   it("replaces clean collections from the cloud and skips dirty ones", async () => {
     await localClient.from("orders").insert({ order_number: "LOCAL-1" }); // dirty
     const { client } = fakeCloud({
@@ -444,15 +465,68 @@ describe("pullNow", () => {
     expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Local edit");
   });
 
-  it("still full-snapshots tables that have no updated_at trigger", async () => {
-    // crm_people is pushed but carries no set_updated_at trigger in schema.sql,
-    // so it must keep coming down whole or edits there would go missing.
-    const { client, calls } = fakeCloud({ pull: { crm_people: [{ id: 3, name: "Ada" }] } });
+  it("uses revisions for CRM and histories without timestamp triggers, including deletions", async () => {
+    const unchanged = { id: 1, body: "Large unchanged message", sync_revision: 4 };
+    const updated = { id: 2, body: "Edited message", sync_revision: 6 };
+    await replaceColl("email_messages", [unchanged, { ...updated, body: "Old message", sync_revision: 5 }, { id: 3, sync_revision: 1 }]);
+    const { client, calls } = fakeCloud({ pull: {
+      crm_people: [{ id: 3, name: "Ada", sync_revision: 1 }],
+      email_messages: [unchanged, updated],
+    } });
     expect(await pullNow(client)).toBe(true);
-    expect(calls.some((c) => c.table === "crm_people" && c.op === "select-in")).toBe(false);
+    expect(calls.find(c => c.op === "filey_sync_manifest")?.payload.p_tables).toContain("email_messages");
+    expect(calls.filter(c => c.table === "email_messages")).toEqual([{ table: "email_messages", op: "select-in", ids: [2] }]);
+    expect((await localClient.from("email_messages").select("*")).data).toEqual([unchanged, updated]);
     const { data } = await localClient.from("crm_people").select("*");
-    expect(data).toEqual([{ id: 3, name: "Ada" }]);
+    expect(data).toEqual([{ id: 3, name: "Ada", sync_revision: 1 }]);
+    calls.length = 0;
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some(c => c.table === "email_messages" || c.table === "crm_people")).toBe(false);
   });
+});
+
+it("checks all 45 clean collections in one metadata call and only pages collections with more rows", async () => {
+  const rows = Array.from({ length: 1001 }, (_, id) => ({ id, name: "Cached", updated_at: "2026-09-20", sync_revision: 1 }));
+  await replaceColl("products", rows);
+  const { client, calls, reads } = fakeCloud({ pull: { products: rows } });
+  expect(await pullNow(client)).toBe(true);
+  const manifests = calls.filter(c => c.op === "filey_sync_manifest");
+  expect(manifests.map(c => c.payload)).toEqual([
+    { p_tables: PUSH_TABLES, p_offset: 0, p_limit: 1000 },
+    { p_tables: ["products"], p_offset: 1000, p_limit: 1000 },
+  ]);
+  expect(reads.map(r => r.table)).toEqual(["profiles"]);
+  expect((await localClient.from("products").select("*")).data).toEqual(rows);
+});
+
+it("preserves every collection when the metadata batch is partial or fails", async () => {
+  await replaceColl("products", [{ id: 1, name: "Keep me" }]);
+  const { client } = fakeCloud();
+  client.rpc = async () => ({ data: { products: [] }, error: null });
+  expect(await pullNow(client)).toBe(false);
+  expect(getSyncStatus().error).toContain("Incomplete cloud change check");
+  expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Keep me");
+  client.rpc = async () => ({ data: null, error: { message: "Connection failed" } });
+  expect(await pullNow(client)).toBe(false);
+  expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Keep me");
+});
+
+it("reconciles just the saved collections, while a manual check still finds other-device changes", async () => {
+  localStorage.setItem("filey_cloud_seeded", "1");
+  await localClient.from("products").insert({ id: 1, name: "Saved product" });
+  await replaceColl("crm_people", [{ id: 2, name: "Previous", sync_revision: 1 }]);
+  const { client, reads } = fakeCloud({ pull: {
+    products: [{ id: 1, name: "Saved product", updated_at: "2026-09-20", sync_revision: 1 }],
+    crm_people: [{ id: 2, name: "Other-device edit", sync_revision: 2 }],
+  } });
+  expect(await syncCycle(client, { changesOnly: true })).toBe(true);
+  expect(new Set(reads.map(r => r.table))).toEqual(new Set(["profiles", "products"]));
+  expect((await localClient.from("crm_people").select("*")).data?.[0].name).toBe("Previous");
+  reads.length = 0;
+  expect(await syncCycle(client, { changesOnly: true })).toBe(true);
+  expect(reads).toEqual([]);
+  expect(await syncCycle(client, { manual: true, changesOnly: true })).toBe(true);
+  expect((await localClient.from("crm_people").select("*")).data?.[0].name).toBe("Other-device edit");
 });
 
 describe("syncCycle first-run seeding", () => {

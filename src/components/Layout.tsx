@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useRef, useState, type CSSProperties } from "reac
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
+  ArrowLeft,
   Search,
   LogOut,
   UserRound,
@@ -380,11 +381,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         >
           <div className="max-w-md space-y-4">
             <h2 id="workspace-changed-title" className="text-lg font-semibold">
-              Storage changed in another tab
+              Workspace changed in another tab
             </h2>
             <p className="text-sm text-muted-foreground">
               This tab is paused to keep records in the correct workspace. Reload to use
-              the selected storage. Unsaved form changes in this tab will be discarded.
+              the current workspace. Unsaved form changes in this tab will be discarded.
             </p>
             <button
               className="btn-primary"
@@ -444,6 +445,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             />
 
             <div className="workspace-sidebar-footer">
+              {!("__TAURI_INTERNALS__" in window) && (
+                <a href="https://gofiley.com/" className="workspace-nav-link mb-1">
+                  <ArrowLeft size={18} aria-hidden="true" />
+                  <span>{t("Back to GoFiley")}</span>
+                </a>
+              )}
               <nav className="workspace-support-links" aria-label={t("Support")}>
                 <NavLink to="/help" onClick={() => setMobileOpen(false)}>
                   <LifeBuoy size={16} strokeWidth={1.75} aria-hidden="true" />

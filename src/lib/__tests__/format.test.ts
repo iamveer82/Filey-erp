@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { aed, num, vatBreakdown, fmtDate, UAE_VAT_RATE } from "../format";
 
 describe("format helpers", () => {
@@ -27,5 +27,15 @@ describe("format helpers", () => {
     expect(fmtDate(null)).toBe("—");
     expect(fmtDate(undefined)).toBe("—");
     expect(fmtDate("not-a-date")).toBe("not-a-date");
+  });
+  it("treats date-only documents as local calendar dates and preserves timestamp instants", () => {
+    const format = vi.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (this: Date) {
+      return `${this.getFullYear()}-${this.getMonth()+1}-${this.getDate()} ${this.getHours()}`;
+    });
+    try {
+      expect(fmtDate("2026-09-01")).toBe("2026-9-1 12");
+      const stamp = "2026-09-01T00:00:00Z";
+      expect(fmtDate(stamp)).toBe(new Date(stamp).toLocaleDateString());
+    } finally { format.mockRestore(); }
   });
 });

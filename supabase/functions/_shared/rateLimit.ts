@@ -1,16 +1,16 @@
 // Filey ERP — Shared rate limiter for Supabase Edge Functions
 //
-// Uses audit_log table (already present in schema) as a counter.
-// Each function defines its own limit + window. No extra tables needed.
+// Atomically reserves an attempt in a service-only database counter.
+// Each function defines its own fixed window starting at the first attempt.
 //
 // Usage:
 //   import { rateLimit, json } from "../_shared/rateLimit.ts";
 //   const allowed = await rateLimit(supa, userId, "stripe_checkout", 10, 3600);
 //   if (!allowed) return json({ error: "Rate limit exceeded" }, 429);
 
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-/** Check if a user is within their rate limit. Returns true if allowed, false if blocked. */
+/** Reserve an attempt before calling a provider. Database failures fail closed. */
 export async function rateLimit(
   supa: SupabaseClient,
   userId: string,
@@ -18,21 +18,14 @@ export async function rateLimit(
   limit: number,
   windowSeconds: number
 ): Promise<boolean> {
-  const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
-  const { count } = await supa
-    .from("audit_log")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("action", action)
-    .gte("created_at", since);
-  return (count ?? 0) < limit;
+  const { data, error } = await supa.rpc("filey_take_rate_limit", {
+    p_subject: userId, p_action: action, p_limit: limit, p_window_seconds: windowSeconds,
+  });
+  if (error || typeof data !== "boolean") throw new Error("Usage limits are temporarily unavailable. Please retry later.");
+  return data;
 }
 
-/** Log an action to audit_log (for rate counting + audit trail).
- *  NOTE: audit_log has no `meta` column — the metadata rides along in
- *  `details` as JSON. This insert is what the count-based limiter counts, so
- *  a failure here must be LOUD: a silently failing counter means the limiter
- *  never trips at all. */
+/** Best-effort account audit trail; rate reservations do not depend on it. */
 export async function logAction(
   supa: SupabaseClient,
   userId: string,

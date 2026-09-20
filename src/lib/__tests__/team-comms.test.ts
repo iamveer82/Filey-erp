@@ -47,6 +47,20 @@ describe("chat channels", () => {
   it("refuses a channel name that normalises to nothing", async () => {
     await expect(channels.create("###")).rejects.toThrow();
   });
+  it("paginates conversations without dropping replies and rejects cross-channel replies", async () => {
+    for(let n=0;n<35;n++) await messages.post(`Thread ${n}`,null,"general");
+    const first=await messages.page("general");
+    expect(first.rows).toHaveLength(30);
+    expect(first.rows.every(m => typeof m.user_id === "string" && m.author === "You")).toBe(true);
+    const second=await messages.page("general",first.next!);
+    expect(second.rows).toHaveLength(5);
+    const root=second.rows[0].id;
+    await messages.post("Reply to an older thread",root,"general");
+    const threads=[...(await messages.page("general")).rows,...(await messages.page("general",first.next!)).rows];
+    expect(threads.some(m=>m.parent_id===root)).toBe(true);
+    await expect(messages.post("Wrong channel",root,"sales")).rejects.toThrow("this channel");
+    await expect(messages.post(" ")).rejects.toThrow("characters");
+  });
 });
 
 describe("email record", () => {

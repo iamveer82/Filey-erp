@@ -20,7 +20,7 @@ import {
 } from "../../lib/license";
 import { Check } from "lucide-react";
 import { billing, erp, crm, quotes, invoicesThisMonth } from "../../lib/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { isLocalMode } from "../../lib/dataMode";
@@ -30,7 +30,8 @@ const ENTERPRISE_MAILTO =
 
 export default function BillingPanel() {
   const { toast } = useUI();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const checkoutHandled = useRef(false);
   const [stats, setStats] = useState<Record<string, number>>({});
   const [statsError, setStatsError] = useState(false);
   const [sub, setSub] = useState<Subscription>({ plan: "free" });
@@ -88,31 +89,34 @@ export default function BillingPanel() {
       .finally(() => setSubLoading(false));
   }, []);
 
-  // Once on mount only. With [params, toast] deps the success toast re-renders
-  // the provider, both deps get fresh identities, and the effect loops —
-  // endless "Subscription updated" toasts after returning from Stripe.
+  // A return URL is not proof of payment. Only the verified webhook activates
+  // the plan. Let the router remove this parameter without losing its hash.
   useEffect(() => {
     const c = params.get("checkout");
+    if (checkoutHandled.current || !["success", "cancel"].includes(c ?? "")) return;
+    checkoutHandled.current = true;
+    const next = new URLSearchParams(params);
+    next.delete("checkout");
+    setParams(next, { replace: true });
     if (c === "success") {
-      toast.success("Subscription updated - welcome aboard!");
-      // Strip the param so leaving Settings and coming back doesn't re-toast.
-      params.delete("checkout");
-      window.history.replaceState(null, "", `?${params.toString()}`);
-      // The webhook, not this redirect, is what switches the plan on — so wait
-      // for it rather than showing Free to someone who just paid.
+      toast.info("Confirming your payment…");
       awaitCloudPlan(12, 2500)
-        .then((s) => s && setSub(s))
-        .catch(() => {});
+        .then((s) => {
+          if (s) {
+            setSub(s);
+            window.dispatchEvent(new Event("filey:entitlement"));
+            toast.success("Pro is active on this workspace.");
+          } else toast.info("Payment is still processing. Reopen Billing to check again.");
+        })
+        .catch(() => toast.error("Could not verify your payment. Reopen Billing to check again."));
     } else if (c === "cancel") {
       toast.info("Checkout canceled.");
-      params.delete("checkout");
-      window.history.replaceState(null, "", `?${params.toString()}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const buy = async (p: PlanCard) => {
-    if (p.id === "free") return;
+    if (busy || p.id === "free") return;
     setBusy(p.id);
     try {
       if (p.kind === "contact") {
@@ -149,11 +153,13 @@ export default function BillingPanel() {
     }
   };
   const manage = async () => {
+    if (busy) return;
     setBusy("manage");
     try {
       await openBillingPortal();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
       setBusy(null);
     }
   };
@@ -192,7 +198,7 @@ export default function BillingPanel() {
               )}
             </div>
             {sub.plan !== "free" && (
-              <button className="btn-ghost" onClick={manage} disabled={busy === "manage"}>
+              <button className="btn-ghost" onClick={manage} disabled={busy !== null}>
                 {busy === "manage" ? "Opening…" : "Manage billing"}
               </button>
             )}
@@ -319,7 +325,7 @@ export default function BillingPanel() {
                         p.recommended ? "btn-primary" : "btn-ghost"
                       )}
                       onClick={() => buy(p)}
-                      disabled={busy === p.id}
+                      disabled={busy !== null}
                     >
                       {busy === p.id
                         ? "Redirecting…"
