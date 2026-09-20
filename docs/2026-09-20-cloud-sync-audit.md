@@ -78,3 +78,30 @@ ESLint error check for changed files and the desktop SQLite migration check all
 passed. Initial static JavaScript is 792,370 bytes; the build retains existing
 converter chunk/import warnings. These checks use disposable fixtures, not
 customer data.
+
+### Authenticated Vercel check
+
+Vercel email and authenticator verification completed on September 20. Dashboard
+inspection confirmed:
+
+- `app.gofiley.com` and `filey-erp.vercel.app` both show **Valid Configuration**
+  and target Production. Production is Ready at `04ee646b`, built from `main`.
+- The project uses Vite and Node 24. The production build overrides are
+  `npm run build` and `dist`, matching `vercel.json`; the dashboard's override
+  notice does not indicate a mismatch in those commands.
+- There are no project environment variables or linked shared variables. The
+  frontend therefore uses its checked-in public Supabase configuration. Backend
+  provider secrets belong to Supabase Edge Functions, not this static deployment.
+- The six-hour overview showed 394 edge requests, zero Vercel function invocations
+  and a 0% error rate. The twelve-hour CDN view showed 665 requests, 0% HTTP 5xx,
+  3ms p90 TTFB, a 29.2% hit rate, 471 misses and zero bypasses. These are dashboard
+  snapshots for those periods, not end-user load-time or Supabase health metrics.
+- The `filey-catalog-cache` database is available at team level but is not linked
+  to this Vercel project. This is compatible with the existing design: Supabase's
+  integrations function accesses Redis using its own backend secrets.
+
+No Vercel configuration, service plan, database connection or production deployment
+was changed. Supabase still shows its separate sign-in page; production database
+policies/triggers, Storage configuration and backend deployment prerequisites
+remain unverified. The reduced-read/photo-sync changes are still on the development
+branch and have not been promoted to production.
