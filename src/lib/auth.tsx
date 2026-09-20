@@ -14,6 +14,7 @@ import { setCacheOrg } from "./api";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
 import { registerCloudDevice, entitlement, collectPurchases, clearEntitlementCache } from "./license";
 import { mfaRequired } from "./mfa";
+import { pendingProfile, queueProfile } from "./profileSync";
 import {
   assertLocalAccount,
   getLocalCredential,
@@ -70,11 +71,7 @@ function localProfile(): Profile {
 }
 
 function saveLocalProfile(p: Profile): void {
-  try {
-    localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
+  localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(p));
 }
 
 /** Copy the account's cloud profile onto this device. The profile is created
@@ -95,6 +92,7 @@ export function adoptLocalProfile(p: Partial<Profile>): void {
     ...Object.fromEntries(
       Object.entries(p).filter(([, v]) => v !== null && v !== undefined && v !== "")
     ),
+    ...(p.id ? pendingProfile(p.id) : {}),
   } as Profile;
   saveLocalProfile(merged);
 }
@@ -662,6 +660,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: `${firstName.trim()} ${lastName.trim()}`.trim(),
         company: company.trim(),
       };
+      queueProfile(user?.id ?? "", { name: np.name, company: np.company });
       saveLocalProfile(np);
       setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);
@@ -686,6 +685,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (patch: Partial<Profile>) => {
     if (local) {
       const np = { ...(profile ?? { id: LOCAL_USER.id, email: "", name: "", company: "" }), ...patch } as Profile;
+      queueProfile(user?.id ?? "", patch);
       saveLocalProfile(np);
       setCacheOrg(user ? np.org_id : null, user?.id);
       setProfile(np);

@@ -355,6 +355,18 @@ describe("org sharing", () => {
 });
 
 describe("pullNow", () => {
+  it("downloads only changed saved images by revision and still propagates remote deletions", async () => {
+    const original = { id: "image-1", owner: UID, data_url: "large-base64-image", sync_revision: 1 };
+    const changed = { id: "image-2", owner: UID, data_url: "new-image", sync_revision: 2 };
+    await replaceColl("user_assets", [original, { ...changed, data_url: "old-image", sync_revision: 1 }, { id: "deleted", sync_revision: 1 }]);
+    const { client, calls } = fakeCloud({ pull: { user_assets: [original, changed] } });
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.filter(c => c.table === "user_assets")).toEqual([{ table: "user_assets", op: "select-in", ids: ["image-2"] }]);
+    expect((await localClient.from("user_assets").select("*")).data).toEqual([original, changed]);
+    calls.length = 0;
+    expect(await pullNow(client)).toBe(true);
+    expect(calls.some(c => c.table === "user_assets")).toBe(false);
+  });
   it("replaces clean collections from the cloud and skips dirty ones", async () => {
     await localClient.from("orders").insert({ order_number: "LOCAL-1" }); // dirty
     const { client } = fakeCloud({

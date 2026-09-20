@@ -18,6 +18,7 @@ import { supabase } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
+import { syncProfile } from "./profileSync";
 import {
   loadColl,
   replaceColl,
@@ -328,6 +329,7 @@ export async function syncNow(
       return false;
     }
 
+    await syncProfile(supa, uid);
     const j = await journalSnapshot();
     const dirty = PUSH_TABLES.filter((t) => j.tables[t]);
     if (!dirty.length) {
@@ -482,9 +484,10 @@ export async function pullPaged(
  *  on every beat — the free-tier egress blowout. */
 async function pullIncremental(
   supa: SupabaseClient,
-  t: string
+  t: string,
+  version = "updated_at"
 ): Promise<Record<string, any>[]> {
-  const meta = await pullPaged(supa, t, "id, updated_at");
+  const meta = await pullPaged(supa, t, `id, ${version}`);
   const local = new Map(
     (await loadColl(t)).map((r) => [String((r as any).id), r as Record<string, any>])
   );
@@ -492,7 +495,7 @@ async function pullIncremental(
   // on both sides compares equal, and would otherwise never be downloaded.
   const stale = meta.filter((m) => {
     const have = local.get(String(m.id));
-    return !have || have.updated_at !== m.updated_at;
+    return !have || m[version] == null || have[version] !== m[version];
   });
 
   const fetched = new Map<string, Record<string, any>>();
@@ -542,7 +545,11 @@ export async function pullNow(
     let changed = false;
     for (const t of PUSH_TABLES) {
       if (before.tables[t]) continue;
-      const rows = INCREMENTAL.has(t)
+      // These private collections lack updated_at but already have revision
+      // triggers. Do not download every saved PNG on each five-minute beat.
+      const rows = ["user_assets", "user_files", "user_folders"].includes(t)
+        ? await pullIncremental(supa, t, "sync_revision")
+        : INCREMENTAL.has(t)
         ? await pullIncremental(supa, t)
         : await pullPaged(supa, t, "*");
       if (t === "user_files") await pullFileBlobs(supa, rows);

@@ -21,6 +21,7 @@ import {
 } from "./localdb";
 
 import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
+import { pendingProfile, syncProfile } from "./profileSync";
 
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -155,6 +156,14 @@ export async function migrateLocalToCloud(
   assertLocalAccount(uid);
   await inRealOrg(supabase, uid, true);
   const out: MigrateResult[] = [];
+  if (Object.keys(pendingProfile(uid)).length) {
+    try {
+      await syncProfile(supabase, uid);
+      out.push({ table: "profiles", rows: 1 });
+    } catch (error) {
+      out.push({ table: "profiles", rows: 0, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   for (const t of PUSH_TABLES) {
     // Through loadColl, not the raw key: oversized fields (the logo a doc was
