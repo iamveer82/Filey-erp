@@ -1,4 +1,5 @@
-import { supabase, invokeFn } from "./supabase";
+import { supabase } from "./supabase";
+import { billingRequest, paymentUrl } from "./billingService";
 import { clearEntitlementCache, resolveTier } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
@@ -119,18 +120,8 @@ export async function getSubscription(): Promise<Subscription> {
 }
 
 async function invokeDodo(body: Record<string, unknown>): Promise<string> {
-  if (!supabase) throw new Error("Not configured");
-  const { data, error } = (await invokeFn(supabase, "dodo", { body })) as {
-    data: { url?: string; error?: string } | null;
-    error: { message: string } | null;
-  };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.url)
-    throw new Error(
-      "Billing isn't set up yet. Add the Dodo Payments keys to the edge function."
-    );
-  return data.url as string;
+  const data = await billingRequest<{ url?: string }>(body);
+  return paymentUrl(data?.url);
 }
 
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -188,29 +179,7 @@ export interface RefundPayment {
 }
 /** Financial actions deliberately bypass invokeFn's automatic retries. */
 export async function refundAction<T>(body: Record<string, unknown>): Promise<T> {
-  if (!supabase) throw new Error("Sign in to Filey to manage billing.");
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) throw new Error("Sign in to your cloud account to manage billing.");
-  const { data, error } = await supabase.functions.invoke("dodo", { body });
-  if (error) {
-    let detail = "";
-    try {
-      detail = (await error.context?.json())?.error ?? "";
-    } catch {
-      /* transport error */
-    }
-    throw new Error(
-      detail ||
-        "Billing could not be reached. Refresh to check the result before trying again."
-    );
-  }
-  if (data?.error) throw new Error(data.error);
-  const current = await supabase.auth.getSession();
-  if (current.data.session?.user.id !== session.user.id)
-    throw new Error("Your account changed. Reopen Billing.");
-  return data as T;
+  return billingRequest<T>(body);
 }
 
 /** Poll the org's plan until the webhook has switched it on, for the desktop

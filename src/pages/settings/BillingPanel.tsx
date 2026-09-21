@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useUI } from "../../lib/ui";
 import {
   getSubscription,
@@ -14,6 +14,7 @@ import {
   startFreedomCheckout,
   claimPurchasedLicense,
   verifyStoredLicense,
+  licensePurchased,
   cloudAccess,
   entitlement,
   FREE_LIMITS,
@@ -25,6 +26,7 @@ import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { isLocalMode } from "../../lib/dataMode";
 import SubscriptionRefunds from "../../components/SubscriptionRefunds";
+import PlanDevices from "./PlanDevices";
 
 const ENTERPRISE_MAILTO =
   "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
@@ -39,23 +41,37 @@ export default function BillingPanel() {
   const [subLoading, setSubLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [ownsUltra, setOwnsUltra] = useState(false);
+  const [ownershipLoading, setOwnershipLoading] = useState(true);
   const [invoicesUsed, setInvoicesUsed] = useState<number | null>(null);
   const [capped, setCapped] = useState(true);
 
   useEffect(() => {
+    let active = true;
     const refreshOwned = () => {
-      void verifyStoredLicense().then((l) => setOwnsUltra(l.valid));
-      void getSubscription().then(setSub).catch(() => {});
+      setOwnershipLoading(true);
+      setSubLoading(true);
+      void Promise.all([verifyStoredLicense(), licensePurchased().catch(() => null)])
+        .then(([local, purchased]) => {
+          if (active) setOwnsUltra(purchased ?? local.valid);
+        })
+        .finally(() => { if (active) setOwnershipLoading(false); });
+      void getSubscription()
+        .then((value) => { if (active) setSub(value); })
+        .catch(() => { if (active) toast.error("We couldn’t load your plan. Check your connection and reopen Billing."); })
+        .finally(() => { if (active) setSubLoading(false); });
       void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
-        setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
+        if (active) setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
       });
     };
     refreshOwned();
     void invoicesThisMonth().then(setInvoicesUsed).catch(() => {});
     // A purchase collected in the background (auth.tsx) updates this page too.
     window.addEventListener("filey:entitlement", refreshOwned);
-    return () => window.removeEventListener("filey:entitlement", refreshOwned);
-  }, []);
+    return () => {
+      active = false;
+      window.removeEventListener("filey:entitlement", refreshOwned);
+    };
+  }, [toast]);
 
   useEffect(() => {
     let failed = false;
@@ -80,14 +96,6 @@ export default function BillingPanel() {
         Customers: c.length,
       });
     });
-    getSubscription()
-      .then(setSub)
-      .catch((e) =>
-        toast.error(
-          "Failed to load subscription: " + (e instanceof Error ? e.message : e)
-        )
-      )
-      .finally(() => setSubLoading(false));
   }, []);
 
   // A return URL is not proof of payment. Only the verified webhook activates
@@ -101,6 +109,15 @@ export default function BillingPanel() {
     setParams(next, { replace: true });
     if (c === "success") {
       toast.info("Confirming your payment…");
+      if (params.get("section") === "license" || ["ultra", "freedom"].includes(params.get("plan") ?? "")) {
+        claimPurchasedLicense(12, 2500).then((state) => {
+          if (state?.valid) {
+            setOwnsUltra(true);
+            toast.success("Ultra is active on this device.");
+          } else toast.info("Payment is still processing. Reopen Billing to check again.");
+        }).catch(() => toast.error("We couldn’t confirm your plan yet. Reopen Billing to check again."));
+        return;
+      }
       awaitCloudPlan(12, 2500)
         .then((s) => {
           if (s) {
@@ -117,7 +134,7 @@ export default function BillingPanel() {
   }, []);
 
   const buy = async (p: PlanCard) => {
-    if (busy || p.id === "free") return;
+    if (busy || ownershipLoading || subLoading || p.id === "free") return;
     setBusy(p.id);
     try {
       if (p.kind === "contact") {
@@ -131,8 +148,8 @@ export default function BillingPanel() {
         toast.info("Finish the payment in your browser — this page unlocks by itself.");
         const state = await claimPurchasedLicense(60, 5000);
         if (state?.valid) setOwnsUltra(true);
-        toast[state ? "success" : "info"](
-          state
+        toast[state?.valid ? "success" : "info"](
+          state?.valid
             ? "Ultra is active on this device."
             : "No payment yet. When it completes, reopen this page and it activates."
         );
@@ -178,11 +195,11 @@ export default function BillingPanel() {
       <SettingsPanel>
         <SettingsSection
           title="Current plan"
-          description="Your subscription and renewal details."
+          description="Purchased benefits activate automatically. No license key or manual setup needed."
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
-              {subLoading ? (
+              {subLoading || ownershipLoading ? (
                 <p role="status" className="text-sm text-muted-foreground">
                   Loading plan…
                 </p>
@@ -205,6 +222,12 @@ export default function BillingPanel() {
             )}
           </div>
         </SettingsSection>
+
+        <SettingsSection title="AI wallet" description="Optional credits for every plan, separate from your subscription.">
+          <Link className="btn-ghost" to="/settings?section=credits">Open AI wallet</Link>
+        </SettingsSection>
+
+        <PlanDevices />
 
         <SubscriptionRefunds />
 
@@ -328,7 +351,7 @@ export default function BillingPanel() {
                         p.recommended ? "btn-primary" : "btn-ghost"
                       )}
                       onClick={() => buy(p)}
-                      disabled={busy !== null}
+                      disabled={busy !== null || ownershipLoading || subLoading}
                     >
                       {busy === p.id
                         ? "Redirecting…"

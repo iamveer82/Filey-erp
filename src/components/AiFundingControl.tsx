@@ -221,7 +221,7 @@ export default function AiFundingControl({ disabled = false }: { disabled?: bool
           to="/settings?section=credits"
           onClick={() => setOpen(false)}
         >
-          Manage AI credits
+          Open AI wallet
         </Link>
       </PopoverContent>
     </Popover>

@@ -131,7 +131,7 @@ export default function AiCreditsPanel() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">AI credits</h2>
+          <h2 className="text-lg font-semibold">AI wallet</h2>
           <p className="mt-1 text-[13px] text-muted-foreground">
             Optional, on every plan. Your balance stays with your account.
           </p>
@@ -164,6 +164,15 @@ export default function AiCreditsPanel() {
           <FileySpinner size={18} />
           Loading your balance…
         </p>
+      )}
+      {!data && !busy && (
+        <SettingsPanel>
+          <SettingsSection title="Your AI credits" description="Your balance, top-ups and spending history will appear here when your Filey account is connected.">
+            <p className="text-sm text-muted-foreground">Available on Basic, Pro and Ultra. You can also use your own model keys without adding money to Filey.</p>
+            {/^Sign in|^Connect your Filey/.test(error) && <Link className="btn-primary" to="/settings?section=datamode">Connect Filey account</Link>}
+            <Link className="btn-ghost" to="/settings?section=ai">Manage AI connections</Link>
+          </SettingsSection>
+        </SettingsPanel>
       )}
       {data && (
         <SettingsPanel>

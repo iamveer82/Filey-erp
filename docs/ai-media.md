@@ -35,9 +35,9 @@ be automatically resubmitted. Cancellation acceptance is not reported as proof
 that a running provider request stopped or was refunded.
 
 The old shared Higgsfield pair was rejected and was never saved during setup.
-Local source/environment checks found no stored copy. On this change, fresh
-Supabase secret inspection returned 401, so hosted verification requires renewed
-project access. Existing managed-credit video jobs remain readable; BYOK is the
+Local source/environment checks found no stored copy. After sign-in was restored
+on September 21, the hosted Supabase secret list also confirmed no Higgsfield
+credentials were present. Existing managed-credit video jobs remain readable; BYOK is the
 default for new agent-created videos. No shared replacement key is embedded.
 
 Verification uses mocked provider calls and an isolated browser fixture; no

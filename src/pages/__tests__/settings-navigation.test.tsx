@@ -1,7 +1,9 @@
-import { expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import Settings from "../settings";
+afterEach(cleanup);
+vi.mock("../settings/BillingPanel", () => ({ default: () => <h2>Plan and device management</h2> }));
 
 vi.mock("../settings/CompanyDetails", () => ({
   default: () => <input aria-label="Unsaved company name" defaultValue="" />,
@@ -42,4 +44,12 @@ it("keeps drafts across horizontal tabs and follows keyboard and URL navigation"
   fireEvent.click(screen.getByRole("button", { name: "Settings home" }));
   expect(screen.getByRole("tab", { name: "Company Details" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByLabelText("Unsaved company name")).toHaveValue("Unsaved draft");
+});
+
+it("routes old desktop license links into billing and makes the wallet discoverable", async () => {
+  render(<MemoryRouter initialEntries={["/settings?section=license&checkout=success"]}><Settings /><LocationControls /></MemoryRouter>);
+  await screen.findByText("Plan and device management");
+  expect(screen.queryByRole("tab", { name: "Desktop License" })).toBeNull();
+  expect(screen.getByRole("tab", { name: "AI Wallet" })).toBeVisible();
+  expect(screen.getByTestId("location")).toHaveTextContent("section=billing&checkout=success&plan=ultra");
 });

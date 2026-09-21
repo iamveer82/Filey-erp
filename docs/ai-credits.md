@@ -7,7 +7,7 @@ explicit; failed BYOK/free requests never start paid requests. Free models are a
 
 ## User flow
 
-- Settings → AI Credits: available balance, one-time top-ups, model rates,
+- Account menu → AI wallet (or Settings → AI Wallet): available balance, one-time top-ups, model rates,
   per-task/daily spending limits, and paginated usage/top-up/refund history.
 - The chat composer and AI settings expose the funding/model selector.
 - Credit mode covers text, vision and the existing agent's function tools,

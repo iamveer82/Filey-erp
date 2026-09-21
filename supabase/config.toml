@@ -5,6 +5,10 @@
 subject = "Reset your Filey password"
 content_path = "./supabase/templates/recovery.html"
 
+# Dodo webhooks verify their signature; customer actions validate auth.getUser.
+[functions.dodo]
+verify_jwt = false
+
 # The handler validates the current account with auth.getUser.
 [functions.ai-credits]
 verify_jwt = false

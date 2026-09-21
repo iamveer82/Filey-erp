@@ -13,7 +13,8 @@
 // are free; hosted service quotas remain separately enforced.
 
 import { invoke } from "@tauri-apps/api/core";
-import { supabase, invokeFn } from "./supabase";
+import { supabase } from "./supabase";
+import { billingRequest, paymentUrl } from "./billingService";
 import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
 import { PUSH_TABLES } from "./syncTables";
@@ -152,12 +153,8 @@ export async function activateThisDevice(): Promise<LicenseState> {
   const device_name =
     (hasTauri ? "Desktop" : "Browser") +
     (typeof navigator !== "undefined" ? ` · ${navigator.platform}` : "");
-  const { data, error } = (await invokeFn(supabase, "dodo", {
-    body: { action: "license_activate", fingerprint, device_name },
-  })) as { data: { token?: string; error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.token) throw new Error("Activation failed — no token returned.");
+  const data = await billingRequest<{ token?: string }>({ action: "license_activate", fingerprint, device_name });
+  if (!data?.token) throw new Error("We couldn’t activate your plan on this device. Please try again shortly.");
   await kvSet(TOKEN_KEY, data.token as string);
   return verifyStoredLicense();
 }
@@ -187,11 +184,7 @@ export async function redeemVoucher(code: string): Promise<LicenseState> {
  *  The freed machine keeps working offline until it next re-activates. */
 export async function deactivateDevice(fingerprint: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "dodo", {
-    body: { action: "license_deactivate", fingerprint },
-  })) as { data: { error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
+  await billingRequest({ action: "license_deactivate", fingerprint });
   if (fingerprint === (await deviceId())) await kvSet(TOKEN_KEY, "");
 }
 
@@ -258,28 +251,21 @@ export async function releaseOrgDevice(id: string): Promise<void> {
  *  claimPurchasedLicense() while the buyer pays in that browser window. */
 export async function startFreedomCheckout(): Promise<"redirected" | "browser"> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "dodo", {
-    body: { action: "checkout" },
-  })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.url) throw new Error("Checkout failed — no URL returned.");
+  const data = await billingRequest<{ url?: string }>({ action: "checkout" });
+  const url = paymentUrl(data?.url);
   if (hasTauri) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(data.url);
+    await openUrl(url);
     return "browser";
   }
-  window.location.href = data.url;
+  window.location.href = url;
   return "redirected";
 }
 
 /** Has the Dodo webhook recorded this account's purchase yet? */
 export async function licensePurchased(): Promise<boolean> {
   if (!supabase) return false;
-  const { data, error } = (await invokeFn(supabase, "dodo", {
-    body: { action: "license_status" },
-  })) as { data: { licensed?: boolean } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
+  const data = await billingRequest<{ licensed?: boolean }>({ action: "license_status" });
   return !!data?.licensed;
 }
 
@@ -300,6 +286,7 @@ export async function claimPurchasedLicense(
       // The cached tier still says "free" until this is dropped, so the caps
       // would keep firing for someone who just paid.
       clearEntitlementCache();
+      if (state.valid) window.dispatchEvent(new Event("filey:entitlement"));
       return state;
     }
     if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
@@ -468,17 +455,17 @@ export async function claimWebsitePurchases(): Promise<boolean> {
 
 /** Turn any payment made elsewhere into access on this machine. Safe to run on
  *  every sign-in, app start and window focus: it collects website purchases,
- *  then activates this device when the account owns Ultra and no device has
- *  used that licence yet. A licence already in use somewhere is left to
- *  Settings → Licence, or a device someone freed on purpose would keep taking
- *  its slot back. Returns true when access changed. */
+ *  then activates a new device when Ultra has an available slot. A deliberately
+ *  removed device never takes its slot back automatically. */
 export async function collectPurchases(): Promise<boolean> {
   const claimed = await claimWebsitePurchases();
   let activated = false;
   try {
     if (!(await verifyStoredLicense()).valid) {
       const owned = await licenseOverview();
-      if (owned && owned.devices.length === 0) {
+      const fingerprint = await deviceId();
+      const previous = owned?.devices.find(d => d.fingerprint === fingerprint);
+      if (owned && !previous?.deactivated_at && (previous || owned.devices.filter(d => !d.deactivated_at).length < LITE_DEVICE_LIMIT)) {
         activated = (await activateThisDevice()).valid;
       }
     }

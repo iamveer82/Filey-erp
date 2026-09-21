@@ -1,4 +1,6 @@
 import { supabase } from "./supabase";
+import { serviceError } from "./serviceError";
+import { paymentUrl } from "./billingService";
 import { agentStorageScope, readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 export const AI_CREDITS_EVENT = "filey:ai-credits";
@@ -87,17 +89,9 @@ export async function callAiService<T>(
   // No automatic retries for anything that might charge money or call a model.
   const { data, error } = await supabase!.functions.invoke(name, { body });
   if (error) {
-    let detail = "";
-    try {
-      detail = (await error.context?.json())?.error ?? "";
-    } catch {
-      /* use the transport message */
-    }
-    throw new Error(
-      detail || "Could not reach AI Credits. Check your connection and try again."
-    );
+    throw await serviceError(error, "Your AI wallet is temporarily unavailable. Please try again shortly.");
   }
-  if (data?.error) throw new Error(data.error);
+  if (data?.error) throw await serviceError(new Error(data.error), "Your AI wallet is temporarily unavailable. Please try again shortly.");
   const current = await accountSession();
   if (current.user.id !== session.user.id)
     throw new Error("Your account changed. Refresh AI Credits.");
@@ -141,9 +135,7 @@ export async function buyAiCredits(packId: string) {
     action: "checkout_ai_credits",
     pack_id: packId,
   });
-  const target = new URL(url);
-  if (target.protocol !== "https:" || !/(^|\.)dodopayments\.com$/.test(target.hostname))
-    throw new Error("Invalid payment destination.");
+  paymentUrl(url);
   if ("__TAURI_INTERNALS__" in window) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
