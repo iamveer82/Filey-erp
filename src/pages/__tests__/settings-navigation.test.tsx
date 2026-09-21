@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import Settings from "../settings";
 afterEach(cleanup);
 vi.mock("../settings/BillingPanel", () => ({ default: () => <h2>Plan and device management</h2> }));
+vi.mock("../settings/PlanDevices", () => ({ default: () => <h2>Signed-in devices</h2> }));
 
 vi.mock("../settings/CompanyDetails", () => ({
   default: () => <input aria-label="Unsaved company name" defaultValue="" />,
@@ -52,4 +53,13 @@ it("routes old desktop license links into billing and makes the wallet discovera
   expect(screen.queryByRole("tab", { name: "Desktop License" })).toBeNull();
   expect(screen.getByRole("tab", { name: "AI Wallet" })).toBeVisible();
   expect(screen.getByTestId("location")).toHaveTextContent("section=billing&checkout=success&plan=ultra");
+});
+
+it("replaces ordinary license links with Devices and removes internal support tabs", async () => {
+  render(<MemoryRouter initialEntries={["/settings?section=license"]}><Settings /><LocationControls /></MemoryRouter>);
+  await screen.findByText("Signed-in devices");
+  expect(screen.getByRole("tab", { name: "Devices" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByTestId("location")).toHaveTextContent("section=devices");
+  for (const name of ["Desktop License", "Activity Log", "Diagnostics"])
+    expect(screen.queryByRole("tab", { name })).toBeNull();
 });

@@ -22,7 +22,6 @@ vi.mock("../../lib/api", () => ({
 }));
 vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => false }));
 vi.mock("../../lib/supabase", () => ({ supabase: null }));
-vi.mock("../settings/PlanDevices", () => ({ default: () => <p>Manage your devices</p> }));
 
 beforeEach(() => {
   vi.mocked(getSubscription).mockResolvedValue({ plan: "free" });

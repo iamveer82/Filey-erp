@@ -3755,7 +3755,7 @@ function Editor({
       <Modal open={viewOpen} onClose={() => setViewOpen(false)} title={form.number || "Invoice preview"} size="full">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">Page {viewPage} of {viewPageCount}</span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {viewPageCount > 1 && <>
               <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage((p) => Math.max(1, p - 1))}>Previous page</button>
               <button className="btn-ghost" disabled={viewPage >= viewPageCount} onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}>Next page</button>
@@ -3763,15 +3763,9 @@ function Editor({
             <button className="btn-ghost" onClick={downloadPdf} disabled={downloading}><Download size={15} /> {downloading ? "Exporting…" : "PDF"}</button>
           </div>
         </div>
-            <div className="flex-1 overflow-auto p-6">
-              <div className="mx-auto max-w-5xl">
-                <div
-                  data-no-i18n
-                  dir="ltr"
-                  className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                >
-                  <div style={{ position: "relative", minHeight: 1059 }}>
-                    <StampSignatureLayer
+            <FitPreview baseWidth={794} zoom={100} zoomable>
+                  <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
+                    {isLastViewPage && <StampSignatureLayer
                       stamp={
                         form.show_stamp
                           ? form.stamp?.data
@@ -3796,7 +3790,7 @@ function Editor({
                           : companyStampSig.signature;
                         if (base) setForm({ ...form, signature: { ...base, x, y } });
                       }}
-                    />
+                    />}
                     <DocView
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
@@ -3817,9 +3811,7 @@ function Editor({
                       </DraggableBlock>
                     )}
                   </div>
-                </div>
-              </div>
-            </div>
+            </FitPreview>
       </Modal>
     </div>
   );

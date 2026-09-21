@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Monitor, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { SettingsSection } from "../../components/SettingsLayout";
 import { useUI } from "../../lib/ui";
 import { supabase } from "../../lib/supabase";
@@ -17,11 +17,10 @@ import {
   type OrgDevice,
 } from "../../lib/license";
 
-/** Device management belongs to billing; activation is automatic. */
+/** Signed-in devices and plan slots; activation is automatic. */
 export default function PlanDevices() {
   const { confirm } = useUI();
-  const [open, setOpen] = useState(false),
-    [busy, setBusy] = useState(false),
+  const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [overview, setOverview] =
     useState<Awaited<ReturnType<typeof licenseOverview>>>(null);
@@ -30,32 +29,41 @@ export default function PlanDevices() {
   const [active, setActive] = useState(false),
     [loaded, setLoaded] = useState(false);
   const revision = useRef(0);
+  const accountId = useRef<string | null | undefined>(undefined);
+  const [accountVersion, setAccountVersion] = useState(0);
   useEffect(() => {
-    const listener = supabase?.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT") return;
+    const listener = supabase?.auth.onAuthStateChange((event, session) => {
+      if (!["INITIAL_SESSION", "SIGNED_IN", "SIGNED_OUT"].includes(event)) return;
+      const id = session?.user.id ?? null;
+      if (accountId.current === id) return;
+      const initial = accountId.current === undefined;
+      accountId.current = id;
+      if (initial && event === "INITIAL_SESSION") return;
       revision.current++;
       setOverview(null);
       setDevices([]);
       setLoaded(false);
-      setOpen(false);
+      setAccountVersion((version) => version + 1);
       setBusy(false);
       setActive(false);
       setError("");
     });
-    const invalidate = () => { revision.current++; };
+    const invalidate = () => {
+      revision.current++;
+    };
     return () => {
       invalidate();
       listener?.data.subscription.unsubscribe();
     };
   }, []);
-  async function load() {
+  const load = useCallback(async () => {
     setBusy(true);
     setError("");
     const version = revision.current;
     try {
       if (!supabase || !(await supabase.auth.getSession()).data.session)
         throw new Error("Sign in to your Filey account to manage your devices.");
-      await collectPurchases();
+      const changed = await collectPurchases();
       const [owned, cloud, id, local] = await Promise.all([
         licenseOverview(),
         listOrgDevices(),
@@ -68,7 +76,7 @@ export default function PlanDevices() {
       setCurrent(id);
       setActive(local.valid);
       setLoaded(true);
-      window.dispatchEvent(new Event("filey:entitlement"));
+      if (changed) window.dispatchEvent(new Event("filey:entitlement"));
     } catch {
       if (version === revision.current)
         setError(
@@ -77,7 +85,10 @@ export default function PlanDevices() {
     } finally {
       if (version === revision.current) setBusy(false);
     }
-  }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load, accountVersion]);
   async function remove(name: string, work: () => Promise<void>) {
     const version = revision.current;
     if (
@@ -105,117 +116,54 @@ export default function PlanDevices() {
   }
   return (
     <SettingsSection
-      title="Your devices"
+      title="Devices"
       description="Plan benefits are applied when you sign in. Manage your device slots here."
     >
-      <button
-        className="btn-ghost"
-        type="button"
-        aria-expanded={open}
-        disabled={busy}
-        onClick={() => {
-          setOpen(!open);
-          if (!open && !loaded) void load();
-        }}
-      >
-        <Monitor size={15} />
-        {busy ? "Checking devices…" : open ? "Hide devices" : "Manage devices"}
-      </button>
-      {open && (
-        <div className="space-y-4">
-          {error && (
-            <p role="alert" className="text-sm text-danger">
-              {error}
+      <div className="space-y-4">
+        {busy && (
+          <p role="status" className="text-sm text-muted-foreground">
+            Checking devices…
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+        {loaded && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {active
+                ? "Ultra is active on this device, including offline access."
+                : overview
+                  ? "Your account owns Ultra. Access on this device depends on your available device slots."
+                  : "Your purchased plan follows your Filey account. Basic also includes local storage and core offline tools."}
             </p>
-          )}
-          {loaded && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                {active
-                  ? "Ultra is active on this device, including offline access."
-                  : overview
-                    ? "Your account owns Ultra. Access on this device depends on your available device slots."
-                    : "Your purchased plan follows your Filey account. Basic also includes local storage and core offline tools."}
-              </p>
-              {overview && (
-                <div>
-                  <p className="text-sm font-medium">
-                    Ultra devices ·{" "}
-                    {overview.devices.filter((d) => !d.deactivated_at).length} / {LITE_DEVICE_LIMIT}
-                  </p>
-                  <ul className="divide-y divide-border">
-                    {overview.devices
-                      .filter((d) => !d.deactivated_at)
-                      .map((d) => (
-                        <li
-                          className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
-                          key={d.fingerprint}
-                        >
-                          <span>
-                            {d.device_name || "Device"}
-                            {d.fingerprint === current && " · This device"}
-                          </span>
-                          <button
-                            className="btn-ghost"
-                            disabled={busy}
-                            onClick={() =>
-                              void remove(d.device_name || "device", () =>
-                                deactivateDevice(d.fingerprint)
-                              )
-                            }
-                          >
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
-                  {!active && (
-                    <button
-                      className="btn-ghost"
-                      disabled={busy}
-                      onClick={async () => {
-                        setBusy(true);
-                        setError("");
-                        try {
-                          const state = await activateThisDevice();
-                          if (!state.valid) throw new Error();
-                          await load();
-                        } catch {
-                          setError(
-                            "Access could not be restored. If both slots are used, remove an old device first."
-                          );
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                    >
-                      Restore access on this device
-                    </button>
-                  )}
-                </div>
-              )}
-              {devices.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium">Workspace devices</p>
-                  <ul className="divide-y divide-border">
-                    {devices.map((d) => (
+            {overview && (
+              <div>
+                <p className="text-sm font-medium">
+                  Ultra devices ·{" "}
+                  {overview.devices.filter((d) => !d.deactivated_at).length} /{" "}
+                  {LITE_DEVICE_LIMIT}
+                </p>
+                <ul className="divide-y divide-border">
+                  {overview.devices
+                    .filter((d) => !d.deactivated_at)
+                    .map((d) => (
                       <li
                         className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
-                        key={d.id}
+                        key={d.fingerprint}
                       >
-                        <div>
+                        <span>
                           {d.device_name || "Device"}
                           {d.fingerprint === current && " · This device"}
-                          <p className="text-xs text-muted-foreground">
-                            Last used {fmtDate(d.last_seen)}
-                          </p>
-                        </div>
+                        </span>
                         <button
                           className="btn-ghost"
                           disabled={busy}
                           onClick={() =>
                             void remove(d.device_name || "device", () =>
-                              releaseOrgDevice(d.id)
+                              deactivateDevice(d.fingerprint)
                             )
                           }
                         >
@@ -223,17 +171,71 @@ export default function PlanDevices() {
                         </button>
                       </li>
                     ))}
-                  </ul>
-                </div>
-              )}
-            </>
-          )}
-          <button className="btn-ghost" disabled={busy} onClick={() => void load()}>
-            <RefreshCw size={14} />
-            Refresh devices
-          </button>
-        </div>
-      )}
+                </ul>
+                {!active && (
+                  <button
+                    className="btn-ghost"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError("");
+                      try {
+                        const state = await activateThisDevice();
+                        if (!state.valid) throw new Error();
+                        await load();
+                      } catch {
+                        setError(
+                          "Access could not be restored. If both slots are used, remove an old device first."
+                        );
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Restore access on this device
+                  </button>
+                )}
+              </div>
+            )}
+            {devices.length > 0 && (
+              <div>
+                <p className="text-sm font-medium">Workspace devices</p>
+                <ul className="divide-y divide-border">
+                  {devices.map((d) => (
+                    <li
+                      className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
+                      key={d.id}
+                    >
+                      <div>
+                        {d.device_name || "Device"}
+                        {d.fingerprint === current && " · This device"}
+                        <p className="text-xs text-muted-foreground">
+                          Last used {fmtDate(d.last_seen)}
+                        </p>
+                      </div>
+                      <button
+                        className="btn-ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void remove(d.device_name || "device", () =>
+                            releaseOrgDevice(d.id)
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+        <button className="btn-ghost" disabled={busy} onClick={() => void load()}>
+          <RefreshCw size={14} />
+          Refresh devices
+        </button>
+      </div>
     </SettingsSection>
   );
 }

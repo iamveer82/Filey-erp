@@ -26,7 +26,6 @@ import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { isLocalMode } from "../../lib/dataMode";
 import SubscriptionRefunds from "../../components/SubscriptionRefunds";
-import PlanDevices from "./PlanDevices";
 
 const ENTERPRISE_MAILTO =
   "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
@@ -227,7 +226,9 @@ export default function BillingPanel() {
           <Link className="btn-ghost" to="/settings?section=credits">Open AI wallet</Link>
         </SettingsSection>
 
-        <PlanDevices />
+        <SettingsSection title="Devices" description="Paid access is applied automatically when you sign in on an eligible device.">
+          <Link className="btn-ghost" to="/settings?section=devices">Manage devices</Link>
+        </SettingsSection>
 
         <SubscriptionRefunds />
 

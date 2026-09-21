@@ -2223,15 +2223,9 @@ export default function Quoting() {
             </div>}
               <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> PDF</button>
             </div>
-            <div className="min-w-0 overflow-auto">
-                  <div className="mx-auto max-w-5xl">
-                    <div
-                      className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                      data-no-i18n
-                      dir="ltr"
-                    >
-                      <div style={{ position: "relative", minHeight: 1059 }}>
-                        <StampSignatureLayer
+            <FitPreview baseWidth={794} zoom={100} zoomable>
+                      <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
+                        {isLastViewPage && <StampSignatureLayer
                           stamp={
                             form.show_stamp
                               ? form.stamp?.data
@@ -2256,7 +2250,7 @@ export default function Quoting() {
                               : companyStampSig.signature;
                             if (base) setForm({ ...form, signature: { ...base, x, y } });
                           }}
-                        />
+                        />}
                         <DocView
                           form={docViewForm}
                           pageItems={viewPages[viewPageIdx]?.map(
@@ -2286,9 +2280,7 @@ export default function Quoting() {
                           </DraggableBlock>
                         )}
                       </div>
-                    </div>
-                  </div>
-                </div>
+            </FitPreview>
           </Modal>}
         </div>
       </fieldset>

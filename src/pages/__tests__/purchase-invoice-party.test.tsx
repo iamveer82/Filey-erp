@@ -77,6 +77,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); setCacheOrg(null); vi.restoreAllMocks(); });
 
 describe("purchase invoice parties", () => {
+  it("fits the invoice preview to a phone without reflowing or saving the A4 document", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(326);
+    const view = await openPurchase();
+    fireEvent.click(view.getByRole("button", { name: "Preview" }));
+    const dialog = view.getByRole("dialog", { name: invoice.number });
+    const paper = () => dialog.querySelector<HTMLElement>(".invoice-print")!;
+    await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "294px" }));
+    expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px", padding: "48px" });
+    expect(within(dialog).getByRole("columnheader", { name: /Amount/ })).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in on document" }));
+    expect(paper().parentElement).toHaveStyle({ width: "441px" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Fit width" }));
+    expect(paper().parentElement).toHaveStyle({ width: "294px" });
+    expect(billing.saveDoc).not.toHaveBeenCalled();
+  });
+
   it.each(["Save", "Mark as done"])("%s saves supplier snapshots without a CRM foreign key or customer advance", async (action) => {
     const view = await openPurchase();
     const selector = view.getByLabelText("Select saved supplier");

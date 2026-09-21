@@ -2233,16 +2233,14 @@ function Editor({
             </div>}
               <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
-            <div className="min-w-0 overflow-auto">
-              <div className="mx-auto max-w-5xl">
-                <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]" data-no-i18n dir="ltr">
-                  <div style={{ position: "relative", minHeight: 1059 }}>
-                    <StampSignatureLayer
+            <FitPreview baseWidth={794} zoom={100} zoomable>
+                  <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
+                    {isLastViewPage && <StampSignatureLayer
                       stamp={activeStamp}
                       signature={activeSignature}
                       onStampMove={onStampMove}
                       onSignatureMove={onSignatureMove}
-                    />
+                    />}
                     <DocView
                       form={docViewForm as any}
                       pageItems={
@@ -2256,10 +2254,13 @@ function Editor({
                       showFooter={isLastViewPage}
                       labels={docViewLabels}
                     />
+                    {isLastViewPage && form.show_bank && (
+                      <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
                   </div>
-                </div>
-              </div>
-            </div>
+            </FitPreview>
           </Modal>}
     </div>
   );

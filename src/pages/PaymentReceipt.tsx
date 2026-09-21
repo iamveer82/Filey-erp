@@ -1130,19 +1130,11 @@ export default function PaymentReceipt() {
 
               <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
-            <div className="min-w-0 overflow-auto">
-                        <div className="mx-auto max-w-5xl">
-                          <div
-                            data-no-i18n
-                            dir="ltr"
-                            className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                          >
-                            <div style={{ position: "relative", minHeight: 1059 }}>
+            <FitPreview baseWidth={794} zoom={100} padding={0} zoomable>
+                            <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
                               {docContent(form!)}
                             </div>
-                          </div>
-                        </div>
-                      </div>
+            </FitPreview>
           </Modal>}
 
               <Modal
