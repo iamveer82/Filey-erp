@@ -1,5 +1,9 @@
 # Filey brand videos
 
+New image/video requests default to the customer's own keys. See
+[Images and videos in chat](ai-media.md). This document covers the optional
+managed-credit video backend, which has no configured Higgsfield credentials.
+
 Filey AI → **Brand videos** opens an inline panel. Customers can describe a film,
 attach one product photo, choose portrait/landscape/square, set 4–15 seconds,
 and enable generated audio. The initial preset is **Higgsfield Seedance 2.0 at

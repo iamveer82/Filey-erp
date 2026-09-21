@@ -562,7 +562,7 @@ export async function aiFetch(
 
 function redactAiError(message: string, headers?: HeadersInit): string {
   const values = new Headers(headers);
-  const secrets = [values.get("authorization")?.replace(/^Bearer\s+/i, ""), values.get("x-api-key")];
+  const secrets = [values.get("authorization")?.replace(/^(?:Bearer|Key)\s+/i, ""), values.get("x-api-key")];
   return secrets.filter((value): value is string => !!value).reduce((text, value) =>
     text.split(value).join("[REDACTED]").split(encodeURIComponent(value)).join("[REDACTED]"), message);
 }

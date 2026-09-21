@@ -7,6 +7,7 @@ import { createGuard } from "../agentGuard";
 import { TOOLS, runTool, endTurn } from "../aiTools";
 import { setDataMode } from "../dataMode";
 import { setAgentMode } from "../agentMode";
+import { writeAgentStorage } from "../agentStorage";
 const job = {
   id: "91000000-0000-4000-8000-000000000001",
   state: "draft",
@@ -18,6 +19,7 @@ beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
   setCacheOrg("org-a", "user-a");
+  writeAgentStorage("filey.ai.media.config", JSON.stringify({ videoSource: "credits" }));
   setAgentMode("auto");
   vi.spyOn(supabase!.auth, "getSession").mockResolvedValue({
     data: { session: { user: { id: "user-a" } } },

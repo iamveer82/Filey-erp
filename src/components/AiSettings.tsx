@@ -14,6 +14,7 @@ import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig } from "../lib/aiEndpoint"
 import { useUI } from "../lib/ui";
 import { SettingsPanel, SettingsSection } from "./SettingsLayout";
 import AiFundingControl from "./AiFundingControl";
+import MediaSettings from "./MediaSettings";
 import { getCacheScope } from "../lib/api";
 import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
 
@@ -416,6 +417,7 @@ export default function AiSettings() {
         </div>}
       </SettingsSection>
 
+      <MediaSettings />
       <SettingsSection title="Privacy & storage" description={desktop ? "Saved securely on this device." : "Keys stay in this browser session."}>
         <p className="text-[13px] leading-relaxed text-muted-foreground">{desktop ? "Keys are kept in your operating system's secure store, separately for each account and workspace." : "Browser keys stay in memory and are cleared on reload or sign-out. Use the desktop app to keep keys in your operating system's secure store."} Requests go to your selected provider.</p>
         {!desktop && <p className="text-[13px] leading-relaxed text-muted-foreground">The localhost preview supports the listed hosted providers. A deployed browser version requires the provider to allow browser requests; the desktop app also supports custom endpoints.</p>}

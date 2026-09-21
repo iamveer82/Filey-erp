@@ -52,7 +52,7 @@ export const CORE_TOOLS = [
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   video: {
-    about: "Create brand/product videos from a brief or attached photo using Higgsfield. Quote $0.25 per second, user approves generation in the video card; track persistent jobs",
+    about: "Create brand/product videos from a brief or attached photo with the configured media provider. Own-key mode uses fal; the user approves generation in the chat card. Track persistent jobs",
     tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],
   },
   service: {

@@ -27,7 +27,8 @@ import {
 import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
-import AgentVideoPanel, { VideoJobCard } from "../components/AgentVideoPanel";
+import { VideoJobCard } from "../components/AgentVideoPanel";
+import AgentMediaPanel, { MediaJobCard } from "../components/AgentMediaPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
 import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
 import { getActiveAiConfig } from "../lib/ai";
@@ -681,7 +682,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
         <header className="sticky top-0 z-30 mb-3 bg-page pb-3 pt-1">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-[5rem] flex-1">
               <h1 className="text-lg font-semibold leading-tight text-foreground">
                 Filey AI
               </h1>
@@ -695,7 +696,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-              <button type="button" onClick={() => setVideosOpen(v => !v)} className="btn-ghost w-10 !px-0" aria-label="Brand videos" title="Brand videos" aria-expanded={videosOpen} aria-controls="filey-video-panel"><Film size={16} /></button>
+              <button type="button" onClick={() => setVideosOpen(v => !v)} className="btn-ghost w-10 !px-0" aria-label="Images and videos" title="Images and videos" aria-expanded={videosOpen} aria-controls="filey-media-panel"><Film size={16} /></button>
               <button
                 type="button"
                 onClick={openHistory}
@@ -735,7 +736,11 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         </header>
 
-        {videosOpen && <AgentVideoPanel onClose={() => setVideosOpen(false)} />}
+        {videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
+          setChat(current => ({ ...current, turns: [...current.turns,
+            { role: "assistant", text: job.state === "draft" ? `Review your ${job.kind}, then choose Generate to use your own provider key.` : `Here is your ${job.kind} request.`, files: [{ name: `Generated ${job.kind}`, mediaJobId: job.id }] }], updatedAt: Date.now() }));
+          setVideosOpen(false);
+        }} />}
 
         {/* The conversation and composer share one readable measure. */}
         <div
@@ -1309,7 +1314,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             {turn.files.map((f, i) =>
               // Desktop: the file is already on disk, so open it where it
               // landed. Browser: hand over the blob as a real download.
-              f.videoJobId ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : f.path ? (
+              f.mediaJobId ? <MediaJobCard key={f.mediaJobId} id={f.mediaJobId} /> : f.videoJobId ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : f.path ? (
                 <button
                   key={i}
                   type="button"

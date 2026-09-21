@@ -196,6 +196,7 @@ export interface FileOutput {
   url?: string;
   path?: string;
   videoJobId?: string;
+  mediaJobId?: string;
 }
 interface TurnSlot {
   /** Every file attached to this turn, in attachment order — merge combines
@@ -242,6 +243,7 @@ const turnFiles = (tid: string): File[] => turnSlots.get(tid)?.files ?? [];
 const turnFile = (tid: string): File | null => turnFiles(tid)[0] ?? null;
 const pushTurnOutput = (tid: string, o: FileOutput): void => {
   if (o.videoJobId && slotFor(tid).outputs.some(f => f.videoJobId === o.videoJobId)) return;
+  if (o.mediaJobId && slotFor(tid).outputs.some(f => f.mediaJobId === o.mediaJobId)) return;
   slotFor(tid).outputs.push(o);
 };
 /** A file THIS turn produced, matched loosely by name ("the merged pdf" finds
@@ -3829,7 +3831,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_video_draft",
-    description: "Prepare a brand video with Higgsfield Seedance 2.0 at $0.25 USD per second, 720p. This creates a quote and a persistent video card; it NEVER submits paid generation. The user must click Generate on the card. Use a specific creative brief. Optionally use one attached product photo by its 1-based reference_file number. Do not claim the video is rendered, saved or published. Do not use browser/shell tools to bypass the Generate decision.",
+    description: "Prepare a video using the user's configured provider. Default: their own fal key, Wan 2.2 at approximately 5 or 10 seconds, 720p, silent. Filey credit mode uses its managed provider only if explicitly selected. This creates a persistent chat card, NEVER paid generation. The user must click Generate. Optionally use an attached photo by its 1-based reference_file number. Never claim a draft is rendered or published, and never bypass the Generate decision using other tools.",
     parameters: { type: "object", properties: {
       prompt: { type: "string" }, duration: { type: "integer", minimum: 4, maximum: 15 },
       aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"] }, generate_audio: { type: "boolean" },
@@ -3841,6 +3843,13 @@ export const TOOLS: ToolDef[] = [
       const index = a.reference_file;
       const file = index === undefined ? undefined : turnFiles(tid)[Number(index) - 1];
       if (index !== undefined && (!Number.isInteger(index) || Number(index) < 1 || !file)) return { error: "Choose a valid attached image by its 1-based number." };
+      const { getMediaConfig, createMediaDraft } = await import("./aiMedia");
+      if (getMediaConfig().videoSource === "byok") {
+        const job = await createMediaDraft("video", str(a.prompt), { duration: Number(a.duration), aspect: str(a.aspect_ratio) || "9:16", reference: file });
+        pushTurnOutput(tid, { name: "Brand video", mediaJobId: job.id });
+        return { job_id: job.id, state: job.state, billing: "user_provider", pending_action: "media_approval", retry_safe: false,
+          message: "Draft ready in chat. Wan generates silent video. The user must click Generate; their provider rates apply. No Filey credits charged. Do not recreate or submit this draft." };
+      }
       const job = await quoteVideo({ prompt: str(a.prompt), duration: Number(a.duration), aspect_ratio: str(a.aspect_ratio) || "9:16", generate_audio: a.generate_audio !== false }, file);
       pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
       return { job_id: job.id, state: job.state, price_usd: job.charge_micros / 1e6, pending_action: "video_approval", retry_safe: false,
@@ -3852,6 +3861,8 @@ export const TOOLS: ToolDef[] = [
     description: "List this account's recent video drafts and jobs. Persisted jobs survive app restarts. No wallet charge.",
     parameters: { type: "object", properties: {} },
     run: async () => {
+      const { getMediaConfig, listMediaJobs } = await import("./aiMedia");
+      if (getMediaConfig().videoSource === "byok") return { jobs: listMediaJobs().filter(j => j.kind === "video").map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0, 200), duration: j.duration, billing: "user_provider" })) };
       const { listVideos } = await import("./aiVideo");
       const result = await listVideos();
       return { configured: result.configured, jobs: result.jobs.map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0,200), duration: j.duration, price_usd: j.charge_micros / 1e6, charged_usd: j.charged_micros / 1e6 })) };
@@ -3863,6 +3874,12 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
     run: async (a) => {
       const tid = activeTurnId;
+      if (str(a.id).startsWith("media-")) {
+        const { refreshMedia } = await import("./aiMedia");
+        const job = await refreshMedia(str(a.id));
+        pushTurnOutput(tid, { name: `Generated ${job.kind}`, mediaJobId: job.id });
+        return { job_id: job.id, state: job.state, output_url: job.outputUrl, message: "The media card shows the result and current status. No new generation was submitted." };
+      }
       const { getVideo, videoActive } = await import("./aiVideo");
       const job = await getVideo(str(a.id));
       pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
@@ -3876,6 +3893,7 @@ export const TOOLS: ToolDef[] = [
     description: "Discard a video draft or try to cancel a queued video. Processing jobs may not be cancelable. Only report canceled when returned state is canceled.",
     parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
     run: async (a) => {
+      if (str(a.id).startsWith("media-")) return (await import("./aiMedia")).cancelMedia(str(a.id));
       const { cancelVideo } = await import("./aiVideo");
       return cancelVideo(str(a.id));
     },
@@ -3883,49 +3901,23 @@ export const TOOLS: ToolDef[] = [
   {
     name: "generate_image",
     description:
-      "Create an image from a description — a product shot, a social graphic, a header for a campaign. Say what should be IN it and how it should look; you are writing the brief, so be specific about subject, style, colours and mood rather than passing the user's words through unchanged. The image is saved to the user's computer, and to My Files when save_to_app is set. Use it before schedule_social_post when a post needs a picture.",
+      "Prepare an image from a specific creative brief using the user's configured image model and own key. Returns an inline chat card. The user clicks Generate before a paid request is sent. This tool prepares a draft, not a finished image. Do not claim it is saved, generated or posted, and do not bypass the Generate decision. The finished image can be viewed and downloaded in chat.",
     parameters: {
       type: "object",
       properties: {
         prompt: { type: "string" },
         size: { type: "string" },
-        save_to_app: { type: "boolean" },
+        aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"] },
       },
       required: ["prompt"],
     },
     run: async (a) => {
       const tid = activeTurnId;
-      const { generateImage } = await import("./aiImage");
-      let made;
-      try {
-        made = await generateImage(str(a.prompt), { size: str(a.size) || undefined });
-      } catch (e) {
-        return { error: e instanceof Error ? e.message : String(e) };
-      }
-      const { deliverFile, outputDir } = await import("./agentFiles");
-      const saved = await deliverFile({ name: made.name, bytes: made.bytes });
-      pushTurnOutput(tid, { name: saved.name, path: saved.path, url: saved.url });
-      let filed = false;
-      if (a.save_to_app) {
-        try {
-          await (
-            await import("./files")
-          ).saveOutput({ name: made.name, bytes: made.bytes }, "AI image");
-          filed = true;
-        } catch {
-          /* it is already on disk; filing it too is a bonus, not the job */
-        }
-      }
-      const where = await outputDir();
-      return {
-        ok: true,
-        file: saved.name,
-        saved_to: saved.path,
-        folder: where?.dir,
-        filed_in_my_files: filed,
-        prompt_used: made.prompt,
-        message: `Image saved${where ? ` to ${where.dir}` : ""}.`,
-      };
+      const { createMediaDraft } = await import("./aiMedia");
+      const job = await createMediaDraft("image", str(a.prompt), { size: str(a.size) || undefined, aspect: str(a.aspect_ratio) || "1:1" });
+      pushTurnOutput(tid, { name: "Generated image", mediaJobId: job.id });
+      return { job_id: job.id, state: job.state, pending_action: "media_approval", retry_safe: false,
+        message: "Image draft ready in chat. The user must click Generate to use their own image provider key. No image has been generated or published yet." };
     },
   },
   {

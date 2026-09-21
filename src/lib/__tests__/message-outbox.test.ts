@@ -28,7 +28,7 @@ it("retains acceptance IDs, isolates accounts, and allows a deliberate retry onl
   const retry=await beginMessage(input,agentStorageScope()!);
   expect(retry.id).not.toBe(job.id);
   await finishMessage(retry,"accepted","provider-fixture-id");
-  expect((await messageJobs())[0]).toMatchObject({outcome:"accepted",providerId:"provider-fixture-id"});
+  expect((await messageJobs()).find(entry => entry.id === retry.id)).toMatchObject({outcome:"accepted",providerId:"provider-fixture-id"});
   await expect(reviewMessageNotSent(retry,agentStorageScope()!)).rejects.toThrow(/uncertain/);
   setCacheOrg("outbox-fixture","another-owner");
   expect(await messageJobs()).toEqual([]);
