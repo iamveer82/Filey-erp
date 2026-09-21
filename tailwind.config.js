@@ -103,7 +103,7 @@ export default {
         wide: "0.025em",
       },
       spacing: {
-        // Fractional / large steps used by the Folder & FileCard art.
+        // Fractional / large steps used by the Folder art.
         "0.75": "0.1875rem",
         "3.25": "0.8125rem",
         "5.5": "1.375rem",

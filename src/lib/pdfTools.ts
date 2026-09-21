@@ -22,8 +22,8 @@ import {
 import * as safePdf from "./pdfjsSafe";
 import { pdfjs } from "./pdfjsSafe";
 import { parseRanges } from "./ranges";
+import { parseCsvMatrix as parseCsv } from "./csv";
 import { hasTauri, saveBytes } from "./localPaths";
-
 
 export { parseRanges };
 
@@ -767,39 +767,6 @@ export async function textToPdf(file: File): Promise<OutFile> {
     y -= lh;
   }
   return { name: `${nameStem(file.name)}.pdf`, bytes: await doc.save() };
-}
-
-function parseCsv(text: string): string[][] {
-  const s = text.replace(/\r\n?/g, "\n");
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cur = "";
-  let q = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (q) {
-      if (c === '"') {
-        if (s[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else q = false;
-      } else cur += c;
-    } else if (c === '"') q = true;
-    else if (c === ",") {
-      row.push(cur);
-      cur = "";
-    } else if (c === "\n") {
-      row.push(cur);
-      rows.push(row);
-      row = [];
-      cur = "";
-    } else cur += c;
-  }
-  if (cur.length || row.length) {
-    row.push(cur);
-    rows.push(row);
-  }
-  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
 }
 
 /** Render a CSV as a simple paginated table PDF (landscape A4). */
