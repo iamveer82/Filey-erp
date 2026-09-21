@@ -46,3 +46,15 @@ export function paymentUrl(value: unknown): string {
   }
   throw new Error(BILLING_UNAVAILABLE);
 }
+
+/** Mobile uses same-tab navigation; desktop keeps the app open. */
+export async function openBilling(value: unknown): Promise<"browser" | "redirected"> {
+  const url = paymentUrl(value);
+  if ("__TAURI_INTERNALS__" in window) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+    return "browser";
+  }
+  window.location.assign(url);
+  return "redirected";
+}

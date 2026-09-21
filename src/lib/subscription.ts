@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { billingRequest, paymentUrl } from "./billingService";
+import { billingRequest, paymentUrl, openBilling } from "./billingService";
 import { clearEntitlementCache, resolveTier } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
@@ -124,28 +124,13 @@ async function invokeDodo(body: Record<string, unknown>): Promise<string> {
   return paymentUrl(data?.url);
 }
 
-const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-/** Open a Dodo URL wherever it actually works: a new page in the browser, the
- *  system browser on desktop — sending the Tauri webview to Dodo would
- *  navigate the app away from itself. */
-async function openBilling(url: string): Promise<"redirected" | "browser"> {
-  if (hasTauri) {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
-    return "browser";
-  }
-  window.location.href = url;
-  return "redirected";
-}
-
 /** Subscribe to the Cloud plan. The webhook sets the org's plan; the caller
  *  refreshes the subscription afterwards to show it. */
 export async function startCheckout(
   plan: Plan = "cloud"
 ): Promise<"redirected" | "browser"> {
   if (plan !== "cloud") throw new Error(`No checkout for the ${plan} plan.`);
-  return openBilling(await invokeDodo({ action: "checkout_cloud" }));
+  return openBilling(await invokeDodo({ action: "checkout_cloud", from: "app" }));
 }
 
 /** Dodo's customer portal: change card, download invoices, cancel. */

@@ -1,3 +1,4 @@
+import { appCheckoutReturn } from "../_shared/checkout-return.ts";
 // Filey — Dodo Payments edge function (Deno).
 //
 // Sells both plans and turns a completed payment into an entitlement the app
@@ -165,8 +166,8 @@ Deno.serve(async (req) => {
         // The webhook is what grants the licence; this metadata is how it knows
         // whose account to grant it to.
         metadata: { type: "freedom_license", user_id: user.id },
-        return_url: base ? `${base}/thanks?plan=freedom${fromApp}` : undefined,
-        cancel_url: base ? `${base}/#pricing` : undefined,
+        return_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", plan: "ultra", checkout: "success" }) : base ? `${base}/thanks?plan=freedom${fromApp}` : undefined,
+        cancel_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", checkout: "cancel" }) : base ? `${base}/#pricing` : undefined,
       });
       if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
       return json({ url: session.checkout_url, session_id: session.session_id });
@@ -190,8 +191,8 @@ Deno.serve(async (req) => {
         // org_id is how the webhook knows whose cloud to switch on; the
         // subscription carries it forward to every renewal event.
         metadata: { type: "cloud_subscription", org_id: String(org.id), user_id: user.id },
-        return_url: base ? `${base}/thanks?plan=cloud${fromApp}` : undefined,
-        cancel_url: base ? `${base}/#pricing` : undefined,
+        return_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", plan: "cloud", checkout: "success" }) : base ? `${base}/thanks?plan=cloud${fromApp}` : undefined,
+        cancel_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", checkout: "cancel" }) : base ? `${base}/#pricing` : undefined,
       });
       if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
       return json({ url: session.checkout_url, session_id: session.session_id });

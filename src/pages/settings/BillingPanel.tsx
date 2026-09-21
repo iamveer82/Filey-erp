@@ -25,10 +25,8 @@ import { useEffect, useRef, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { isLocalMode } from "../../lib/dataMode";
+import PaymentReview from "../../components/PaymentReview";
 import SubscriptionRefunds from "../../components/SubscriptionRefunds";
-
-const ENTERPRISE_MAILTO =
-  "mailto:sales@filey.co?subject=Filey%20ERP%20Enterprise%20enquiry";
 
 export default function BillingPanel() {
   const { toast } = useUI();
@@ -53,17 +51,31 @@ export default function BillingPanel() {
         .then(([local, purchased]) => {
           if (active) setOwnsUltra(purchased ?? local.valid);
         })
-        .finally(() => { if (active) setOwnershipLoading(false); });
+        .finally(() => {
+          if (active) setOwnershipLoading(false);
+        });
       void getSubscription()
-        .then((value) => { if (active) setSub(value); })
-        .catch(() => { if (active) toast.error("We couldn’t load your plan. Check your connection and reopen Billing."); })
-        .finally(() => { if (active) setSubLoading(false); });
+        .then((value) => {
+          if (active) setSub(value);
+        })
+        .catch(() => {
+          if (active)
+            toast.error(
+              "We couldn’t load your plan. Check your connection and reopen Billing."
+            );
+        })
+        .finally(() => {
+          if (active) setSubLoading(false);
+        });
       void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
-        if (active) setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
+        if (active)
+          setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
       });
     };
     refreshOwned();
-    void invoicesThisMonth().then(setInvoicesUsed).catch(() => {});
+    void invoicesThisMonth()
+      .then(setInvoicesUsed)
+      .catch(() => {});
     // A purchase collected in the background (auth.tsx) updates this page too.
     window.addEventListener("filey:entitlement", refreshOwned);
     return () => {
@@ -108,13 +120,23 @@ export default function BillingPanel() {
     setParams(next, { replace: true });
     if (c === "success") {
       toast.info("Confirming your payment…");
-      if (params.get("section") === "license" || ["ultra", "freedom"].includes(params.get("plan") ?? "")) {
-        claimPurchasedLicense(12, 2500).then((state) => {
-          if (state?.valid) {
-            setOwnsUltra(true);
-            toast.success("Ultra is active on this device.");
-          } else toast.info("Payment is still processing. Reopen Billing to check again.");
-        }).catch(() => toast.error("We couldn’t confirm your plan yet. Reopen Billing to check again."));
+      if (
+        params.get("section") === "license" ||
+        ["ultra", "freedom"].includes(params.get("plan") ?? "")
+      ) {
+        claimPurchasedLicense(12, 2500)
+          .then((state) => {
+            if (state?.valid) {
+              setOwnsUltra(true);
+              toast.success("Ultra is active on this device.");
+            } else
+              toast.info("Payment is still processing. Reopen Billing to check again.");
+          })
+          .catch(() =>
+            toast.error(
+              "We couldn’t confirm your plan yet. Reopen Billing to check again."
+            )
+          );
         return;
       }
       awaitCloudPlan(12, 2500)
@@ -123,52 +145,18 @@ export default function BillingPanel() {
             setSub(s);
             window.dispatchEvent(new Event("filey:entitlement"));
             toast.success("Pro is active on this workspace.");
-          } else toast.info("Payment is still processing. Reopen Billing to check again.");
+          } else
+            toast.info("Payment is still processing. Reopen Billing to check again.");
         })
-        .catch(() => toast.error("Could not verify your payment. Reopen Billing to check again."));
+        .catch(() =>
+          toast.error("Could not verify your payment. Reopen Billing to check again.")
+        );
     } else if (c === "cancel") {
       toast.info("Checkout canceled.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const buy = async (p: PlanCard) => {
-    if (busy || ownershipLoading || subLoading || p.id === "free") return;
-    setBusy(p.id);
-    try {
-      if (p.kind === "contact") {
-        window.location.href = ENTERPRISE_MAILTO;
-        return;
-      }
-      if (p.kind === "license") {
-        // Ultra: one-time. On desktop the checkout opens in the system
-        // browser, so this window waits for the webhook instead of redirecting.
-        if ((await startFreedomCheckout()) === "redirected") return;
-        toast.info("Finish the payment in your browser — this page unlocks by itself.");
-        const state = await claimPurchasedLicense(60, 5000);
-        if (state?.valid) setOwnsUltra(true);
-        toast[state?.valid ? "success" : "info"](
-          state?.valid
-            ? "Ultra is active on this device."
-            : "No payment yet. When it completes, reopen this page and it activates."
-        );
-        return;
-      }
-      if ((await startCheckout("cloud")) === "redirected") return;
-      toast.info("Finish the payment in your browser — this page unlocks by itself.");
-      const updated = await awaitCloudPlan();
-      if (updated) {
-        setSub(updated);
-        toast.success("Pro is active on this workspace.");
-      } else {
-        toast.info("No subscription yet. When it completes, reopen this page.");
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
   const manage = async () => {
     if (busy) return;
     setBusy("manage");
@@ -184,10 +172,58 @@ export default function BillingPanel() {
   // The org's plan says Basic for someone who bought Ultra: the licence lives
   // on the device, not the org. Show what they actually have.
   const current =
-    sub.plan === "free" && ownsUltra ? PLANS.find((p) => p.id === "lite")! : planCardFor(sub.plan);
+    sub.plan === "free" && ownsUltra
+      ? PLANS.find((p) => p.id === "lite")!
+      : planCardFor(sub.plan);
   const owned = (p: PlanCard) => p.id === current.id || (p.id === "lite" && ownsUltra);
   const cap = FREE_LIMITS.invoicesPerMonth;
   const pctUsed = Math.min(100, Math.round(((invoicesUsed ?? 0) / cap) * 100));
+
+  const purchase = PLANS.find(
+    (p) => p.id === params.get("purchase") && (p.id === "cloud" || p.id === "lite")
+  );
+  if (purchase && !subLoading && !ownershipLoading && !owned(purchase)) {
+    return (
+      <PaymentReview
+        key={purchase.id}
+        title={`Get Filey ${purchase.name}`}
+        lines={[
+          { label: `Filey ${purchase.name}`, value: purchase.price },
+          {
+            label: "Billing",
+            value: purchase.id === "cloud" ? "Monthly subscription" : "One-time purchase",
+          },
+        ]}
+        total={`${purchase.price} USD`}
+        terms={
+          purchase.id === "cloud"
+            ? "Renews every month. Cancel any time in Billing."
+            : "Pay once for Ultra. Your account unlocks automatically after payment is confirmed."
+        }
+        onBack={() => {
+          const next = new URLSearchParams(params);
+          next.delete("purchase");
+          setParams(next);
+        }}
+        onPay={() =>
+          purchase.id === "cloud" ? startCheckout("cloud") : startFreedomCheckout()
+        }
+        onVerify={async () => {
+          if (purchase.id === "lite") {
+            const state = await claimPurchasedLicense(1, 0);
+            if (state?.valid) setOwnsUltra(true);
+            return !!state?.valid;
+          }
+          const state = await awaitCloudPlan(1, 0);
+          if (state) {
+            setSub(state);
+            window.dispatchEvent(new Event("filey:entitlement"));
+          }
+          return !!state;
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -222,12 +258,22 @@ export default function BillingPanel() {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="AI wallet" description="Optional credits for every plan, separate from your subscription.">
-          <Link className="btn-ghost" to="/settings?section=credits">Open AI wallet</Link>
+        <SettingsSection
+          title="AI wallet"
+          description="Optional credits for every plan, separate from your subscription."
+        >
+          <Link className="btn-ghost" to="/settings?section=credits">
+            Open AI wallet
+          </Link>
         </SettingsSection>
 
-        <SettingsSection title="Devices" description="Paid access is applied automatically when you sign in on an eligible device.">
-          <Link className="btn-ghost" to="/settings?section=devices">Manage devices</Link>
+        <SettingsSection
+          title="Devices"
+          description="Paid access is applied automatically when you sign in on an eligible device."
+        >
+          <Link className="btn-ghost" to="/settings?section=devices">
+            Manage devices
+          </Link>
         </SettingsSection>
 
         <SubscriptionRefunds />
@@ -351,7 +397,11 @@ export default function BillingPanel() {
                         "w-full",
                         p.recommended ? "btn-primary" : "btn-ghost"
                       )}
-                      onClick={() => buy(p)}
+                      onClick={() => {
+                        const next = new URLSearchParams(params);
+                        next.set("purchase", p.id);
+                        setParams(next);
+                      }}
                       disabled={busy !== null || ownershipLoading || subLoading}
                     >
                       {busy === p.id

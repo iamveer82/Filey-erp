@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { supabase } from "../supabase";
-import { billingRequest, paymentUrl, BILLING_UNAVAILABLE } from "../billingService";
+import { billingRequest, paymentUrl, openBilling, BILLING_UNAVAILABLE } from "../billingService";
 import { startFreedomCheckout, collectPurchases } from "../license";
 import { startCheckout, refundAction } from "../subscription";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 const session = { user: { id: "billing-owner" } };
 beforeEach(() => {
@@ -13,7 +15,7 @@ beforeEach(() => {
   } as never);
   vi.spyOn(supabase!, "functions", "get").mockReturnValue({ invoke: vi.fn() } as never);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
 
 it("explains an owned Ultra plan instead of displaying the edge function error", async () => {
   vi.mocked(supabase!.functions.invoke).mockResolvedValue({
@@ -132,4 +134,18 @@ it("automatically applies Ultra on a second eligible device, but respects full a
   devices = [{ fingerprint: "second", deactivated_at: "2026-09-20" }];
   expect(await collectPurchases()).toBe(false);
   expect(supabase!.functions.invoke).toHaveBeenCalledTimes(1);
+});
+
+
+it("opens the system browser on desktop and navigates the same tab on mobile web", async () => {
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  const url = "https://checkout.dodopayments.com/fixture";
+  const assign = vi.fn();
+  vi.stubGlobal("window", { __TAURI_INTERNALS__: {}, location: { assign } });
+  expect(await openBilling(url)).toBe("browser");
+  expect(openUrl).toHaveBeenCalledWith(url);
+  expect(assign).not.toHaveBeenCalled();
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  expect(await openBilling(url)).toBe("redirected");
+  expect(assign).toHaveBeenCalledExactlyOnceWith(url);
 });

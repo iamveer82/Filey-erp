@@ -14,7 +14,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
-import { billingRequest, paymentUrl } from "./billingService";
+import { billingRequest, openBilling } from "./billingService";
 import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
 import { PUSH_TABLES } from "./syncTables";
@@ -251,15 +251,8 @@ export async function releaseOrgDevice(id: string): Promise<void> {
  *  claimPurchasedLicense() while the buyer pays in that browser window. */
 export async function startFreedomCheckout(): Promise<"redirected" | "browser"> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const data = await billingRequest<{ url?: string }>({ action: "checkout" });
-  const url = paymentUrl(data?.url);
-  if (hasTauri) {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
-    return "browser";
-  }
-  window.location.href = url;
-  return "redirected";
+  const data = await billingRequest<{ url?: string }>({ action: "checkout", from: "app" });
+  return openBilling(data?.url);
 }
 
 /** Has the Dodo webhook recorded this account's purchase yet? */

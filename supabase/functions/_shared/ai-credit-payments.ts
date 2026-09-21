@@ -1,3 +1,4 @@
+import { appCheckoutReturn } from "./checkout-return.ts";
 import type DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
 import type { SupabaseClient, User } from "https://esm.sh/@supabase/supabase-js@2";
 import { creditPacks, TOPUP_FEE_CENTS, UUID } from "./ai-credits.ts";
@@ -40,22 +41,14 @@ export async function createCreditCheckout(
     service_fee_cents: TOPUP_FEE_CENTS,
   });
   if (error) throw error;
-  const configured = Deno.env.get("FILEY_APP_URL") ?? "https://app.gofiley.com";
-  const base = new URL(configured);
-  if (
-    base.protocol !== "https:" &&
-    base.hostname !== "127.0.0.1" &&
-    base.hostname !== "localhost"
-  )
-    throw new Error("Invalid app return URL");
   const session = await dodo.checkoutSessions.create({
     product_cart: [{ product_id: pack.id, quantity: 1 }],
     customer: { email: user.email },
     billing_currency: "USD",
     feature_flags: { allow_discount_code: false, allow_currency_selection: false },
     metadata: { type: "ai_credits", credit_order: id, user_id: user.id },
-    return_url: `${base.origin}/#/settings?section=credits&credit_checkout=returned`,
-    cancel_url: `${base.origin}/#/settings?section=credits&credit_checkout=cancelled`,
+    return_url: appCheckoutReturn({ section: "credits", credit_checkout: "returned" }),
+    cancel_url: appCheckoutReturn({ section: "credits", credit_checkout: "cancelled" }),
   });
   if (!session.checkout_url) throw new Error("Dodo did not return a checkout URL.");
   return { url: session.checkout_url, session_id: session.session_id };
