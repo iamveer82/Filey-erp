@@ -1,6 +1,6 @@
 import type DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
 import type { SupabaseClient, User } from "https://esm.sh/@supabase/supabase-js@2";
-import { creditPacks, UUID } from "./ai-credits.ts";
+import { creditPacks, TOPUP_FEE_CENTS, UUID } from "./ai-credits.ts";
 
 export async function createCreditCheckout(
   dodo: DodoPayments,
@@ -21,7 +21,7 @@ export async function createCreditCheckout(
   if (
     price.type !== "one_time_price" ||
     price.currency !== "USD" ||
-    price.price !== pack.cents ||
+    price.price !== pack.cents + TOPUP_FEE_CENTS ||
     price.pay_what_you_want ||
     price.discount ||
     price.discount_bps ||
@@ -29,14 +29,13 @@ export async function createCreditCheckout(
   )
     throw new Error("This AI credit pack is not configured correctly.");
   const id = crypto.randomUUID();
-  const { error } = await db
-    .from("ai_credit_orders")
-    .insert({
-      id,
-      user_id: user.id,
-      product_id: pack.id,
-      credits_micros: pack.cents * 10000,
-    });
+  const { error } = await db.from("ai_credit_orders").insert({
+    id,
+    user_id: user.id,
+    product_id: pack.id,
+    credits_micros: pack.cents * 10000,
+    service_fee_cents: TOPUP_FEE_CENTS,
+  });
   if (error) throw error;
   const configured = Deno.env.get("FILEY_APP_URL") ?? "https://app.gofiley.com";
   const base = new URL(configured);
@@ -84,7 +83,10 @@ export async function reconcileCreditPayment(
     cart[0].product_id !== order.product_id ||
     cart[0].quantity !== 1 ||
     payment.currency !== "USD" ||
-    payment.total_amount < order.credits_micros / 10000
+    !Number.isSafeInteger(order.service_fee_cents) ||
+    order.service_fee_cents < 0 ||
+    !Number.isSafeInteger(payment.total_amount) ||
+    payment.total_amount < order.credits_micros / 10000 + order.service_fee_cents
   )
     throw new Error("Credit payment does not match its order.");
   if (payment.status !== "succeeded") return true;

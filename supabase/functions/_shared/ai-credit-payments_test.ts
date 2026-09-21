@@ -7,6 +7,7 @@ const order = {
   user_id: "30000000-0000-4000-8000-000000000001",
   product_id: "pdt_fixture",
   credits_micros: 5000000,
+  service_fee_cents: 50,
 };
 Deno.test(
   "credit payment verifies provider order, handles existing refunds and refuses spoofed buyers",
@@ -17,13 +18,13 @@ Deno.test(
       status: "succeeded",
       metadata: { type: "ai_credits", credit_order: order.id, user_id: order.user_id },
       currency: "USD",
-      total_amount: 525,
+      total_amount: 575,
       product_cart: [{ product_id: "pdt_fixture", quantity: 1 }],
       refunds: [
         {
           refund_id: "refund_fixture",
           status: "succeeded",
-          amount: 525,
+          amount: 575,
           currency: "USD",
         },
       ],
@@ -48,7 +49,16 @@ Deno.test(
     } as unknown as Parameters<typeof reconcileCreditPayment>[1];
     assert(await reconcileCreditPayment(dodo, db, "pay_fixture"));
     assert(events.map((e) => e.action).join(",") === "topup,refund,resolve_dispute");
-    assert(events[0].args.paid_cents === 525 && events[1].args.refund_cents === 525);
+    assert(events[0].args.paid_cents === 575 && events[1].args.refund_cents === 575);
+    payment.total_amount = 500;
+    let underpaid = false;
+    try {
+      await reconcileCreditPayment(dodo, db, "pay_fixture");
+    } catch {
+      underpaid = true;
+    }
+    assert(underpaid && events.length === 3, "The service fee must also be paid");
+    payment.total_amount = 575;
     payment.metadata.user_id = "wrong-user";
     let rejected = false;
     try {
@@ -72,7 +82,7 @@ Deno.test(
     try {
       let inserts = 0,
         checkouts = 0;
-      const price = { type: "one_time_price", currency: "USD", price: 500 };
+      const price = { type: "one_time_price", currency: "USD", price: 550 };
       const dodo = {
         products: { retrieve: async () => ({ price, is_recurring: false }) },
         checkoutSessions: {
@@ -92,7 +102,14 @@ Deno.test(
       } as unknown as Parameters<typeof createCreditCheckout>[0];
       const db = {
         from: () => ({
-          insert: async () => {
+          insert: async (value: {
+            credits_micros: number;
+            service_fee_cents: number;
+          }) => {
+            assert(
+              value.credits_micros === 5000000 && value.service_fee_cents === 50,
+              "The fee must never become spendable credit"
+            );
             inserts++;
             return { error: null };
           },

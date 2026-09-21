@@ -226,15 +226,17 @@ export default function AiCreditsPanel() {
                   ) : (
                     <ArrowUpRight size={15} />
                   )}
-                  Add {creditMoney(pack.cents * 10000)}
+                  {creditMoney(pack.cents * 10000)} credit · Pay{" "}
+                  {creditMoney((pack.cents + (data.topup_fee_cents ?? 0)) * 10000)}
                 </button>
               ))}
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              One-time top-ups. No auto-recharge or subscription required. Taxes, if
-              applicable, appear at checkout. Paid credits do not expire and are excluded
-              from the subscription refund program. A stopped request can still use
-              credits for work already performed.
+              Each top-up includes a {creditMoney((data.topup_fee_cents ?? 0) * 10000)}{" "}
+              Filey service fee, separate from your spendable credit. No auto-recharge or
+              subscription required. Taxes, if applicable, appear at checkout. Paid
+              credits do not expire and are excluded from the subscription refund program.
+              A stopped request can still use credits for work already performed.
             </p>
             <Link
               to="/settings?section=ai"
@@ -245,7 +247,7 @@ export default function AiCreditsPanel() {
           </SettingsSection>
           <SettingsSection
             title="Spending limits"
-            description="Limits include the service markup. Each task can make multiple model requests. Daily limits reset at midnight UTC."
+            description="These limits apply to paid model usage. Each task can make multiple model requests. Daily limits reset at midnight UTC."
           >
             <form onSubmit={save} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -285,7 +287,11 @@ export default function AiCreditsPanel() {
           </SettingsSection>
           <SettingsSection
             title="Model rates"
-            description={`Provider usage cost + ${data.markup_bps / 100}% Filey service markup. Rates below include the markup. Cached input is charged at the provider's actual cost.`}
+            description={
+              data.markup_bps
+                ? `Rates include ${data.markup_bps / 100}% service markup. Cached input is charged at the provider's actual cost.`
+                : "Pay the provider's usage cost, with no Filey usage markup. Free models never deduct credit and have shared availability limits."
+            }
             stacked
           >
             {data.models.length ? (

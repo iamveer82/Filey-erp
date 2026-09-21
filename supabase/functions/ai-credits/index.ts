@@ -2,6 +2,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CORS_HEADERS, json, rateLimit } from "../_shared/rateLimit.ts";
 import {
   chargedMicros,
+  creditModels,
+  requireModelFunding,
+  FREE_REQUESTS_PER_DAY,
+  TOPUP_FEE_CENTS,
   creditPacks,
   markupBps,
   prepareCreditRequest,
@@ -33,41 +37,7 @@ async function models(): Promise<CreditModel[]> {
     });
     if (!res.ok) throw new Error("The model catalogue is temporarily unavailable.");
     const body = await res.json();
-    const list: CreditModel[] = [];
-    for (const m of body.data ?? []) {
-      if (!allowed.has(m.id) || !m.supported_parameters?.includes("tools")) continue;
-      const input = Number(m.pricing?.prompt),
-        output = Number(m.pricing?.completion);
-      // Exclude models with extra request/image/search/audio charges. Supported
-      // vision models bill their image input as prompt tokens.
-      if (
-        ![input, output].every((n) => Number.isFinite(n) && n >= 0) ||
-        input + output <= 0 ||
-        Object.entries(m.pricing ?? {}).some(
-          ([k, v]) =>
-            !["prompt", "completion", "input_cache_read", "input_cache_write"].includes(
-              k
-            ) && Number(v) > 0
-        )
-      )
-        continue;
-      const context = Math.min(Number(m.context_length), 131072);
-      const maxOutput = Math.min(
-        Number(m.top_provider?.max_completion_tokens) || 8192,
-        8192,
-        context - 1024
-      );
-      if (!Number.isInteger(context) || context < 2048 || maxOutput < 1) continue;
-      list.push({
-        id: m.id,
-        name: m.name,
-        input,
-        output,
-        context,
-        maxOutput,
-        vision: !!m.architecture?.input_modalities?.includes("image"),
-      });
-    }
+    const list = creditModels(body.data, allowed);
     catalogue = { expires: Date.now() + 300000, models: list };
     return list;
   })().finally(() => {
@@ -76,7 +46,7 @@ async function models(): Promise<CreditModel[]> {
   return loading;
 }
 
-Deno.serve(async (req) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "Use POST." }, 405);
   const admin = createClient(
@@ -192,6 +162,8 @@ Deno.serve(async (req) => {
         history: history.data,
         models: availableModels,
         markup_bps: markup,
+        topup_fee_cents: TOPUP_FEE_CENTS,
+        free_requests_per_day: FREE_REQUESTS_PER_DAY,
         configured,
         packs: configured ? packs : [],
         topups_enabled:
@@ -209,7 +181,7 @@ Deno.serve(async (req) => {
         503
       );
     if (!user.email_confirmed_at)
-      return json({ error: "Verify your email before spending AI credits." }, 403);
+      return json({ error: "Verify your email before using Filey-hosted AI." }, 403);
     if (!UUID.test(String(body.request_id)) || !UUID.test(String(body.run_id)))
       return json({ error: "Invalid request identifier." }, 400);
     const payload = body.request as Record<string, unknown>;
@@ -224,22 +196,43 @@ Deno.serve(async (req) => {
       );
     let prepared;
     try {
+      requireModelFunding(body.funding, model);
       prepared = prepareCreditRequest(payload, model, markup);
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
-    try {
-      await wallet("reserve", {
-        request_id: body.request_id,
-        run_id: body.run_id,
-        model: model.id,
-        amount_micros: prepared.reserve,
-        markup_bps: markup,
-      });
-    } catch (e) {
-      return json({ error: (e as Error).message }, 402);
+    if (model.free) {
+      // Shared provider quota is additional to this per-account allowance.
+      if (!(await rateLimit(admin, user.id, "ai_free_day", FREE_REQUESTS_PER_DAY, 86400)))
+        return json(
+          {
+            error:
+              "Your free AI request allowance is used up. Try again in 24 hours, bring your own key, or choose Filey Credits.",
+          },
+          429
+        );
+      if (!(await rateLimit(admin, "filey-openrouter", "ai_free_minute", 20, 60)))
+        return json(
+          {
+            error:
+              "Free AI is busy. Please try again in a minute. Your credits were not used.",
+          },
+          429
+        );
+    } else {
+      try {
+        await wallet("reserve", {
+          request_id: body.request_id,
+          run_id: body.run_id,
+          model: model.id,
+          amount_micros: prepared.reserve,
+          markup_bps: markup,
+        });
+      } catch (e) {
+        return json({ error: (e as Error).message }, 402);
+      }
+      reservation = String(body.request_id);
     }
-    reservation = String(body.request_id);
     // Never retry a paid completion. The request ID remains consumed even if
     // the network fails. Client disconnect does not interrupt accounting.
     const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -255,16 +248,18 @@ Deno.serve(async (req) => {
     });
     if (!upstream.ok) {
       await upstream.body?.cancel();
-      await wallet("release", { request_id: reservation });
+      if (reservation) await wallet("release", { request_id: reservation });
       reservation = undefined;
       return json(
         {
           error:
-            upstream.status === 429
-              ? "This model is busy. No Filey credits were charged; try again shortly."
-              : "The model could not complete this request. No Filey credits were charged.",
+            model.free && (upstream.status === 429 || upstream.status === 402)
+              ? "The shared free AI allowance is unavailable or exhausted. Try later, bring your own key, or select Filey Credits. Your credits were not used."
+              : upstream.status === 429
+                ? "This model is busy. No Filey credits were charged; try again shortly."
+                : "The model could not complete this request. No Filey credits were charged.",
         },
-        502
+        upstream.status === 429 ? 429 : 502
       );
     }
     const completion = await upstream.json();
@@ -272,6 +267,13 @@ Deno.serve(async (req) => {
       throw new Error(
         "The provider did not return verifiable usage. No Filey credits were charged."
       );
+    if (model.free) {
+      if (completion.usage.cost !== 0)
+        throw new Error(
+          "The provider returned unexpected pricing. No Filey credits were charged."
+        );
+      return json({ completion, charged_micros: 0 });
+    }
     const cost = chargedMicros(completion.usage.cost, markup);
     const tokens = (n: unknown) => (Number.isSafeInteger(n) && Number(n) >= 0 ? n : null);
     const account = await wallet("settle", {
@@ -307,4 +309,6 @@ Deno.serve(async (req) => {
       503
     );
   }
-});
+}
+
+if (import.meta.main) Deno.serve(handleRequest);

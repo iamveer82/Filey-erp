@@ -85,7 +85,7 @@ try {
   console.log('PASS: exactly three of twelve concurrent requests reserve the three available slots.');
   run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','ai_credits']);
   const creditArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','ai_credits','-X','-q','-v','ON_ERROR_STOP=1'];
-  const creditMigration=sql('supabase/2026-09-20-ai-credits.sql');
+  const creditMigration=sql('supabase/2026-09-20-ai-credits.sql')+'\n'+sql('supabase/2026-09-21-ai-credit-topup-fee.sql');
   console.log(run('psql',creditArgs,"create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$; grant usage on schema public,auth to authenticated,service_role;\n"
     +creditMigration+'\n'+creditMigration+'\n'+sql('scripts/fixtures/ai-credit-assertions.sql')).trim());
   const creditRaces=await Promise.allSettled(Array.from({length:8},(_,i)=>promisify(execFile)(exe('psql'),[...creditArgs,'-tAc',

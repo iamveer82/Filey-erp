@@ -1,5 +1,8 @@
 import {
   chargedMicros,
+  creditModels,
+  requireModelFunding,
+  markupBps,
   creditPacks,
   prepareCreditRequest,
   type CreditModel,
@@ -28,6 +31,7 @@ const model: CreditModel = {
 Deno.test(
   "credits use micro-unit rounding, validate packs and reject unverified costs",
   () => {
+    assert(markupBps(undefined) === 0, "No usage markup after the top-up fee");
     assert(chargedMicros(0.000001, 2000) === 2);
     assert(chargedMicros(0.1, 2000) === 120000);
     for (const cost of [NaN, Infinity, -1, 1001])
@@ -42,6 +46,47 @@ Deno.test(
       rejects(() => creditPacks(input));
   }
 );
+
+Deno.test("free catalogue verifies zero pricing and cannot silently become paid", () => {
+  const row = {
+    id: "fixture/model:free",
+    name: "Free",
+    context_length: 32768,
+    supported_parameters: ["tools"],
+    pricing: { prompt: "0", completion: "0" },
+  };
+  const list = creditModels(
+    [
+      row,
+      { ...row, id: "openrouter/free" },
+      { ...row, id: "fixture/paid:free", pricing: { prompt: "0.1", completion: "0" } },
+      { ...row, id: "fixture/extra:free", pricing: { ...row.pricing, image: "0.1" } },
+      { ...row, id: "fixture/no-tools:free", supported_parameters: [] },
+    ],
+    new Set()
+  );
+  assert(list.length === 2 && list[0].id === "openrouter/free");
+  const free = list[0];
+  requireModelFunding("free", free);
+  rejects(() => requireModelFunding("free", model));
+  rejects(() => requireModelFunding("credits", free));
+  rejects(() => requireModelFunding(undefined, free));
+  const request = prepareCreditRequest(
+    {
+      messages: [{ role: "user", content: "Hi" }],
+      plugins: [{ id: "web" }],
+      reasoning_effort: "high",
+    },
+    free,
+    2000
+  );
+  assert(
+    request.reserve === 0 &&
+      request.request.provider.max_price.prompt === 0 &&
+      request.request.provider.max_price.completion === 0
+  );
+  assert(!("plugins" in request.request) && !("reasoning" in request.request));
+});
 Deno.test(
   "paid requests strip expensive routing/plugins and bound all output including reasoning",
   () => {

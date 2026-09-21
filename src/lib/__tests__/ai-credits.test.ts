@@ -26,9 +26,12 @@ beforeEach(() => {
     data: { session: { user: { id: "user-a" } } },
     error: null,
   } as never);
-  vi.spyOn(supabase!, "functions", "get").mockReturnValue({invoke:vi.fn().mockResolvedValue({
-    data: { completion: reply, account }, error: null,
-  })} as never);
+  vi.spyOn(supabase!, "functions", "get").mockReturnValue({
+    invoke: vi.fn().mockResolvedValue({
+      data: { completion: reply, account },
+      error: null,
+    }),
+  } as never);
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -73,6 +76,28 @@ it("never retries or falls back after a paid request fails", async () => {
   );
   expect(supabase!.functions.invoke).toHaveBeenCalledTimes(1);
   expect(network).not.toHaveBeenCalled();
+});
+
+it("free mode routes without a wallet balance and stays free across rounds", async () => {
+  setCreditChoice("free", "openrouter/free");
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: { completion: reply, charged_micros: 0 },
+    error: null,
+  });
+  expect(await aiChat([{ role: "user", text: "hello" }])).toBe("done");
+  const send = createCreditFetch("free");
+  setCreditChoice("credits", "fixture/paid");
+  await send("ignored", { body: '{"model":"openrouter/free"}' });
+  const calls = vi.mocked(supabase!.functions.invoke).mock.calls;
+  for (const call of calls) expect(call[1]?.body).toMatchObject({ funding: "free" });
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: null,
+    error: { context: { json: async () => ({ error: "Free allowance exhausted" }) } },
+  } as never);
+  await expect(send("ignored", { body: '{"model":"openrouter/free"}' })).rejects.toThrow(
+    "Free allowance exhausted"
+  );
+  expect(supabase!.functions.invoke).toHaveBeenCalledTimes(3);
 });
 
 it("BYOK failure never starts a wallet request; connection tests use BYOK even with credits selected", async () => {

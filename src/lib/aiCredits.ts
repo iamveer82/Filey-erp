@@ -2,7 +2,7 @@ import { supabase } from "./supabase";
 import { agentStorageScope, readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 export const AI_CREDITS_EVENT = "filey:ai-credits";
-export type AiFunding = "byok" | "credits";
+export type AiFunding = "byok" | "credits" | "free";
 export interface CreditModel {
   id: string;
   name: string;
@@ -11,6 +11,7 @@ export interface CreditModel {
   context: number;
   maxOutput: number;
   vision: boolean;
+  free?: boolean;
 }
 export interface CreditAccount {
   balance_micros: number;
@@ -33,6 +34,8 @@ export interface CreditStatus {
   models: CreditModel[];
   packs: { id: string; cents: number }[];
   markup_bps: number;
+  topup_fee_cents?: number;
+  free_requests_per_day?: number;
   configured: boolean;
   topups_enabled: boolean;
   notice: string | null;
@@ -48,7 +51,8 @@ export function creditChoice(): { funding: AiFunding; model: string } {
   try {
     const value = JSON.parse(readAgentStorage("filey.ai.funding") ?? "{}");
     return {
-      funding: value.funding === "credits" ? "credits" : "byok",
+      funding:
+        value.funding === "credits" || value.funding === "free" ? value.funding : "byok",
       model: typeof value.model === "string" ? value.model : "",
     };
   } catch {
@@ -56,8 +60,7 @@ export function creditChoice(): { funding: AiFunding; model: string } {
   }
 }
 export function setCreditChoice(funding: AiFunding, model = creditChoice().model) {
-  if (funding === "credits" && !model)
-    throw new Error("Choose a Filey Credits model first.");
+  if (funding !== "byok" && !model) throw new Error("Choose a Filey AI model first.");
   writeAgentStorage("filey.ai.funding", JSON.stringify({ funding, model }));
   window.dispatchEvent(new Event(AI_CREDITS_EVENT));
 }
@@ -142,7 +145,7 @@ export async function buyAiCredits(packId: string) {
 
 /** One closure per task; delegated rounds share its server-enforced budget.
  * Choice changes apply to the next task. Never fall back to credits from BYOK. */
-export function createCreditFetch() {
+export function createCreditFetch(funding: "credits" | "free" = "credits") {
   const runId = crypto.randomUUID(),
     scope = agentStorageScope();
   let owner: Awaited<ReturnType<typeof accountSession>> | undefined;
@@ -153,12 +156,13 @@ export function createCreditFetch() {
     const session = (owner ??= await accountSession());
     const result = await call<{
       completion: unknown;
-      account: CreditAccount;
+      account?: CreditAccount;
       charged_micros: number;
     }>(
       "ai-credits",
       {
         action: "completion",
+        funding,
         run_id: runId,
         request_id: crypto.randomUUID(),
         request: JSON.parse(String(init.body)),
@@ -167,7 +171,7 @@ export function createCreditFetch() {
     );
     // A stopped turn can have billable provider usage. Settle it, then stop
     // before any model output can execute another tool.
-    if (cached?.user === session.user.id)
+    if (result.account && cached?.user === session.user.id)
       cached = {
         ...cached,
         value: { ...cached.value, account: result.account },

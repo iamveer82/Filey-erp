@@ -1,5 +1,7 @@
 /** USD micro-units: never use a mutable client balance for billing. */
 export const MICROS = 1_000_000;
+export const TOPUP_FEE_CENTS = 50;
+export const FREE_REQUESTS_PER_DAY = 20;
 export const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type CreditModel = {
@@ -10,6 +12,8 @@ export type CreditModel = {
   context: number;
   maxOutput: number;
   vision: boolean;
+  free?: boolean;
+  reasoning?: boolean;
 };
 export type CreditPack = { id: string; cents: number };
 
@@ -35,10 +39,71 @@ export function creditPacks(raw: string): CreditPack[] {
 }
 
 export function markupBps(raw: string | undefined): number {
-  const value = Number(raw ?? "2000");
+  const value = Number(raw ?? "0");
   if (!Number.isInteger(value) || value < 0 || value > 10000)
     throw new Error("Invalid AI service markup");
   return value;
+}
+
+/** Rebuild from provider pricing: a ':free' name alone never grants free routing. */
+export function creditModels(rows: unknown, allowed: Set<string>): CreditModel[] {
+  if (!Array.isArray(rows)) return [];
+  const list: CreditModel[] = [];
+  for (const m of rows) {
+    if (typeof m?.id !== "string" || !m.supported_parameters?.includes("tools")) continue;
+    const input = Number(m.pricing?.prompt),
+      output = Number(m.pricing?.completion);
+    if (![input, output].every((n) => Number.isFinite(n) && n >= 0)) continue;
+    const free =
+      (m.id === "openrouter/free" || m.id.endsWith(":free")) &&
+      input === 0 &&
+      output === 0 &&
+      Object.values(m.pricing).every((v) => Number(v) === 0);
+    if (!free && (!allowed.has(m.id) || input + output <= 0)) continue;
+    if (
+      Object.entries(m.pricing ?? {}).some(
+        ([k, v]) =>
+          !["prompt", "completion", "input_cache_read", "input_cache_write"].includes(
+            k
+          ) && Number(v) > 0
+      )
+    )
+      continue;
+    const context = Math.min(Number(m.context_length), 131072);
+    const maxOutput = Math.min(
+      Number(m.top_provider?.max_completion_tokens) || 8192,
+      8192,
+      context - 1024
+    );
+    if (!Number.isInteger(context) || context < 2048 || maxOutput < 1) continue;
+    list.push({
+      id: m.id,
+      name: String(m.name ?? m.id),
+      input,
+      output,
+      context,
+      maxOutput,
+      vision: !!m.architecture?.input_modalities?.includes("image"),
+      free,
+      reasoning: m.supported_parameters.includes("reasoning"),
+    });
+  }
+  return list.sort(
+    (a, b) =>
+      Number(b.id === "openrouter/free") - Number(a.id === "openrouter/free") ||
+      Number(b.free) - Number(a.free) ||
+      a.name.localeCompare(b.name)
+  );
+}
+
+export function requireModelFunding(funding: unknown, model: CreditModel) {
+  // Missing funding is supported for older paid clients only.
+  if (funding !== undefined && funding !== "credits" && funding !== "free")
+    throw new Error("Choose how to use Filey AI.");
+  if ((funding === "free") !== !!model.free)
+    throw new Error(
+      "The model's pricing changed. Choose a model again; free mode never spends credits."
+    );
 }
 
 export function chargedMicros(cost: number, markup: number): number {
@@ -165,10 +230,12 @@ export function prepareCreditRequest(
     throw new Error(
       "This conversation is too large for the selected model. Start a new chat or choose a larger-context model."
     );
-  const reserve = Math.max(
-    1,
-    chargedMicros(inputBound * model.input + maxTokens * model.output, markup)
-  );
+  const reserve = model.free
+    ? 0
+    : Math.max(
+        1,
+        chargedMicros(inputBound * model.input + maxTokens * model.output, markup)
+      );
   return {
     reserve,
     request: {
@@ -182,7 +249,8 @@ export function prepareCreditRequest(
       body.temperature <= 2
         ? { temperature: body.temperature }
         : {}),
-      ...(typeof body.reasoning_effort === "string" &&
+      ...(model.reasoning !== false &&
+      typeof body.reasoning_effort === "string" &&
       ["low", "medium", "high", "xhigh"].includes(body.reasoning_effort)
         ? { reasoning: { effort: body.reasoning_effort } }
         : {}),

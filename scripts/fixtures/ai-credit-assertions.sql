@@ -9,7 +9,8 @@ select ('40000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
 do $$ declare u uuid; n integer; a jsonb; rejected boolean; begin
   for n in 1..3 loop
     u:=('30000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid;
-    a:=filey_ai_wallet('topup',u,jsonb_build_object('order_id','40000000-0000-4000-8000-'||lpad(n::text,12,'0'),'payment_id','pay_'||n,'paid_cents',500));
+    if n=3 then update ai_credit_orders set service_fee_cents=50 where user_id=u; end if;
+    a:=filey_ai_wallet('topup',u,jsonb_build_object('order_id','40000000-0000-4000-8000-'||lpad(n::text,12,'0'),'payment_id','pay_'||n,'paid_cents',case when n=3 then 550 else 500 end));
     assert (a->>'balance_micros')::bigint=5000000;
     a:=filey_ai_wallet('topup',u,jsonb_build_object('order_id','40000000-0000-4000-8000-'||lpad(n::text,12,'0'),'payment_id','pay_'||n,'paid_cents',500));
     assert (a->>'balance_micros')::bigint=5000000,'Duplicate topup changed money';

@@ -28,7 +28,7 @@ import { creditChoice, createCreditFetch } from "./aiCredits";
 export type AiProvider = "openai" | "anthropic";
 
 export interface AiConfig {
-  billing?: "credits";
+  billing?: "credits" | "free";
   provider: AiProvider;
   /** Base URL for the selected OpenAI-compatible or Anthropic API. */
   baseUrl: string;
@@ -97,15 +97,15 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
 
 export function getActiveAiConfig(): AiConfig {
   const choice = creditChoice();
-  return choice.funding === "credits" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model, apiKey: "", billing: "credits" } : getAiConfig();
+  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model, apiKey: "", billing: choice.funding } : getAiConfig();
 }
 
 async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
-  return funding !== "byok" && creditChoice().funding === "credits" ? getActiveAiConfig() : getAiRequestConfig();
+  return funding !== "byok" && creditChoice().funding !== "byok" ? getActiveAiConfig() : getAiRequestConfig();
 }
 
 export function aiReady(cfg: AiConfig = getActiveAiConfig()): boolean {
-  if (cfg.billing === "credits") return !!cfg.model.trim();
+  if (cfg.billing) return !!cfg.model.trim();
   return !!aiEndpoint(cfg.baseUrl) && !!cfg.model.trim() &&
     (!!cfg.apiKey.trim() || hasCredential(aiCredentialName(cfg)) || isLocalAiEndpoint(cfg));
 }
@@ -324,7 +324,7 @@ export async function aiChat(
     );
   return cfg.provider === "anthropic"
     ? anthropicChat(cfg, messages, opts)
-    : openaiChat(cfg, messages, opts, cfg.billing === "credits" ? createCreditFetch() : aiFetch);
+    : openaiChat(cfg, messages, opts, cfg.billing ? createCreditFetch(cfg.billing) : aiFetch);
 }
 
 /** Ceiling for one model request when the caller passes no signal of its own.
@@ -598,7 +598,7 @@ export async function* aiAgentStream(
   const scope = agentStorageScope();
   const prior = opts.isOwner === false ? "" : journalDigest();
   const context = prior ? [{ role: "system" as const, text: prior }, ...messages] : messages;
-  const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing === "credits" ? createCreditFetch() : aiFetch });
+  const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing ? createCreditFetch(cfg.billing) : aiFetch });
   const events: AgentEvent[] = [];
   try {
     for (;;) {
