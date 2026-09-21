@@ -37,7 +37,7 @@ buyer pays on Dodo's hosted page  ◄──────────────�
         │
         ├─► Dodo webhook: payment.succeeded  ──►  dodo fn  ──►  licenses row
         │
-        └─► browser returns to /#/settings?section=license&checkout=success
+        └─► browser returns to /#/settings?section=billing&plan=ultra&checkout=success
                    │
                    └─► claimPurchasedLicense() polls license_status, then
                        license_activate → signed ECDSA token → Ultra
@@ -45,8 +45,10 @@ buyer pays on Dodo's hosted page  ◄──────────────�
 
 The webhook is the **only** thing that grants a licence. The returning browser
 proves nothing — it is just a hint to start polling. A buyer who closes the tab
-still gets their licence; the next time they open the licence page, the
-entitlement is already there and the device activates.
+still gets their licence; the next sign-in or return to Filey collects the
+purchase and activates an eligible device automatically. Device slots are
+managed under Settings → Devices, also linked from Billing. Existing
+`section=license` links redirect to Devices; checkout returns still go to Billing.
 
 The licence token itself is unchanged: an ECDSA P-256 signature the desktop
 verifies offline forever, issued by `_shared/license.ts`.

@@ -60,6 +60,14 @@ try {
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
   console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql')+'\n'
     +sql('supabase/2026-09-19-billing-integrity.sql')+'\n'+sql('scripts/fixtures/billing-lifecycle-assertions.sql')).trim());
+  const refundMigration=sql('supabase/2026-09-20-subscription-refunds.sql');
+  console.log(run('psql',basicArgs,refundMigration+'\n'+refundMigration+'\n'+sql('scripts/fixtures/subscription-refund-assertions.sql')).trim());
+  const refundRaces = await Promise.all(Array.from({length:8},()=>
+    promisify(execFile)(exe('psql'),[...basicArgs,'-tAc',
+      "set role service_role; update subscription_refund_requests set status='processing' where payment_id='pay_test' and status='requested' returning id;"],
+      {encoding:'utf8',windowsHide:true})));
+  assert.equal(refundRaces.filter(r=>r.stdout.includes('90000000-0000-4000-8000-000000000001')).length,1);
+  console.log('PASS: exactly one of eight simultaneous merchant approvals can claim a refund.');
   run('createdb', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', 'team_acceptance']);
   const teamArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'team_acceptance', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
   const teamMigration = sql('supabase/2026-09-20-team-workspaces.sql');
@@ -75,6 +83,24 @@ try {
       {encoding:'utf8',windowsHide:true})));
   assert.equal(limitRace.filter(result => result.stdout.trim()==='t').length,3);
   console.log('PASS: exactly three of twelve concurrent requests reserve the three available slots.');
+  run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','ai_credits']);
+  const creditArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','ai_credits','-X','-q','-v','ON_ERROR_STOP=1'];
+  const creditMigration=sql('supabase/2026-09-20-ai-credits.sql')+'\n'+sql('supabase/2026-09-21-ai-credit-topup-fee.sql');
+  console.log(run('psql',creditArgs,"create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$; grant usage on schema public,auth to authenticated,service_role;\n"
+    +creditMigration+'\n'+creditMigration+'\n'+sql('scripts/fixtures/ai-credit-assertions.sql')).trim());
+  const creditRaces=await Promise.allSettled(Array.from({length:8},(_,i)=>promisify(execFile)(exe('psql'),[...creditArgs,'-tAc',
+    `set role service_role; select filey_ai_wallet('reserve','30000000-0000-4000-8000-000000000003','{"request_id":"70000000-0000-4000-8000-${String(i+1).padStart(12,'0')}","run_id":"80000000-0000-4000-8000-${String(i+1).padStart(12,'0')}","model":"fixture/model","amount_micros":1000000,"markup_bps":2000}');`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(creditRaces.filter(r=>r.status==='fulfilled').length,5);
+  for(const r of creditRaces) if(r.status==='rejected') assert.match(r.reason.stderr,/Not enough available AI credits/);
+  assert.equal(run('psql',[...creditArgs,'-tAc',"select balance_micros-reserved_micros from ai_credit_accounts where user_id='30000000-0000-4000-8000-000000000003'"]).trim(),'0');
+  console.log('PASS: five dollars funds exactly five of eight concurrent one-dollar reservations.');
+  const videoMigration=sql('supabase/2026-09-21-ai-video.sql');
+  console.log(run('psql',creditArgs,videoMigration+'\n'+videoMigration+'\n'+sql('scripts/fixtures/ai-video-assertions.sql')).trim());
+  const videoRaces=await Promise.all(Array.from({length:8},()=>promisify(execFile)(exe('psql'),[...creditArgs,'-tAc',
+    `set role service_role; select filey_ai_video('start','31000000-0000-4000-8000-000000000001','91000000-0000-4000-8000-000000000009','{"charge_micros":1250000}')->>'claimed';`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(videoRaces.filter(r=>r.stdout.trim()==='true').length,1);
+  assert.equal(run('psql',[...creditArgs,'-tAc',"select reserved_micros from ai_credit_accounts where user_id='31000000-0000-4000-8000-000000000001'"]).trim(),'1250000');
+  console.log('PASS: eight concurrent Generate clicks reserve and claim exactly one video.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }

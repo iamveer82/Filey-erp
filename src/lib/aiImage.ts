@@ -20,7 +20,7 @@ function configKey(expected?: string): string | null {
   if (expected && scope !== expected) throw new Error("Your workspace changed. Reopen image settings.");
   return scope ? `${STORE_KEY}:${encodeURIComponent(scope)}` : null;
 }
-const imageCredential = (cfg: Pick<ImageConfig,"baseUrl">) => `image:${aiEndpoint(cfg.baseUrl || getAiConfig().baseUrl)?.origin ?? "invalid"}`;
+export const imageCredential = (cfg: Pick<ImageConfig,"baseUrl">) => `image:${aiEndpoint(cfg.baseUrl || getAiConfig().baseUrl)?.origin ?? "invalid"}`;
 /** Image generation can legitimately take a while; the download of a
  *  provider-hosted result should not. */
 const GENERATE_TIMEOUT_MS = 180_000;
@@ -72,19 +72,21 @@ export function setImageConfig(patch: Partial<ImageConfig>, expectedScope?: stri
 /** Where images will actually be generated from, once the fallbacks are
  *  resolved. Exported so Settings can show it rather than making the user
  *  guess which key is in play. */
-export function resolveImageEndpoint(): {
+export function resolveImageEndpoint(img: ImageConfig = getImageConfig()): {
   baseUrl: string;
   apiKey: string;
   model: string;
   usable: boolean;
   why?: string;
 } {
-  const img = getImageConfig();
   const chat = getAiConfig();
   const baseUrl = (img.baseUrl || chat.baseUrl || "").replace(/\/+$/, "");
   const sameOrigin = aiEndpoint(baseUrl)?.origin === aiEndpoint(chat.baseUrl)?.origin;
   const apiKey = img.apiKey || (sameOrigin ? chat.apiKey : "") || "";
   const model = img.model || DEFAULTS.model;
+  const endpoint = aiEndpoint(baseUrl);
+  if (!endpoint || (endpoint.protocol !== "https:" && !isLocalAiEndpoint({ provider: "openai", baseUrl })))
+    return { baseUrl, apiKey, model, usable: false, why: "Use an HTTPS image API URL, or a local server on this device." };
   if (!apiKey && !hasCredential(imageCredential(img)) && !(sameOrigin && hasCredential(aiCredentialName(chat))) &&
       !isLocalAiEndpoint({ provider: "openai", baseUrl }))
     return { baseUrl, apiKey, model, usable: false, why: "No API key set." };
@@ -118,27 +120,28 @@ export interface GeneratedImage {
   bytes: Uint8Array;
   /** What the model was actually asked for, after any rewriting. */
   prompt: string;
+  mime: string;
 }
 
 /** Generate one image. Returns raw bytes so the caller decides where it goes —
  *  a file on disk, My Files, or the media of a social post. */
 export async function generateImage(
   prompt: string,
-  opts: { size?: string; model?: string } = {}
+  opts: { size?: string; model?: string; config?: Omit<ImageConfig, "apiKey"> } = {}
 ): Promise<GeneratedImage> {
   const text = prompt.trim();
   if (!text) throw new ImageError("An image needs a prompt.");
-  const ep = resolveImageEndpoint();
+  const img = opts.config ? { ...opts.config, apiKey: "" } : getImageConfig();
+  const ep = resolveImageEndpoint(img);
   if (!ep.usable) throw new ImageError(ep.why ?? "Image generation isn't configured.");
   const scope = getCacheScope();
   if (!scope) throw new ImageError("Sign in before generating images.");
-  const img = getImageConfig();
   const chat = getAiConfig();
   ep.apiKey = await readCredential(imageCredential(img), scope) ??
     (aiEndpoint(ep.baseUrl)?.origin === aiEndpoint(chat.baseUrl)?.origin ? await readCredential(aiCredentialName(chat), scope) : null) ?? "";
   if (!ep.apiKey && !isLocalAiEndpoint({ provider: "openai", baseUrl: ep.baseUrl }))
     throw new ImageError("The image provider needs its own API key.");
-  const size = opts.size || getImageConfig().size || DEFAULTS.size;
+  const size = opts.size || img.size || DEFAULTS.size;
 
   // Through the shared AI transport, not raw fetch: on the desktop that is the
   // native proxy, so providers without CORS headers work here exactly as they
@@ -156,7 +159,7 @@ export async function generateImage(
       }),
       signal: timeoutSignal(GENERATE_TIMEOUT_MS),
     },
-    { retries: 1 }
+    { retries: 0 }
   );
   const body = (await res.json().catch(() => ({}))) as {
     data?: { b64_json?: string; url?: string }[];
@@ -180,7 +183,9 @@ export async function generateImage(
     // timeout so a stalled CDN can't hang the turn.
     let img: Response;
     try {
-      img = await aiFetch(first.url, { signal: timeoutSignal(DOWNLOAD_TIMEOUT_MS) });
+      // The JSON-only native AI proxy cannot transport binary image bytes.
+      const { downloadMedia } = await import("./mediaDownload");
+      img = await downloadMedia(first.url, timeoutSignal(DOWNLOAD_TIMEOUT_MS));
     } catch {
       throw new ImageError("Could not download the generated image.");
     }
@@ -190,6 +195,11 @@ export async function generateImage(
     throw new ImageError("The provider returned neither image bytes nor a URL.");
   }
 
+  if (scope !== getCacheScope()) throw new ImageError("Your workspace changed. The image was not added to this workspace.");
+  if (!bytes.length || bytes.length > 20_000_000) throw new ImageError("The image is empty or exceeds the 20 MB limit.");
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const webp = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45;
+  const extension = jpeg ? "jpg" : webp ? "webp" : "png";
   const slug =
     text
       .toLowerCase()
@@ -197,5 +207,5 @@ export async function generateImage(
       .replace(/^-|-$/g, "")
       .slice(0, 40) || "image";
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-  return { name: `${slug}-${stamp}.png`, bytes, prompt: text };
+  return { name: `${slug}-${stamp}.${extension}`, bytes, prompt: text, mime: `image/${jpeg ? "jpeg" : extension}` };
 }

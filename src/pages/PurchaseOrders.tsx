@@ -2224,7 +2224,7 @@ function Editor({
 
       {/* Full-screen view modal. Portaled out of <main>'s scrolling subtree —
           WebView2 half-paints a `fixed` overlay that stays inside it. */}
-      {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.po_number || "PO preview"} size="full">
+      {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.po_number || "PO preview"} size="document">
             <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
               {viewPageCount > 1 && <div className="flex flex-wrap items-center gap-2">
               <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage(p => Math.max(1, p - 1))} aria-label="Back to previous preview page">Back</button>
@@ -2233,16 +2233,14 @@ function Editor({
             </div>}
               <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
-            <div className="min-w-0 overflow-auto">
-              <div className="mx-auto max-w-5xl">
-                <div className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]" data-no-i18n dir="ltr">
-                  <div style={{ position: "relative", minHeight: 1059 }}>
-                    <StampSignatureLayer
+            <FitPreview baseWidth={794} zoom={100} zoomable>
+                  <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
+                    {isLastViewPage && <StampSignatureLayer
                       stamp={activeStamp}
                       signature={activeSignature}
                       onStampMove={onStampMove}
                       onSignatureMove={onSignatureMove}
-                    />
+                    />}
                     <DocView
                       form={docViewForm as any}
                       pageItems={
@@ -2256,10 +2254,13 @@ function Editor({
                       showFooter={isLastViewPage}
                       labels={docViewLabels}
                     />
+                    {isLastViewPage && form.show_bank && (
+                      <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
+                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                      </DraggableBlock>
+                    )}
                   </div>
-                </div>
-              </div>
-            </div>
+            </FitPreview>
           </Modal>}
     </div>
   );

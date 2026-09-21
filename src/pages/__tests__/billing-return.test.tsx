@@ -4,6 +4,7 @@ import { HashRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import { awaitCloudPlan, getSubscription, openBillingPortal, type Subscription } from "../../lib/subscription";
 import BillingPanel from "../settings/BillingPanel";
+import { licensePurchased, claimPurchasedLicense } from "../../lib/license";
 
 vi.mock("../../lib/subscription", async (original) => ({
   ...await original<typeof import("../../lib/subscription")>(),
@@ -12,6 +13,7 @@ vi.mock("../../lib/subscription", async (original) => ({
 vi.mock("../../lib/license", () => ({
   verifyStoredLicense: async () => ({ valid: false }), entitlement: async () => "free",
   cloudAccess: async () => ({ reason: "free" }), FREE_LIMITS: { invoicesPerMonth: 5 },
+  licensePurchased: vi.fn(async () => false), claimPurchasedLicense: vi.fn(),
 }));
 vi.mock("../../lib/api", () => ({
   erp: { products: async () => [], orders: async () => [] },
@@ -23,7 +25,25 @@ vi.mock("../../lib/supabase", () => ({ supabase: null }));
 
 beforeEach(() => {
   vi.mocked(getSubscription).mockResolvedValue({ plan: "free" });
+  vi.mocked(licensePurchased).mockResolvedValue(false);
   window.history.replaceState(null, "", "/#/settings?section=billing&checkout=success");
+});
+
+it("shows account-owned Ultra without a local activation token or a second purchase button", async () => {
+  window.history.replaceState(null, "", "/#/settings?section=billing");
+  vi.mocked(licensePurchased).mockResolvedValue(true);
+  render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
+  await waitFor(() => expect(screen.queryByRole("button", { name: /Get Ultra/ })).toBeNull());
+  expect(screen.getByRole("link", { name: "Open AI wallet" })).toHaveAttribute("href", "#/settings?section=credits");
+});
+
+it("activates an Ultra return without waiting for a Pro subscription", async () => {
+  window.history.replaceState(null, "", "/#/settings?section=billing&checkout=success&plan=ultra");
+  vi.mocked(claimPurchasedLicense).mockResolvedValue({ valid: true });
+  render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
+  await screen.findByText("Ultra is active on this device.");
+  expect(claimPurchasedLicense).toHaveBeenCalledTimes(1);
+  expect(awaitCloudPlan).not.toHaveBeenCalled();
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); window.history.replaceState(null, "", "/"); });
 

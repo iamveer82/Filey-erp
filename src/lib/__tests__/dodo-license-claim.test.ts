@@ -9,7 +9,7 @@ const state = { licensedAfter: 0, activateCalls: 0 };
 vi.mock("../supabase", () => ({
   isConfigured: true,
   cloudConfigured: true,
-  supabase: {},
+  supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: "buyer" } } }, error: null }) } },
   invokeFn: async (_client: unknown, fn: string, opts: { body: { action: string } }) => {
     calls.push({ action: opts.body.action });
     if (fn !== "dodo") throw new Error(`unexpected function: ${fn}`);

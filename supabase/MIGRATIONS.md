@@ -1,5 +1,14 @@
 # Supabase migrations — apply order & convention
 
+## AI credits and subscription refunds
+
+`2026-09-20-ai-credits.sql` adds the hosted wallet ledger and service-only accounting
+RPC. `2026-09-20-subscription-refunds.sql` adds service-only subscription refund
+requests after `organizations` exists. Both are additive and idempotent; neither
+changes customer ERP records or desktop sync tables. Deploy `ai-credits` and
+`dodo` after these migrations. Activation secrets and verification steps are in
+[`docs/ai-credits.md`](../docs/ai-credits.md).
+
 ## September 20 live reconciliation
 
 Applied and read back from `voyrjqgaypiylwskkwpr`:
@@ -122,3 +131,10 @@ A column referenced by the app but absent in the DB is a silent production failu
 is deployed alongside it. See [business permissions](../docs/business-permissions.md).
 Disposable PostgreSQL tests do not prove production policy state — re-read
 `pg_policies` when in doubt.
+# Optional AI credits — 20 September 2026
+
+Apply `2026-09-20-ai-credits.sql` before deploying `ai-credits` and the updated
+`dodo`. This adds four account-isolated cloud billing tables and the service-only
+`filey_ai_wallet` transaction function. These tables must **not** be added to the
+desktop synchronization allowlist. See [AI credits setup](../docs/ai-credits.md)
+for provider secrets, Dodo products, webhook events and release checks.

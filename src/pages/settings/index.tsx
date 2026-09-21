@@ -13,11 +13,11 @@ import {
   Grid3x3,
   Palette,
   Lock,
-  Activity,
-  KeyRound,
-  Stethoscope,
+  Monitor,
+  Wallet,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
+import { SettingsPanel } from "../../components/SettingsLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
 import { cloudConfigured } from "../../lib/supabase";
 import { cn } from "../../lib/format";
@@ -25,8 +25,7 @@ const CompanyDetails = lazy(() => import("./CompanyDetails"));
 const AccountProfile = lazy(() => import("./AccountProfile"));
 const AiSettings = lazy(() => import("../../components/AiSettings"));
 const UsersRoles = lazy(() => import("./UsersRoles"));
-const ActivityLog = lazy(() => import("./ActivityLog"));
-const DiagnosticsPanel = lazy(() => import("./DiagnosticsPanel"));
+const PlanDevices = lazy(() => import("./PlanDevices"));
 const SecurityPanel = lazy(() => import("./SecurityPanel"));
 const ChangePasswordModal = lazy(() => import("./SecurityPanel").then(module => ({default:module.ChangePasswordModal})));
 const AppsManager = lazy(() => import("./AppsManager"));
@@ -34,9 +33,9 @@ const AppearancePanel = lazy(() => import("./AppearancePanel"));
 const PreferencesPanel = lazy(() => import("./PreferencesPanel"));
 const NotificationsPanel = lazy(() => import("./NotificationsPanel"));
 const BillingPanel = lazy(() => import("./BillingPanel"));
+const AiCreditsPanel = lazy(() => import("./AiCreditsPanel"));
 const BackupPanel = lazy(() => import("./BackupPanel"));
 const DataModePanel = lazy(() => import("./DataModePanel"));
-const LicensePanel = lazy(() => import("./LicensePanel"));
 
 type Section =
   | "company"
@@ -46,12 +45,12 @@ type Section =
   | "appearance"
   | "preferences"
   | "billing"
+  | "credits"
   | "security"
   | "notifications"
   | "backup"
   | "datamode"
-  | "activity"
-  | "diagnostics"
+  | "devices"
   | "ai"
   | "license";
 
@@ -59,29 +58,37 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
+  { id: "credits", label: "AI Wallet", icon: Wallet },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { id: "billing", label: "Billing & Subscription", icon: CreditCard },
-  { id: "license", label: "Desktop License", icon: KeyRound },
+  { id: "devices", label: "Devices", icon: Monitor },
   { id: "security", label: "Security", icon: Lock },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
   { id: "datamode", label: "Data & Storage", icon: HardDrive },
-  { id: "activity", label: "Activity Log", icon: Activity },
-  { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
 ];
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the
 // user never lands on a panel of dead/erroring controls.
-const CLOUD_ONLY = new Set<Section>(["users", "billing", "security"]);
+const CLOUD_ONLY = new Set<Section>(["users", "billing", "devices", "security"]);
 const NAV = ALL_NAV.filter((n) => cloudConfigured || !CLOUD_ONLY.has(n.id));
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const requested = (params.get("section") ?? "") as Section;
-  const section = NAV.some((n) => n.id === requested) ? requested : "company";
+  const legacyTarget = params.has("checkout") ? "billing" : "devices";
+  const target = requested === "license" ? legacyTarget : requested;
+  const section = NAV.some((n) => n.id === target) ? target : "company";
+  useEffect(() => {
+    if (requested !== "license") return;
+    const next = new URLSearchParams(params);
+    next.set("section", section);
+    if (next.has("checkout")) next.set("plan", "ultra");
+    setParams(next, { replace: true });
+  }, [requested, params, setParams, section]);
   const activeTab = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     activeTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -136,18 +143,17 @@ export default function Settings() {
               { id: "company", el: <CompanyDetails /> },
               { id: "account", el: <AccountProfile /> },
               { id: "ai", el: <AiSettings /> },
+              { id: "credits", el: <AiCreditsPanel /> },
               { id: "users", el: <UsersRoles /> },
               { id: "apps", el: <AppsManager /> },
               { id: "appearance", el: <AppearancePanel /> },
-              { id: "activity", el: <ActivityLog /> },
-              { id: "diagnostics", el: <DiagnosticsPanel /> },
+              { id: "devices", el: <SettingsPanel><PlanDevices /></SettingsPanel> },
               {
                 id: "security",
                 el: <SecurityPanel onChangePassword={() => setPwOpen(true)} />,
               },
               { id: "preferences", el: <PreferencesPanel /> },
               { id: "billing", el: <BillingPanel /> },
-              { id: "license", el: <LicensePanel /> },
               { id: "notifications", el: <NotificationsPanel /> },
               { id: "backup", el: <BackupPanel /> },
               { id: "datamode", el: <DataModePanel /> },

@@ -3,6 +3,7 @@ import { supabase, cloudConfigured } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
@@ -280,6 +281,13 @@ export default function AccountProfile() {
 
   return (
     <SettingsPanel>
+      <SettingsSection title="Your Filey account" description="Your plan, AI wallet and payment history in one place.">
+        <div className="flex flex-wrap gap-2">
+          <Link className="btn-primary" to="/settings?section=credits">Open AI wallet</Link>
+          <Link className="btn-ghost" to="/settings?section=billing">Manage plan & billing</Link>
+        </div>
+        <p className="text-sm text-muted-foreground">AI credits are optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
+      </SettingsSection>
       <SettingsSection
         title="Profile Information"
         description="Your personal details and profile photo."
@@ -501,8 +509,8 @@ export default function AccountProfile() {
           Connect your account with other services
         </p>
         {[
-          { n: "Google", s: "OAuth not configured" },
-          { n: "Apple", s: "OAuth not configured" },
+          { n: "Google", s: "Not available yet" },
+          { n: "Apple", s: "Not available yet" },
         ].map((a) => (
           <div
             key={a.n}
@@ -515,7 +523,7 @@ export default function AccountProfile() {
             <button
               className="btn-ghost text-xs"
               disabled
-              title="Configure the provider in Supabase Auth to enable"
+              title="This sign-in option is not available yet"
             >
               Connect
             </button>

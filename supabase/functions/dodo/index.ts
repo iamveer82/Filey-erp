@@ -37,6 +37,8 @@ import {
   type LicenseResult,
 } from "../_shared/license.ts";
 import { buyerOf, planPatchFor, type DodoPurchase } from "../_shared/billing.ts";
+import { createCreditCheckout, reconcileCreditPayment } from "../_shared/ai-credit-payments.ts";
+import { subscriptionRefundAction, reconcileSubscriptionRefund } from "../_shared/subscription-refunds.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -119,9 +121,18 @@ Deno.serve(async (req) => {
     // the next step differently for each.
     const fromApp = payload.from === "web" ? "" : "&from=app";
 
-    const allowed = await rateLimit(supa, user.id, "dodo_action", 20, 3600);
+    const billingRead = action === "subscription_refunds" || action === "subscription_refund_payments";
+    const allowed = await rateLimit(supa, user.id, billingRead ? "dodo_read" : "dodo_action", billingRead ? 120 : 20, 3600);
     if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
     await logAction(supa, user.id, "dodo_action", { action });
+
+    // Account-owned and available on every tier, independently of org billing.
+    if (action === "checkout_ai_credits") return json(await createCreditCheckout(dodo, supa, user, payload.pack_id));
+
+    if (["subscription_refunds", "subscription_refund_payments", "request_subscription_refund", "review_subscription_refund", "refresh_subscription_refund"].includes(action)) {
+      if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
+      return json(await subscriptionRefundAction(dodo, supa, user.id, await userOrg(supa, user.id), payload));
+    }
 
     if (action === "license_status") return reply(await licenseStatus(supa, user.id));
 
@@ -303,6 +314,18 @@ async function handleWebhook(req: Request): Promise<Response> {
   if (event.type.startsWith("subscription.")) {
     try { return await handleSubscription(event.data, event.timestamp); }
     catch { return json({ error: "Could not update subscription. Delivery will be retried." }, 500); }
+  }
+
+  if ((event.type === "payment.succeeded" && (event.data as { metadata?: { type?: string } }).metadata?.type === "ai_credits") || event.type.startsWith("refund.") || event.type.startsWith("dispute.")) {
+    const paymentId = (event.data as { payment_id?: string }).payment_id;
+    if (paymentId) {
+      try {
+        if (await reconcileCreditPayment(dodo, admin(), paymentId)) return json({ received: true, credits: true });
+        if (event.type.startsWith("refund.") && await reconcileSubscriptionRefund(dodo, admin(), paymentId))
+          return json({ received: true, subscription_refund: true });
+      }
+      catch { return json({ error: "Payment reconciliation failed. Delivery will be retried." }, 500); }
+    }
   }
 
   // Everything else (disputes, refunds) is recorded by Dodo; only a completed

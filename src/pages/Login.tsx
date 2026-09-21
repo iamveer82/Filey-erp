@@ -709,7 +709,7 @@ export default function Login() {
         )}
 
         <p className="text-[11px] text-brand-400 text-center mt-6">
-          Protected workspace · Supabase-secured
+          Secure sign-in · Your workspace, protected
         </p>
       </div>
     </div>

@@ -1125,24 +1125,16 @@ export default function PaymentReceipt() {
                   Portaled out of <main>'s scrolling subtree: WebView2
                   half-paints a `fixed` overlay that stays inside it. */}
               {viewOpen &&
-                <Modal open onClose={() => setViewOpen(false)} title={form.number || "Receipt preview"} size="full">
+                <Modal open onClose={() => setViewOpen(false)} title={form.number || "Receipt preview"} size="document">
             <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
 
               <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
             </div>
-            <div className="min-w-0 overflow-auto">
-                        <div className="mx-auto max-w-5xl">
-                          <div
-                            data-no-i18n
-                            dir="ltr"
-                            className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                          >
-                            <div style={{ position: "relative", minHeight: 1059 }}>
+            <FitPreview baseWidth={794} zoom={100} padding={0} zoomable>
+                            <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
                               {docContent(form!)}
                             </div>
-                          </div>
-                        </div>
-                      </div>
+            </FitPreview>
           </Modal>}
 
               <Modal

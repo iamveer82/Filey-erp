@@ -13,6 +13,37 @@ use crate::error::{AppError, AppResult};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::time::Duration;
+use std::io::Read;
+use base64::Engine;
+
+#[derive(Serialize)]
+pub struct MediaResponse {
+    pub data: String,
+    pub mime: String,
+}
+
+/// Binary images cannot pass through the text-only ai_proxy response.
+/// No authorization, cookies or redirects are forwarded to media hosts.
+#[tauri::command]
+pub async fn ai_download_media(url: String) -> AppResult<MediaResponse> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let parsed = tauri::Url::parse(&url).map_err(|_| AppError::Http("Invalid media URL".into()))?;
+        let host = parsed.host_str().unwrap_or("");
+        if parsed.scheme() != "https" || !parsed.username().is_empty() || parsed.password().is_some()
+            || parsed.port().is_some() || !host.contains('.') || host.parse::<std::net::IpAddr>().is_ok()
+            || ["localhost", "local", "internal"].iter().any(|s| host == *s || host.ends_with(&format!(".{s}"))) {
+            return Err(AppError::Http("Invalid media URL".into()));
+        }
+        let response = ureq::AgentBuilder::new().timeout(Duration::from_secs(60)).redirects(0).build()
+            .get(&url).call().map_err(|_| AppError::Http("Could not download media".into()))?;
+        let mime = response.header("content-type").unwrap_or("application/octet-stream").to_string();
+        let mut bytes = Vec::new();
+        response.into_reader().take(20_000_001).read_to_end(&mut bytes)
+            .map_err(|_| AppError::Http("Could not read media".into()))?;
+        if bytes.is_empty() || bytes.len() > 20_000_000 { return Err(AppError::Http("Image exceeds 20 MB or is empty".into())); }
+        Ok(MediaResponse { data: base64::engine::general_purpose::STANDARD.encode(bytes), mime })
+    }).await.map_err(|e| AppError::Http(e.to_string()))?
+}
 
 #[derive(Serialize)]
 pub struct ProxyResponse {
@@ -45,6 +76,7 @@ fn ai_proxy_blocking(
 ) -> AppResult<ProxyResponse> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(180))
+        .redirects(0)
         .build();
 
     let mut req = match method.to_uppercase().as_str() {

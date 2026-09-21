@@ -1,4 +1,5 @@
-import { supabase, invokeFn } from "./supabase";
+import { supabase } from "./supabase";
+import { billingRequest, paymentUrl } from "./billingService";
 import { clearEntitlementCache, resolveTier } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
@@ -119,16 +120,8 @@ export async function getSubscription(): Promise<Subscription> {
 }
 
 async function invokeDodo(body: Record<string, unknown>): Promise<string> {
-  if (!supabase) throw new Error("Not configured");
-  const { data, error } = (await invokeFn(supabase, "dodo", { body })) as {
-    data: { url?: string; error?: string } | null;
-    error: { message: string } | null;
-  };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.url)
-    throw new Error("Billing isn't set up yet. Add the Dodo Payments keys to the edge function.");
-  return data.url as string;
+  const data = await billingRequest<{ url?: string }>(body);
+  return paymentUrl(data?.url);
 }
 
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -148,7 +141,9 @@ async function openBilling(url: string): Promise<"redirected" | "browser"> {
 
 /** Subscribe to the Cloud plan. The webhook sets the org's plan; the caller
  *  refreshes the subscription afterwards to show it. */
-export async function startCheckout(plan: Plan = "cloud"): Promise<"redirected" | "browser"> {
+export async function startCheckout(
+  plan: Plan = "cloud"
+): Promise<"redirected" | "browser"> {
   if (plan !== "cloud") throw new Error(`No checkout for the ${plan} plan.`);
   return openBilling(await invokeDodo({ action: "checkout_cloud" }));
 }
@@ -156,6 +151,35 @@ export async function startCheckout(plan: Plan = "cloud"): Promise<"redirected" 
 /** Dodo's customer portal: change card, download invoices, cancel. */
 export async function openBillingPortal(): Promise<"redirected" | "browser"> {
   return openBilling(await invokeDodo({ action: "portal" }));
+}
+
+export interface SubscriptionRefund {
+  id: string;
+  org_id: string;
+  payment_id: string;
+  amount: number;
+  currency: string;
+  reason: string;
+  status: string;
+  refunded_amount: number;
+  review_note: string;
+  created_at: string;
+}
+export interface RefundOverview {
+  requests: SubscriptionRefund[];
+  queue: SubscriptionRefund[];
+  reviewer: boolean;
+  can_manage: boolean;
+}
+export interface RefundPayment {
+  payment_id: string;
+  amount: number;
+  currency: string;
+  created_at: string;
+}
+/** Financial actions deliberately bypass invokeFn's automatic retries. */
+export async function refundAction<T>(body: Record<string, unknown>): Promise<T> {
+  return billingRequest<T>(body);
 }
 
 /** Poll the org's plan until the webhook has switched it on, for the desktop

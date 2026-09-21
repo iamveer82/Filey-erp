@@ -30,6 +30,7 @@ jobs:
       - run: npm run test:edge
       - run: deno check --lock=deno.lock --frozen supabase/functions/integrations/index.ts
       - run: deno check --lock=deno.lock --frozen supabase/functions/team-invite/index.ts
+      - run: deno check --lock=deno.lock --frozen supabase/functions/ai-video/index.ts supabase/functions/ai-credits/index.ts
       - run: deno check --lock=deno.lock --frozen supabase/functions/dodo/index.ts supabase/functions/stripe/index.ts supabase/functions/agent-jobs/index.ts supabase/functions/run-tool/index.ts supabase/functions/channel-webhook/index.ts supabase/functions/send-email/index.ts
       - run: npm run build -- --manifest
       - run: node scripts/check-route-bundles.mjs

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import AccountProfile from "../settings/AccountProfile";
+import { MemoryRouter } from "react-router-dom";
 const fixture = vi.hoisted(() => ({ save: vi.fn(), error: vi.fn() }));
 vi.mock("../../lib/auth", () => ({ useAuth: () => ({ profile: { name: "Test User", email: "test@example.invalid" }, updateProfile: fixture.save }) }));
 vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { error: fixture.error, success: vi.fn() } }) }));
@@ -18,7 +19,7 @@ it("bounds a large avatar before saving and preserves other fields edited while 
     expect([this.width, this.height]).toEqual([512, 256]);
     return "data:image/webp;base64,small";
   });
-  const { container } = render(<AccountProfile />);
+  const { container } = render(<MemoryRouter><AccountProfile /></MemoryRouter>);
   fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["photo"], "photo.png", { type: "image/png" })] } });
   fireEvent.change(screen.getByLabelText(/Full Name/), { target: { value: "Updated name" } });
   resolve(bitmap);
@@ -30,7 +31,7 @@ it("bounds a large avatar before saving and preserves other fields edited while 
 
 it("reports an unreadable photo without pretending it was uploaded", async () => {
   vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new Error("Bad image")));
-  const { container } = render(<AccountProfile />);
+  const { container } = render(<MemoryRouter><AccountProfile /></MemoryRouter>);
   fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["bad"], "photo.png", { type: "image/png" })] } });
   await waitFor(() => expect(fixture.error).toHaveBeenCalledWith(expect.stringContaining("Could not read")));
   expect(screen.queryByAltText("Profile photo")).toBeNull();

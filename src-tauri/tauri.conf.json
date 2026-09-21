@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Filey ERP",
-  "version": "2.11.1",
+  "version": "3.0.0",
   "identifier": "com.iamvi.filey-erp",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https://logos.composio.dev https://upload.wikimedia.org https://thumb.wikimedia.org; frame-src 'self' blob: data:; object-src 'self' blob: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co https://api.frankfurter.app https://api.frankfurter.dev https://api.worldbank.org https://openholidaysapi.org https://commons.wikimedia.org https://fonts.googleapis.com https://fonts.gstatic.com"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https://*.fal.media https://fal.media https://logos.composio.dev https://upload.wikimedia.org https://thumb.wikimedia.org; media-src 'self' blob: https:; frame-src 'self' blob: data:; object-src 'self' blob: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co https://api.frankfurter.app https://api.frankfurter.dev https://api.worldbank.org https://openholidaysapi.org https://commons.wikimedia.org https://fonts.googleapis.com https://fonts.gstatic.com"
     }
   },
   "bundle": {

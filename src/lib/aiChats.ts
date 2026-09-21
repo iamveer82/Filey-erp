@@ -8,13 +8,13 @@ export interface ChatTurn {
   text: string;
   /** Files the agent produced on this turn, kept with the message that made
    *  them so they stay reachable instead of vanishing at the next question. */
-  files?: { name: string; path?: string; url?: string }[];
+  files?: { name: string; path?: string; url?: string; videoJobId?: string; mediaJobId?: string }[];
   run?: {
     plan: { step: string; status: "pending" | "in_progress" | "completed" | "blocked" }[];
     actions: {
       id: string;
       name: string;
-      status: "running" | "completed" | "failed";
+      status: "running" | "completed" | "failed" | "waiting";
       detail?: string;
     }[];
     outcome?: string;
@@ -81,8 +81,8 @@ export function saveChats(chats: Chat[], expectedScope?: string): boolean {
         ...(t.files
           ? {
               files: t.files
-                .map(({ name, path }) => ({ name, path }))
-                .filter((f) => f.path),
+                .map(({ name, path, videoJobId, mediaJobId }) => ({ name, path, videoJobId, mediaJobId }))
+                .filter((f) => f.path || f.videoJobId || f.mediaJobId),
             }
           : {}),
         ...(t.run
