@@ -153,10 +153,14 @@ export async function handleRequest(req: Request): Promise<Response> {
           .eq("user_id", user.id)
           .order("id", { ascending: false })
           .limit(30),
-        apiKey ? models() : Promise.resolve([]),
+        // A chat-provider outage must not hide the wallet or block video usage.
+        apiKey ? models().catch(() => []) : Promise.resolve([]),
       ]);
       if (history.error) throw history.error;
       const configured = !!apiKey && availableModels.length > 0;
+      const videoConfigured =
+        !!Deno.env.get("HF_API_KEY_ID") && !!Deno.env.get("HF_API_KEY_SECRET");
+      const walletReady = configured || videoConfigured;
       return json({
         account,
         history: history.data,
@@ -165,12 +169,15 @@ export async function handleRequest(req: Request): Promise<Response> {
         topup_fee_cents: TOPUP_FEE_CENTS,
         free_requests_per_day: FREE_REQUESTS_PER_DAY,
         configured,
-        packs: configured ? packs : [],
+        video_configured: videoConfigured,
+        packs: walletReady ? packs : [],
         topups_enabled:
-          configured && packs.length > 0 && !!Deno.env.get("DODO_PAYMENTS_API_KEY"),
+          walletReady && packs.length > 0 && !!Deno.env.get("DODO_PAYMENTS_API_KEY"),
         notice: configured
           ? null
-          : "Filey-funded AI is being set up. Your own API key still works.",
+          : videoConfigured
+            ? "Video generation is connected. Managed chat models are still being set up; your own chat API key still works."
+            : "Filey-funded AI is being set up. Your own API key still works.",
       });
     }
     if (action !== "completion")

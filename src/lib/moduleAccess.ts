@@ -59,6 +59,8 @@ const MODULE_FREE = new Set([
   "list_skills","use_skill","learn_skill","import_skill",
   "list_toolsets","use_toolset",
   "generate_image","work_service",
+  // Personal AI-credit wallet; no business records or organization funds.
+  "create_video_draft","list_video_jobs","get_video_job","cancel_video_job",
   "read_web_page","search_web","enrich_company_website","find_prospects",
   "read_github","read_github_file","search_github","watch_youtube","read_rss","read_social_page",
   "save_secret","recall_secret","list_secrets",

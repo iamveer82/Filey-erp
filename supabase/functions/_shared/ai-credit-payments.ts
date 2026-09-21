@@ -8,7 +8,10 @@ export async function createCreditCheckout(
   user: User,
   packId: unknown
 ) {
-  if (!Deno.env.get("FILEY_AI_OPENROUTER_KEY"))
+  if (
+    !Deno.env.get("FILEY_AI_OPENROUTER_KEY") &&
+    !(Deno.env.get("HF_API_KEY_ID") && Deno.env.get("HF_API_KEY_SECRET"))
+  )
     throw new Error("Filey-funded AI is not available yet.");
   if (!user.email_confirmed_at || !user.email)
     throw new Error("Verify your email before adding AI credits.");

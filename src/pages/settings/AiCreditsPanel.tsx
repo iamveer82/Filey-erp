@@ -247,7 +247,7 @@ export default function AiCreditsPanel() {
           </SettingsSection>
           <SettingsSection
             title="Spending limits"
-            description="These limits apply to paid model usage. Each task can make multiple model requests. Daily limits reset at midnight UTC."
+            description="These limits apply to paid chat and videos. Each video is a separate task. Daily limits reset at midnight UTC."
           >
             <form onSubmit={save} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -286,14 +286,26 @@ export default function AiCreditsPanel() {
             </form>
           </SettingsSection>
           <SettingsSection
-            title="Model rates"
+            title="AI rates"
             description={
               data.markup_bps
-                ? `Rates include ${data.markup_bps / 100}% service markup. Cached input is charged at the provider's actual cost.`
-                : "Pay the provider's usage cost, with no Filey usage markup. Free models never deduct credit and have shared availability limits."
+                ? `Chat rates include ${data.markup_bps / 100}% service markup. Cached input is charged at the provider's actual cost.`
+                : "Chat uses the provider's usage cost, with no Filey usage markup. Free chat models never deduct credit and have shared availability limits."
             }
             stacked
           >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+              <div>
+                <p className="text-sm font-medium">Brand videos · Seedance 2.0</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  $0.25 per second · 720p · 4–15 seconds · Charged on completion
+                </p>
+              </div>
+              <Link className="btn-ghost" to="/agent?video=1">
+                {data.video_configured ? "Create a video" : "Video setup & history"}
+                <ArrowUpRight size={14} />
+              </Link>
+            </div>
             {data.models.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-left">

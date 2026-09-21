@@ -106,7 +106,7 @@ export function createGuard(): AgentGuard {
 
   return {
     before(name, args) {
-      if (name === "workspace_browser") return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "browser") &&

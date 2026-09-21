@@ -75,7 +75,12 @@ Deno.test(
 Deno.test(
   "checkout grants nothing and checks the configured product price before taking payment",
   async () => {
-    const names = ["FILEY_AI_OPENROUTER_KEY", "DODO_AI_CREDIT_PACKS"];
+    const names = [
+      "FILEY_AI_OPENROUTER_KEY",
+      "DODO_AI_CREDIT_PACKS",
+      "HF_API_KEY_ID",
+      "HF_API_KEY_SECRET",
+    ];
     const previous = names.map((n) => Deno.env.get(n));
     Deno.env.set(names[0], "fixture-not-a-real-key");
     Deno.env.set(names[1], '[{"id":"pdt_fixture","cents":500}]');
@@ -122,6 +127,14 @@ Deno.test(
       } as Parameters<typeof createCreditCheckout>[2];
       await createCreditCheckout(dodo, db, user, "pdt_fixture");
       assert(inserts === 1 && checkouts === 1);
+      Deno.env.delete(names[0]);
+      Deno.env.set(names[2], "fixture-video-id");
+      Deno.env.set(names[3], "fixture-video-secret");
+      await createCreditCheckout(dodo, db, user, "pdt_fixture");
+      assert(
+        Number(inserts) === 2 && Number(checkouts) === 2,
+        "Video-only accounts can add credits without a chat provider key"
+      );
       price.price = 100;
       let rejected = false;
       try {
@@ -129,7 +142,7 @@ Deno.test(
       } catch {
         rejected = true;
       }
-      assert(rejected && inserts === 1 && checkouts === 1);
+      assert(rejected && Number(inserts) === 2 && Number(checkouts) === 2);
     } finally {
       names.forEach((n, i) =>
         previous[i] === undefined ? Deno.env.delete(n) : Deno.env.set(n, previous[i]!)

@@ -22,10 +22,12 @@ import {
   Square,
   Settings2,
   PanelRight,
+  Film,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
+import AgentVideoPanel, { VideoJobCard } from "../components/AgentVideoPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
 import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
 import { getActiveAiConfig } from "../lib/ai";
@@ -146,6 +148,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [videosOpen, setVideosOpen] = useState(() => new URLSearchParams(location.search).get("video") === "1");
   const [webOn, setWebOn] = useState(getReachConfig().enabled);
   const plusRef = useRef<HTMLDivElement>(null);
 
@@ -332,8 +335,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // it only populates the shared 60s memo, and send() still awaits properly if
   // this hasn't finished.
   useEffect(() => {
-    buildAiContext().catch(() => {});
-  }, []);
+    if (!videosOpen) buildAiContext().catch(() => {});
+  }, [videosOpen]);
+
+  useEffect(() => {
+    if (videosOpen) topRef.current?.scrollIntoView({ block: "start" });
+  }, [videosOpen]);
 
   // Opening a chat must not animate. A smooth scroll on mount — with the
   // sentinel aligned to the *top* of the viewport, which is scrollIntoView's
@@ -344,7 +351,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // anchor to `end` so the newest message sits at the bottom, not the top.
   const mounted = useRef(false);
   useEffect(() => {
-    if (!mounted.current) {
+    if (videosOpen) return;
+    if (!mounted.current || !chat.turns.length) {
       mounted.current = true;
       const atFoot = chat.turns.length > 0;
       (atFoot ? endRef.current : topRef.current)?.scrollIntoView({
@@ -357,13 +365,13 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     // restarted a *smooth* scroll on every streamed step — a fresh easing
     // animation several times a second, which WebView2 renders as the whole
     // app locking up while the agent is answering.
-  }, [chat.turns, busy]);
+  }, [chat.turns, busy, videosOpen]);
 
   // Following the stream is a separate, much cheaper job: jump (no easing) and
   // only while the reader is already at the bottom, so scrolling up to re-read
   // something isn't yanked back on the next step.
   useEffect(() => {
-    if (!streaming || !mounted.current) return;
+    if (!streaming || !mounted.current || videosOpen) return;
     const scroller = topRef.current?.closest("main");
     const nearFoot = scroller
       ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120
@@ -375,7 +383,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       endRef.current?.scrollIntoView({ block: "end" });
     });
     return () => cancelAnimationFrame(id);
-  }, [streaming]);
+  }, [streaming, videosOpen]);
 
   /** Stop the run. The catch in send() turns the abort into a kept partial
    *  reply rather than an error banner. */
@@ -522,10 +530,11 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               typeof ev.result === "object" &&
               "error" in ev.result
             );
+            const waiting = !!(ev.result && typeof ev.result === "object" && "pending_action" in ev.result && ev.result.pending_action);
             const at = trace.actions.map((a) => a.id).lastIndexOf(ev.id);
             trace.actions = trace.actions.map((a, i) =>
               i === at
-                ? { ...a, status: failed ? ("failed" as const) : ("completed" as const) }
+                ? { ...a, status: failed ? ("failed" as const) : waiting ? ("waiting" as const) : ("completed" as const) }
                 : a
             );
           } else if (ev.type === "done") {
@@ -572,8 +581,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           ],
         }));
       } else {
+        const failedFiles = endTurn(turnId);
         setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
-        if (trace.actions.length || streamedRef.current)
+        if (trace.actions.length || streamedRef.current || failedFiles.length)
           setChat((c) => ({
             ...c,
             turns: [
@@ -584,6 +594,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   streamedRef.current ||
                   "The task stopped before finishing. Review the actions below before trying again.",
                 run: { ...trace, outcome: "error" },
+                ...(failedFiles.length ? { files: failedFiles } : {}),
               },
             ],
           }));
@@ -684,6 +695,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <button type="button" onClick={() => setVideosOpen(v => !v)} className="btn-ghost w-10 !px-0" aria-label="Brand videos" title="Brand videos" aria-expanded={videosOpen} aria-controls="filey-video-panel"><Film size={16} /></button>
               <button
                 type="button"
                 onClick={openHistory}
@@ -722,6 +734,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
             </div>
           </div>
         </header>
+
+        {videosOpen && <AgentVideoPanel onClose={() => setVideosOpen(false)} />}
 
         {/* The conversation and composer share one readable measure. */}
         <div
@@ -864,7 +878,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                  * still shown, by the wrapper's border darkening.
                  */
                 className="max-h-[160px] min-h-[48px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
-                autoFocus={typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
+                autoFocus={!videosOpen && typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
               />
 
               {/* Action bar — one circular cluster, reference-style: the same
@@ -1295,7 +1309,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             {turn.files.map((f, i) =>
               // Desktop: the file is already on disk, so open it where it
               // landed. Browser: hand over the blob as a real download.
-              f.path ? (
+              f.videoJobId ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : f.path ? (
                 <button
                   key={i}
                   type="button"

@@ -16,6 +16,13 @@ export interface Capability {
 
 export const CAPABILITIES: Capability[] = [
   {
+    id: "video",
+    name: "Brand videos",
+    description: "Prepare video quotes and check jobs. Paid generation always needs your Generate click.",
+    tools: ["create_video_draft", "cancel_video_job", "get_video_job", "list_video_jobs"],
+    readOnlyTools: ["get_video_job", "list_video_jobs"],
+  },
+  {
     id: "computer",
     name: "Computer use",
     description:

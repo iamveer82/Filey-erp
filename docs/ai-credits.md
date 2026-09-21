@@ -36,6 +36,10 @@ explicit; failed BYOK/free requests never start paid requests. Free models are a
 
 ## Deployment
 
+Brand videos use the same wallet at **$0.25 per second**, independently of chat
+funding/model selection. See [video workflow and deployment](ai-video.md). The
+$0.50 top-up fee still applies once per purchase; it is not charged again per video.
+
 1. Apply `supabase/2026-09-20-ai-credits.sql`. It only adds new credit tables,
    indexes, RLS and one service-only RPC; it does not change business records.
 2. Store a funded OpenRouter key as **FILEY_AI_OPENROUTER_KEY** in Supabase Edge

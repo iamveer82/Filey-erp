@@ -94,6 +94,13 @@ try {
   for(const r of creditRaces) if(r.status==='rejected') assert.match(r.reason.stderr,/Not enough available AI credits/);
   assert.equal(run('psql',[...creditArgs,'-tAc',"select balance_micros-reserved_micros from ai_credit_accounts where user_id='30000000-0000-4000-8000-000000000003'"]).trim(),'0');
   console.log('PASS: five dollars funds exactly five of eight concurrent one-dollar reservations.');
+  const videoMigration=sql('supabase/2026-09-21-ai-video.sql');
+  console.log(run('psql',creditArgs,videoMigration+'\n'+videoMigration+'\n'+sql('scripts/fixtures/ai-video-assertions.sql')).trim());
+  const videoRaces=await Promise.all(Array.from({length:8},()=>promisify(execFile)(exe('psql'),[...creditArgs,'-tAc',
+    `set role service_role; select filey_ai_video('start','31000000-0000-4000-8000-000000000001','91000000-0000-4000-8000-000000000009','{"charge_micros":1250000}')->>'claimed';`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(videoRaces.filter(r=>r.stdout.trim()==='true').length,1);
+  assert.equal(run('psql',[...creditArgs,'-tAc',"select reserved_micros from ai_credit_accounts where user_id='31000000-0000-4000-8000-000000000001'"]).trim(),'1250000');
+  console.log('PASS: eight concurrent Generate clicks reserve and claim exactly one video.');
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }

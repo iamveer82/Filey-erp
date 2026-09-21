@@ -37,6 +37,7 @@ export interface CreditStatus {
   topup_fee_cents?: number;
   free_requests_per_day?: number;
   configured: boolean;
+  video_configured?: boolean;
   topups_enabled: boolean;
   notice: string | null;
 }
@@ -65,7 +66,7 @@ export function setCreditChoice(funding: AiFunding, model = creditChoice().model
   window.dispatchEvent(new Event(AI_CREDITS_EVENT));
 }
 
-async function accountSession() {
+export async function aiAccountSession() {
   if (!supabase) throw new Error("Connect your Filey account to use AI credits.");
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session)
@@ -74,7 +75,8 @@ async function accountSession() {
     );
   return data.session;
 }
-async function call<T>(
+const accountSession = aiAccountSession;
+export async function callAiService<T>(
   name: string,
   body: Record<string, unknown>,
   expectedUser?: string
@@ -101,7 +103,12 @@ async function call<T>(
     throw new Error("Your account changed. Refresh AI Credits.");
   return data as T;
 }
+const call = callAiService;
 let cached: { user: string; value: CreditStatus; expires: number } | undefined;
+export function invalidateCreditStatus() {
+  cached = undefined;
+  window.dispatchEvent(new Event(AI_CREDITS_EVENT));
+}
 export async function getCreditStatus(force = false): Promise<CreditStatus> {
   const session = await accountSession();
   if (!force && cached?.user === session.user.id && cached.expires > Date.now())

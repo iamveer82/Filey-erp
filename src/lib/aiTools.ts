@@ -195,6 +195,7 @@ export interface FileOutput {
   name: string;
   url?: string;
   path?: string;
+  videoJobId?: string;
 }
 interface TurnSlot {
   /** Every file attached to this turn, in attachment order — merge combines
@@ -240,6 +241,7 @@ let activeTurnId = "";
 const turnFiles = (tid: string): File[] => turnSlots.get(tid)?.files ?? [];
 const turnFile = (tid: string): File | null => turnFiles(tid)[0] ?? null;
 const pushTurnOutput = (tid: string, o: FileOutput): void => {
+  if (o.videoJobId && slotFor(tid).outputs.some(f => f.videoJobId === o.videoJobId)) return;
   slotFor(tid).outputs.push(o);
 };
 /** A file THIS turn produced, matched loosely by name ("the merged pdf" finds
@@ -3824,6 +3826,59 @@ export const TOOLS: ToolDef[] = [
         subject: str(a.subject),
         body: str(a.body),
       }),
+  },
+  {
+    name: "create_video_draft",
+    description: "Prepare a brand video with Higgsfield Seedance 2.0 at $0.25 USD per second, 720p. This creates a quote and a persistent video card; it NEVER submits paid generation. The user must click Generate on the card. Use a specific creative brief. Optionally use one attached product photo by its 1-based reference_file number. Do not claim the video is rendered, saved or published. Do not use browser/shell tools to bypass the Generate decision.",
+    parameters: { type: "object", properties: {
+      prompt: { type: "string" }, duration: { type: "integer", minimum: 4, maximum: 15 },
+      aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"] }, generate_audio: { type: "boolean" },
+      reference_file: { type: "integer", minimum: 1, description: "Optional attached JPG, PNG or WebP under 2 MB. Its framing is used instead of aspect_ratio." },
+    }, required: ["prompt", "duration"] },
+    run: async (a) => {
+      const tid = activeTurnId;
+      const { quoteVideo } = await import("./aiVideo");
+      const index = a.reference_file;
+      const file = index === undefined ? undefined : turnFiles(tid)[Number(index) - 1];
+      if (index !== undefined && (!Number.isInteger(index) || Number(index) < 1 || !file)) return { error: "Choose a valid attached image by its 1-based number." };
+      const job = await quoteVideo({ prompt: str(a.prompt), duration: Number(a.duration), aspect_ratio: str(a.aspect_ratio) || "9:16", generate_audio: a.generate_audio !== false }, file);
+      pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
+      return { job_id: job.id, state: job.state, price_usd: job.charge_micros / 1e6, pending_action: "video_approval", retry_safe: false,
+        message: "Video quote prepared. The user can review the card and click Generate. No generation credits have been charged. Do not poll or recreate the draft." };
+    },
+  },
+  {
+    name: "list_video_jobs",
+    description: "List this account's recent video drafts and jobs. Persisted jobs survive app restarts. No wallet charge.",
+    parameters: { type: "object", properties: {} },
+    run: async () => {
+      const { listVideos } = await import("./aiVideo");
+      const result = await listVideos();
+      return { configured: result.configured, jobs: result.jobs.map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0,200), duration: j.duration, price_usd: j.charge_micros / 1e6, charged_usd: j.charged_micros / 1e6 })) };
+    },
+  },
+  {
+    name: "get_video_job",
+    description: "Check one video job and show its card. For a running job, tell the user the card follows progress; never poll in a loop or create a duplicate. A draft is waiting for the user's Generate click.",
+    parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    run: async (a) => {
+      const tid = activeTurnId;
+      const { getVideo, videoActive } = await import("./aiVideo");
+      const job = await getVideo(str(a.id));
+      pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
+      return { job_id: job.id, state: job.state, charged_usd: job.charged_micros / 1e6, output_url: job.output_url,
+        pending_action: job.state === "draft" ? "video_approval" : videoActive(job) ? "video_render" : undefined,
+        message: job.error || (job.state === "completed" ? "Video ready in its card. It has not been saved to disk or posted to social media." : "The video card shows current progress; do not poll in this chat turn.") };
+    },
+  },
+  {
+    name: "cancel_video_job",
+    description: "Discard a video draft or try to cancel a queued video. Processing jobs may not be cancelable. Only report canceled when returned state is canceled.",
+    parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    run: async (a) => {
+      const { cancelVideo } = await import("./aiVideo");
+      return cancelVideo(str(a.id));
+    },
   },
   {
     name: "generate_image",

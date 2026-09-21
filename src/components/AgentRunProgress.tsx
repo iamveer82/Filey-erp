@@ -67,7 +67,7 @@ export default function AgentRunProgress({
                   ? Check
                   : a.status === "failed"
                     ? CircleAlert
-                    : pending
+                    : pending && a.status !== "waiting"
                       ? LoaderCircle
                       : Circle;
               return (
@@ -81,7 +81,7 @@ export default function AgentRunProgress({
                     {a.name.replace(/_/g, " ")}
                     <span className="text-muted-foreground">
                       {" "}
-                      · {a.status === "running" && !pending ? "interrupted" : a.status}
+                      · {a.status === "running" && !pending ? "interrupted" : a.status === "waiting" ? "see video card" : a.status}
                     </span>
                   </span>
                 </li>

@@ -9,6 +9,11 @@ content_path = "./supabase/templates/recovery.html"
 [functions.ai-credits]
 verify_jwt = false
 
+# User requests verify auth.getUser; callbacks verify an opaque per-job token
+# and independently retrieve the provider's status before touching credits.
+[functions.ai-video]
+verify_jwt = false
+
 # send-email verifies the session with auth.getUser before every action.
 [functions.send-email]
 verify_jwt = false
