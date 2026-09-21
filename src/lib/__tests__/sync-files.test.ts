@@ -44,6 +44,19 @@ it("missing bytes are a failure; successful and already-present bytes use the sa
   expect(first.rows[0].storage_path).toMatch(/^file-test-owner\/synced\/[a-f0-9]{64}\/invoice.pdf$/);
   upload.mockResolvedValue({ data: null, error: { statusCode: "409" } });
   expect((await pushFileBlobs(client, uid, [row])).rows).toEqual(first.rows);
+  for (const error of [
+    { status: 400, statusCode: "400", message: "The resource already exists" },
+    { status: 400, statusCode: "400", message: "Asset Already Exists" },
+    { status: 409, statusCode: "ResourceAlreadyExists", message: "Already exists" },
+    { status: 400, statusCode: "Duplicate", message: "Already exists" },
+  ]) {
+    upload.mockResolvedValue({ data: null, error });
+    expect((await pushFileBlobs(client, uid, [row])).rows).toEqual(first.rows);
+  }
+  upload.mockResolvedValue({ data: null, error: { status: 400, statusCode: "400", message: "Invalid upload" } });
+  const report = vi.fn();
+  expect((await pushFileBlobs(client, uid, [row], report)).failed).toEqual([row.id]);
+  expect(report).toHaveBeenCalledWith(expect.objectContaining({ kind: "file", recordId: row.id }));
   expect(upload.mock.calls[0][2].upsert).toBe(false);
 });
 it("a second device caches cloud PDFs, and failed downloads never pretend the file is present", async () => {

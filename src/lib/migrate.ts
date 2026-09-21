@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { cleanRowForPush, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs } from "./sync";
+import { cleanRowForPush, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
 import {
   loadColl,
   replaceColl,
@@ -173,14 +173,16 @@ export async function migrateLocalToCloud(
     if (rows.length === 0) continue;
 
     onProgress?.(`Pushing ${t}…`);
-    const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows) : { rows, failed: [] };
+    const failures: SyncFailure[] = [];
+    const report = (failure: SyncFailure) => failures.push(failure);
+    const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report) : { rows, failed: [] };
     const cleaned = uploaded.rows.map((r) => cleanRowForPush(r as Record<string, any>, uid, t));
-    const failed = [...uploaded.failed, ...await pushCollection(supabase, t, cleaned)];
+    const failed = [...uploaded.failed, ...await pushCollection(supabase, t, cleaned, report)];
     if (failed.length) await journalMark(t, { changed: failed, silent: true });
     out.push({
       table: t,
       rows: rows.length - failed.length,
-      error: failed.length ? `${failed.length} row(s) failed` : undefined,
+      error: failed.length ? `${failed.length} row(s) failed. ${[...new Set(failures.map(f => f.message))].join(" ")}` : undefined,
     });
   }
 
