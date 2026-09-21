@@ -2214,7 +2214,7 @@ export default function Quoting() {
 
           {/* Portaled out of <main>'s scrolling subtree - WebView2 half-paints
               a `fixed` overlay that stays inside it. */}
-          {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.number || "Quotation preview"} size="full">
+          {viewOpen && <Modal open onClose={() => setViewOpen(false)} title={form.number || "Quotation preview"} size="document">
             <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
               {viewPageCount > 1 && <div className="flex flex-wrap items-center gap-2">
               <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage(p => Math.max(1, p - 1))} aria-label="Back to previous preview page">Back</button>

@@ -17,8 +17,10 @@ it("refits when its panel changes width without changing the exported A4 size", 
   const paper = () => page.container.querySelector<HTMLElement>(".invoice-print")!;
   await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "400px" }));
   width.mockReturnValue(272);
+  const viewport = page.container.querySelector<HTMLElement>(".fp-box")!;
+  viewport.style.padding = "8px";
   act(() => resize());
-  await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "240px" }));
+  await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "256px" }));
   expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px" });
   page.unmount();
   expect(disconnect).toHaveBeenCalledOnce();

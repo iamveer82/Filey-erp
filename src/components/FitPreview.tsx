@@ -47,7 +47,9 @@ export default function FitPreview({
     if (!box) return;
 
     const measure = () => {
-      const avail = box.clientWidth - 32; // p-4 on each side
+      const styles = getComputedStyle(box);
+      const inset = (parseFloat(styles.paddingLeft) || 16) + (parseFloat(styles.paddingRight) || 16);
+      const avail = box.clientWidth - inset;
       if (avail > 0) setFitW(avail);
     };
     let frame = 0;

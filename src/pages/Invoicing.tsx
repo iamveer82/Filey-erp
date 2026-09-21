@@ -3752,7 +3752,7 @@ function Editor({
         />
       </div>
 
-      <Modal open={viewOpen} onClose={() => setViewOpen(false)} title={form.number || "Invoice preview"} size="full">
+      <Modal open={viewOpen} onClose={() => setViewOpen(false)} title={form.number || "Invoice preview"} size="document">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">Page {viewPage} of {viewPageCount}</span>
           <div className="flex flex-wrap items-center gap-2">

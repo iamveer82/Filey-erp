@@ -82,6 +82,7 @@ describe("purchase invoice parties", () => {
     const view = await openPurchase();
     fireEvent.click(view.getByRole("button", { name: "Preview" }));
     const dialog = view.getByRole("dialog", { name: invoice.number });
+    expect(dialog).toHaveClass("filey-document-dialog");
     const paper = () => dialog.querySelector<HTMLElement>(".invoice-print")!;
     await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "294px" }));
     expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px", padding: "48px" });

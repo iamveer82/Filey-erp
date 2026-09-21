@@ -727,7 +727,7 @@ export function Modal({
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full";
+  size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full" | "document";
 }) {
   const widthClass = {
     md: "max-w-lg",
@@ -736,6 +736,7 @@ export function Modal({
     "2xl": "max-w-4xl",
     "3xl": "max-w-5xl",
     full: "max-w-[95vw]",
+    document: "filey-document-dialog max-w-[95vw] h-[90dvh]",
   }[size];
   const returnFocus = useRef<HTMLElement | null>(null);
   return (
