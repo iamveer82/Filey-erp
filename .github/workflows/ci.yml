@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: node scripts/check-release-recovery.mjs
       # Bridge tests import its isolated Node dependencies, not the web bundle.
       - run: npm ci --prefix tools/wa-bridge --no-audit --no-fund
       - run: npm run typecheck

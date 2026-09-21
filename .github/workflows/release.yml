@@ -7,11 +7,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      intel_recovery_tag:
+        description: 'Recover missing Intel Mac assets for an existing draft tag (blank for normal build)'
+        type: string
+        required: false
 
 # tauri-action creates the GitHub Release, which needs write access to repo
 # contents (otherwise: "Resource not accessible by integration").
 permissions:
   contents: write
+
+concurrency:
+  group: filey-release-${{ inputs.intel_recovery_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -25,7 +34,9 @@ jobs:
       # appends to it, giving one release with every platform in one latest.json.
       max-parallel: 1
       matrix:
-        include:
+        include: ${{ fromJSON(inputs.intel_recovery_tag != '' && '[{"os":"macos-latest","args":"--target x86_64-apple-darwin","rust_target":"x86_64-apple-darwin","bun_target":"bun-darwin-x64"}]' || '[{"os":"ubuntu-22.04","args":"--bundles deb,rpm"},{"os":"windows-latest","args":""},{"os":"macos-latest","args":""},{"os":"macos-latest","args":"--target x86_64-apple-darwin","rust_target":"x86_64-apple-darwin","bun_target":"bun-darwin-x64"}]') }}
+        # Recovery builds only Intel; the normal matrix retains all four builds.
+        # Original platform rationale:
           # deb + rpm only. tauri.conf sets targets "all", which on Linux also
           # builds an AppImage — and that step has failed on every single
           # release this project has ever cut ("failed to run linuxdeploy",
@@ -37,10 +48,6 @@ jobs:
           # FUSE out, so re-adding "appimage" needs the real linuxdeploy error
           # first — likeliest suspect is the bun-compiled wa-bridge sidecar in
           # externalBin, which linuxdeploy also tries to resolve deps for.
-          - os: ubuntu-22.04
-            args: "--bundles deb,rpm"
-          - os: windows-latest
-            args: ""
           # macOS is UNSIGNED — no APPLE_* secrets are set, so Gatekeeper marks
           # the .dmg as from an unidentified developer and users must right-click
           # → Open once. Set APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
@@ -52,19 +59,33 @@ jobs:
           # carries the sidecar it can actually run, and tauri-action appends
           # both to the same draft, so latest.json ends up with darwin-aarch64
           # and darwin-x86_64.
-          - os: macos-latest
-            args: ""
           # Intel Macs, cross-compiled from the arm64 runner: the Rust binary
           # needs the rustup target and the bun sidecar needs --target, or an
           # arm64 sidecar gets bundled into an x86_64 app and the bridge dies
           # on launch with no error a user could act on.
-          - os: macos-latest
-            args: "--target x86_64-apple-darwin"
-            rust_target: x86_64-apple-darwin
-            bun_target: bun-darwin-x64
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Validate Intel recovery target
+        if: inputs.intel_recovery_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.intel_recovery_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected a release tag"; exit 1; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > release.json
+          node -e 'const r=require("./release.json"); if(!r.isDraft || r.assets.some(a=>/(_x64\.dmg|_x64\.app\.tar\.gz(?:\.sig)?)$/.test(a.name))) process.exit(1)'
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.intel_recovery_tag || github.ref }}
+
+      - name: Check recovery version
+        if: inputs.intel_recovery_tag != ''
+        env:
+          TAG: ${{ inputs.intel_recovery_tag }}
+        run: node -e 'if("v"+require("./src-tauri/tauri.conf.json").version!==process.env.TAG) process.exit(1)'
 
       - name: Linux build deps
         if: matrix.os == 'ubuntu-22.04'
@@ -117,7 +138,13 @@ jobs:
           npm ci --no-audit --no-fund
           # Fail here, not three steps later inside the bundler.
           test -d node_modules/libsignal || { echo "libsignal missing"; exit 1; }
-          # Cross builds name the sidecar for the TARGET, not the runner's host.
+          # Native tests run on the host even when packaging a cross target.
+          HOST_TRIPLE=$(rustc -vV | sed -n 's/host: //p')
+          if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" != "$HOST_TRIPLE" ]; then
+            mkdir -p ../../src-tauri/binaries
+            bun build --compile index.mjs --outfile "../../src-tauri/binaries/filey-wa-bridge-$HOST_TRIPLE"
+          fi
+          # Package the actual target separately; never rename host bytes.
           TRIPLE="${{ matrix.rust_target }}"
           [ -n "$TRIPLE" ] || TRIPLE=$(rustc -vV | sed -n 's/host: //p')
           EXT=""
@@ -143,8 +170,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         with:
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: ${{ github.ref_type == 'tag' && format('Filey ERP {0}', github.ref_name) || '' }}
+          tagName: ${{ inputs.intel_recovery_tag || (github.ref_type == 'tag' && github.ref_name || '') }}
+          releaseName: ${{ (inputs.intel_recovery_tag || github.ref_type == 'tag') && format('Filey ERP {0}', inputs.intel_recovery_tag || github.ref_name) || '' }}
           releaseDraft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -186,13 +213,13 @@ jobs:
   # goes missing.
   verify-release-assets:
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.intel_recovery_tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Assert every platform uploaded its installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
         run: |
           set -euo pipefail
           echo "Assets on $TAG:"
