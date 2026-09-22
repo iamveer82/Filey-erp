@@ -2,13 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HashRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
-import { awaitCloudPlan, getSubscription, openBillingPortal, type Subscription } from "../../lib/subscription";
+import { awaitCloudPlan, getSubscription, openBillingPortal, startCheckout, type Subscription } from "../../lib/subscription";
 import BillingPanel from "../settings/BillingPanel";
 import { licensePurchased, claimPurchasedLicense } from "../../lib/license";
 
 vi.mock("../../lib/subscription", async (original) => ({
   ...await original<typeof import("../../lib/subscription")>(),
-  getSubscription: vi.fn(), awaitCloudPlan: vi.fn(), openBillingPortal: vi.fn(),
+  getSubscription: vi.fn(), awaitCloudPlan: vi.fn(), openBillingPortal: vi.fn(), startCheckout: vi.fn(),
 }));
 vi.mock("../../lib/license", () => ({
   verifyStoredLicense: async () => ({ valid: false }), entitlement: async () => "free",
@@ -80,4 +80,20 @@ it("re-enables billing controls when the desktop portal opens in another browser
   opened("browser");
   await waitFor(() => expect(screen.getByRole("button", { name: "Manage billing" })).toBeEnabled());
   expect(openBillingPortal).toHaveBeenCalledTimes(1);
+});
+
+
+it("opens a review section before contacting the payment provider", async () => {
+  window.history.replaceState(null, "", "/#/settings?section=billing");
+  vi.mocked(startCheckout).mockResolvedValue("browser");
+  render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
+  const get = await screen.findByRole("button", { name: "Get Pro" });
+  await waitFor(() => expect(get).toBeEnabled());
+  fireEvent.click(get);
+  await screen.findByRole("heading", { name: "Get Filey Pro" });
+  expect(startCheckout).not.toHaveBeenCalled();
+  expect(window.location.hash).toContain("purchase=cloud");
+  fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+  await screen.findByText(/Your secure payment page is open/);
+  expect(startCheckout).toHaveBeenCalledExactlyOnceWith("cloud");
 });

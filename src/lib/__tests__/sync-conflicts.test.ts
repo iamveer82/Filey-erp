@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { localClient, journalSnapshot, replaceColl, resolveLocalSyncConflict, rememberSyncRevision } from "../localdb";
-import { pushCollection, listSyncConflicts } from "../sync";
+import { pushCollection, listSyncConflicts, syncNow, getSyncStatus } from "../sync";
 
 beforeEach(() => localStorage.clear());
 
@@ -41,4 +41,41 @@ it("resolving one record preserves unrelated pending edits and rejects an outdat
   await expect(resolveLocalSyncConflict("products", 1, cloud, true, local)).rejects.toThrow(/changed while/);
   await resolveLocalSyncConflict("products", 1, cloud, true, cloud);
   expect((await journalSnapshot()).tables.products.changed).toEqual([2, 1]);
+});
+
+it("reports conflicts, permissions, missing invoice links and schema failures separately without leaking server details", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  await localClient.from("products").insert({ id: 1, name: "Pending" });
+  await localClient.from("invoice_payments").insert({ id: 2, invoice_id: null, amount: 100 });
+  const rpc = vi.fn();
+  const client: any = {
+    auth: { getSession: async () => ({ data: { session: { user: { id: "diagnostic-owner" }, expires_at: Date.now() / 1000 + 3600 } } }) },
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { org_id: "default" }, error: null }) }) }), upsert: async () => ({ error: null }) }),
+    rpc,
+  };
+  for (const [response, kind] of [
+    [{ data: { ok: false, conflict: true }, error: null }, "conflict"],
+    [{ data: null, error: { code: "42501", message: "private record details" } }, "permission"],
+    [{ data: null, error: { code: "PGRST202", message: "missing sync_record" } }, "schema"],
+  ] as const) {
+    rpc.mockResolvedValue(response);
+    expect(await syncNow(client, { manual: true })).toBe(false);
+    expect(getSyncStatus().failures).toEqual([
+      expect.objectContaining({ table: "products", kind }),
+      expect.objectContaining({ table: "invoice_payments", kind: "record" }),
+    ]);
+    expect(getSyncStatus().error?.includes("schema needs an update")).toBe(kind === "schema");
+    expect(JSON.stringify(getSyncStatus())).not.toContain("private record details");
+  }
+  expect(rpc.mock.calls.some(([, args]) => args?.p_table === "invoice_payments")).toBe(false);
+  expect((await journalSnapshot()).tables.invoice_payments.changed).toEqual([2]);
+  localStorage.setItem("filey_auto_sync", "on");
+  rpc.mockClear();
+  expect(await syncNow(client)).toBe(false);
+  expect(rpc.mock.calls.some(([name]) => name === "sync_record")).toBe(false);
+  expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
+  rpc.mockResolvedValue({ data: { ok: true, revision: 2 }, error: null });
+  await syncNow(client, { manual: true });
+  expect(rpc.mock.calls.some(([, args]) => args?.p_table === "products")).toBe(true);
+  expect(await listSyncConflicts()).toEqual([]);
 });

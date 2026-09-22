@@ -46,7 +46,7 @@ export default function SyncConflictReview() {
   return <>
     {conflicts.length > 0 && <div className="space-y-2 border-t border-border pt-4">
       <h4 className="text-sm font-medium">{conflicts.length} sync conflict{conflicts.length === 1 ? "" : "s"} to review</h4>
-      <p className="text-xs text-muted-foreground">Both versions are preserved. Choose which version to keep, then sync again.</p>
+      <p className="text-xs text-muted-foreground">Your local records are preserved. Compare the available versions before choosing, then sync again.</p>
       {conflicts.map(conflict => <div key={conflict.id} className="flex flex-wrap items-center justify-between gap-2 py-1 text-sm">
         <span className="min-w-0 break-all">{conflict.table.replace(/_/g, " ")} · {conflict.recordId}</span>
         <button className="btn-ghost" disabled={busy} onClick={() => void open(conflict)}>Review</button>
@@ -55,7 +55,10 @@ export default function SyncConflictReview() {
     {error && !review && <p role="alert" className="text-sm text-danger">{error}</p>}
     <Modal open={!!review} onClose={() => { if (!busy) setReview(null); }} title="Review sync conflict" size="lg">
       <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">Using the cloud version replaces this local record. Keeping the local version queues it for upload; Filey will check for newer cloud changes again.</p>
+        <p className="text-sm text-muted-foreground">{review?.cloud
+          ? "Using the cloud version replaces this local record. Keeping the local version queues it for upload; Filey will check for newer cloud changes again."
+          : "The cloud record is unavailable. It may belong to another workspace or have been deleted. Your local record is preserved; check the workspace before trying to upload it again."}</p>
+        {review?.local && review.local.sync_revision == null && <p className="text-sm text-muted-foreground">This older local record has no saved cloud revision. This warning does not necessarily mean either version was edited recently. Compare both versions before choosing.</p>}
         <div className="max-h-[50vh] overflow-auto rounded-xl border border-border">
           <table className="w-full table-fixed text-left text-xs">
             <thead className="sticky top-0 bg-card"><tr><th className="w-1/4 p-3">Field</th><th className="p-3">This device{!review?.local ? " (deleted)" : ""}</th><th className="p-3">Cloud{!review?.cloud ? " (unavailable)" : ""}</th></tr></thead>
@@ -70,7 +73,7 @@ export default function SyncConflictReview() {
         <div className="flex flex-wrap justify-end gap-2">
           <button className="btn-ghost" disabled={busy} onClick={() => setReview(null)}>Cancel</button>
           <button className="btn-ghost" disabled={busy} onClick={() => void resolve(true)}>Keep local version</button>
-          <button className="btn-primary" disabled={busy} onClick={() => void resolve(false)}>Use cloud version</button>
+          <button className="btn-primary" disabled={busy || !review?.cloud} onClick={() => void resolve(false)}>Use cloud version</button>
         </div>
       </div>
     </Modal>

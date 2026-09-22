@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, RefreshCw, Wallet } from "lucide-react";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { FileySpinner } from "../../components/FileySpinner";
+import PaymentReview from "../../components/PaymentReview";
 import AiFundingControl from "../../components/AiFundingControl";
 import {
   buyAiCredits,
@@ -84,18 +85,6 @@ export default function AiCreditsPanel() {
     setParams(next, { replace: true });
     void refresh();
   }, [params, setParams]);
-  async function purchase(id: string) {
-    setBusy(id);
-    setError("");
-    try {
-      await buyAiCredits(id);
-      setNotice("Complete checkout in your browser, then refresh your balance here.");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
   async function save(event: React.FormEvent) {
     event.preventDefault();
     setBusy("limits");
@@ -126,6 +115,46 @@ export default function AiCreditsPanel() {
     } finally {
       setBusy("");
     }
+  }
+
+  const selectedPack = data?.packs.find((pack) => pack.id === params.get("pack"));
+  if (selectedPack && data?.topups_enabled) {
+    return (
+      <PaymentReview
+        key={selectedPack.id}
+        title="Add AI credits"
+        lines={[
+          {
+            label: "Spendable AI credit",
+            value: creditMoney(selectedPack.cents * 10000),
+          },
+          {
+            label: "Filey service fee",
+            value: creditMoney((data.topup_fee_cents ?? 0) * 10000),
+          },
+        ]}
+        total={`${creditMoney((selectedPack.cents + (data.topup_fee_cents ?? 0)) * 10000)} USD`}
+        terms="One-time top-up. No subscription or auto-recharge. AI credits do not expire and are excluded from the subscription refund program."
+        onBack={() => {
+          const next = new URLSearchParams(params);
+          next.delete("pack");
+          setParams(next);
+        }}
+        onPay={() => buyAiCredits(selectedPack.id)}
+        onVerify={async () => {
+          const value = await getCreditStatus(true);
+          const added = value.history.some(
+            (entry) =>
+              entry.kind === "topup" && !data.history.some((old) => old.id === entry.id)
+          );
+          if (added) {
+            setData(value);
+            return true;
+          }
+          return false;
+        }}
+      />
+    );
   }
   return (
     <div className="space-y-4">
@@ -167,10 +196,22 @@ export default function AiCreditsPanel() {
       )}
       {!data && !busy && (
         <SettingsPanel>
-          <SettingsSection title="Your AI credits" description="Your balance, top-ups and spending history will appear here when your Filey account is connected.">
-            <p className="text-sm text-muted-foreground">Available on Basic, Pro and Ultra. You can also use your own model keys without adding money to Filey.</p>
-            {/^Sign in|^Connect your Filey/.test(error) && <Link className="btn-primary" to="/settings?section=datamode">Connect Filey account</Link>}
-            <Link className="btn-ghost" to="/settings?section=ai">Manage AI connections</Link>
+          <SettingsSection
+            title="Your AI credits"
+            description="Your balance, top-ups and spending history will appear here when your Filey account is connected."
+          >
+            <p className="text-sm text-muted-foreground">
+              Available on Basic, Pro and Ultra. You can also use your own model keys
+              without adding money to Filey.
+            </p>
+            {/^Sign in|^Connect your Filey/.test(error) && (
+              <Link className="btn-primary" to="/settings?section=datamode">
+                Connect Filey account
+              </Link>
+            )}
+            <Link className="btn-ghost" to="/settings?section=ai">
+              Manage AI connections
+            </Link>
           </SettingsSection>
         </SettingsPanel>
       )}
@@ -221,6 +262,12 @@ export default function AiCreditsPanel() {
             {data.notice && (
               <p className="text-sm text-muted-foreground">{data.notice}</p>
             )}
+            {!data.topups_enabled && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Credit purchases are not available yet. You can keep using your own API
+                key; no payment will be taken.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {data.packs.map((pack) => (
                 <button
@@ -228,7 +275,11 @@ export default function AiCreditsPanel() {
                   className="btn-primary"
                   key={pack.id}
                   disabled={!!busy || !data.topups_enabled}
-                  onClick={() => void purchase(pack.id)}
+                  onClick={() => {
+                    const next = new URLSearchParams(params);
+                    next.set("pack", pack.id);
+                    setParams(next);
+                  }}
                 >
                   {busy === pack.id ? (
                     <FileySpinner size={15} />

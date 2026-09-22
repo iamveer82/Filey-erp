@@ -207,6 +207,14 @@ function CloudSyncCard() {
           >
             {statusLine}
           </p>
+          {!!sync.failures?.some(failure => failure.kind !== "conflict") && <details className="text-xs">
+            <summary className="cursor-pointer font-medium">Upload issues</summary>
+            <ul className="mt-2 space-y-2 text-muted-foreground">
+              {[...new Set(sync.failures.filter(failure => failure.kind !== "conflict")
+                .map(failure => `${failure.table.replace(/_/g, " ")}: ${failure.message}`))]
+                .map(message => <li key={message}>{message}</li>)}
+            </ul>
+          </details>}
           <SyncConflictReview />
         </>
       ) : (

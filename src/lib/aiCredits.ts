@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { serviceError } from "./serviceError";
-import { paymentUrl } from "./billingService";
+import { openBilling } from "./billingService";
 import { agentStorageScope, readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 export const AI_CREDITS_EVENT = "filey:ai-credits";
@@ -135,11 +135,7 @@ export async function buyAiCredits(packId: string) {
     action: "checkout_ai_credits",
     pack_id: packId,
   });
-  paymentUrl(url);
-  if ("__TAURI_INTERNALS__" in window) {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
-  } else window.location.assign(url);
+  return openBilling(url);
 }
 
 /** One closure per task; delegated rounds share its server-enforced budget.

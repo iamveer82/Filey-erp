@@ -3,6 +3,7 @@ import {
   useContext,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -282,7 +283,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // An invitation or a switch on another device changes the server profile.
   // Unmount the old workspace before reloading its identity and permissions.
-  useEffect(() => {
+  // Attach before the ready screen is visible; a passive effect can miss a
+  // profile event delivered between the committed render and effect setup.
+  useLayoutEffect(() => {
     if (local || !user) return;
     const changed = (event: Event) => {
       const next = (event as CustomEvent<Profile>).detail;

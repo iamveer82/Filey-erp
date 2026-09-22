@@ -435,13 +435,21 @@ export async function journalVersion(): Promise<number> {
 
 /** Remember a successful upload without overwriting edits made during the request. */
 export function rememberSyncRevision(coll: string, id: string | number, revision: number): Promise<void> {
+  return rememberSyncRevisions(coll, new Map([[id, revision]]));
+}
+
+/** One collection write per upload batch, preserving edits made in flight. */
+export function rememberSyncRevisions(coll: string, revisions: Map<string | number, number>): Promise<void> {
   return serializeWrite(async () => {
     const rows = await loadColl(coll);
-    if (rows.some(row => row.id === id))
-      await saveColl(coll, rows.map(row => row.id === id ? { ...row, sync_revision: revision } : row));
+    if (rows.some(row => revisions.has(row.id)))
+      await saveColl(coll, rows.map(row => revisions.has(row.id) ? { ...row, sync_revision: revisions.get(row.id) } : row));
     const j = await journalSnapshot();
-    if (j.tables[coll]?.deleted.includes(id)) {
-      j.tables[coll].deletedRevisions = { ...j.tables[coll].deletedRevisions, [String(id)]: revision };
+    const deleted = j.tables[coll]?.deleted.filter(id => revisions.has(id)) ?? [];
+    if (deleted.length) {
+      const entry = j.tables[coll];
+      entry.deletedRevisions = { ...entry.deletedRevisions };
+      for (const id of deleted) entry.deletedRevisions[String(id)] = revisions.get(id)!;
       await journalSave(j);
     }
   });
@@ -485,11 +493,23 @@ export function resolveLocalSyncConflict(coll: string, id: string | number, remo
 /** Clear pushed tables from the journal — but only if nothing wrote since the
  *  snapshot (`v` unchanged). Otherwise leave it; the next debounced sync
  *  re-pushes, and upserts make that harmless. */
-export async function journalCommit(v: number, tables: string[]): Promise<void> {
-  const j = await journalLoad();
-  if (j.v !== v) return;
-  for (const t of tables) delete j.tables[t];
-  await journalSave(j);
+export function journalCommit(v: number, tables: string[], failures: Record<string, (string | number)[]> = {}): Promise<void> {
+  return serializeWrite(async () => {
+    const j = await journalSnapshot();
+    if (j.v !== v) return;
+    for (const t of tables) {
+      const entry = j.tables[t];
+      const pending = new Set(failures[t] ?? []);
+      if (!entry || !pending.size) { delete j.tables[t]; continue; }
+      // A failed row must not keep every successful row in the retry queue.
+      entry.changed = [...pending].filter(id => !entry.deleted.includes(id));
+      entry.deleted = entry.deleted.filter(id => pending.has(id));
+      if (entry.deletedRevisions) entry.deletedRevisions = Object.fromEntries(
+        entry.deleted.map(id => [String(id), entry.deletedRevisions![String(id)] ?? null]));
+      delete entry.all;
+    }
+    await journalSave(j);
+  });
 }
 
 // ---- query builder --------------------------------------------------------

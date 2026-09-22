@@ -1,5 +1,15 @@
 # Supabase migrations — apply order & convention
 
+## September 22 sync batches
+
+Apply `2026-09-22-batched-sync.sql` after `2026-09-12-sync-conflict-protection.sql`
+and before the 3.0.1 desktop client. It adds an authenticated, SECURITY INVOKER
+wrapper for up to 50 rows with a savepoint per row. The existing `sync_record`
+still enforces RLS, optimistic revisions and idempotency. No business rows change.
+Older servers remain compatible through single-row fallback. Verify using
+`npm run test:rls:local`. Applied and read back from production on 22 September:
+body hash `d4ee83cc2755bbde1f4636c4059bbbcc`, invoker security, authenticated-only execution.
+
 ## AI credits and subscription refunds
 
 `2026-09-20-ai-credits.sql` adds the hosted wallet ledger and service-only accounting

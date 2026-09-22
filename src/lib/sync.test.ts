@@ -4,7 +4,7 @@
 // collections.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
-import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating } from "./sync";
+import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating, inRealOrg } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 
@@ -50,6 +50,20 @@ it("refuses to sync device data into another account", async () => {
   expect(getSyncStatus().error).toContain("another account");
 });
 
+it("reconciles clean tables after partial upload failure without hiding pending records", async () => {
+  localStorage.setItem("filey_cloud_seeded", "1");
+  await localClient.from("products").insert({ id: 1, name: "Pending local edit" });
+  const { client } = fakeCloud({ failTables: ["products"], pull: {
+    orders: [{ id: 7, order_number: "Saved on another device" }],
+    products: [{ id: 1, name: "Must not overwrite local" }],
+  } });
+  expect(await syncCycle(client)).toBe(false);
+  expect((await localClient.from("orders").select()).data?.[0].order_number).toBe("Saved on another device");
+  expect((await localClient.from("products").select()).data?.[0].name).toBe("Pending local edit");
+  expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
+  expect(getSyncStatus()).toMatchObject({ state: "error", failures: [expect.objectContaining({ table: "products" })] });
+});
+
 // Minimal fake of the supabase-js surface sync touches. Records every call.
 // opts: uid (session user), org (profiles.org_id), failTables (upsert errors),
 // pull (rows served per table to select().order().range()).
@@ -85,7 +99,15 @@ function fakeCloud(opts?: {
         return { data: { session }, error: null };
       },
     },
-    async rpc(name: string, args?: any) {
+    async rpc(name: string, args?: any): Promise<{ data: any; error: any }> {
+      if (name === "sync_records") {
+        const data = [];
+        for (const request of args.p_records) {
+          const response = await client.rpc("sync_record", { p_table: args.p_table, p_row: request.row, p_expected: request.expected });
+          data.push({ ...response.data, error: response.error, id: request.row.id });
+        }
+        return { data, error: null };
+      }
       if (name === "filey_sync_manifest") {
         calls.push({ table: "(rpc)", op: name, payload: args });
         return { data: Object.fromEntries(args.p_tables.map((t: string) => [t,
@@ -218,7 +240,7 @@ describe("local write journal", () => {
 
 describe("syncNow", () => {
   it("pushes dirty tables (upsert + delete), strips ownership, clears journal", async () => {
-    await localClient.from("products").insert({ name: "A", org_id: "local", user_id: "x" });
+    await localClient.from("products").insert({ name: "A", org_id: "default", user_id: "x" });
     await localClient.from("products").insert({ name: "B" });
     await localClient.from("products").delete().eq("id", 2);
 
@@ -549,7 +571,8 @@ describe("cleanRowForPush", () => {
   it("preserves explicit field and relationship clears", () => {
     expect(cleanRowForPush({ id: 1, email: null, customer_id: null }, UID)).toEqual({ id: 1, email: null, customer_id: null });
   });
-  it("re-stamps owner and remaps local storage paths", () => {
+  it("re-stamps owner and remaps local storage paths", async () => {
+    await inRealOrg(fakeCloud({ org: "o" }).client, UID, true);
     const out = cleanRowForPush(
       { id: 1, owner: "local-user", storage_path: "local-user/docs/a.pdf", org_id: "o", user_id: "u" },
       UID
