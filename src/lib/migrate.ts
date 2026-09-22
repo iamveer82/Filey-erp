@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { cleanRowForPush, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
+import { prepareSyncRows, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
 import {
   loadColl,
   replaceColl,
@@ -166,19 +166,24 @@ export async function migrateLocalToCloud(
   }
 
   for (const t of PUSH_TABLES) {
+    await journalMark(t, { all: true, silent: true });
+    const pending = await journalSnapshot();
     // Through loadColl, not the raw key: oversized fields (the logo a doc was
     // issued with) are stored as {__blob} markers pointing at a shared payload,
     // and the cloud must receive the real value, not the marker.
     const rows = await loadColl(t);
-    if (rows.length === 0) continue;
-
+    if (rows.length === 0) {
+      await journalCommit(pending.v, [t], { [t]: pending.tables[t]?.deleted ?? [] });
+      continue;
+    }
     onProgress?.(`Pushing ${t}…`);
     const failures: SyncFailure[] = [];
     const report = (failure: SyncFailure) => failures.push(failure);
     const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report) : { rows, failed: [] };
-    const cleaned = uploaded.rows.map((r) => cleanRowForPush(r as Record<string, any>, uid, t));
-    const failed = [...uploaded.failed, ...await pushCollection(supabase, t, cleaned, report)];
-    if (failed.length) await journalMark(t, { changed: failed, silent: true });
+    const prepared = prepareSyncRows(uploaded.rows, uid, t, report);
+    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report)];
+    // This upload does not execute queued deletions; automatic sync owns them.
+    await journalCommit(pending.v, [t], { [t]: [...failed, ...(pending.tables[t]?.deleted ?? [])] });
     out.push({
       table: t,
       rows: rows.length - failed.length,

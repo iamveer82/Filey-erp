@@ -28,7 +28,7 @@ import {
   journalCommit,
   journalMark,
   localClient,
-  rememberSyncRevision,
+  rememberSyncRevisions,
   resolveLocalSyncConflict,
 } from "./localdb";
 
@@ -91,6 +91,8 @@ function setStatus(s: SyncStatus): void {
  *  also clear it in the cloud. Invalid required fields remain pending instead
  *  of silently changing their meaning during an upload. */
 export function cleanRowForPush(row: Record<string, any>, uid: string, table?: string): Record<string, any> {
+  if (row.org_id && orgCache?.uid === uid && row.org_id !== orgCache.orgId)
+    throw new Error("This record belongs to a different company. Switch to its original workspace before uploading.");
   const { user_id: _u, org_id: _o, ...rest } = row;
   if ("owner" in row && (!table || ["user_files", "user_folders", "user_assets"].includes(table))) rest.owner = uid;
   if (typeof rest.storage_path === "string")
@@ -113,7 +115,7 @@ const NO_SHARE = new Set([
 // SECURITY: shared=true may only be set for members of a REAL organization.
 // Every solo account sits in org 'default', so sharing there would expose
 // rows to unrelated users. Cached per uid; refreshed on every pull.
-let orgCache: { uid: string; inOrg: boolean } | null = null;
+let orgCache: { uid: string; orgId: string; inOrg: boolean } | null = null;
 export async function inRealOrg(
   supa: SupabaseClient,
   uid: string,
@@ -128,12 +130,13 @@ export async function inRealOrg(
   if (error) throw error;
   assertLocalAccount(uid, data?.org_id ?? null);
   const inOrg = !!data?.org_id && data.org_id !== "default";
-  orgCache = { uid, inOrg };
+  orgCache = { uid, orgId: data?.org_id || "default", inOrg };
   return inOrg;
 }
 
-/** Upload each record with its last observed cloud revision. Never strip
- * relationships or fall back to an unconditional overwrite after a failure. */
+const batchUnavailable = new WeakSet<SupabaseClient>();
+
+/** Batch network and local-storage writes, preserving per-row revision checks. */
 export async function pushCollection(
   supa: SupabaseClient,
   table: string,
@@ -141,28 +144,74 @@ export async function pushCollection(
   onFailure?: (failure: SyncFailure) => void,
 ): Promise<(string | number)[]> {
   const failed: (string | number)[] = [];
-  // ponytail: sequential row RPCs preserve FK order and isolate failures;
-  // add a transactional batch RPC when measured large-import latency needs it.
-  for (const row of rows) {
+  const ready = rows.filter(row => {
     if (["invoice_doc_items", "invoice_payments"].includes(table) && row.invoice_id == null) {
       failed.push(row.id);
       onFailure?.({ table, recordId: row.id, kind: "record", message: "This record has no linked invoice. Review it before uploading; Filey has preserved it on this device." });
-      continue;
+      return false;
     }
-    const { sync_revision, ...payload } = row;
-    const { data, error } = await supa.rpc("sync_record", {
-      p_table: table, p_row: payload, p_expected: sync_revision ?? null,
-    });
-    if (error || !data?.ok || !Number.isSafeInteger(data.revision) || data.revision < 1) {
-      failed.push(row.id);
-      onFailure?.(syncFailure(table, row.id, error, !!data?.conflict));
-      if (data?.conflict) await saveConflict(table, row.id);
-    } else {
-      await rememberSyncRevision(table, row.id, data.revision);
-      await clearConflict(table, row.id);
+    return true;
+  });
+  for (let offset = 0; offset < ready.length;) {
+    const batch: Record<string, any>[] = [];
+    let characters = 0;
+    while (offset < ready.length && batch.length < 50) {
+      const size = JSON.stringify(ready[offset]).length;
+      if (batch.length && characters + size > 500_000) break;
+      batch.push(ready[offset++]); characters += size;
+    }
+    assertWorkspaceCurrent();
+    const requests = batch.map(({ sync_revision, ...row }) => ({ row, expected: sync_revision ?? null }));
+    let results: any[] = [];
+    if (batch.length > 1 && !batchUnavailable.has(supa)) {
+      const { data, error } = await supa.rpc("sync_records", { p_table: table, p_records: requests });
+      if (error?.code === "PGRST202" || error?.code === "42883") batchUnavailable.add(supa);
+      else results = batch.map((row, i) => ({
+        data: Array.isArray(data) && data.length === batch.length && data[i]?.id === row.id ? data[i] : null,
+        error: error ?? (Array.isArray(data) ? data[i]?.error : { code: "INVALID_RESPONSE" }),
+      }));
+    }
+    if (!results.length) {
+      // Compatibility with servers that have not installed the batch migration.
+      // Never retry a network failure: the server may have committed the batch.
+      for (const request of requests) results.push(await supa.rpc("sync_record", {
+        p_table: table, p_row: request.row, p_expected: request.expected,
+      }));
+    }
+    const revisions = new Map<string | number, number>();
+    const conflicts: Record<string, any>[] = [];
+    for (let i = 0; i < batch.length; i++) {
+      const row = batch[i], { data, error } = results[i];
+      if (error || !data?.ok || !Number.isSafeInteger(data.revision) || data.revision < 1) {
+        failed.push(row.id);
+        onFailure?.(syncFailure(table, row.id, error, !!data?.conflict));
+        if (data?.conflict) conflicts.push({ id: `${table}:${row.id}`, table, recordId: row.id, at: new Date().toISOString() });
+      } else revisions.set(row.id, data.revision);
+    }
+    if (revisions.size) {
+      await rememberSyncRevisions(table, revisions);
+      const { error } = await localClient.from("sync_conflicts").delete().in("id", [...revisions.keys()].map(id => `${table}:${id}`));
+      if (error) throw error;
+    }
+    if (conflicts.length) {
+      const { error } = await localClient.from("sync_conflicts").upsert(conflicts);
+      if (error) throw error;
     }
   }
   return failed;
+}
+
+/** Keep mixed-workspace legacy rows pending instead of reassigning ownership. */
+export function prepareSyncRows(rows: Record<string, any>[], uid: string, table: string, onFailure: (failure: SyncFailure) => void) {
+  const ready: Record<string, any>[] = [], failed: (string | number)[] = [];
+  for (const row of rows) {
+    try { ready.push(cleanRowForPush(row, uid, table)); }
+    catch (error) {
+      failed.push(row.id);
+      onFailure({ table, recordId: row.id, kind: "permission", message: (error as Error).message });
+    }
+  }
+  return { rows: ready, failed };
 }
 
 export interface SyncConflict { id: string; table: string; recordId: string | number; at: string }
@@ -434,8 +483,9 @@ export async function syncNow(
         ready = uploaded.rows;
         if (uploaded.failed.length) failedByTable[t] = [...(failedByTable[t] ?? []), ...uploaded.failed];
       }
-      const cleaned = ready.map((r) => {
-        const c = cleanRowForPush(r, uid, t);
+      const prepared = prepareSyncRows(ready, uid, t, report);
+      if (prepared.failed.length) failedByTable[t] = [...(failedByTable[t] ?? []), ...prepared.failed];
+      const cleaned = prepared.rows.map((c) => {
         // Sharing is always opt-in; syncing a private local row must not publish it.
         if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? false) : false;
         return c;
@@ -466,7 +516,7 @@ export async function syncNow(
 
     // Keep failed tables dirty throughout: clearing and then re-marking them
     // would lose pending records if storage failed between those two writes.
-    await journalCommit(j.v, completed);
+    await journalCommit(j.v, dirty, failedByTable);
     for (const [t, ids] of Object.entries(failedByTable)) {
       log.warn("sync", `${t}: ${ids.length} row(s) failed, will retry`);
     }
@@ -645,8 +695,8 @@ export async function pullNow(
   }
 }
 
-/** Seed once, push local changes, then reconcile the cloud. A failed push
- *  retains the journal and stops the cycle so the next attempt can retry. */
+/** Reconcile clean tables even after row-level upload failures. Failed tables
+ *  stay local and pending; authentication/transport setup failures stop early. */
 export async function syncCycle(
   client?: SupabaseClient | null,
   opts?: { manual?: boolean; changesOnly?: boolean }
@@ -661,8 +711,11 @@ export async function syncCycle(
   // "Sync now" is a button, not a heartbeat: pass the intent down so it does
   // not sit there doing nothing when auto-sync happens to be switched off.
   const pushed = await syncNow(client, opts);
-  if (!pushed) return false;
+  const uploadStatus = getSyncStatus();
+  if (!pushed && !uploadStatus.failures?.length) return false;
   const pulled = tables?.length === 0 || await pullNow(client, { ...opts, tables });
+  // A successful pull must not hide the records still awaiting upload/review.
+  if (!pushed) setStatus(uploadStatus);
   return pushed && pulled;
 }
 
